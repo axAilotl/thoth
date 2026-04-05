@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any, Mapping
@@ -190,7 +190,7 @@ def evaluate_archivist_dirty_check(
     provider = route[0] if route else None
     model = route[1] if route else None
     next_due_at = _compute_next_due_at(state.last_success_at, topic.cadence_hours)
-    now_dt = now or datetime.now()
+    now_dt = now or datetime.now(timezone.utc)
 
     if state.force_requested_at:
         return ArchivistDirtyCheckResult(
@@ -244,18 +244,21 @@ def evaluate_archivist_dirty_check(
             model=model,
         )
 
-    if next_due_at is not None and now_dt >= _parse_datetime(next_due_at):
-        return ArchivistDirtyCheckResult(
-            should_run=True,
-            reason="cadence_due",
-            forced=False,
-            dirty=False,
-            due=True,
-            next_due_at=next_due_at,
-            snapshot=snapshot,
-            model_provider=provider,
-            model=model,
-        )
+    if next_due_at is not None:
+        due_dt = _parse_datetime(next_due_at)
+        compare_now, compare_due = _normalize_datetime_pair(now_dt, due_dt)
+        if compare_now >= compare_due:
+            return ArchivistDirtyCheckResult(
+                should_run=True,
+                reason="cadence_due",
+                forced=False,
+                dirty=False,
+                due=True,
+                next_due_at=next_due_at,
+                snapshot=snapshot,
+                model_provider=provider,
+                model=model,
+            )
 
     return ArchivistDirtyCheckResult(
         should_run=False,
@@ -399,4 +402,14 @@ def _optional_text(value: Any) -> str | None:
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat()
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_datetime_pair(left: datetime, right: datetime) -> tuple[datetime, datetime]:
+    if left.tzinfo is None and right.tzinfo is None:
+        return left, right
+    if left.tzinfo is None:
+        left = left.replace(tzinfo=timezone.utc)
+    if right.tzinfo is None:
+        right = right.replace(tzinfo=timezone.utc)
+    return left, right

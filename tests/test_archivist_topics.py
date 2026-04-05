@@ -230,3 +230,29 @@ def test_config_validate_surfaces_archivist_registry_errors(tmp_path: Path, monk
     errors = config.validate()
 
     assert any("Archivist topic registry file not found" in error for error in errors)
+
+
+def test_archivist_registry_parses_staged_retrieval_controls(tmp_path: Path):
+    config = _make_config(tmp_path)
+    registry_path = tmp_path / "archivist_topics.yaml"
+    registry_path.write_text(
+        "version: 1\n"
+        "topics:\n"
+        "  - id: companion-ai-research\n"
+        "    title: Companion AI Research\n"
+        "    output_path: pages/topic-companion-ai-research.md\n"
+        "    include_roots:\n"
+        "      - tweets\n"
+        "    retrieval:\n"
+        "      carryover_limit_per_type: 3\n"
+        "      source_type_limits:\n"
+        "        tweet: 12\n"
+        "        repository: 6\n",
+        encoding="utf-8",
+    )
+
+    registry = load_archivist_topic_registry(config, project_root=tmp_path, required=True)
+
+    topic = registry.topics[0]
+    assert topic.retrieval.carryover_limit_per_type == 3
+    assert dict(topic.retrieval.source_type_limits) == {"tweet": 12, "repository": 6}

@@ -568,6 +568,40 @@ class MetadataDB:
                 "CREATE INDEX IF NOT EXISTS idx_archivist_embeddings_model ON archivist_corpus_embeddings (provider, model)"
             )
 
+    def ensure_archivist_topic_usage_tables(self) -> None:
+        """Initialize archivist topic/source usage tracking tables on demand."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS archivist_topic_source_usage (
+                    topic_id TEXT NOT NULL,
+                    candidate_key TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    retrieval_score REAL NOT NULL,
+                    last_polled_at TEXT NOT NULL,
+                    last_selected_at TEXT,
+                    last_read_at TEXT,
+                    last_source_used_at TEXT,
+                    last_final_used_at TEXT,
+                    selected_count INTEGER NOT NULL DEFAULT 0,
+                    read_count INTEGER NOT NULL DEFAULT 0,
+                    source_used_count INTEGER NOT NULL DEFAULT 0,
+                    final_used_count INTEGER NOT NULL DEFAULT 0,
+                    last_decision TEXT NOT NULL,
+                    last_reason TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (topic_id, candidate_key)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_topic_usage_topic ON archivist_topic_source_usage (topic_id, source_type)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_topic_usage_updated ON archivist_topic_source_usage (updated_at)"
+            )
+
     def upsert_archivist_corpus_document(self, document) -> None:
         """Insert or update a parsed archivist corpus document and refresh FTS rows."""
         self.ensure_archivist_corpus_tables()
@@ -954,6 +988,119 @@ class MetadataDB:
                     row["source_type"]: int(row["count"] or 0) for row in type_rows
                 },
             }
+
+    def list_archivist_topic_source_usage(
+        self,
+        *,
+        topic_id: str,
+        candidate_keys: tuple[str, ...] = (),
+    ):
+        """List durable archivist topic/source usage rows."""
+        from .archivist_compilation.models import ArchivistTopicSourceUsage
+
+        self.ensure_archivist_topic_usage_tables()
+        where_clauses = ["topic_id = ?"]
+        params: list[Any] = [topic_id]
+        if candidate_keys:
+            placeholders = ",".join("?" for _ in candidate_keys)
+            where_clauses.append(f"candidate_key IN ({placeholders})")
+            params.extend(candidate_keys)
+
+        sql = """
+            SELECT *
+            FROM archivist_topic_source_usage
+            WHERE {where_sql}
+            ORDER BY source_type ASC, updated_at DESC, candidate_key ASC
+        """.format(where_sql=" AND ".join(where_clauses))
+        with self._get_connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            return [
+                ArchivistTopicSourceUsage(
+                    topic_id=row["topic_id"],
+                    candidate_key=row["candidate_key"],
+                    source_type=row["source_type"],
+                    source_hash=row["source_hash"],
+                    retrieval_score=float(row["retrieval_score"] or 0.0),
+                    last_polled_at=row["last_polled_at"],
+                    last_selected_at=row["last_selected_at"],
+                    last_read_at=row["last_read_at"],
+                    last_source_used_at=row["last_source_used_at"],
+                    last_final_used_at=row["last_final_used_at"],
+                    selected_count=int(row["selected_count"] or 0),
+                    read_count=int(row["read_count"] or 0),
+                    source_used_count=int(row["source_used_count"] or 0),
+                    final_used_count=int(row["final_used_count"] or 0),
+                    last_decision=row["last_decision"],
+                    last_reason=row["last_reason"],
+                    updated_at=row["updated_at"],
+                )
+                for row in rows
+            ]
+
+    def upsert_archivist_topic_source_usage(self, records) -> None:
+        """Insert or update archivist topic/source usage rows."""
+        self.ensure_archivist_topic_usage_tables()
+        with self._get_connection() as conn:
+            for record in records:
+                conn.execute(
+                    """
+                    INSERT INTO archivist_topic_source_usage (
+                        topic_id,
+                        candidate_key,
+                        source_type,
+                        source_hash,
+                        retrieval_score,
+                        last_polled_at,
+                        last_selected_at,
+                        last_read_at,
+                        last_source_used_at,
+                        last_final_used_at,
+                        selected_count,
+                        read_count,
+                        source_used_count,
+                        final_used_count,
+                        last_decision,
+                        last_reason,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(topic_id, candidate_key) DO UPDATE SET
+                        source_type=excluded.source_type,
+                        source_hash=excluded.source_hash,
+                        retrieval_score=excluded.retrieval_score,
+                        last_polled_at=excluded.last_polled_at,
+                        last_selected_at=excluded.last_selected_at,
+                        last_read_at=excluded.last_read_at,
+                        last_source_used_at=excluded.last_source_used_at,
+                        last_final_used_at=excluded.last_final_used_at,
+                        selected_count=excluded.selected_count,
+                        read_count=excluded.read_count,
+                        source_used_count=excluded.source_used_count,
+                        final_used_count=excluded.final_used_count,
+                        last_decision=excluded.last_decision,
+                        last_reason=excluded.last_reason,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        record.topic_id,
+                        record.candidate_key,
+                        record.source_type,
+                        record.source_hash,
+                        float(record.retrieval_score),
+                        record.last_polled_at,
+                        record.last_selected_at,
+                        record.last_read_at,
+                        record.last_source_used_at,
+                        record.last_final_used_at,
+                        int(record.selected_count),
+                        int(record.read_count),
+                        int(record.source_used_count),
+                        int(record.final_used_count),
+                        record.last_decision,
+                        record.last_reason,
+                        record.updated_at or datetime.now().isoformat(),
+                    ),
+                )
     
     # Tweet operations
     def upsert_tweet(self, tweet_meta: TweetMetadata) -> bool:

@@ -55,7 +55,7 @@ Important config layers:
 - `control.json` is local untracked operator state written by the settings UI.
 - `archivist_topics.example.yaml` is the tracked archivist template.
 - `archivist_topics.yaml` is the live local registry bootstrapped from the template and kept untracked.
-- `prompts/archivist_system.md` and `prompts/archivist_user.md` are tracked prompt files for the archivist compiler and can be edited without changing Python.
+- `prompts/archivist_*.md` are tracked archivist prompt files for source briefs, repository relevance briefs, and final synthesis, and can be edited without changing Python.
 
 Important paths:
 - `paths.vault_dir` is the synced vault root for raw and processed artifacts.
@@ -159,8 +159,11 @@ What exists now:
 - source-type, tag, and term filters plus modular retrieval policy
 - full-text retrieval, semantic retrieval, and hybrid ranking
 - cadence and dirty-check state
+- staged compilation: one brief per source type, then final page synthesis
+- repository handling as topic-relevance evidence instead of standalone README dumping
+- durable topic/source usage tracking so automated runs do not reread unchanged never-used sources
 - manual force flags
-- prompt files outside the codebase at `prompts/archivist_system.md` and `prompts/archivist_user.md`
+- prompt files outside the codebase for source briefs, repository briefs, and final synthesis
 - a standalone `archivist` CLI command that compiles selected topics
 - settings UI support for editing the registry, viewing corpus stats, running due topics, force-running a topic, and viewing parsed topics/state
 - API routes for direct archivist execution
@@ -170,12 +173,13 @@ What exists now:
 Current archivist workflow:
 
 1. Edit the live local `archivist_topics.yaml`, either in `/settings` or on disk.
-2. Adjust the archivist prompt files in `prompts/` if you want to change synthesis style or sectioning.
+2. Adjust the archivist prompt files in `prompts/` if you want to change source-type briefing, repository framing, or final synthesis style.
 3. Configure the `archivist` task route, and configure `embedding` too if any topic uses semantic or hybrid retrieval.
 4. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
 5. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages.
 6. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
 7. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
+8. Tune `retrieval.source_type_limits` and `carryover_limit_per_type` in `archivist_topics.yaml` when a topic needs stricter staged caps by source type.
 
 ## Storage Layout
 

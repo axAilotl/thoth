@@ -1,4 +1,4 @@
-"""Archivist topic compiler for baseline multi-source wiki pages."""
+"""Archivist topic compiler for staged multi-source wiki pages."""
 
 from __future__ import annotations
 
@@ -8,6 +8,14 @@ import os
 from pathlib import Path
 from typing import Any, Sequence
 
+from .archivist_compilation import (
+    ArchivistSourceBrief,
+    build_stage_planning_result,
+    extract_cited_candidate_keys,
+    load_final_prompt_bundle,
+    load_source_prompt_bundle,
+    source_type_sort_key,
+)
 from .archivist_retrieval.service import select_archivist_candidates_async
 from .archivist_selection import ArchivistCandidate
 from .archivist_state import evaluate_archivist_dirty_check, record_archivist_topic_run
@@ -24,9 +32,6 @@ from .wiki_contract import WikiContract, WikiPageSpec, build_wiki_contract
 from .wiki_io import atomic_write_text, read_document, render_frontmatter, truncate_summary
 from .wiki_scaffold import append_wiki_log_entry, ensure_wiki_scaffold
 from .wiki_updater import CompiledWikiUpdater
-
-DEFAULT_ARCHIVIST_SYSTEM_PROMPT = "prompts/archivist_system.md"
-DEFAULT_ARCHIVIST_USER_PROMPT = "prompts/archivist_user.md"
 
 
 class ArchivistCompilerError(ValueError):
@@ -45,6 +50,9 @@ class ArchivistCompileResult:
     source_paths: tuple[str, ...]
     model_provider: str | None
     model: str | None
+    brief_count: int = 0
+    used_source_count: int = 0
+    source_type_counts: dict[str, int] | None = None
 
 
 class ArchivistCompiler:
@@ -110,18 +118,38 @@ class ArchivistCompiler:
             route=route,
             db=self.db,
         )
+        usage_by_key = self._load_usage_by_key(topic.id, candidates)
+        stage_planning = build_stage_planning_result(
+            topic,
+            candidates,
+            usage_by_key=usage_by_key,
+            force=force or dirty.forced,
+        )
+        page_path = topic.output_path_for_root(self.layout.wiki_root)
+        source_type_counts = self._source_type_counts(candidates)
 
         should_run = force or dirty.should_run
         if not should_run:
+            self._record_source_usage(
+                topic,
+                candidates,
+                usage_by_key=usage_by_key,
+                stage_briefs=(),
+                final_used_candidates=(),
+                stage_planning=stage_planning,
+                run_at=self._now_iso(),
+                default_reason=dirty.reason,
+            )
             return ArchivistCompileResult(
                 topic_id=topic.id,
                 status="skipped",
                 reason=dirty.reason,
-                page_path=topic.output_path_for_root(self.layout.wiki_root),
+                page_path=page_path,
                 candidate_count=len(candidates),
                 source_paths=self._source_paths_for_candidates(candidates),
                 model_provider=route[0],
                 model=route[1],
+                source_type_counts=source_type_counts,
             )
 
         if not candidates:
@@ -141,14 +169,38 @@ class ArchivistCompiler:
                 topic_id=topic.id,
                 status="skipped",
                 reason="no_candidates",
-                page_path=topic.output_path_for_root(self.layout.wiki_root),
+                page_path=page_path,
                 candidate_count=0,
                 source_paths=(),
                 model_provider=route[0],
                 model=route[1],
+                source_type_counts={},
             )
 
-        page_path = topic.output_path_for_root(self.layout.wiki_root)
+        if not stage_planning.stage_plans and not (force or dirty.forced):
+            if not dry_run:
+                self._record_source_usage(
+                    topic,
+                    candidates,
+                    usage_by_key=usage_by_key,
+                    stage_briefs=(),
+                    final_used_candidates=(),
+                    stage_planning=stage_planning,
+                    run_at=self._now_iso(),
+                    default_reason="no_source_delta",
+                )
+            return ArchivistCompileResult(
+                topic_id=topic.id,
+                status="skipped",
+                reason="no_source_delta",
+                page_path=page_path,
+                candidate_count=len(candidates),
+                source_paths=self._source_paths_for_candidates(candidates),
+                model_provider=route[0],
+                model=route[1],
+                source_type_counts=source_type_counts,
+            )
+
         if dry_run:
             return ArchivistCompileResult(
                 topic_id=topic.id,
@@ -159,20 +211,50 @@ class ArchivistCompiler:
                 source_paths=self._source_paths_for_candidates(candidates),
                 model_provider=route[0],
                 model=route[1],
+                brief_count=len(stage_planning.stage_plans),
+                source_type_counts=source_type_counts,
             )
 
-        body = await self._generate_topic_body(topic, candidates, route=route)
-        self._write_topic_page(topic, candidates, body=body, page_path=page_path)
+        stage_briefs = await self._generate_source_briefs(
+            topic,
+            stage_planning.stage_plans,
+            route=route,
+        )
+        promoted_candidates = self._promoted_candidates_from_briefs(candidates, stage_briefs)
+        body, final_used_candidates = await self._generate_final_topic_body(
+            topic,
+            stage_briefs=stage_briefs,
+            promoted_candidates=promoted_candidates,
+            route=route,
+        )
+        self._write_topic_page(
+            topic,
+            final_used_candidates,
+            body=body,
+            page_path=page_path,
+        )
+        run_at = self._now_iso()
+        self._record_source_usage(
+            topic,
+            candidates,
+            usage_by_key=usage_by_key,
+            stage_briefs=stage_briefs,
+            final_used_candidates=final_used_candidates,
+            stage_planning=stage_planning,
+            run_at=run_at,
+            default_reason="compiled",
+        )
         record_archivist_topic_run(
             topic,
             candidates,
             route=route,
             db=self.db,
             succeeded=True,
+            run_at=run_at,
         )
         append_wiki_log_entry(
             self.scaffold,
-            f"Archivist compiled `{topic.id}` from `{len(candidates)}` source(s).",
+            f"Archivist compiled `{topic.id}` from `{len(candidates)}` candidate source(s), producing `{len(stage_briefs)}` staged brief(s) and `{len(final_used_candidates)}` final citations.",
         )
         CompiledWikiUpdater(
             self.config,
@@ -185,9 +267,12 @@ class ArchivistCompiler:
             reason="forced" if force else dirty.reason,
             page_path=page_path,
             candidate_count=len(candidates),
-            source_paths=self._source_paths_for_candidates(candidates),
+            source_paths=self._source_paths_for_candidates(final_used_candidates),
             model_provider=route[0],
             model=route[1],
+            brief_count=len(stage_briefs),
+            used_source_count=len(final_used_candidates),
+            source_type_counts=source_type_counts,
         )
 
     def _select_topics(
@@ -219,14 +304,88 @@ class ArchivistCompiler:
             )
         return route
 
-    async def _generate_topic_body(
+    async def _generate_source_briefs(
         self,
         topic: ArchivistTopicDefinition,
-        candidates: Sequence[ArchivistCandidate],
+        stage_plans,
         *,
         route: tuple[str, str, dict[str, Any]],
+    ) -> tuple[ArchivistSourceBrief, ...]:
+        briefs: list[ArchivistSourceBrief] = []
+        for stage_plan in stage_plans:
+            system_prompt, user_prompt = self._render_source_prompts(topic, stage_plan)
+            content = await self._generate_markdown(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                route=route,
+                topic_id=topic.id,
+                stage_label=stage_plan.source_type,
+            )
+            promoted_keys = extract_cited_candidate_keys(content, stage_plan.selected_candidates)
+            if not promoted_keys:
+                raise ArchivistCompilerError(
+                    f"Archivist source brief for topic {topic.id} and source type {stage_plan.source_type} did not cite any supplied sources"
+                )
+            briefs.append(
+                ArchivistSourceBrief(
+                    source_type=stage_plan.source_type,
+                    source_label=stage_plan.source_label,
+                    body=self._normalize_llm_body(stage_plan.source_label, content),
+                    selected_candidate_keys=tuple(
+                        candidate.candidate_key for candidate in stage_plan.selected_candidates
+                    ),
+                    promoted_candidate_keys=promoted_keys,
+                    skipped_unchanged_candidate_keys=stage_plan.skipped_unchanged_candidate_keys,
+                    skipped_limited_candidate_keys=stage_plan.skipped_limited_candidate_keys,
+                )
+            )
+        return tuple(briefs)
+
+    async def _generate_final_topic_body(
+        self,
+        topic: ArchivistTopicDefinition,
+        *,
+        stage_briefs: Sequence[ArchivistSourceBrief],
+        promoted_candidates: Sequence[ArchivistCandidate],
+        route: tuple[str, str, dict[str, Any]],
+    ) -> tuple[str, tuple[ArchivistCandidate, ...]]:
+        system_prompt, user_prompt = self._render_final_prompts(
+            topic,
+            stage_briefs=stage_briefs,
+            promoted_candidates=promoted_candidates,
+        )
+        content = await self._generate_markdown(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            route=route,
+            topic_id=topic.id,
+            stage_label="final",
+        )
+        normalized_body = self._normalize_llm_body(topic.title, content)
+        final_used_keys = extract_cited_candidate_keys(normalized_body, promoted_candidates)
+        if promoted_candidates and not final_used_keys:
+            raise ArchivistCompilerError(
+                f"Archivist final synthesis for topic {topic.id} did not cite any promoted evidence sources"
+            )
+        final_candidate_map = {
+            candidate.candidate_key: candidate for candidate in promoted_candidates
+        }
+        final_used_candidates = tuple(
+            final_candidate_map[candidate_key]
+            for candidate_key in final_used_keys
+            if candidate_key in final_candidate_map
+        )
+        return normalized_body, final_used_candidates
+
+    async def _generate_markdown(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        route: tuple[str, str, dict[str, Any]],
+        topic_id: str,
+        stage_label: str,
     ) -> str:
-        system_prompt, user_prompt = self._render_prompts(topic, candidates)
         provider_name, model_id, model_cfg = route
         response = await self.llm_interface.generate(
             prompt=user_prompt,
@@ -238,59 +397,58 @@ class ArchivistCompiler:
         )
         if response.error:
             raise ArchivistCompilerError(
-                f"Archivist generation failed for topic {topic.id}: {response.error}"
+                f"Archivist generation failed for topic {topic_id} at stage {stage_label}: {response.error}"
             )
         content = (response.content or "").strip()
         if not content:
             raise ArchivistCompilerError(
-                f"Archivist generation returned empty content for topic {topic.id}"
+                f"Archivist generation returned empty content for topic {topic_id} at stage {stage_label}"
             )
-        return self._normalize_llm_body(topic.title, content)
+        return content
 
-    def _render_prompts(
+    def _render_source_prompts(
         self,
         topic: ArchivistTopicDefinition,
-        candidates: Sequence[ArchivistCandidate],
+        stage_plan,
     ) -> tuple[str, str]:
-        system_prompt_path = self._resolve_prompt_path(
-            "llm.prompts.archivist.system_file",
-            DEFAULT_ARCHIVIST_SYSTEM_PROMPT,
+        manifest = self._render_source_manifest(stage_plan.selected_candidates)
+        return load_source_prompt_bundle(
+            self.config,
+            project_root=self.project_root,
+            source_type=stage_plan.source_type,
+            context={
+                "topic_id": topic.id,
+                "topic_title": topic.title,
+                "topic_description": topic.description or "No additional topic description provided.",
+                "source_type": stage_plan.source_type,
+                "source_label": stage_plan.source_label,
+                "candidate_count": len(stage_plan.selected_candidates),
+                "new_source_count": len(stage_plan.new_candidate_keys),
+                "carryover_source_count": len(stage_plan.carryover_candidate_keys),
+                "source_manifest": manifest,
+            },
         )
-        user_prompt_path = self._resolve_prompt_path(
-            "llm.prompts.archivist.user_file",
-            DEFAULT_ARCHIVIST_USER_PROMPT,
+
+    def _render_final_prompts(
+        self,
+        topic: ArchivistTopicDefinition,
+        *,
+        stage_briefs: Sequence[ArchivistSourceBrief],
+        promoted_candidates: Sequence[ArchivistCandidate],
+    ) -> tuple[str, str]:
+        return load_final_prompt_bundle(
+            self.config,
+            project_root=self.project_root,
+            context={
+                "topic_id": topic.id,
+                "topic_title": topic.title,
+                "topic_description": topic.description or "No additional topic description provided.",
+                "brief_count": len(stage_briefs),
+                "promoted_source_count": len(promoted_candidates),
+                "brief_manifest": self._render_brief_manifest(stage_briefs),
+                "source_manifest": self._render_source_manifest(promoted_candidates),
+            },
         )
-        system_prompt = self._read_prompt_file(system_prompt_path)
-        user_template = self._read_prompt_file(user_prompt_path)
-        manifest = self._render_source_manifest(candidates)
-        try:
-            user_prompt = user_template.format(
-                topic_id=topic.id,
-                topic_title=topic.title,
-                topic_description=topic.description or "No additional topic description provided.",
-                candidate_count=len(candidates),
-                source_manifest=manifest,
-            )
-        except KeyError as exc:
-            raise ArchivistCompilerError(
-                f"Archivist user prompt template {user_prompt_path} has an unknown placeholder: {exc}"
-            ) from exc
-        return system_prompt, user_prompt
-
-    def _resolve_prompt_path(self, config_key: str, default_value: str) -> Path:
-        raw_value = self.config.get(config_key)
-        candidate = Path(str(raw_value).strip()) if raw_value else Path(default_value)
-        if candidate.is_absolute():
-            return candidate
-        return self.project_root / candidate
-
-    def _read_prompt_file(self, path: Path) -> str:
-        if not path.exists():
-            raise ArchivistCompilerError(f"Archivist prompt file not found: {path}")
-        content = path.read_text(encoding="utf-8").strip()
-        if not content:
-            raise ArchivistCompilerError(f"Archivist prompt file is empty: {path}")
-        return content
 
     def _render_source_manifest(self, candidates: Sequence[ArchivistCandidate]) -> str:
         rendered: list[str] = []
@@ -313,6 +471,26 @@ class ArchivistCompiler:
                 ]
             )
         return "\n".join(rendered).strip()
+
+    def _render_brief_manifest(
+        self,
+        briefs: Sequence[ArchivistSourceBrief],
+    ) -> str:
+        lines: list[str] = []
+        for index, brief in enumerate(
+            sorted(briefs, key=lambda item: source_type_sort_key(item.source_type)),
+            start=1,
+        ):
+            lines.extend(
+                [
+                    f"[B{index}] {brief.source_label}",
+                    f"- Selected Sources: {len(brief.selected_candidate_keys)}",
+                    f"- Promoted Sources: {len(brief.promoted_candidate_keys)}",
+                    brief.body.strip(),
+                    "",
+                ]
+            )
+        return "\n".join(lines).strip()
 
     def _candidate_excerpt(self, candidate: ArchivistCandidate, *, limit: int = 1800) -> str:
         text = " ".join((candidate.content_text or "").split())
@@ -383,6 +561,133 @@ class ArchivistCompiler:
             lines.append(f"  - Updated: `{candidate.updated_at}`")
         return lines
 
+    def _promoted_candidates_from_briefs(
+        self,
+        candidates: Sequence[ArchivistCandidate],
+        briefs: Sequence[ArchivistSourceBrief],
+    ) -> tuple[ArchivistCandidate, ...]:
+        candidate_map = {candidate.candidate_key: candidate for candidate in candidates}
+        promoted_keys: list[str] = []
+        seen: set[str] = set()
+        for brief in briefs:
+            for candidate_key in brief.promoted_candidate_keys:
+                if candidate_key in seen or candidate_key not in candidate_map:
+                    continue
+                seen.add(candidate_key)
+                promoted_keys.append(candidate_key)
+        return tuple(candidate_map[candidate_key] for candidate_key in promoted_keys)
+
+    def _load_usage_by_key(
+        self,
+        topic_id: str,
+        candidates: Sequence[ArchivistCandidate],
+    ) -> dict[str, Any]:
+        candidate_keys = tuple(candidate.candidate_key for candidate in candidates)
+        return {
+            record.candidate_key: record
+            for record in self.db.list_archivist_topic_source_usage(
+                topic_id=topic_id,
+                candidate_keys=candidate_keys,
+            )
+        }
+
+    def _record_source_usage(
+        self,
+        topic: ArchivistTopicDefinition,
+        candidates: Sequence[ArchivistCandidate],
+        *,
+        usage_by_key: dict[str, Any],
+        stage_briefs: Sequence[ArchivistSourceBrief],
+        final_used_candidates: Sequence[ArchivistCandidate],
+        stage_planning,
+        run_at: str,
+        default_reason: str,
+    ) -> None:
+        stage_used_keys = {
+            candidate_key
+            for brief in stage_briefs
+            for candidate_key in brief.promoted_candidate_keys
+        }
+        final_used_keys = {
+            candidate.candidate_key for candidate in final_used_candidates
+        }
+        selected_keys = set(stage_planning.selected_candidate_keys)
+        skipped_unchanged_keys = set(stage_planning.skipped_unchanged_candidate_keys)
+        skipped_limited_keys = set(stage_planning.skipped_limited_candidate_keys)
+        records = []
+        for candidate in candidates:
+            existing = usage_by_key.get(candidate.candidate_key)
+            selected = candidate.candidate_key in selected_keys
+            stage_used = candidate.candidate_key in stage_used_keys
+            final_used = candidate.candidate_key in final_used_keys
+            if final_used:
+                decision = "final_used"
+                reason = "final_citation"
+            elif stage_used:
+                decision = "source_used"
+                reason = "source_brief_citation"
+            elif selected:
+                decision = "read_not_used"
+                reason = "stage_not_cited"
+            elif candidate.candidate_key in skipped_unchanged_keys:
+                decision = "polled_only"
+                reason = "unchanged_unused"
+            elif candidate.candidate_key in skipped_limited_keys:
+                decision = "polled_only"
+                reason = "stage_limit"
+            else:
+                decision = "polled_only"
+                reason = default_reason
+            records.append(
+                self._build_usage_record(
+                    topic_id=topic.id,
+                    candidate=candidate,
+                    existing=existing,
+                    run_at=run_at,
+                    selected=selected,
+                    stage_used=stage_used,
+                    final_used=final_used,
+                    decision=decision,
+                    reason=reason,
+                )
+            )
+        self.db.upsert_archivist_topic_source_usage(records)
+
+    def _build_usage_record(
+        self,
+        *,
+        topic_id: str,
+        candidate: ArchivistCandidate,
+        existing: Any,
+        run_at: str,
+        selected: bool,
+        stage_used: bool,
+        final_used: bool,
+        decision: str,
+        reason: str,
+    ) -> Any:
+        from .archivist_compilation.models import ArchivistTopicSourceUsage
+
+        return ArchivistTopicSourceUsage(
+            topic_id=topic_id,
+            candidate_key=candidate.candidate_key,
+            source_type=candidate.source_type,
+            source_hash=candidate.source_hash,
+            retrieval_score=float(candidate.retrieval_score),
+            last_polled_at=run_at,
+            last_selected_at=run_at if selected else getattr(existing, "last_selected_at", None),
+            last_read_at=run_at if selected else getattr(existing, "last_read_at", None),
+            last_source_used_at=run_at if stage_used else getattr(existing, "last_source_used_at", None),
+            last_final_used_at=run_at if final_used else getattr(existing, "last_final_used_at", None),
+            selected_count=(getattr(existing, "selected_count", 0) or 0) + (1 if selected else 0),
+            read_count=(getattr(existing, "read_count", 0) or 0) + (1 if selected else 0),
+            source_used_count=(getattr(existing, "source_used_count", 0) or 0) + (1 if stage_used else 0),
+            final_used_count=(getattr(existing, "final_used_count", 0) or 0) + (1 if final_used else 0),
+            last_decision=decision,
+            last_reason=reason,
+            updated_at=run_at,
+        )
+
     def _absolute_path_for_candidate(self, candidate: ArchivistCandidate) -> Path:
         if candidate.scope == "vault":
             return self.layout.vault_root / candidate.scope_relative_path
@@ -428,6 +733,15 @@ class ArchivistCompiler:
                 continue
             return truncate_summary(line)
         return truncate_summary(fallback)
+
+    def _source_type_counts(
+        self,
+        candidates: Sequence[ArchivistCandidate],
+    ) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for candidate in candidates:
+            counts[candidate.source_type] = counts.get(candidate.source_type, 0) + 1
+        return counts
 
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

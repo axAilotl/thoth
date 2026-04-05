@@ -20,11 +20,13 @@ class ArchivistRetrievalPolicy:
     full_text_limit: int = 150
     semantic_limit: int = 80
     rerank_limit: int = 120
+    carryover_limit_per_type: int = 4
     max_new_embeddings_per_run: int = 24
     semantic_weight: float = 0.55
     full_text_weight: float = 0.35
     recency_weight: float = 0.10
     source_type_weights: tuple[tuple[str, float], ...] = ()
+    source_type_limits: tuple[tuple[str, int], ...] = ()
 
     def weight_for_source_type(self, source_type: str) -> float:
         for candidate_type, weight in self.source_type_weights:
@@ -37,6 +39,12 @@ class ArchivistRetrievalPolicy:
 
     def requires_semantic(self) -> bool:
         return self.mode in {"semantic", "hybrid"}
+
+    def limit_for_source_type(self, source_type: str) -> int | None:
+        for candidate_type, limit in self.source_type_limits:
+            if candidate_type == source_type:
+                return int(limit)
+        return None
 
 
 @dataclass(frozen=True)

@@ -90,6 +90,9 @@ def serialize_archivist_run(
             "source_paths": list(result.source_paths),
             "model_provider": result.model_provider,
             "model": result.model,
+            "brief_count": result.brief_count,
+            "used_source_count": result.used_source_count,
+            "source_type_counts": dict(result.source_type_counts or {}),
         }
         for result in results
     ]

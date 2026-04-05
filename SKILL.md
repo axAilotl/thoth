@@ -119,10 +119,12 @@ Archivist now ships as a real compiler plus the existing control plane.
 What exists:
 - `archivist_topics.example.yaml` as the tracked template
 - local `archivist_topics.yaml` bootstrapped from the template
-- tracked prompt files at `prompts/archivist_system.md` and `prompts/archivist_user.md`
+- tracked staged prompt files at `prompts/archivist_*.md`
 - source gates by root scope
 - source-type, tag, and term filters plus modular retrieval policy
 - incremental corpus inventory, full-text retrieval, semantic retrieval, and hybrid ranking
+- staged source-type briefing followed by final topic synthesis
+- durable topic/source usage tracking so automated runs skip unchanged never-used sources
 - cadence and dirty-check state
 - manual force flags
 - dedicated `archivist` and `embedding` task routing in settings
@@ -135,13 +137,14 @@ What exists:
 How to work with it now:
 
 1. Edit `archivist_topics.yaml` in the `Archivist` tab or directly on disk.
-2. Adjust `prompts/archivist_system.md` or `prompts/archivist_user.md` if the compiler instructions need to change.
+2. Adjust the staged prompt files in `prompts/archivist_*.md` if source-type briefing, repository framing, or final synthesis needs to change.
 3. Set the `archivist` provider/model route in settings, and set `embedding` too if any topic uses semantic or hybrid retrieval.
 4. Run `.venv/bin/python thoth.py archivist` to compile due topics.
 5. Use `.venv/bin/python thoth.py archivist --topics <id> --force` for intentional reruns.
 6. Use `.venv/bin/python thoth.py archivist --benchmark --topics <id>` to inspect retrieval quality without writing wiki pages.
 7. Use `Run Due Topics` or a topic card `Run Now` / `Force Run` action in `/settings` for immediate execution.
 8. Use `automation.archivist` in settings when you want the API service to compile due topics on a fixed interval.
+9. Use `retrieval.source_type_limits` and `carryover_limit_per_type` in the topic registry when one source type is crowding out the others.
 
 ## Current Data Boundaries
 

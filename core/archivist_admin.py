@@ -226,12 +226,16 @@ def _serialize_topic(
             "full_text_limit": topic.retrieval.full_text_limit,
             "semantic_limit": topic.retrieval.semantic_limit,
             "rerank_limit": topic.retrieval.rerank_limit,
+            "carryover_limit_per_type": topic.retrieval.carryover_limit_per_type,
             "max_new_embeddings_per_run": topic.retrieval.max_new_embeddings_per_run,
             "semantic_weight": topic.retrieval.semantic_weight,
             "full_text_weight": topic.retrieval.full_text_weight,
             "recency_weight": topic.retrieval.recency_weight,
             "source_type_weights": {
                 key: value for key, value in topic.retrieval.source_type_weights
+            },
+            "source_type_limits": {
+                key: value for key, value in topic.retrieval.source_type_limits
             },
         },
     }

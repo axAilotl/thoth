@@ -331,6 +331,10 @@ def _parse_retrieval_policy(
         raw_policy.get("source_type_weights", fallback.source_type_weights),
         field_name=f"{field_name}.source_type_weights",
     )
+    source_type_limits = _parse_source_type_limits(
+        raw_policy.get("source_type_limits", fallback.source_type_limits),
+        field_name=f"{field_name}.source_type_limits",
+    )
 
     return ArchivistRetrievalPolicy(
         mode=mode,
@@ -349,6 +353,13 @@ def _parse_retrieval_policy(
         rerank_limit=_parse_positive_int(
             raw_policy.get("rerank_limit", fallback.rerank_limit),
             field_name=f"{field_name}.rerank_limit",
+        ),
+        carryover_limit_per_type=_parse_positive_int(
+            raw_policy.get(
+                "carryover_limit_per_type",
+                fallback.carryover_limit_per_type,
+            ),
+            field_name=f"{field_name}.carryover_limit_per_type",
         ),
         max_new_embeddings_per_run=_parse_positive_int(
             raw_policy.get(
@@ -370,6 +381,7 @@ def _parse_retrieval_policy(
             field_name=f"{field_name}.recency_weight",
         ),
         source_type_weights=source_type_weights or fallback.source_type_weights,
+        source_type_limits=source_type_limits or fallback.source_type_limits,
     )
 
 
@@ -392,6 +404,30 @@ def _parse_source_type_weights(
             (
                 token,
                 _parse_positive_float(raw_weight, field_name=f"{field_name}.{token}"),
+            )
+        )
+    return tuple(normalized)
+
+
+def _parse_source_type_limits(
+    value: Any,
+    *,
+    field_name: str,
+) -> tuple[tuple[str, int], ...]:
+    if value in (None, {}):
+        return ()
+    if isinstance(value, tuple):
+        return tuple(value)
+    if not isinstance(value, dict):
+        raise ArchivistTopicConfigError(f"{field_name} must be an object")
+
+    normalized: list[tuple[str, int]] = []
+    for raw_key, raw_limit in value.items():
+        token = _normalize_generic_token(raw_key)
+        normalized.append(
+            (
+                token,
+                _parse_positive_int(raw_limit, field_name=f"{field_name}.{token}"),
             )
         )
     return tuple(normalized)

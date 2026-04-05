@@ -13,8 +13,8 @@ from core.path_layout import build_path_layout
 
 
 class FakeLLMInterface:
-    def __init__(self, content: str):
-        self.content = content
+    def __init__(self, contents: list[str]):
+        self.contents = list(contents)
         self.calls: list[dict[str, str]] = []
 
     def resolve_task_route(self, task: str):
@@ -22,7 +22,7 @@ class FakeLLMInterface:
         return (
             "openrouter",
             "anthropic/claude-3-haiku",
-            {"max_tokens": 1600, "temperature": 0.2},
+            {"max_tokens": 2200, "temperature": 0.2},
         )
 
     async def generate(self, prompt: str, system_prompt: str = None, **kwargs):
@@ -34,7 +34,9 @@ class FakeLLMInterface:
                 "model": kwargs.get("model", ""),
             }
         )
-        return SimpleNamespace(content=self.content, error=None)
+        if not self.contents:
+            raise AssertionError("Unexpected extra LLM call")
+        return SimpleNamespace(content=self.contents.pop(0), error=None)
 
 
 def _configure_runtime_config(tmp_path: Path):
@@ -50,6 +52,16 @@ def _configure_runtime_config(tmp_path: Path):
     config.set("database.path", "meta.db")
     config.set("llm.prompts.archivist.system_file", "prompts/archivist_system.md")
     config.set("llm.prompts.archivist.user_file", "prompts/archivist_user.md")
+    config.set("llm.prompts.archivist.source_system_file", "prompts/archivist_source_system.md")
+    config.set("llm.prompts.archivist.source_user_file", "prompts/archivist_source_user.md")
+    config.set(
+        "llm.prompts.archivist.repository_system_file",
+        "prompts/archivist_repository_system.md",
+    )
+    config.set(
+        "llm.prompts.archivist.repository_user_file",
+        "prompts/archivist_repository_user.md",
+    )
     return original
 
 
@@ -57,11 +69,27 @@ def _write_prompt_files(tmp_path: Path):
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
     (prompts_dir / "archivist_system.md").write_text(
-        "SYSTEM TEST PROMPT\nUse [S1] style citations.\n",
+        "FINAL SYSTEM PROMPT\nUse promoted evidence citations like [S1].\n",
         encoding="utf-8",
     )
     (prompts_dir / "archivist_user.md").write_text(
-        "Topic={topic_title}\nDescription={topic_description}\nCount={candidate_count}\n{source_manifest}\n",
+        "Topic={topic_title}\nBriefs={brief_count}\nPromoted={promoted_source_count}\n{brief_manifest}\n{source_manifest}\n",
+        encoding="utf-8",
+    )
+    (prompts_dir / "archivist_source_system.md").write_text(
+        "SOURCE SYSTEM PROMPT\nUse [S1] citations.\n",
+        encoding="utf-8",
+    )
+    (prompts_dir / "archivist_source_user.md").write_text(
+        "SourceType={source_label}\nCount={candidate_count}\nNew={new_source_count}\nCarryover={carryover_source_count}\n{source_manifest}\n",
+        encoding="utf-8",
+    )
+    (prompts_dir / "archivist_repository_system.md").write_text(
+        "REPOSITORY SYSTEM PROMPT\nExplain repo relevance only.\n",
+        encoding="utf-8",
+    )
+    (prompts_dir / "archivist_repository_user.md").write_text(
+        "RepoType={source_label}\nCount={candidate_count}\n{source_manifest}\n",
         encoding="utf-8",
     )
 
@@ -123,12 +151,11 @@ def test_archivist_compiler_writes_topic_page_and_records_state(tmp_path: Path, 
         _write_source_files(layout)
         db = MetadataDB(str(layout.database_path))
         llm = FakeLLMInterface(
-            "## Overview\n"
-            "Companion systems depend on stable persona memory [S1] and repository-level tooling for continuity [S2].\n"
-            "\n"
-            "## Key Signals\n"
-            "- Persona continuity matters [S1]\n"
-            "- Tooling is becoming more explicit about long-term identity [S2]\n"
+            [
+                "## Signals\nStable persona memory matters [S1].\n",
+                "## Topic-Relevant Implementations\nThis repo matters because it packages persona continuity tooling [S1].\n",
+                "## Overview\nCompanion systems depend on stable persona memory [S1] and repository-level tooling for continuity [S2].\n\n## Key Signals\n- Persona continuity matters [S1]\n- Tooling is becoming more explicit about long-term identity [S2]\n",
+            ]
         )
         compiler = ArchivistCompiler(
             config,
@@ -143,10 +170,14 @@ def test_archivist_compiler_writes_topic_page_and_records_state(tmp_path: Path, 
         page_path = layout.wiki_root / "pages" / "topic-companion-ai-research.md"
         assert result.status == "compiled"
         assert result.page_path == page_path
-        assert len(llm.calls) == 1
+        assert result.brief_count == 2
+        assert result.used_source_count == 2
+        assert result.source_type_counts == {"repository": 1, "tweet": 1}
+        assert len(llm.calls) == 3
         content = page_path.read_text(encoding="utf-8")
         assert "# Companion AI Research" in content
-        assert "Companion systems depend on stable persona memory [S1]" in content
+        assert "stable persona memory [S1]" in content
+        assert "repository-level tooling for continuity [S2]" in content
         assert "## Sources" in content
         assert "tweets/companion_note.md" in content
         assert "stars/owner_repo_summary.md" in content
@@ -156,6 +187,11 @@ def test_archivist_compiler_writes_topic_page_and_records_state(tmp_path: Path, 
         assert state.last_candidate_count == 2
         assert state.last_model_provider == "openrouter"
         assert state.last_model == "anthropic/claude-3-haiku"
+
+        usage_rows = db.list_archivist_topic_source_usage(topic_id="companion-ai-research")
+        assert len(usage_rows) == 2
+        assert {row.last_decision for row in usage_rows} == {"final_used"}
+        assert {row.final_used_count for row in usage_rows} == {1}
     finally:
         config.data = original
 
@@ -170,7 +206,13 @@ def test_archivist_compiler_skips_up_to_date_topics_without_recalling_llm(
         layout = build_path_layout(config, project_root=tmp_path)
         _write_source_files(layout)
         db = MetadataDB(str(layout.database_path))
-        llm = FakeLLMInterface("## Overview\nInitial synthesis [S1].\n")
+        llm = FakeLLMInterface(
+            [
+                "## Signals\nStable persona memory matters [S1].\n",
+                "## Topic-Relevant Implementations\nThis repo matters because it packages persona continuity tooling [S1].\n",
+                "## Overview\nInitial synthesis [S1] and repo context [S2].\n",
+            ]
+        )
         compiler = ArchivistCompiler(
             config,
             project_root=tmp_path,
@@ -185,12 +227,14 @@ def test_archivist_compiler_skips_up_to_date_topics_without_recalling_llm(
 
         assert second.status == "skipped"
         assert second.reason == "up_to_date"
-        assert len(llm.calls) == 1
+        assert len(llm.calls) == 3
     finally:
         config.data = original
 
 
-def test_archivist_compiler_uses_external_prompt_files(tmp_path: Path, monkeypatch):
+def test_archivist_compiler_uses_external_prompt_files_for_source_and_final_passes(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     original = _configure_runtime_config(tmp_path)
     try:
@@ -198,7 +242,13 @@ def test_archivist_compiler_uses_external_prompt_files(tmp_path: Path, monkeypat
         layout = build_path_layout(config, project_root=tmp_path)
         _write_source_files(layout)
         db = MetadataDB(str(layout.database_path))
-        llm = FakeLLMInterface("## Overview\nPrompt plumbing check [S1].\n")
+        llm = FakeLLMInterface(
+            [
+                "## Signals\nSource prompt plumbing check [S1].\n",
+                "## Topic-Relevant Implementations\nRepo prompt plumbing check [S1].\n",
+                "## Overview\nFinal prompt plumbing check [S1].\n",
+            ]
+        )
         compiler = ArchivistCompiler(
             config,
             project_root=tmp_path,
@@ -209,10 +259,59 @@ def test_archivist_compiler_uses_external_prompt_files(tmp_path: Path, monkeypat
 
         __import__("asyncio").run(compiler.compile_topic(_build_topic()))
 
-        assert llm.calls
-        assert "SYSTEM TEST PROMPT" in llm.calls[0]["system_prompt"]
-        assert "Topic=Companion AI Research" in llm.calls[0]["prompt"]
-        assert "[S1]" in llm.calls[0]["prompt"]
+        assert len(llm.calls) == 3
+        assert "SOURCE SYSTEM PROMPT" in llm.calls[0]["system_prompt"]
+        assert "REPOSITORY SYSTEM PROMPT" in llm.calls[1]["system_prompt"]
+        assert "FINAL SYSTEM PROMPT" in llm.calls[2]["system_prompt"]
+        assert "SourceType=Tweets" in llm.calls[0]["prompt"]
+        assert "RepoType=Repositories" in llm.calls[1]["prompt"]
+        assert "Briefs=2" in llm.calls[2]["prompt"]
+    finally:
+        config.data = original
+
+
+def test_archivist_compiler_skips_due_topics_when_no_source_delta_exists(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = _configure_runtime_config(tmp_path)
+    try:
+        _write_prompt_files(tmp_path)
+        layout = build_path_layout(config, project_root=tmp_path)
+        _write_source_files(layout)
+        db = MetadataDB(str(layout.database_path))
+        llm = FakeLLMInterface(
+            [
+                "## Signals\nStable persona memory matters [S1].\n",
+                "## Topic-Relevant Implementations\nThis repo matters because it packages persona continuity tooling [S1].\n",
+                "## Overview\nInitial synthesis [S1] and repo context [S2].\n",
+            ]
+        )
+        compiler = ArchivistCompiler(
+            config,
+            project_root=tmp_path,
+            layout=layout,
+            db=db,
+            llm_interface=llm,
+        )
+        topic = _build_topic()
+
+        __import__("asyncio").run(compiler.compile_topic(topic))
+
+        monkeypatch.setattr(
+            "core.archivist_compiler.evaluate_archivist_dirty_check",
+            lambda *args, **kwargs: SimpleNamespace(
+                should_run=True,
+                reason="cadence_due",
+                forced=False,
+                dirty=False,
+            ),
+        )
+        second = __import__("asyncio").run(compiler.compile_topic(topic))
+
+        assert second.status == "skipped"
+        assert second.reason == "no_source_delta"
+        assert len(llm.calls) == 3
     finally:
         config.data = original
 

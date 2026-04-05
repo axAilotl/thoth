@@ -134,7 +134,11 @@
               "type": "object",
               "properties": {
                 "system_file": { "type": "string" },
-                "user_file": { "type": "string" }
+                "user_file": { "type": "string" },
+                "source_system_file": { "type": "string" },
+                "source_user_file": { "type": "string" },
+                "repository_system_file": { "type": "string" },
+                "repository_user_file": { "type": "string" }
               },
               "additionalProperties": true
             }

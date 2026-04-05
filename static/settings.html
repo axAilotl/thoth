@@ -2066,11 +2066,18 @@
                             `fts:${topic.retrieval?.full_text_limit ?? 'n/a'}`,
                             `semantic:${topic.retrieval?.semantic_limit ?? 'n/a'}`,
                             `rerank:${topic.retrieval?.rerank_limit ?? 'n/a'}`,
+                            `carryover:${topic.retrieval?.carryover_limit_per_type ?? 'n/a'}`,
                             `embed_budget:${topic.retrieval?.max_new_embeddings_per_run ?? 'n/a'}`
                         ])}</div>
                         <div class="archivist-section-label">Source Type Weights</div>
                         <div class="archivist-pill-list">${renderArchivistPills(
                             Object.entries(topic.retrieval?.source_type_weights || {}).map(
+                                ([key, value]) => `${key}:${value}`
+                            )
+                        )}</div>
+                        <div class="archivist-section-label">Source Type Limits</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(
+                            Object.entries(topic.retrieval?.source_type_limits || {}).map(
                                 ([key, value]) => `${key}:${value}`
                             )
                         )}</div>
