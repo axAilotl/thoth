@@ -7,7 +7,7 @@
 Thoth is the evolution of the earlier `xmarks` system. `xmarks` handled high-volume raw capture and bookmark ingestion; Thoth keeps that ingestion layer, adds stronger storage boundaries, and builds a compiled knowledge layer on top. The wiki side is explicitly inspired by Andrej Karpathy's persistent LLM wiki idea, but adapted to a larger historical corpus and a more automated ingest stack.
 
 Thoth separates:
-- raw and processed source material in the vault
+- pipeline source and generated material in the vault
 - compiled wiki output outside the vault
 - local operational state in `.thoth_system`
 
@@ -59,8 +59,6 @@ Important config layers:
 
 Important paths:
 - `paths.vault_dir` is the synced vault root for raw and processed artifacts.
-- `paths.raw_dir` is the raw source area inside the vault.
-- `paths.library_dir` is the processed artifact area inside the vault.
 - `paths.wiki_dir` is the compiled wiki root and resolves outside the vault by default.
 - `paths.system_dir` is local-only state for auth, databases, caches, logs, and temp files.
 
@@ -95,7 +93,7 @@ Use `python thoth.py --help` for the full command list and `python thoth.py <com
 | `social` | Sync GitHub stars and Hugging Face likes. | `--sync`, `--github-user`, `--hf-user`, `--limit` |
 | `github-stars` | Pull GitHub stars directly. | `--limit`, `--no-resume` |
 | `huggingface-likes` | Pull Hugging Face likes directly. | `--limit`, `--no-resume`, `--no-models` |
-| `web-clipper` | Index configured Obsidian Web Clipper source directories. | none |
+| `web-clipper` | Index configured vault source directories for imported markdown and attachments. | none |
 | `archivist` | Compile archivist topic pages from selected source material. | `--topics`, `--force`, `--dry-run`, `--limit` |
 | `youtube` | Post-process existing tweets for YouTube metadata and transcripts. | `--limit`, `--no-resume`, `--no-transcripts` |
 | `update-videos` | Refresh existing tweet/thread outputs with video data. | none |
@@ -197,14 +195,14 @@ Logical runtime layout:
 
 ```text
 vault/
-  raw/
-  library/
-    translations/
   tweets/
   threads/
   papers/
   repos/
   stars/
+  translations/
+  imports/
+  notes/
   media/
   videos/
   images/
@@ -216,9 +214,10 @@ wiki/
 ```
 
 Key rules:
-- raw tweets and threads stay in the vault
+- tweet and thread artifacts stay in the vault
 - repo `README` source files live in `repos/`
 - generated repo summaries live in `stars/`
+- selected imported-note source directories live directly under the vault
 - the compiled wiki stays outside the vault
 - databases, caches, auth, temp files, and logs stay in `.thoth_system/`
 

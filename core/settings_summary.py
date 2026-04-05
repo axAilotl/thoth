@@ -29,8 +29,6 @@ def _summarize_layout(config: ConfigLike, *, project_root: Path) -> dict[str, An
 
     return {
         "vault_root": str(layout.vault_root),
-        "raw_root": str(layout.raw_root),
-        "library_root": str(layout.library_root),
         "wiki_root": str(layout.wiki_root),
         "system_root": str(layout.system_root),
         "cache_root": str(layout.cache_root),
@@ -72,9 +70,12 @@ def _summarize_archivist(config: ConfigLike, *, project_root: Path) -> dict[str,
 def _summarize_web_clipper(config: ConfigLike, *, project_root: Path) -> dict[str, Any]:
     source_config = config.get("sources.web_clipper", {}) or {}
     enabled = bool(source_config.get("enabled", False))
+    configured = bool(source_config.get("note_dirs")) or bool(
+        source_config.get("attachment_dirs")
+    )
     summary: dict[str, Any] = {
         "enabled": enabled,
-        "configured": enabled,
+        "configured": configured,
         "note_dirs": [],
         "attachment_dirs": [],
         "watch_dirs": [],
@@ -84,7 +85,7 @@ def _summarize_web_clipper(config: ConfigLike, *, project_root: Path) -> dict[st
         ),
     }
 
-    if not enabled:
+    if not configured:
         return summary
 
     try:

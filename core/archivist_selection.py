@@ -8,6 +8,10 @@ import hashlib
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Optional
 
+from collectors.web_clipper_layout import (
+    WebClipperSourceContract,
+    build_web_clipper_contract,
+)
 from collectors.web_clipper_parser import parse_web_clipper_markdown
 
 from .archivist_topics import ArchivistTopicDefinition
@@ -102,6 +106,7 @@ def select_archivist_candidates(
     candidates_by_key: dict[str, ArchivistCandidate] = {}
     scanned_roots: list[str] = []
     missing_roots: list[str] = []
+    web_clipper_contract = _load_web_clipper_contract(config, layout=resolved_layout)
 
     for root in include_roots:
         if not root.path.exists():
@@ -122,6 +127,7 @@ def select_archivist_candidates(
                 root=root,
                 layout=resolved_layout,
                 db=metadata_db,
+                web_clipper_contract=web_clipper_contract,
             )
             if candidate is None:
                 continue
@@ -168,7 +174,7 @@ def _resolve_root_spec(spec: str, *, layout: PathLayout) -> ResolvedArchivistRoo
         scope = "vault"
         relative_parts = parts
     else:
-        scope = "raw"
+        scope = "vault"
         relative_parts = parts
 
     base = _scope_base(scope, layout)
@@ -199,6 +205,7 @@ def _build_candidate(
     root: ResolvedArchivistRoot,
     layout: PathLayout,
     db: MetadataDB,
+    web_clipper_contract: WebClipperSourceContract | None,
 ) -> ArchivistCandidate | None:
     suffix = path.suffix.lower()
     if suffix not in SUPPORTED_TEXT_EXTENSIONS and suffix not in SUPPORTED_BINARY_EXTENSIONS:
@@ -227,6 +234,7 @@ def _build_candidate(
             path,
             scope=root.scope,
             scope_relative_path=scope_relative_path,
+            web_clipper_contract=web_clipper_contract,
         )
     else:
         title = _prettify_name(path.stem)
@@ -280,9 +288,10 @@ def _read_text_candidate(
     *,
     scope: str,
     scope_relative_path: str,
+    web_clipper_contract: WebClipperSourceContract | None,
 ) -> tuple[str, str, tuple[str, ...], str, str, str]:
     suffix = path.suffix.lower()
-    if scope == "raw" and _path_has_prefix(scope_relative_path, "web-clipper"):
+    if _is_web_clipper_note_path(path, web_clipper_contract):
         parsed = parse_web_clipper_markdown(path.read_text(encoding="utf-8"), source_path=path)
         tags = _normalize_tags(parsed.frontmatter.get("tags") or parsed.frontmatter.get("tag"))
         content_text = parsed.body.strip()
@@ -368,6 +377,34 @@ def _detect_source_type(
     if normalized_first == "web_clipper":
         return "web_clipper"
     return default_type
+
+
+def _load_web_clipper_contract(
+    config: Config,
+    *,
+    layout: PathLayout,
+) -> WebClipperSourceContract | None:
+    source_config = config.get("sources.web_clipper", {}) or {}
+    if not isinstance(source_config, dict):
+        return None
+
+    if not source_config.get("note_dirs") and not source_config.get("attachment_dirs"):
+        return None
+
+    return build_web_clipper_contract(config, layout=layout)
+
+
+def _is_web_clipper_note_path(
+    path: Path,
+    contract: WebClipperSourceContract | None,
+) -> bool:
+    if contract is None:
+        return False
+
+    if not contract.is_note_path(path):
+        return False
+
+    return any(path == root or root in path.parents for root in contract.note_dirs)
 
 
 def _normalize_tags(raw_tags: Any) -> tuple[str, ...]:

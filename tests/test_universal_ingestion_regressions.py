@@ -35,8 +35,8 @@ def _configure_runtime_config(tmp_path: Path) -> None:
     config.set("paths.wiki_dir", "wiki")
     config.set("paths.digests_dir", "_digests")
     config.set("database.path", "meta.db")
-    config.set("sources.web_clipper.note_dirs", ["web-clipper/notes"])
-    config.set("sources.web_clipper.attachment_dirs", ["web-clipper/assets"])
+    config.set("sources.web_clipper.note_dirs", ["Clippings"])
+    config.set("sources.web_clipper.attachment_dirs", ["clipper-assets"])
     config.set("llm.tasks.translation.enabled", True)
     config.set(
         "llm.tasks.translation.fallback",
@@ -62,7 +62,7 @@ class FakeTranslationLLM:
 
 
 @pytest.mark.anyio
-async def test_universal_ingestion_loop_keeps_sources_in_raw_and_outputs_in_managed_layers(
+async def test_universal_ingestion_loop_keeps_sources_in_vault_and_outputs_in_managed_layers(
     tmp_path: Path, monkeypatch, restore_runtime_config
 ):
     monkeypatch.chdir(tmp_path)
@@ -77,7 +77,7 @@ async def test_universal_ingestion_loop_keeps_sources_in_raw_and_outputs_in_mana
     assert layout.cache_root == layout.system_root / "graphql_cache"
     assert layout.temp_root == layout.system_root / "tmp"
 
-    note_path = layout.raw_root / "web-clipper" / "notes" / "capture.md"
+    note_path = layout.vault_root / "Clippings" / "capture.md"
     note_path.parent.mkdir(parents=True, exist_ok=True)
     source_text = (
         "---\n"
@@ -92,11 +92,11 @@ async def test_universal_ingestion_loop_keeps_sources_in_raw_and_outputs_in_mana
     )
     note_path.write_text(source_text, encoding="utf-8")
 
-    attachment_path = layout.raw_root / "web-clipper" / "assets" / "capture.pdf"
+    attachment_path = layout.vault_root / "clipper-assets" / "capture.pdf"
     attachment_path.parent.mkdir(parents=True, exist_ok=True)
     attachment_path.write_bytes(b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n")
 
-    ignored_path = layout.raw_root / "ignored" / "outside.md"
+    ignored_path = layout.vault_root / "ignored" / "outside.md"
     ignored_path.parent.mkdir(parents=True, exist_ok=True)
     ignored_path.write_text("# not scanned\n", encoding="utf-8")
 
@@ -120,7 +120,7 @@ async def test_universal_ingestion_loop_keeps_sources_in_raw_and_outputs_in_mana
     )
     assert note_record.artifact is not None
     assert attachment_record.managed_path == (
-        layout.library_root / "web-clipper" / "assets" / "capture.pdf"
+        layout.vault_root / "clipper-assets" / "capture.pdf"
     )
     assert attachment_record.managed_path.exists()
     assert attachment_record.managed_path.read_bytes() == attachment_path.read_bytes()
@@ -143,15 +143,13 @@ async def test_universal_ingestion_loop_keeps_sources_in_raw_and_outputs_in_mana
     assert wiki_page.exists()
     wiki_content = wiki_page.read_text(encoding="utf-8")
     assert "language: es" in wiki_content
-    assert "raw/web-clipper/notes/capture.md" in wiki_content
+    assert "Clippings/capture.md" in wiki_content
 
     translation = await runtime.publish_english_companion(note_record.artifact)
     translation_path = (
-        layout.library_root
+        layout.vault_root
         / "translations"
-        / "raw"
-        / "web-clipper"
-        / "notes"
+        / "Clippings"
         / "capture.en.md"
     )
     assert translation.status == "created"

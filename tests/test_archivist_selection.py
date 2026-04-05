@@ -30,7 +30,7 @@ def test_archivist_selection_enforces_root_gates_before_content_filters(tmp_path
     (layout.vault_root / "tweets").mkdir(parents=True, exist_ok=True)
     (layout.vault_root / "papers").mkdir(parents=True, exist_ok=True)
     (layout.vault_root / "transcripts").mkdir(parents=True, exist_ok=True)
-    (layout.raw_root / "journals").mkdir(parents=True, exist_ok=True)
+    (layout.vault_root / "journals").mkdir(parents=True, exist_ok=True)
 
     tweet_path = layout.vault_root / "tweets" / "companion.md"
     tweet_path.write_text(
@@ -51,7 +51,7 @@ def test_archivist_selection_enforces_root_gates_before_content_filters(tmp_path
         "# Expensive transcript\n\nDo not include this source.\n",
         encoding="utf-8",
     )
-    (layout.raw_root / "journals" / "daily.md").write_text(
+    (layout.vault_root / "journals" / "daily.md").write_text(
         "# Personal journal\n\nPrivate source.\n",
         encoding="utf-8",
     )
@@ -81,7 +81,8 @@ def test_archivist_selection_applies_source_type_tag_and_term_filters(tmp_path: 
     layout = build_path_layout(config, project_root=tmp_path)
     layout.ensure_directories()
 
-    note_dir = layout.raw_root / "web-clipper" / "notes"
+    config.set("sources.web_clipper.note_dirs", ["research-imports"])
+    note_dir = layout.vault_root / "research-imports"
     note_dir.mkdir(parents=True, exist_ok=True)
     matching = note_dir / "matching.md"
     matching.write_text(
@@ -115,7 +116,7 @@ def test_archivist_selection_applies_source_type_tag_and_term_filters(tmp_path: 
         id="companion-ai-research",
         title="Companion AI Research",
         output_path="pages/topic-companion-ai-research.md",
-        include_roots=("web-clipper/notes",),
+        include_roots=("research-imports",),
         source_types=("web_clipper",),
         include_tags=("companion_ai",),
         include_terms=("introspection",),

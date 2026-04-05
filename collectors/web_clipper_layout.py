@@ -50,9 +50,12 @@ def _resolve_dir_list(
     *,
     base_dir: Path,
     config_key: str,
+    required: bool = True,
 ) -> tuple[Path, ...]:
     if not raw_values:
-        raise ValueError(f"Required list not configured: {config_key}")
+        if required:
+            raise ValueError(f"Required list not configured: {config_key}")
+        return ()
 
     resolved: list[Path] = []
     seen: set[Path] = set()
@@ -69,12 +72,12 @@ def _resolve_dir_list(
     return tuple(resolved)
 
 
-def _ensure_within_source_root(path: Path, *, layout: PathLayout, config_key: str) -> None:
+def _ensure_within_vault_root(path: Path, *, layout: PathLayout, config_key: str) -> None:
     try:
-        path.relative_to(layout.raw_root)
+        path.relative_to(layout.vault_root)
     except ValueError as exc:
         raise ValueError(
-            f"{config_key} must stay inside the raw source root: {path}"
+            f"{config_key} must stay inside the vault root: {path}"
         ) from exc
 
 
@@ -90,9 +93,7 @@ class WebClipperSourceContract:
     def __post_init__(self):
         if not self.note_dirs:
             raise ValueError("Web Clipper note_dirs must not be empty")
-        if not self.attachment_dirs:
-            raise ValueError("Web Clipper attachment_dirs must not be empty")
-        if set(self.note_dirs).intersection(self.attachment_dirs):
+        if self.attachment_dirs and set(self.note_dirs).intersection(self.attachment_dirs):
             raise ValueError("Web Clipper note_dirs and attachment_dirs must not overlap")
 
     @property
@@ -125,17 +126,18 @@ def build_web_clipper_contract(
 
     note_dirs = _resolve_dir_list(
         web_clipper_config.get("note_dirs"),
-        base_dir=path_layout.raw_root,
+        base_dir=path_layout.vault_root,
         config_key="sources.web_clipper.note_dirs",
     )
     attachment_dirs = _resolve_dir_list(
         web_clipper_config.get("attachment_dirs"),
-        base_dir=path_layout.raw_root,
+        base_dir=path_layout.vault_root,
         config_key="sources.web_clipper.attachment_dirs",
+        required=False,
     )
 
     for dir_path in note_dirs + attachment_dirs:
-        _ensure_within_source_root(
+        _ensure_within_vault_root(
             dir_path,
             layout=path_layout,
             config_key="sources.web_clipper",

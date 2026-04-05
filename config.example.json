@@ -434,12 +434,8 @@
     },
     "web_clipper": {
       "enabled": false,
-      "note_dirs": [
-        "web-clipper/notes"
-      ],
-      "attachment_dirs": [
-        "web-clipper/assets"
-      ],
+      "note_dirs": [],
+      "attachment_dirs": [],
       "note_extensions": [
         ".md",
         ".markdown"

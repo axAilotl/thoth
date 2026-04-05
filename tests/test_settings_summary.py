@@ -21,8 +21,8 @@ def make_config_data(tmp_path: Path) -> dict:
         "sources": {
             "web_clipper": {
                 "enabled": True,
-                "note_dirs": ["web-clipper/notes"],
-                "attachment_dirs": ["web-clipper/assets"],
+                "note_dirs": ["imports/notes"],
+                "attachment_dirs": ["imports/assets"],
                 "note_extensions": [".md"],
                 "attachment_extensions": [".png", ".pdf"],
             }
@@ -52,7 +52,6 @@ topics:
 
     summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
 
-    assert summary["layout"]["raw_root"] == str(tmp_path / "vault" / "raw")
     assert summary["layout"]["wiki_root"] == str(tmp_path / "wiki")
     assert summary["layout"]["system_root"] == str(tmp_path / ".thoth_system")
 
@@ -65,8 +64,8 @@ topics:
 
     assert summary["web_clipper"]["enabled"] is True
     assert summary["web_clipper"]["watch_dirs"] == [
-        str(tmp_path / "vault" / "raw" / "web-clipper" / "notes"),
-        str(tmp_path / "vault" / "raw" / "web-clipper" / "assets"),
+        str(tmp_path / "vault" / "imports" / "notes"),
+        str(tmp_path / "vault" / "imports" / "assets"),
     ]
 
 
@@ -78,7 +77,7 @@ def test_settings_summary_surfaces_archivist_and_web_clipper_errors(tmp_path: Pa
     summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
 
     assert "Archivist topic registry file not found" in summary["archivist"]["error"]
-    assert "must stay inside the raw source root" in summary["web_clipper"]["error"]
+    assert "must stay inside the vault root" in summary["web_clipper"]["error"]
 
 
 def test_settings_summary_hides_web_clipper_watch_dirs_when_disabled(tmp_path: Path):
@@ -87,5 +86,8 @@ def test_settings_summary_hides_web_clipper_watch_dirs_when_disabled(tmp_path: P
 
     summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
 
-    assert summary["web_clipper"]["configured"] is False
-    assert summary["web_clipper"]["watch_dirs"] == []
+    assert summary["web_clipper"]["configured"] is True
+    assert summary["web_clipper"]["watch_dirs"] == [
+        str(tmp_path / "vault" / "imports" / "notes"),
+        str(tmp_path / "vault" / "imports" / "assets"),
+    ]

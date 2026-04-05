@@ -150,7 +150,7 @@ def _translation_output_path(layout: PathLayout, source_relative_path: str) -> P
         translated_name = f"{source_rel.stem}.en{source_rel.suffix}"
     else:
         translated_name = f"{source_rel.name}.en.md"
-    return layout.library_root / "translations" / source_rel.with_name(translated_name)
+    return layout.vault_root / "translations" / source_rel.with_name(translated_name)
 
 
 class EnglishCompanionPublisher:
@@ -447,7 +447,7 @@ class EnglishCompanionPublisher:
                 return source_path.resolve()
             except Exception:
                 pass
-        return self.layout.raw_root / source_relative_path
+        return self.layout.vault_root / source_relative_path
 
     def _index_companion_file(self, output_path: Path, source_relative_path: str) -> None:
         try:

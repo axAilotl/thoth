@@ -59,7 +59,7 @@ async def test_translation_companion_publishes_english_note(
     _configure_runtime_config(tmp_path)
     layout = build_path_layout(config)
 
-    source_note = layout.raw_root / "web-clipper" / "notes" / "capture.md"
+    source_note = layout.vault_root / "Clippings" / "capture.md"
     source_note.parent.mkdir(parents=True, exist_ok=True)
     source_note.write_text(
         "---\n"
@@ -75,12 +75,12 @@ async def test_translation_companion_publishes_english_note(
     )
 
     artifact = WebClipperArtifact(
-        id="webclip:web-clipper/notes/capture.md",
+        id="webclip:Clippings/capture.md",
         source_type="web_clipper",
         raw_content=source_note.read_text(encoding="utf-8"),
         ingested_at="2026-04-04T00:00:00Z",
         source_path=str(source_note),
-        source_relative_path="web-clipper/notes/capture.md",
+        source_relative_path="Clippings/capture.md",
         file_type="note",
         title="ejemplo",
         frontmatter={"title": "ejemplo", "lang": "es", "url": "https://example.com/articulo"},
@@ -99,11 +99,9 @@ async def test_translation_companion_publishes_english_note(
 
     result = await publisher.publish_web_clipper_artifact(artifact)
     output_path = (
-        layout.library_root
+        layout.vault_root
         / "translations"
-        / "raw"
-        / "web-clipper"
-        / "notes"
+        / "Clippings"
         / "capture.en.md"
     )
 
@@ -125,7 +123,7 @@ async def test_translation_companion_skips_english_source(
     _configure_runtime_config(tmp_path)
     layout = build_path_layout(config)
 
-    source_note = layout.raw_root / "web-clipper" / "notes" / "capture.md"
+    source_note = layout.vault_root / "Clippings" / "capture.md"
     source_note.parent.mkdir(parents=True, exist_ok=True)
     source_note.write_text(
         "---\n"
@@ -138,12 +136,12 @@ async def test_translation_companion_skips_english_source(
     )
 
     artifact = WebClipperArtifact(
-        id="webclip:web-clipper/notes/capture.md",
+        id="webclip:Clippings/capture.md",
         source_type="web_clipper",
         raw_content=source_note.read_text(encoding="utf-8"),
         ingested_at="2026-04-04T00:00:00Z",
         source_path=str(source_note),
-        source_relative_path="web-clipper/notes/capture.md",
+        source_relative_path="Clippings/capture.md",
         file_type="note",
         title="example",
         frontmatter={"title": "example", "lang": "en"},
@@ -163,7 +161,7 @@ async def test_translation_companion_skips_english_source(
 
     assert result.status == "skipped"
     assert result.reason == "source already English"
-    assert not (layout.library_root / "translations").exists()
+    assert not (layout.vault_root / "translations").exists()
 
 
 def test_translation_validation_requires_a_fallback_route():

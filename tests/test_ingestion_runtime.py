@@ -76,13 +76,13 @@ def test_materialize_artifact_supports_known_types(
         created_at="2026-04-04T00:00:00",
     )
     webclip_artifact = WebClipperArtifact(
-        id="webclip:web-clipper/notes/capture.md",
+        id="webclip:imports/notes/capture.md",
         source_type="web_clipper",
         raw_content="---\ntitle: captured note\n---\n\n# captured note\n",
         created_at="2026-04-04T00:00:00",
         ingested_at="2026-04-04T00:00:00",
-        source_path="/tmp/vault/raw/web-clipper/notes/capture.md",
-        source_relative_path="web-clipper/notes/capture.md",
+        source_path="/tmp/vault/imports/notes/capture.md",
+        source_relative_path="imports/notes/capture.md",
         file_type="note",
         title="captured note",
         frontmatter={"title": "captured note"},

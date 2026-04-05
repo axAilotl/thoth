@@ -925,12 +925,12 @@
                     <input type="number" id="source-arxiv-limit" min="1" step="1" placeholder="50">
                 </div>
 
-                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Obsidian Web Clipper</h4>
+                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Vault Markdown Imports</h4>
 
                 <div class="toggle-container">
                     <div class="toggle-info">
-                        <div class="toggle-label">Web Clipper Ingest Enabled</div>
-                        <div class="toggle-description">Scan the explicit raw-source allowlist for clipped notes and attachments</div>
+                        <div class="toggle-label">Vault Source Ingest Enabled</div>
+                        <div class="toggle-description">Scan only the explicit knowledge_vault directories you allow for imported markdown and attachments</div>
                     </div>
                     <label class="toggle">
                         <input type="checkbox" id="source-web-clipper-enabled">
@@ -939,13 +939,13 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Clipper Note Directories <span class="hint">One per line, relative to the raw root. These must stay inside <code>raw/</code>.</span></label>
-                    <textarea id="source-web-clipper-note-dirs" rows="3" placeholder="web-clipper/notes&#10;web-clipper/drafts"></textarea>
+                    <label>Source Note Directories <span class="hint">One per line, relative to the vault root. These must stay inside <code>knowledge_vault</code>.</span></label>
+                    <textarea id="source-web-clipper-note-dirs" rows="3" placeholder="imports/articles&#10;notes/inbox"></textarea>
                 </div>
 
                 <div class="form-group">
-                    <label>Clipper Attachment Directories <span class="hint">One per line, relative to the raw root.</span></label>
-                    <textarea id="source-web-clipper-attachment-dirs" rows="3" placeholder="web-clipper/assets"></textarea>
+                    <label>Source Attachment Directories <span class="hint">Optional. One per line, relative to the vault root.</span></label>
+                    <textarea id="source-web-clipper-attachment-dirs" rows="3" placeholder="imports/assets"></textarea>
                 </div>
 
                 <div class="form-group">
@@ -1217,15 +1217,7 @@
                     <input type="text" id="path-vault" placeholder="knowledge_vault">
                 </div>
                 <div class="form-group">
-                    <label>Raw Source Directory <span class="hint">Relative to the vault root.</span></label>
-                    <input type="text" id="path-raw" placeholder="raw">
-                </div>
-                <div class="form-group">
-                    <label>Library Directory <span class="hint">Relative to the vault root.</span></label>
-                    <input type="text" id="path-library" placeholder="library">
-                </div>
-                <div class="form-group">
-                    <label>Wiki Directory <span class="hint">Relative to the vault parent so the compiled wiki stays outside the raw vault.</span></label>
+                    <label>Wiki Directory <span class="hint">Relative to the vault parent so the compiled wiki stays outside the vault.</span></label>
                     <input type="text" id="path-wiki" placeholder="wiki">
                 </div>
                 <div class="form-group">
@@ -1295,7 +1287,7 @@
                     <textarea id="runtime-archivist-topics" rows="4" readonly></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Active Web Clipper Watch Roots</label>
+                    <label>Configured Vault Source Roots</label>
                     <textarea id="runtime-web-clipper-watch-dirs" rows="4" readonly></textarea>
                 </div>
             </div>
@@ -1965,7 +1957,7 @@
             const enabled = taskConfig.enabled !== false;
             const route = taskConfig.fallback?.[0] || {};
             if (!enabled) {
-                return 'Disabled';
+                return 'Task route disabled';
             }
             if (!route.provider) {
                 return 'No route selected';
@@ -2463,8 +2455,6 @@
                 // Load paths
                 if (config.paths) {
                     document.getElementById('path-vault').value = config.paths.vault_dir || '';
-                    document.getElementById('path-raw').value = config.paths.raw_dir || '';
-                    document.getElementById('path-library').value = config.paths.library_dir || '';
                     document.getElementById('path-wiki').value = config.paths.wiki_dir || '';
                     document.getElementById('path-system').value = config.paths.system_dir || '';
                     document.getElementById('path-cache').value = config.paths.cache_dir || '';
@@ -2559,9 +2549,9 @@
                     'runtime-web-clipper-watch-dirs',
                     runtimeWebClipper.error
                         ? `ERROR: ${runtimeWebClipper.error}`
-                        : runtimeWebClipper.enabled
+                        : runtimeWebClipper.configured
                             ? multilineFromValue(runtimeWebClipper.watch_dirs || [])
-                            : 'Disabled'
+                            : 'Not configured'
                 );
 
                 await refreshXApiStatus();
@@ -2822,8 +2812,6 @@
             const config = {
                 paths: {
                     vault_dir: document.getElementById('path-vault').value,
-                    raw_dir: document.getElementById('path-raw').value,
-                    library_dir: document.getElementById('path-library').value,
                     wiki_dir: document.getElementById('path-wiki').value,
                     system_dir: document.getElementById('path-system').value,
                     cache_dir: document.getElementById('path-cache').value,

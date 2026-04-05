@@ -21,8 +21,6 @@ def test_settings_ui_exposes_archivist_web_clipper_and_translation_controls():
         'id="automation-archivist-enabled"',
         'id="automation-archivist-run-on-startup"',
         'id="automation-archivist-interval-hours"',
-        'id="path-raw"',
-        'id="path-library"',
         'id="path-wiki"',
         'id="path-system"',
         'id="path-archivist-topics"',

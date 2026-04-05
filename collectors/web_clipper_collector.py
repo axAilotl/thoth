@@ -1,5 +1,5 @@
 """
-Web Clipper collector - indexes explicit source directories under the raw vault.
+Web Clipper collector - indexes explicit source directories under the vault.
 
 This collector only scans the configured allowlist from the Web Clipper source
 contract. It does not expand beyond those roots, and it does not parse or mutate
@@ -132,7 +132,7 @@ class WebClipperCollector:
         size_bytes = stat.st_size
         updated_at = datetime.fromtimestamp(stat.st_mtime).isoformat()
         sha256 = self._sha256_file(path)
-        source_id = str(path.relative_to(self.layout.raw_root))
+        source_id = str(path.relative_to(self.layout.vault_root))
         file_type = "note"
         existing = self.db.get_file_entry(str(path))
         is_new_or_changed = (
@@ -214,7 +214,7 @@ class WebClipperCollector:
         size_bytes = stat.st_size
         updated_at = datetime.fromtimestamp(stat.st_mtime).isoformat()
         sha256 = self._sha256_file(path)
-        source_id = str(path.relative_to(self.layout.raw_root))
+        source_id = str(path.relative_to(self.layout.vault_root))
         file_type = "attachment"
         existing = self.db.get_file_entry(str(path))
         is_new_or_changed = (
@@ -238,11 +238,15 @@ class WebClipperCollector:
 
         managed_path = self._managed_attachment_path(source_id)
         attachment_asset_type = self._attachment_asset_type(path)
+        same_path = managed_path.resolve() == path.resolve()
         should_stage = (
-            is_new_or_changed
-            or not managed_path.exists()
-            or not validate_existing_asset(
-                managed_path, asset_type=attachment_asset_type
+            not same_path
+            and (
+                is_new_or_changed
+                or not managed_path.exists()
+                or not validate_existing_asset(
+                    managed_path, asset_type=attachment_asset_type
+                )
             )
         )
         if should_stage:
@@ -347,7 +351,7 @@ class WebClipperCollector:
             source_checksum=sha256,
             source_size_bytes=size_bytes,
             capabilities=("binary_attachment",),
-            output_paths={"library": str(managed_path)},
+            output_paths={"vault": str(managed_path)},
             custom_metadata={
                 "source_kind": "web_clipper",
                 "source_path": str(source_path),
@@ -370,17 +374,17 @@ class WebClipperCollector:
         return [item for item in items if item]
 
     def _ensure_safe_source_path(self, path: Path) -> None:
-        raw_root = self.layout.raw_root.resolve()
+        vault_root = self.layout.vault_root.resolve()
         resolved_path = path.resolve()
         try:
-            resolved_path.relative_to(raw_root)
+            resolved_path.relative_to(vault_root)
         except ValueError as exc:
             raise ValueError(
-                f"Web Clipper source path escapes the raw root: {path}"
+                f"Web Clipper source path escapes the vault root: {path}"
             ) from exc
 
     def _managed_attachment_path(self, source_id: str) -> Path:
-        return self.layout.library_root / source_id
+        return self.layout.vault_root / source_id
 
     def _attachment_asset_type(self, path: Path) -> str:
         suffix = path.suffix.lower()

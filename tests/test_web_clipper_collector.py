@@ -23,8 +23,8 @@ def make_config(tmp_path: Path) -> Config:
     config.set("paths.wiki_dir", "wiki")
     config.set("paths.digests_dir", "_digests")
     config.set("database.path", "meta.db")
-    config.set("sources.web_clipper.note_dirs", ["web-clipper/notes"])
-    config.set("sources.web_clipper.attachment_dirs", ["web-clipper/assets"])
+    config.set("sources.web_clipper.note_dirs", ["Clippings"])
+    config.set("sources.web_clipper.attachment_dirs", ["clipper-assets"])
     return config
 
 
@@ -40,23 +40,23 @@ def make_collector(tmp_path: Path) -> tuple[WebClipperCollector, Path]:
     layout = build_path_layout(config, project_root=tmp_path)
     layout.ensure_directories()
 
-    note_dir = layout.raw_root / "web-clipper" / "notes"
-    asset_dir = layout.raw_root / "web-clipper" / "assets"
+    note_dir = layout.vault_root / "Clippings"
+    asset_dir = layout.vault_root / "clipper-assets"
     note_dir.mkdir(parents=True, exist_ok=True)
     asset_dir.mkdir(parents=True, exist_ok=True)
 
     db = MetadataDB(db_path=str(layout.database_path))
     collector = WebClipperCollector(config, layout=layout, db=db)
-    return collector, layout.raw_root
+    return collector, layout.vault_root
 
 
 def test_web_clipper_collector_indexes_allowlisted_roots_only(tmp_path: Path):
-    collector, raw_root = make_collector(tmp_path)
+    collector, vault_root = make_collector(tmp_path)
 
-    note_file = raw_root / "web-clipper" / "notes" / "capture.md"
-    ignored_note_file = raw_root / "web-clipper" / "notes" / "capture.txt"
-    attachment_file = raw_root / "web-clipper" / "assets" / "capture_attachment.pdf"
-    ignored_attachment_file = raw_root / "web-clipper" / "assets" / "image.md"
+    note_file = vault_root / "Clippings" / "capture.md"
+    ignored_note_file = vault_root / "Clippings" / "capture.txt"
+    attachment_file = vault_root / "clipper-assets" / "capture_attachment.pdf"
+    ignored_attachment_file = vault_root / "clipper-assets" / "image.md"
 
     _copy_fixture("capture_note.md", note_file)
     ignored_note_file.write_text("skip me\n", encoding="utf-8")
@@ -78,10 +78,10 @@ def test_web_clipper_collector_indexes_allowlisted_roots_only(tmp_path: Path):
     assert attachment_record.artifact.file_type == "attachment"
     assert attachment_record.artifact.title == "capture_attachment"
     managed_attachment = (
-        collector.layout.library_root / "web-clipper" / "assets" / "capture_attachment.pdf"
+        collector.layout.vault_root / "clipper-assets" / "capture_attachment.pdf"
     )
     assert attachment_record.managed_path == managed_attachment
-    assert attachment_record.artifact.output_paths["library"] == str(managed_attachment)
+    assert attachment_record.artifact.output_paths["vault"] == str(managed_attachment)
     assert managed_attachment.exists()
     assert managed_attachment.read_bytes() == attachment_file.read_bytes()
     assert attachment_file.exists()
@@ -92,9 +92,9 @@ def test_web_clipper_collector_indexes_allowlisted_roots_only(tmp_path: Path):
 
 
 def test_web_clipper_collector_reindexes_changed_files(tmp_path: Path):
-    collector, raw_root = make_collector(tmp_path)
+    collector, vault_root = make_collector(tmp_path)
 
-    note_file = raw_root / "web-clipper" / "notes" / "capture.md"
+    note_file = vault_root / "Clippings" / "capture.md"
     note_file.write_text(
         "---\n"
         "title: first version\n"
@@ -128,9 +128,9 @@ def test_web_clipper_collector_reindexes_changed_files(tmp_path: Path):
 def test_web_clipper_collector_queues_notes_for_shared_runtime(
     tmp_path: Path,
 ):
-    collector, raw_root = make_collector(tmp_path)
+    collector, vault_root = make_collector(tmp_path)
 
-    note_file = raw_root / "web-clipper" / "notes" / "capture.md"
+    note_file = vault_root / "Clippings" / "capture.md"
     note_file.write_text(
         "---\n"
         "title: captured note\n"
@@ -146,7 +146,7 @@ def test_web_clipper_collector_queues_notes_for_shared_runtime(
     discovered = collector.collect()
 
     assert len(discovered) == 1
-    queue_entry = collector.db.get_ingestion_entry("webclip:web-clipper/notes/capture.md")
+    queue_entry = collector.db.get_ingestion_entry("webclip:Clippings/capture.md")
     assert queue_entry is not None
     assert queue_entry.artifact_type == "web_clipper"
     assert queue_entry.status == "pending"
@@ -156,13 +156,13 @@ def test_web_clipper_collector_queues_notes_for_shared_runtime(
 
     assert len(results) == 1
     assert results[0].artifact_type == "web_clipper"
-    assert collector.db.get_ingestion_entry("webclip:web-clipper/notes/capture.md").status == "processed"
+    assert collector.db.get_ingestion_entry("webclip:Clippings/capture.md").status == "processed"
 
     wiki_page = collector.layout.wiki_root / "pages" / "clip-captured-note.md"
     assert wiki_page.exists()
     wiki_content = wiki_page.read_text(encoding="utf-8")
     assert "captured note" in wiki_content
-    assert "web-clipper/notes/capture.md" in wiki_content
+    assert "Clippings/capture.md" in wiki_content
 
 
 def test_web_clipper_collector_fails_closed_when_roots_missing(tmp_path: Path):
@@ -179,9 +179,9 @@ def test_web_clipper_collector_fails_closed_when_roots_missing(tmp_path: Path):
 
 
 def test_web_clipper_collector_rejects_notes_without_frontmatter(tmp_path: Path):
-    collector, raw_root = make_collector(tmp_path)
+    collector, vault_root = make_collector(tmp_path)
 
-    note_file = raw_root / "web-clipper" / "notes" / "capture.md"
+    note_file = vault_root / "Clippings" / "capture.md"
     _copy_fixture("missing_frontmatter.md", note_file)
 
     with pytest.raises(ValueError, match="Missing frontmatter"):
@@ -191,15 +191,15 @@ def test_web_clipper_collector_rejects_notes_without_frontmatter(tmp_path: Path)
 def test_web_clipper_collector_rejects_attachment_symlink_escape(
     tmp_path: Path,
 ):
-    collector, raw_root = make_collector(tmp_path)
+    collector, vault_root = make_collector(tmp_path)
 
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir(parents=True, exist_ok=True)
     outside_file = outside_dir / "escape.png"
     outside_file.write_bytes(b"binary-png")
 
-    unsafe_link = raw_root / "web-clipper" / "assets" / "escape.png"
+    unsafe_link = vault_root / "clipper-assets" / "escape.png"
     os.symlink(outside_file, unsafe_link)
 
-    with pytest.raises(ValueError, match="escapes the raw root"):
+    with pytest.raises(ValueError, match="escapes the vault root"):
         collector.collect()

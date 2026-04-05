@@ -295,12 +295,12 @@ class CompiledWikiUpdater:
             candidates.extend(sorted((self.layout.vault_root / "repos").glob(f"*{safe_name}*README.md")))
         elif isinstance(artifact, WebClipperArtifact):
             if artifact.source_relative_path:
-                candidates.append(self.layout.raw_root / artifact.source_relative_path)
+                candidates.append(self.layout.vault_root / artifact.source_relative_path)
             elif artifact.source_path:
                 candidates.append(Path(artifact.source_path))
-            managed_path = artifact.output_paths.get("library")
-            if managed_path:
-                candidates.append(Path(managed_path))
+            for managed_path in artifact.output_paths.values():
+                if managed_path:
+                    candidates.append(Path(managed_path))
 
         normalized: list[str] = []
         for candidate in candidates:

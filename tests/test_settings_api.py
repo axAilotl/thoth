@@ -51,8 +51,8 @@ def test_settings_api_returns_runtime_summary(monkeypatch, tmp_path: Path):
         "sources": {
             "web_clipper": {
                 "enabled": True,
-                "note_dirs": ["web-clipper/notes"],
-                "attachment_dirs": ["web-clipper/assets"],
+                "note_dirs": ["imports/notes"],
+                "attachment_dirs": ["imports/assets"],
             }
         },
     }
@@ -81,8 +81,8 @@ topics:
     assert payload["runtime"]["layout"]["wiki_root"] == str(tmp_path / "wiki")
     assert payload["runtime"]["archivist"]["topics"] == ["test-topic"]
     assert payload["runtime"]["web_clipper"]["watch_dirs"] == [
-        str(tmp_path / "vault" / "raw" / "web-clipper" / "notes"),
-        str(tmp_path / "vault" / "raw" / "web-clipper" / "assets"),
+        str(tmp_path / "vault" / "imports" / "notes"),
+        str(tmp_path / "vault" / "imports" / "assets"),
     ]
     assert payload["config_files"] == {
         "base": str(tmp_path / "config.example.json"),

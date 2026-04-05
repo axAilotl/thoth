@@ -234,13 +234,11 @@
             "enabled": { "type": "boolean" },
             "note_dirs": {
               "type": "array",
-              "items": { "type": "string" },
-              "minItems": 1
+              "items": { "type": "string" }
             },
             "attachment_dirs": {
               "type": "array",
-              "items": { "type": "string" },
-              "minItems": 1
+              "items": { "type": "string" }
             },
             "note_extensions": {
               "type": "array",

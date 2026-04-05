@@ -14,23 +14,23 @@ def make_config(tmp_path: Path) -> Config:
     config.set("paths.cache_dir", "graphql_cache")
     config.set("paths.raw_dir", "raw")
     config.set("database.path", "meta.db")
-    config.set("sources.web_clipper.note_dirs", ["web-clipper/notes", "web-clipper/drafts"])
-    config.set("sources.web_clipper.attachment_dirs", ["web-clipper/assets"])
+    config.set("sources.web_clipper.note_dirs", ["Clippings", "clippings"])
+    config.set("sources.web_clipper.attachment_dirs", ["assets"])
     return config
 
 
-def test_web_clipper_contract_resolves_inside_raw_root(tmp_path: Path):
+def test_web_clipper_contract_resolves_inside_vault_root(tmp_path: Path):
     config = make_config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)
 
     contract = build_web_clipper_contract(config, layout=layout)
 
     assert contract.note_dirs == (
-        tmp_path / "vault" / "raw" / "web-clipper" / "notes",
-        tmp_path / "vault" / "raw" / "web-clipper" / "drafts",
+        tmp_path / "vault" / "Clippings",
+        tmp_path / "vault" / "clippings",
     )
     assert contract.attachment_dirs == (
-        tmp_path / "vault" / "raw" / "web-clipper" / "assets",
+        tmp_path / "vault" / "assets",
     )
     assert contract.watch_dirs == contract.note_dirs + contract.attachment_dirs
 
@@ -69,7 +69,24 @@ def test_web_clipper_contract_rejects_outside_vault_paths(tmp_path: Path):
     config.set("paths.raw_dir", "raw")
     config.set("database.path", "meta.db")
     config.set("sources.web_clipper.note_dirs", [str(tmp_path / "outside")])
-    config.set("sources.web_clipper.attachment_dirs", ["web-clipper/assets"])
+    config.set("sources.web_clipper.attachment_dirs", ["assets"])
 
-    with pytest.raises(ValueError, match="must stay inside the raw source root"):
+    with pytest.raises(ValueError, match="must stay inside the vault root"):
         build_web_clipper_contract(config, layout=build_path_layout(config, project_root=tmp_path))
+
+
+def test_web_clipper_contract_allows_note_only_configuration(tmp_path: Path):
+    config = Config()
+    config.set("paths.vault_dir", str(tmp_path / "vault"))
+    config.set("paths.system_dir", ".thoth_system")
+    config.set("paths.cache_dir", "graphql_cache")
+    config.set("database.path", "meta.db")
+    config.set("sources.web_clipper.note_dirs", ["Clippings"])
+
+    contract = build_web_clipper_contract(
+        config,
+        layout=build_path_layout(config, project_root=tmp_path),
+    )
+
+    assert contract.note_dirs == (tmp_path / "vault" / "Clippings",)
+    assert contract.attachment_dirs == ()
