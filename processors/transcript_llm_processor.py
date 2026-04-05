@@ -456,7 +456,7 @@ class TranscriptLLMProcessor:
             else:
                 logger.error("❌ No chunks were processed successfully for %s", target_label)
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error processing chunked transcript for {target_label}: {e}")
             return None
