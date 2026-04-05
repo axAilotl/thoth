@@ -231,3 +231,4 @@ def test_archivist_cli_help_exposes_runtime_command():
     assert "--topics" in result.stdout
     assert "--force" in result.stdout
     assert "--dry-run" in result.stdout
+    assert "--benchmark" in result.stdout

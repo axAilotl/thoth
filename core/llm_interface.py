@@ -24,6 +24,15 @@ class LLMResponse:
     error: Optional[str] = None
 
 
+@dataclass
+class EmbeddingResponse:
+    """Response from an embedding provider."""
+    vectors: List[List[float]]
+    model: str
+    provider: str
+    error: Optional[str] = None
+
+
 class BaseLLMProvider(ABC):
     """Abstract base class for LLM providers"""
     
@@ -35,6 +44,11 @@ class BaseLLMProvider(ABC):
     @abstractmethod
     async def generate(self, prompt: str, system_prompt: str = None, **kwargs) -> LLMResponse:
         """Generate text from prompt"""
+        pass
+
+    @abstractmethod
+    async def embed_texts(self, texts: List[str], **kwargs) -> EmbeddingResponse:
+        """Generate embedding vectors for one or more texts."""
         pass
     
     @abstractmethod
@@ -61,6 +75,27 @@ class OpenAIProvider(BaseLLMProvider):
         model_lower = model.lower()
         no_temp_prefixes = ('o1', 'o3', 'o4', 'gpt-5')
         return not any(model_lower.startswith(p) or f'/{p}' in model_lower for p in no_temp_prefixes)
+
+    async def embed_texts(self, texts: List[str], **kwargs) -> EmbeddingResponse:
+        try:
+            response = await self.client.embeddings.create(
+                model=self.model,
+                input=texts,
+            )
+            vectors = [list(item.embedding) for item in response.data or []]
+            return EmbeddingResponse(
+                vectors=vectors,
+                model=self.model,
+                provider="openai",
+            )
+        except Exception as e:
+            logger.error(f"OpenAI embedding error: {e}")
+            return EmbeddingResponse(
+                vectors=[],
+                model=self.model,
+                provider="openai",
+                error=str(e),
+            )
 
     async def generate(self, prompt: str, system_prompt: str = None, **kwargs) -> LLMResponse:
         try:
@@ -174,6 +209,27 @@ class OpenRouterProvider(BaseLLMProvider):
     def get_provider_name(self) -> str:
         return "openrouter"
 
+    async def embed_texts(self, texts: List[str], **kwargs) -> EmbeddingResponse:
+        try:
+            response = await self.client.embeddings.create(
+                model=self.model,
+                input=texts,
+            )
+            vectors = [list(item.embedding) for item in response.data or []]
+            return EmbeddingResponse(
+                vectors=vectors,
+                model=self.model,
+                provider="openrouter",
+            )
+        except Exception as e:
+            logger.error(f"OpenRouter embedding error: {e}")
+            return EmbeddingResponse(
+                vectors=[],
+                model=self.model,
+                provider="openrouter",
+                error=str(e),
+            )
+
 
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic provider"""
@@ -230,6 +286,14 @@ class AnthropicProvider(BaseLLMProvider):
 
     def get_provider_name(self) -> str:
         return "anthropic"
+
+    async def embed_texts(self, texts: List[str], **kwargs) -> EmbeddingResponse:
+        return EmbeddingResponse(
+            vectors=[],
+            model=self.model,
+            provider="anthropic",
+            error="Anthropic provider does not expose embeddings in this runtime",
+        )
 
 
 class LocalProvider(BaseLLMProvider):
@@ -290,6 +354,27 @@ class LocalProvider(BaseLLMProvider):
     
     def get_provider_name(self) -> str:
         return "local"
+
+    async def embed_texts(self, texts: List[str], **kwargs) -> EmbeddingResponse:
+        try:
+            response = await self.client.embeddings.create(
+                model=self.model,
+                input=texts,
+            )
+            vectors = [list(item.embedding) for item in response.data or []]
+            return EmbeddingResponse(
+                vectors=vectors,
+                model=self.model,
+                provider="local",
+            )
+        except Exception as e:
+            logger.error(f"Local embedding error: {e}")
+            return EmbeddingResponse(
+                vectors=[],
+                model=self.model,
+                provider="local",
+                error=str(e),
+            )
 
 
 class LLMInterface:
@@ -400,6 +485,51 @@ class LLMInterface:
     def resolve_task_route(self, task: str) -> Optional[tuple]:
         """Public helper to expose task route resolution"""
         return self._resolve_task_route(task)
+
+    async def embed_texts(
+        self,
+        texts: List[str],
+        *,
+        provider: str = None,
+        model: str = None,
+    ) -> EmbeddingResponse:
+        """Generate embeddings using either an explicit route or llm.tasks.embedding."""
+        if not texts:
+            return EmbeddingResponse(
+                vectors=[],
+                model=model or "none",
+                provider=provider or "none",
+                error="No texts were provided for embeddings",
+            )
+
+        if provider is None or model is None:
+            route = self._resolve_task_route('embedding')
+            if route is None:
+                return EmbeddingResponse(
+                    vectors=[],
+                    model=model or "none",
+                    provider=provider or "none",
+                    error="No embedding provider configured",
+                )
+            provider, model, _ = route
+
+        selected_provider = self.providers.get(provider)
+        if not selected_provider:
+            return EmbeddingResponse(
+                vectors=[],
+                model=model or "none",
+                provider=provider or "none",
+                error=f"Provider '{provider}' not available",
+            )
+
+        original_model = getattr(selected_provider, 'model', None)
+        if model and hasattr(selected_provider, 'model'):
+            selected_provider.model = model
+        try:
+            return await selected_provider.embed_texts(texts)
+        finally:
+            if model and hasattr(selected_provider, 'model'):
+                selected_provider.model = original_model
 
     async def generate(self, prompt: str, system_prompt: str = None, provider: str = None, model: str = None, **kwargs) -> LLMResponse:
         """Generate text using specified or default provider"""

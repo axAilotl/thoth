@@ -77,6 +77,7 @@ def build_archivist_admin_payload(
     payload["defaults"] = asdict(registry.defaults)
 
     metadata_db = _build_metadata_db(config, project_root=project_root)
+    payload["corpus"] = metadata_db.get_archivist_corpus_stats()
     payload["topics"] = [
         _serialize_topic(topic, db=metadata_db)
         for topic in registry.topics
@@ -217,6 +218,22 @@ def _serialize_topic(
         "cadence_hours": topic.cadence_hours,
         "max_sources": topic.max_sources,
         "allow_manual_force": topic.allow_manual_force,
+        "retrieval": {
+            "mode": topic.retrieval.mode,
+            "tag_mode": topic.retrieval.tag_mode,
+            "term_mode": topic.retrieval.term_mode,
+            "query_text": topic.retrieval.query_text,
+            "full_text_limit": topic.retrieval.full_text_limit,
+            "semantic_limit": topic.retrieval.semantic_limit,
+            "rerank_limit": topic.retrieval.rerank_limit,
+            "max_new_embeddings_per_run": topic.retrieval.max_new_embeddings_per_run,
+            "semantic_weight": topic.retrieval.semantic_weight,
+            "full_text_weight": topic.retrieval.full_text_weight,
+            "recency_weight": topic.retrieval.recency_weight,
+            "source_type_weights": {
+                key: value for key, value in topic.retrieval.source_type_weights
+            },
+        },
     }
 
     try:

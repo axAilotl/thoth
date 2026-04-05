@@ -500,6 +500,460 @@ class MetadataDB:
                 (state_key,),
             )
             return result.rowcount > 0
+
+    def ensure_archivist_corpus_tables(self) -> None:
+        """Initialize archivist retrieval tables on demand."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS archivist_corpus_documents (
+                    candidate_key TEXT PRIMARY KEY,
+                    path TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    scope_relative_path TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    file_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    tags_json TEXT NOT NULL,
+                    content_text TEXT NOT NULL,
+                    search_corpus TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    source_id TEXT,
+                    indexed_at TEXT NOT NULL
+                )
+                """
+            )
+            try:
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS archivist_corpus_fts
+                    USING fts5(
+                        candidate_key UNINDEXED,
+                        title,
+                        tags,
+                        path,
+                        source_type,
+                        content,
+                        tokenize = 'unicode61'
+                    )
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                raise RuntimeError(
+                    "SQLite FTS5 support is required for archivist full-text retrieval"
+                ) from exc
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS archivist_corpus_embeddings (
+                    candidate_key TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    vector_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (candidate_key, provider, model)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_docs_scope_path ON archivist_corpus_documents (scope, scope_relative_path)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_docs_source_type ON archivist_corpus_documents (source_type)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_embeddings_model ON archivist_corpus_embeddings (provider, model)"
+            )
+
+    def upsert_archivist_corpus_document(self, document) -> None:
+        """Insert or update a parsed archivist corpus document and refresh FTS rows."""
+        self.ensure_archivist_corpus_tables()
+        search_corpus = document.search_corpus()
+        indexed_at = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO archivist_corpus_documents (
+                    candidate_key,
+                    path,
+                    scope,
+                    scope_relative_path,
+                    source_type,
+                    file_type,
+                    title,
+                    tags_json,
+                    content_text,
+                    search_corpus,
+                    source_hash,
+                    size_bytes,
+                    updated_at,
+                    source_id,
+                    indexed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(candidate_key) DO UPDATE SET
+                    path=excluded.path,
+                    scope=excluded.scope,
+                    scope_relative_path=excluded.scope_relative_path,
+                    source_type=excluded.source_type,
+                    file_type=excluded.file_type,
+                    title=excluded.title,
+                    tags_json=excluded.tags_json,
+                    content_text=excluded.content_text,
+                    search_corpus=excluded.search_corpus,
+                    source_hash=excluded.source_hash,
+                    size_bytes=excluded.size_bytes,
+                    updated_at=excluded.updated_at,
+                    source_id=excluded.source_id,
+                    indexed_at=excluded.indexed_at
+                """,
+                (
+                    document.candidate_key,
+                    str(document.path),
+                    document.scope,
+                    document.scope_relative_path,
+                    document.source_type,
+                    document.file_type,
+                    document.title,
+                    json.dumps(list(document.tags), ensure_ascii=False),
+                    document.content_text,
+                    search_corpus,
+                    document.source_hash,
+                    document.size_bytes,
+                    document.updated_at,
+                    document.source_id,
+                    indexed_at,
+                ),
+            )
+            conn.execute(
+                "DELETE FROM archivist_corpus_fts WHERE candidate_key = ?",
+                (document.candidate_key,),
+            )
+            conn.execute(
+                """
+                INSERT INTO archivist_corpus_fts (
+                    candidate_key,
+                    title,
+                    tags,
+                    path,
+                    source_type,
+                    content
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    document.candidate_key,
+                    document.title,
+                    " ".join(document.tags),
+                    document.scope_relative_path,
+                    document.source_type,
+                    document.content_text,
+                ),
+            )
+
+    def get_archivist_corpus_document(self, candidate_key: str):
+        """Fetch a parsed archivist corpus document by key."""
+        from .archivist_retrieval.models import ArchivistCorpusDocument
+
+        self.ensure_archivist_corpus_tables()
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM archivist_corpus_documents
+                WHERE candidate_key = ?
+                """,
+                (candidate_key,),
+            ).fetchone()
+            if not row:
+                return None
+            return ArchivistCorpusDocument(
+                candidate_key=row["candidate_key"],
+                path=Path(row["path"]),
+                scope=row["scope"],
+                scope_relative_path=row["scope_relative_path"],
+                source_type=row["source_type"],
+                file_type=row["file_type"],
+                title=row["title"],
+                tags=tuple(json.loads(row["tags_json"] or "[]")),
+                content_text=row["content_text"] or "",
+                source_hash=row["source_hash"],
+                size_bytes=row["size_bytes"],
+                updated_at=row["updated_at"],
+                source_id=row["source_id"],
+            )
+
+    def list_archivist_corpus_documents(
+        self,
+        *,
+        root_filters: tuple[tuple[str, str], ...] = (),
+        source_types: tuple[str, ...] = (),
+        candidate_keys: tuple[str, ...] = (),
+    ):
+        """List indexed archivist corpus documents with optional scope and key filters."""
+        from .archivist_retrieval.models import ArchivistCorpusDocument
+
+        self.ensure_archivist_corpus_tables()
+        where_clauses: list[str] = []
+        params: list[Any] = []
+
+        if root_filters:
+            root_clauses: list[str] = []
+            for scope, relative_prefix in root_filters:
+                if relative_prefix:
+                    root_clauses.append(
+                        "(scope = ? AND (scope_relative_path = ? OR scope_relative_path LIKE ?))"
+                    )
+                    params.extend([scope, relative_prefix, f"{relative_prefix}/%"])
+                else:
+                    root_clauses.append("(scope = ?)")
+                    params.append(scope)
+            where_clauses.append("(" + " OR ".join(root_clauses) + ")")
+
+        if source_types:
+            placeholders = ",".join("?" for _ in source_types)
+            where_clauses.append(f"source_type IN ({placeholders})")
+            params.extend(source_types)
+
+        if candidate_keys:
+            placeholders = ",".join("?" for _ in candidate_keys)
+            where_clauses.append(f"candidate_key IN ({placeholders})")
+            params.extend(candidate_keys)
+
+        sql = "SELECT * FROM archivist_corpus_documents"
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+        sql += " ORDER BY updated_at DESC, candidate_key DESC"
+
+        with self._get_connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            return [
+                ArchivistCorpusDocument(
+                    candidate_key=row["candidate_key"],
+                    path=Path(row["path"]),
+                    scope=row["scope"],
+                    scope_relative_path=row["scope_relative_path"],
+                    source_type=row["source_type"],
+                    file_type=row["file_type"],
+                    title=row["title"],
+                    tags=tuple(json.loads(row["tags_json"] or "[]")),
+                    content_text=row["content_text"] or "",
+                    source_hash=row["source_hash"],
+                    size_bytes=row["size_bytes"],
+                    updated_at=row["updated_at"],
+                    source_id=row["source_id"],
+                )
+                for row in rows
+            ]
+
+    def prune_archivist_corpus_documents(
+        self,
+        *,
+        scope: str,
+        relative_prefix: str,
+        keep_candidate_keys: tuple[str, ...],
+    ) -> int:
+        """Delete indexed docs that disappeared from a scanned scope prefix."""
+        self.ensure_archivist_corpus_tables()
+        where_parts = ["scope = ?"]
+        params: list[Any] = [scope]
+        if relative_prefix:
+            where_parts.append("(scope_relative_path = ? OR scope_relative_path LIKE ?)")
+            params.extend([relative_prefix, f"{relative_prefix}/%"])
+        if keep_candidate_keys:
+            placeholders = ",".join("?" for _ in keep_candidate_keys)
+            where_parts.append(f"candidate_key NOT IN ({placeholders})")
+            params.extend(keep_candidate_keys)
+        where_sql = " AND ".join(where_parts)
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT candidate_key FROM archivist_corpus_documents WHERE {where_sql}",
+                tuple(params),
+            ).fetchall()
+            if not rows:
+                return 0
+            keys = tuple(row["candidate_key"] for row in rows)
+            placeholders = ",".join("?" for _ in keys)
+            conn.execute(
+                f"DELETE FROM archivist_corpus_fts WHERE candidate_key IN ({placeholders})",
+                keys,
+            )
+            conn.execute(
+                f"DELETE FROM archivist_corpus_embeddings WHERE candidate_key IN ({placeholders})",
+                keys,
+            )
+            deleted = conn.execute(
+                f"DELETE FROM archivist_corpus_documents WHERE candidate_key IN ({placeholders})",
+                keys,
+            )
+            return deleted.rowcount or 0
+
+    def search_archivist_corpus_full_text(
+        self,
+        *,
+        query: str,
+        root_filters: tuple[tuple[str, str], ...] = (),
+        source_types: tuple[str, ...] = (),
+        limit: int = 100,
+    ) -> list[tuple[Any, float]]:
+        """Search the corpus FTS index and return documents with BM25-style scores."""
+        from .archivist_retrieval.models import ArchivistCorpusDocument
+
+        self.ensure_archivist_corpus_tables()
+        cleaned_query = str(query or "").strip()
+        if not cleaned_query:
+            return []
+
+        where_clauses = ["archivist_corpus_fts MATCH ?"]
+        params: list[Any] = [cleaned_query]
+        if root_filters:
+            root_clauses: list[str] = []
+            for scope, relative_prefix in root_filters:
+                if relative_prefix:
+                    root_clauses.append(
+                        "(d.scope = ? AND (d.scope_relative_path = ? OR d.scope_relative_path LIKE ?))"
+                    )
+                    params.extend([scope, relative_prefix, f"{relative_prefix}/%"])
+                else:
+                    root_clauses.append("(d.scope = ?)")
+                    params.append(scope)
+            where_clauses.append("(" + " OR ".join(root_clauses) + ")")
+        if source_types:
+            placeholders = ",".join("?" for _ in source_types)
+            where_clauses.append(f"d.source_type IN ({placeholders})")
+            params.extend(source_types)
+
+        sql = f"""
+            SELECT
+                d.*,
+                bm25(archivist_corpus_fts, 5.0, 2.0, 1.0, 1.0, 0.75) AS rank_score
+            FROM archivist_corpus_fts
+            JOIN archivist_corpus_documents AS d
+              ON d.candidate_key = archivist_corpus_fts.candidate_key
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY rank_score ASC
+            LIMIT ?
+        """
+        params.append(int(limit))
+
+        with self._get_connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            results: list[tuple[Any, float]] = []
+            for row in rows:
+                document = ArchivistCorpusDocument(
+                    candidate_key=row["candidate_key"],
+                    path=Path(row["path"]),
+                    scope=row["scope"],
+                    scope_relative_path=row["scope_relative_path"],
+                    source_type=row["source_type"],
+                    file_type=row["file_type"],
+                    title=row["title"],
+                    tags=tuple(json.loads(row["tags_json"] or "[]")),
+                    content_text=row["content_text"] or "",
+                    source_hash=row["source_hash"],
+                    size_bytes=row["size_bytes"],
+                    updated_at=row["updated_at"],
+                    source_id=row["source_id"],
+                )
+                rank_score = float(row["rank_score"]) if row["rank_score"] is not None else 0.0
+                results.append((document, rank_score))
+            return results
+
+    def upsert_archivist_corpus_embedding(
+        self,
+        *,
+        candidate_key: str,
+        provider: str,
+        model: str,
+        source_hash: str,
+        vector: list[float],
+    ) -> None:
+        """Insert or update a semantic embedding for a corpus document."""
+        self.ensure_archivist_corpus_tables()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO archivist_corpus_embeddings (
+                    candidate_key,
+                    provider,
+                    model,
+                    source_hash,
+                    vector_json,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(candidate_key, provider, model) DO UPDATE SET
+                    source_hash=excluded.source_hash,
+                    vector_json=excluded.vector_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    candidate_key,
+                    provider,
+                    model,
+                    source_hash,
+                    json.dumps(vector, ensure_ascii=False),
+                    datetime.now().isoformat(),
+                ),
+            )
+
+    def get_archivist_corpus_embeddings(
+        self,
+        *,
+        candidate_keys: tuple[str, ...],
+        provider: str,
+        model: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch stored embeddings for a provider/model pair."""
+        self.ensure_archivist_corpus_tables()
+        if not candidate_keys:
+            return {}
+        placeholders = ",".join("?" for _ in candidate_keys)
+        params: list[Any] = [provider, model, *candidate_keys]
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT candidate_key, source_hash, vector_json, updated_at
+                FROM archivist_corpus_embeddings
+                WHERE provider = ? AND model = ? AND candidate_key IN ({placeholders})
+                """,
+                tuple(params),
+            ).fetchall()
+            return {
+                row["candidate_key"]: {
+                    "source_hash": row["source_hash"],
+                    "vector": json.loads(row["vector_json"]),
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            }
+
+    def get_archivist_corpus_stats(self) -> Dict[str, Any]:
+        """Return corpus inventory counts for diagnostics."""
+        self.ensure_archivist_corpus_tables()
+        with self._get_connection() as conn:
+            docs_row = conn.execute(
+                "SELECT COUNT(*) AS count, MAX(indexed_at) AS last_indexed_at FROM archivist_corpus_documents"
+            ).fetchone()
+            embeddings_row = conn.execute(
+                "SELECT COUNT(*) AS count, MAX(updated_at) AS last_updated_at FROM archivist_corpus_embeddings"
+            ).fetchone()
+            type_rows = conn.execute(
+                "SELECT source_type, COUNT(*) AS count FROM archivist_corpus_documents GROUP BY source_type ORDER BY source_type"
+            ).fetchall()
+            return {
+                "document_count": int(docs_row["count"] or 0),
+                "last_indexed_at": docs_row["last_indexed_at"],
+                "embedding_count": int(embeddings_row["count"] or 0),
+                "last_embedding_at": embeddings_row["last_updated_at"],
+                "by_source_type": {
+                    row["source_type"]: int(row["count"] or 0) for row in type_rows
+                },
+            }
     
     # Tweet operations
     def upsert_tweet(self, tweet_meta: TweetMetadata) -> bool:

@@ -121,12 +121,14 @@ What exists:
 - local `archivist_topics.yaml` bootstrapped from the template
 - tracked prompt files at `prompts/archivist_system.md` and `prompts/archivist_user.md`
 - source gates by root scope
-- source-type, tag, and term filters
+- source-type, tag, and term filters plus modular retrieval policy
+- incremental corpus inventory, full-text retrieval, semantic retrieval, and hybrid ranking
 - cadence and dirty-check state
 - manual force flags
-- dedicated `archivist` task routing in settings
+- dedicated `archivist` and `embedding` task routing in settings
 - the `Archivist` tab in `/settings`
 - the `thoth.py archivist` CLI command
+- the `thoth.py archivist --benchmark` retrieval benchmark path
 - immediate API/UI archivist execution
 - scheduled archivist automation via `automation.archivist`
 
@@ -134,11 +136,12 @@ How to work with it now:
 
 1. Edit `archivist_topics.yaml` in the `Archivist` tab or directly on disk.
 2. Adjust `prompts/archivist_system.md` or `prompts/archivist_user.md` if the compiler instructions need to change.
-3. Set the `archivist` provider/model route in settings.
+3. Set the `archivist` provider/model route in settings, and set `embedding` too if any topic uses semantic or hybrid retrieval.
 4. Run `.venv/bin/python thoth.py archivist` to compile due topics.
 5. Use `.venv/bin/python thoth.py archivist --topics <id> --force` for intentional reruns.
-6. Use `Run Due Topics` or a topic card `Run Now` / `Force Run` action in `/settings` for immediate execution.
-7. Use `automation.archivist` in settings when you want the API service to compile due topics on a fixed interval.
+6. Use `.venv/bin/python thoth.py archivist --benchmark --topics <id>` to inspect retrieval quality without writing wiki pages.
+7. Use `Run Due Topics` or a topic card `Run Now` / `Force Run` action in `/settings` for immediate execution.
+8. Use `automation.archivist` in settings when you want the API service to compile due topics on a fixed interval.
 
 ## Current Data Boundaries
 

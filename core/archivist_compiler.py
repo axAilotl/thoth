@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 from typing import Any, Sequence
 
-from .archivist_selection import ArchivistCandidate, select_archivist_candidates
+from .archivist_retrieval.service import select_archivist_candidates_async
+from .archivist_selection import ArchivistCandidate
 from .archivist_state import evaluate_archivist_dirty_check, record_archivist_topic_run
 from .archivist_topics import (
     ArchivistTopicDefinition,
@@ -95,11 +96,12 @@ class ArchivistCompiler:
         dry_run: bool = False,
     ) -> ArchivistCompileResult:
         route = self._resolve_archivist_route()
-        selection = select_archivist_candidates(
+        selection = await select_archivist_candidates_async(
             topic,
             config=self.config,
             layout=self.layout,
             db=self.db,
+            llm_interface=self.llm_interface,
         )
         candidates = selection.candidates
         dirty = evaluate_archivist_dirty_check(

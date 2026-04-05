@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 import re
 from typing import Any
 
 import yaml
 
+from .archivist_retrieval.models import (
+    FILTER_MODES,
+    RETRIEVAL_MODES,
+    ArchivistRetrievalPolicy,
+)
 from .config import Config
 
 ARCHIVIST_TOPICS_FILENAME = "archivist_topics.yaml"
@@ -30,6 +35,7 @@ class ArchivistTopicDefaults:
     cadence_hours: float = 12.0
     max_sources: int | None = 120
     allow_manual_force: bool = True
+    retrieval: ArchivistRetrievalPolicy = field(default_factory=ArchivistRetrievalPolicy)
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,7 @@ class ArchivistTopicDefinition:
     cadence_hours: float = 12.0
     max_sources: int | None = 120
     allow_manual_force: bool = True
+    retrieval: ArchivistRetrievalPolicy = field(default_factory=ArchivistRetrievalPolicy)
 
     def output_path_for_root(self, wiki_root: Path) -> Path:
         """Resolve the topic output path inside the compiled wiki root."""
@@ -201,6 +208,11 @@ def _parse_defaults(raw_defaults: Any) -> ArchivistTopicDefaults:
             allow_none=True,
         ),
         allow_manual_force=bool(raw_defaults.get("allow_manual_force", True)),
+        retrieval=_parse_retrieval_policy(
+            raw_defaults.get("retrieval"),
+            field_name="defaults.retrieval",
+            fallback=ArchivistRetrievalPolicy(),
+        ),
     )
 
 
@@ -278,7 +290,111 @@ def _parse_topic(
         allow_manual_force=bool(
             raw_topic.get("allow_manual_force", defaults.allow_manual_force)
         ),
+        retrieval=_parse_retrieval_policy(
+            raw_topic.get("retrieval"),
+            field_name=f"{field_prefix}.retrieval",
+            fallback=defaults.retrieval,
+        ),
     )
+
+
+def _parse_retrieval_policy(
+    raw_policy: Any,
+    *,
+    field_name: str,
+    fallback: ArchivistRetrievalPolicy,
+) -> ArchivistRetrievalPolicy:
+    if raw_policy in (None, {}):
+        return fallback
+    if not isinstance(raw_policy, dict):
+        raise ArchivistTopicConfigError(f"{field_name} must be an object")
+
+    mode = str(raw_policy.get("mode", fallback.mode) or "").strip().lower()
+    if mode not in RETRIEVAL_MODES:
+        raise ArchivistTopicConfigError(
+            f"{field_name}.mode must be one of {sorted(RETRIEVAL_MODES)}"
+        )
+
+    tag_mode = str(raw_policy.get("tag_mode", fallback.tag_mode) or "").strip().lower()
+    if tag_mode not in FILTER_MODES:
+        raise ArchivistTopicConfigError(
+            f"{field_name}.tag_mode must be one of {sorted(FILTER_MODES)}"
+        )
+
+    term_mode = str(raw_policy.get("term_mode", fallback.term_mode) or "").strip().lower()
+    if term_mode not in FILTER_MODES:
+        raise ArchivistTopicConfigError(
+            f"{field_name}.term_mode must be one of {sorted(FILTER_MODES)}"
+        )
+
+    source_type_weights = _parse_source_type_weights(
+        raw_policy.get("source_type_weights", fallback.source_type_weights),
+        field_name=f"{field_name}.source_type_weights",
+    )
+
+    return ArchivistRetrievalPolicy(
+        mode=mode,
+        tag_mode=tag_mode,
+        term_mode=term_mode,
+        query_text=_normalize_optional_text(raw_policy.get("query_text"))
+        or fallback.query_text,
+        full_text_limit=_parse_positive_int(
+            raw_policy.get("full_text_limit", fallback.full_text_limit),
+            field_name=f"{field_name}.full_text_limit",
+        ),
+        semantic_limit=_parse_positive_int(
+            raw_policy.get("semantic_limit", fallback.semantic_limit),
+            field_name=f"{field_name}.semantic_limit",
+        ),
+        rerank_limit=_parse_positive_int(
+            raw_policy.get("rerank_limit", fallback.rerank_limit),
+            field_name=f"{field_name}.rerank_limit",
+        ),
+        max_new_embeddings_per_run=_parse_positive_int(
+            raw_policy.get(
+                "max_new_embeddings_per_run",
+                fallback.max_new_embeddings_per_run,
+            ),
+            field_name=f"{field_name}.max_new_embeddings_per_run",
+        ),
+        semantic_weight=_parse_non_negative_float(
+            raw_policy.get("semantic_weight", fallback.semantic_weight),
+            field_name=f"{field_name}.semantic_weight",
+        ),
+        full_text_weight=_parse_non_negative_float(
+            raw_policy.get("full_text_weight", fallback.full_text_weight),
+            field_name=f"{field_name}.full_text_weight",
+        ),
+        recency_weight=_parse_non_negative_float(
+            raw_policy.get("recency_weight", fallback.recency_weight),
+            field_name=f"{field_name}.recency_weight",
+        ),
+        source_type_weights=source_type_weights or fallback.source_type_weights,
+    )
+
+
+def _parse_source_type_weights(
+    value: Any,
+    *,
+    field_name: str,
+) -> tuple[tuple[str, float], ...]:
+    if value in (None, {}):
+        return ()
+    if isinstance(value, tuple):
+        return tuple(value)
+    if not isinstance(value, dict):
+        raise ArchivistTopicConfigError(f"{field_name} must be an object")
+
+    normalized: list[tuple[str, float]] = []
+    for raw_key, raw_weight in value.items():
+        token = _normalize_generic_token(raw_key)
+        normalized.append(
+            (
+                token,
+                _parse_positive_float(raw_weight, field_name=f"{field_name}.{token}"),
+            )
+        )
+    return tuple(normalized)
 
 
 def _normalize_required_text(value: Any, *, field_name: str) -> str:
@@ -413,6 +529,16 @@ def _parse_positive_float(value: Any, *, field_name: str) -> float:
         raise ArchivistTopicConfigError(f"{field_name} must be a number") from exc
     if parsed <= 0:
         raise ArchivistTopicConfigError(f"{field_name} must be positive")
+    return parsed
+
+
+def _parse_non_negative_float(value: Any, *, field_name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ArchivistTopicConfigError(f"{field_name} must be a number") from exc
+    if parsed < 0:
+        raise ArchivistTopicConfigError(f"{field_name} must be non-negative")
     return parsed
 
 

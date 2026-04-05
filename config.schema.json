@@ -97,6 +97,25 @@
                 }
               },
               "additionalProperties": true
+            },
+            "embedding": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "fallback": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "provider": { "type": "string" },
+                      "model": { "type": "string" }
+                    },
+                    "required": ["provider"],
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "additionalProperties": true
             }
           },
           "additionalProperties": true

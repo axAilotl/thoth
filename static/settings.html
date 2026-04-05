@@ -745,6 +745,16 @@
                     </div>
 
                     <div class="task-row">
+                        <span class="task-name">🧠 Semantic Retrieval</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="task-embedding-enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <select id="task-embedding-provider" onchange="updateTaskModelDropdown('embedding')"></select>
+                        <select id="task-embedding-model"></select>
+                    </div>
+
+                    <div class="task-row">
                         <span class="task-name">🏛️ Archivist Compilation</span>
                         <label class="toggle">
                             <input type="checkbox" id="task-archivist-enabled">
@@ -1287,6 +1297,10 @@
                     <textarea id="runtime-archivist-topics" rows="4" readonly></textarea>
                 </div>
                 <div class="form-group">
+                    <label>Archivist Corpus Stats</label>
+                    <textarea id="runtime-archivist-corpus" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
                     <label>Configured Vault Source Roots</label>
                     <textarea id="runtime-web-clipper-watch-dirs" rows="4" readonly></textarea>
                 </div>
@@ -1315,6 +1329,10 @@
                     <div class="form-group">
                         <label>Topic Count</label>
                         <input type="text" id="archivist-topic-count" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Corpus Index</label>
+                        <input type="text" id="archivist-corpus-summary" readonly>
                     </div>
                     <div class="btn-group">
                         <button class="btn btn-secondary" onclick="loadArchivistRegistry()">↻ Reload Registry</button>
@@ -1419,7 +1437,7 @@
 
     <script>
         const API_BASE = '';
-        const TASK_ROUTE_KEYS = ['tags', 'summary', 'alt_text', 'transcript', 'translation', 'archivist'];
+        const TASK_ROUTE_KEYS = ['tags', 'summary', 'alt_text', 'transcript', 'translation', 'embedding', 'archivist'];
         let providersConfig = {};
         let tasksConfig = {};
         let modelsCache = {};
@@ -2023,6 +2041,7 @@
                             <div><strong>Cadence</strong>${escapeHtml(String(topic.cadence_hours))}h</div>
                             <div><strong>Max Sources</strong>${escapeHtml(topic.max_sources == null ? 'Unlimited' : String(topic.max_sources))}</div>
                             <div><strong>Manual Force</strong>${topic.allow_manual_force ? 'Allowed' : 'Disabled'}</div>
+                            <div><strong>Retrieval</strong>${escapeHtml(topic.retrieval?.mode || 'literal')}</div>
                         </div>
                         ${stateError}
                         <div class="archivist-section-label">Include Roots</div>
@@ -2039,6 +2058,22 @@
                         <div class="archivist-pill-list">${renderArchivistPills(topic.include_terms)}</div>
                         <div class="archivist-section-label">Exclude Terms</div>
                         <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_terms)}</div>
+                        <div class="archivist-section-label">Retrieval Policy</div>
+                        <div class="archivist-pill-list">${renderArchivistPills([
+                            `mode:${topic.retrieval?.mode || 'literal'}`,
+                            `tags:${topic.retrieval?.tag_mode || 'required'}`,
+                            `terms:${topic.retrieval?.term_mode || 'required'}`,
+                            `fts:${topic.retrieval?.full_text_limit ?? 'n/a'}`,
+                            `semantic:${topic.retrieval?.semantic_limit ?? 'n/a'}`,
+                            `rerank:${topic.retrieval?.rerank_limit ?? 'n/a'}`,
+                            `embed_budget:${topic.retrieval?.max_new_embeddings_per_run ?? 'n/a'}`
+                        ])}</div>
+                        <div class="archivist-section-label">Source Type Weights</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(
+                            Object.entries(topic.retrieval?.source_type_weights || {}).map(
+                                ([key, value]) => `${key}:${value}`
+                            )
+                        )}</div>
                         ${forceButtons}
                     </article>
                 `;
@@ -2050,6 +2085,12 @@
             setFieldValue('archivist-registry-path', archivistRegistryState.registry_path || '');
             setFieldValue('archivist-registry-editor', archivistRegistryState.raw_text || '');
             setFieldValue('archivist-topic-count', String((archivistRegistryState.topics || []).length));
+            setFieldValue(
+                'archivist-corpus-summary',
+                archivistRegistryState.corpus
+                    ? `${archivistRegistryState.corpus.document_count || 0} docs / ${archivistRegistryState.corpus.embedding_count || 0} embeddings`
+                    : ''
+            );
             updateArchivistRouteSummary();
 
             const errorNode = document.getElementById('archivist-registry-error');
@@ -2399,7 +2440,7 @@
                             return;
                         }
 
-                        enabled.checked = !['translation', 'archivist'].includes(task);
+                        enabled.checked = !['translation', 'embedding', 'archivist'].includes(task);
                     });
 
                     setFieldValue(
@@ -2542,6 +2583,20 @@
                     archivist.error
                         ? `ERROR: ${archivist.error}`
                         : multilineFromValue(archivist.topics || [])
+                );
+                setFieldValue(
+                    'runtime-archivist-corpus',
+                    archivist.corpus_error
+                        ? `ERROR: ${archivist.corpus_error}`
+                        : archivist.corpus
+                            ? [
+                                `documents: ${archivist.corpus.document_count || 0}`,
+                                `embeddings: ${archivist.corpus.embedding_count || 0}`,
+                                `last indexed: ${archivist.corpus.last_indexed_at || 'never'}`,
+                                `last embedded: ${archivist.corpus.last_embedding_at || 'never'}`,
+                                ...Object.entries(archivist.corpus.by_source_type || {}).map(([key, value]) => `${key}: ${value}`)
+                              ].join('\n')
+                            : 'No corpus index yet'
                 );
 
                 const runtimeWebClipper = runtime.web_clipper || {};

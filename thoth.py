@@ -25,6 +25,7 @@ from core import (
     WikiLintRunner,
     WikiQueryRunner,
 )
+from core.archivist_benchmark import benchmark_archivist_topics
 from core.graphql_cache import maybe_cleanup_graphql_cache
 from processors import URLProcessor, CacheLoader, VideoUpdater
 from processors.pipeline_processor import PipelineProcessor
@@ -1705,7 +1706,6 @@ async def cmd_ingest_queue(args):
 
 async def cmd_archivist(args):
     """Compile archivist topic pages from configured source material."""
-    compiler = ArchivistCompiler(config, project_root=Path.cwd())
     topic_ids = None
     if getattr(args, "topics", None):
         topic_ids = [
@@ -1713,6 +1713,41 @@ async def cmd_archivist(args):
             for item in str(args.topics).split(",")
             if item.strip()
         ]
+
+    if bool(getattr(args, "benchmark", False)):
+        print("🔎 Benchmarking archivist retrieval...")
+        results = await benchmark_archivist_topics(
+            config,
+            project_root=Path.cwd(),
+            topic_ids=topic_ids,
+            limit=getattr(args, "limit", None),
+        )
+        if not results:
+            print("✅ No archivist topics matched the requested scope")
+            return
+
+        for result in results:
+            print(
+                f"   - {result.topic_id}: mode={result.retrieval_mode} "
+                f"candidates={result.candidate_count} indexed={result.indexed_count}"
+            )
+            if result.scanned_roots:
+                print(f"     scanned: {', '.join(result.scanned_roots)}")
+            if result.missing_roots:
+                print(f"     missing: {', '.join(result.missing_roots)}")
+            if result.source_type_counts:
+                source_breakdown = ", ".join(
+                    f"{source_type}={count}"
+                    for source_type, count in sorted(result.source_type_counts.items())
+                )
+                print(f"     source_types: {source_breakdown}")
+            if result.top_candidate_paths:
+                for path in result.top_candidate_paths[: max(1, int(getattr(args, 'benchmark_top', 10) or 10))]:
+                    print(f"     top: {path}")
+        print(f"✅ Archivist benchmark complete: topics={len(results)}")
+        return
+
+    compiler = ArchivistCompiler(config, project_root=Path.cwd())
 
     print("📚 Running archivist topic compiler...")
     results = await compiler.run(
@@ -2273,6 +2308,17 @@ Examples:
         "--dry-run",
         action="store_true",
         help="Evaluate topics without calling the LLM or writing wiki pages",
+    )
+    archivist_parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Evaluate retrieval only and print candidate diagnostics without compiling pages",
+    )
+    archivist_parser.add_argument(
+        "--benchmark-top",
+        type=int,
+        default=10,
+        help="Number of top candidate paths to print per topic during --benchmark",
     )
 
     wiki_query_parser = subparsers.add_parser(

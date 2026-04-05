@@ -176,13 +176,15 @@ class Config:
                 str(self.get("paths.archivist_topics_file", "") or "").strip()
             )
             archivist_registry_path = resolve_archivist_topics_path(self)
+            archivist_registry = None
             if explicit_archivist_path or archivist_registry_path.exists():
-                load_archivist_topic_registry(
+                archivist_registry = load_archivist_topic_registry(
                     self,
                     required=explicit_archivist_path,
                 )
         except Exception as exc:
             errors.append(str(exc))
+            archivist_registry = None
 
         # Check required files exist
         required_files = ['paths.bookmarks_file', 'paths.cookies_file']
@@ -342,6 +344,20 @@ class Config:
             llm_tasks_config=llm_tasks_config,
             task_name="archivist",
         )
+        _validate_llm_task_route(
+            errors=errors,
+            llm_tasks_config=llm_tasks_config,
+            task_name="embedding",
+        )
+
+        if archivist_registry and any(
+            topic.retrieval.requires_semantic() for topic in archivist_registry.topics
+        ):
+            embedding_cfg = llm_tasks_config.get("embedding", {})
+            if not isinstance(embedding_cfg, dict) or not embedding_cfg.get("enabled", False):
+                errors.append(
+                    "llm.tasks.embedding must be enabled when archivist topics use semantic or hybrid retrieval"
+                )
 
         # Check environment variables for LLM providers if enabled
         env_var_mapping = {

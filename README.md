@@ -75,10 +75,11 @@ Then open `/settings` for the operator control plane.
 The settings UI exposes:
 - provider credentials and task routing
 - model aliases per provider
+- a dedicated embedding route for semantic archivist retrieval
 - X API auth and manual sync controls
 - Web Clipper source directory settings
 - path layout for active shared roots and registries
-- archivist registry editing, due-topic runs, force runs, and background automation
+- archivist registry editing, corpus diagnostics, due-topic runs, force runs, and background automation
 
 ## CLI Overview
 
@@ -94,7 +95,7 @@ Use `python thoth.py --help` for the full command list and `python thoth.py <com
 | `github-stars` | Pull GitHub stars directly. | `--limit`, `--no-resume` |
 | `huggingface-likes` | Pull Hugging Face likes directly. | `--limit`, `--no-resume`, `--no-models` |
 | `web-clipper` | Index configured vault source directories for imported markdown and attachments. | none |
-| `archivist` | Compile archivist topic pages from selected source material. | `--topics`, `--force`, `--dry-run`, `--limit` |
+| `archivist` | Compile archivist topic pages or benchmark retrieval for selected topics. | `--topics`, `--force`, `--dry-run`, `--benchmark`, `--limit` |
 | `youtube` | Post-process existing tweets for YouTube metadata and transcripts. | `--limit`, `--no-resume`, `--no-transcripts` |
 | `update-videos` | Refresh existing tweet/thread outputs with video data. | none |
 | `twitter-transcripts` | Run local Whisper over Twitter video media. | `--limit`, `--no-resume`, `--verbose` |
@@ -154,24 +155,27 @@ Archivist is topic-scoped compilation, not free-roaming summarization.
 What exists now:
 - topic registry loading and validation
 - hard source gates by folder scope
-- source-type, tag, and term filtering
+- incremental corpus inventory with reuse-safe change detection
+- source-type, tag, and term filters plus modular retrieval policy
+- full-text retrieval, semantic retrieval, and hybrid ranking
 - cadence and dirty-check state
 - manual force flags
 - prompt files outside the codebase at `prompts/archivist_system.md` and `prompts/archivist_user.md`
 - a standalone `archivist` CLI command that compiles selected topics
-- settings UI support for editing the registry, running due topics, force-running a topic, and viewing parsed topics/state
+- settings UI support for editing the registry, viewing corpus stats, running due topics, force-running a topic, and viewing parsed topics/state
 - API routes for direct archivist execution
 - background archivist automation driven by `automation.archivist`
-- task routing support for a dedicated `archivist` model route
+- task routing support for dedicated `archivist` and `embedding` model routes
 
 Current archivist workflow:
 
 1. Edit the live local `archivist_topics.yaml`, either in `/settings` or on disk.
 2. Adjust the archivist prompt files in `prompts/` if you want to change synthesis style or sectioning.
-3. Configure the `archivist` task route to the provider/model alias you want.
+3. Configure the `archivist` task route, and configure `embedding` too if any topic uses semantic or hybrid retrieval.
 4. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
-5. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
-6. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
+5. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages.
+6. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
+7. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
 
 ## Storage Layout
 

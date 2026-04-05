@@ -4,6 +4,14 @@ defaults:
   cadence_hours: 12
   max_sources: 120
   allow_manual_force: true
+  retrieval:
+    mode: full_text
+    tag_mode: query
+    term_mode: query
+    full_text_limit: 160
+    semantic_limit: 80
+    rerank_limit: 120
+    max_new_embeddings_per_run: 24
 
 topics:
   - id: companion-ai-research
@@ -40,6 +48,11 @@ topics:
     exclude_terms:
       - customer support
       - sales bot
+    retrieval:
+      source_type_weights:
+        paper: 1.3
+        repository: 1.1
+        thread: 1.05
 
   - id: model-evals-and-benchmarks
     title: Model Evals and Benchmarks
@@ -71,3 +84,7 @@ topics:
       - model performance
     cadence_hours: 24
     max_sources: 60
+    retrieval:
+      source_type_weights:
+        paper: 1.35
+        repository: 1.15

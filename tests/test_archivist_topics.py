@@ -95,6 +95,9 @@ def test_archivist_registry_loads_defaults_and_normalizes_fields(tmp_path: Path)
     assert companion.cadence_hours == 12
     assert companion.max_sources == 120
     assert companion.allow_manual_force is True
+    assert companion.retrieval.mode == "full_text"
+    assert companion.retrieval.tag_mode == "required"
+    assert companion.retrieval.term_mode == "required"
 
     evals = registry.get_topic("model-evals-and-benchmarks")
     assert evals is not None

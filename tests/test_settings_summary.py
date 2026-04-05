@@ -57,6 +57,7 @@ topics:
 
     assert summary["archivist"]["exists"] is True
     assert summary["archivist"]["topic_count"] == 2
+    assert summary["archivist"]["corpus"]["document_count"] == 0
     assert summary["archivist"]["topics"] == [
         "companion-ai-research",
         "model-evals-and-benchmarks",

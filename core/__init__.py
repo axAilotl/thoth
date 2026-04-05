@@ -23,13 +23,14 @@ from .archivist_topics import (
     load_archivist_topic_registry,
     resolve_archivist_topics_path,
 )
-from .archivist_selection import (
-    ArchivistCandidate,
-    ArchivistSelectionError,
+from .archivist_retrieval.inventory import ArchivistInventoryError
+from .archivist_retrieval.models import (
+    ArchivistRetrievalPolicy,
     ArchivistSelectionResult,
     ResolvedArchivistRoot,
-    select_archivist_candidates,
 )
+from .archivist_retrieval.service import select_archivist_candidates_async
+from .archivist_selection import ArchivistCandidate, select_archivist_candidates
 from .archivist_state import (
     ARCHIVIST_STATE_KEY_PREFIX,
     ArchivistDirtyCheckResult,
@@ -145,10 +146,12 @@ __all__ = [
     'load_archivist_topic_registry',
     'resolve_archivist_topics_path',
     'ArchivistCandidate',
-    'ArchivistSelectionError',
+    'ArchivistInventoryError',
+    'ArchivistRetrievalPolicy',
     'ArchivistSelectionResult',
     'ResolvedArchivistRoot',
     'select_archivist_candidates',
+    'select_archivist_candidates_async',
     'ARCHIVIST_STATE_KEY_PREFIX',
     'ArchivistDirtyCheckResult',
     'ArchivistSourceSnapshot',
