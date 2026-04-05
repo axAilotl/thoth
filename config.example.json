@@ -488,6 +488,11 @@
     }
   },
   "automation": {
+    "archivist": {
+      "enabled": false,
+      "interval_hours": 12,
+      "run_on_startup": false
+    },
     "social_sync": {
       "enabled": false,
       "interval_hours": 8,

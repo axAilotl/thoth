@@ -5,7 +5,36 @@ from fastapi.testclient import TestClient
 import thoth_api
 
 
+def _patch_background_tasks(monkeypatch):
+    def noop(*args, **kwargs):
+        return None
+
+    async def noop_async(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(thoth_api, "ensure_wiki_scaffold", noop)
+    monkeypatch.setattr(thoth_api, "background_processor", noop_async)
+    monkeypatch.setattr(thoth_api, "ingestion_worker", noop_async)
+    monkeypatch.setattr(thoth_api, "social_sync_scheduler", noop_async)
+    monkeypatch.setattr(thoth_api, "x_api_sync_scheduler", noop_async)
+    monkeypatch.setattr(thoth_api, "archivist_scheduler", noop_async)
+    monkeypatch.setattr(thoth_api, "load_pending_bookmarks_from_db", noop_async)
+    monkeypatch.setattr(
+        thoth_api,
+        "resolve_x_api_sync_config",
+        lambda: {
+            "enabled": False,
+            "interval_hours": 8,
+            "run_on_startup": False,
+            "max_results": 100,
+            "max_pages": None,
+            "resume_from_checkpoint": True,
+        },
+    )
+
+
 def test_settings_api_returns_runtime_summary(monkeypatch, tmp_path: Path):
+    _patch_background_tasks(monkeypatch)
     config_data = {
         "paths": {
             "vault_dir": str(tmp_path / "vault"),

@@ -274,6 +274,15 @@
     "automation": {
       "type": "object",
       "properties": {
+        "archivist": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval_hours": { "type": "number", "minimum": 5 },
+            "run_on_startup": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        },
         "social_sync": {
           "type": "object",
           "properties": {

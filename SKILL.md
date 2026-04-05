@@ -109,8 +109,8 @@ Open `/settings` for:
 - model aliases per provider
 - X API auth and manual sync
 - Web Clipper source configuration
-- path layout inspection
-- archivist topic registry editing and force controls
+- path layout inspection for active shared roots
+- archivist topic registry editing, immediate runs, and background automation
 
 ## Archivist
 
@@ -127,6 +127,8 @@ What exists:
 - dedicated `archivist` task routing in settings
 - the `Archivist` tab in `/settings`
 - the `thoth.py archivist` CLI command
+- immediate API/UI archivist execution
+- scheduled archivist automation via `automation.archivist`
 
 How to work with it now:
 
@@ -135,11 +137,8 @@ How to work with it now:
 3. Set the `archivist` provider/model route in settings.
 4. Run `.venv/bin/python thoth.py archivist` to compile due topics.
 5. Use `.venv/bin/python thoth.py archivist --topics <id> --force` for intentional reruns.
-6. Use `Queue Force` in `/settings` if you want the next runtime pass to ignore cadence.
-
-Important reality check:
-- The compiler/runtime command is real now.
-- Do not claim the scheduler or direct UI-triggered execution is complete unless those paths are actually wired.
+6. Use `Run Due Topics` or a topic card `Run Now` / `Force Run` action in `/settings` for immediate execution.
+7. Use `automation.archivist` in settings when you want the API service to compile due topics on a fixed interval.
 
 ## Current Data Boundaries
 

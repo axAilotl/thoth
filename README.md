@@ -79,8 +79,8 @@ The settings UI exposes:
 - model aliases per provider
 - X API auth and manual sync controls
 - Web Clipper source directory settings
-- path layout for vault, raw, library, wiki, and system state
-- archivist registry editing and per-topic force controls
+- path layout for active shared roots and registries
+- archivist registry editing, due-topic runs, force runs, and background automation
 
 ## CLI Overview
 
@@ -161,7 +161,9 @@ What exists now:
 - manual force flags
 - prompt files outside the codebase at `prompts/archivist_system.md` and `prompts/archivist_user.md`
 - a standalone `archivist` CLI command that compiles selected topics
-- settings UI support for editing the registry and viewing parsed topics/state
+- settings UI support for editing the registry, running due topics, force-running a topic, and viewing parsed topics/state
+- API routes for direct archivist execution
+- background archivist automation driven by `automation.archivist`
 - task routing support for a dedicated `archivist` model route
 
 Current archivist workflow:
@@ -170,10 +172,8 @@ Current archivist workflow:
 2. Adjust the archivist prompt files in `prompts/` if you want to change synthesis style or sectioning.
 3. Configure the `archivist` task route to the provider/model alias you want.
 4. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
-5. Use `Queue Force` in `/settings` when you want the next archivist runtime pass to ignore normal cadence.
-
-Current limitation:
-- The scheduler and direct UI-triggered execution are still separate follow-on work. The compiler itself is now live through the CLI path.
+5. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
+6. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
 
 ## Storage Layout
 

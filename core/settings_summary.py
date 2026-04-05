@@ -72,12 +72,9 @@ def _summarize_archivist(config: ConfigLike, *, project_root: Path) -> dict[str,
 def _summarize_web_clipper(config: ConfigLike, *, project_root: Path) -> dict[str, Any]:
     source_config = config.get("sources.web_clipper", {}) or {}
     enabled = bool(source_config.get("enabled", False))
-    configured = enabled or bool(source_config.get("note_dirs")) or bool(
-        source_config.get("attachment_dirs")
-    )
     summary: dict[str, Any] = {
         "enabled": enabled,
-        "configured": configured,
+        "configured": enabled,
         "note_dirs": [],
         "attachment_dirs": [],
         "watch_dirs": [],
@@ -87,7 +84,7 @@ def _summarize_web_clipper(config: ConfigLike, *, project_root: Path) -> dict[st
         ),
     }
 
-    if not configured:
+    if not enabled:
         return summary
 
     try:

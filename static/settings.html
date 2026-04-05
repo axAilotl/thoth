@@ -1170,6 +1170,32 @@
                     <input type="number" id="automation-x-api-max-pages" min="1" step="1" placeholder="">
                 </div>
 
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Background Archivist</div>
+                        <div class="toggle-description">Compile due archivist topic pages in the API service on a fixed interval</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="automation-archivist-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Run Archivist On Startup</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="automation-archivist-run-on-startup">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>Archivist Interval (Hours)</label>
+                    <input type="number" id="automation-archivist-interval-hours" min="5" step="1" placeholder="12">
+                </div>
+
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="saveSources()">💾 Save Source Settings</button>
                 </div>
@@ -1248,18 +1274,10 @@
                 <div class="card-header">
                     <div>
                         <h2 class="card-title">Resolved Runtime Layout</h2>
-                        <p class="card-description">Read-only runtime resolution from the current merged config.</p>
+                        <p class="card-description">Read-only runtime resolution for active shared roots and registries from the current merged config.</p>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label>Resolved Raw Root</label>
-                    <input type="text" id="runtime-raw-root" readonly>
-                </div>
-                <div class="form-group">
-                    <label>Resolved Library Root</label>
-                    <input type="text" id="runtime-library-root" readonly>
-                </div>
                 <div class="form-group">
                     <label>Resolved Wiki Root</label>
                     <input type="text" id="runtime-wiki-root" readonly>
@@ -1277,7 +1295,7 @@
                     <textarea id="runtime-archivist-topics" rows="4" readonly></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Web Clipper Watch Roots</label>
+                    <label>Active Web Clipper Watch Roots</label>
                     <textarea id="runtime-web-clipper-watch-dirs" rows="4" readonly></textarea>
                 </div>
             </div>
@@ -1308,6 +1326,8 @@
                     </div>
                     <div class="btn-group">
                         <button class="btn btn-secondary" onclick="loadArchivistRegistry()">↻ Reload Registry</button>
+                        <button class="btn btn-secondary" onclick="runArchivistTopics()">▶ Run Due Topics</button>
+                        <button class="btn btn-secondary" onclick="runArchivistTopics({ dryRun: true })">Dry Run Due</button>
                         <button class="btn btn-primary" onclick="saveArchivistRegistry()">💾 Save Registry</button>
                     </div>
                 </div>
@@ -1322,7 +1342,7 @@
                 <div class="card-header">
                     <div>
                         <h2 class="card-title">Parsed Topics</h2>
-                        <p class="card-description">Read-only normalized view of the registry plus durable topic state. Queue force only marks the next archivist run; it does not bypass other safety checks.</p>
+                        <p class="card-description">Read-only normalized view of the registry plus durable topic state. Run Now executes the topic immediately. Force Run queues a force flag and then executes the topic immediately through the same shared state path.</p>
                     </div>
                 </div>
 
@@ -1990,11 +2010,16 @@
                 const forceButtons = topic.allow_manual_force
                     ? `
                         <div class="btn-group">
-                            <button class="btn btn-secondary btn-small" onclick="queueArchivistForce('${escapeHtml(topic.id)}')">Queue Force</button>
+                            <button class="btn btn-secondary btn-small" onclick="runArchivistTopic('${escapeHtml(topic.id)}')">Run Now</button>
+                            <button class="btn btn-secondary btn-small" onclick="queueArchivistForce('${escapeHtml(topic.id)}')">Force Run</button>
                             <button class="btn btn-secondary btn-small" onclick="clearArchivistForce('${escapeHtml(topic.id)}')">Clear Force</button>
                         </div>
                     `
-                    : '';
+                    : `
+                        <div class="btn-group">
+                            <button class="btn btn-secondary btn-small" onclick="runArchivistTopic('${escapeHtml(topic.id)}')">Run Now</button>
+                        </div>
+                    `;
 
                 return `
                     <article class="archivist-topic-card">
@@ -2254,6 +2279,56 @@
             }
         }
 
+        async function runArchivistTopics(options = {}) {
+            try {
+                const response = await fetch(`${API_BASE}/api/archivist/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        force: options.force === true,
+                        dry_run: options.dryRun === true
+                    })
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Failed to run archivist topics');
+                }
+                const summary = payload.summary || {};
+                showAlert(
+                    `Archivist run complete: compiled=${summary.compiled || 0}, skipped=${summary.skipped || 0}, dry_run=${summary.dry_run || 0}`
+                );
+                await loadArchivistRegistry();
+            } catch (e) {
+                showAlert(`Failed to run archivist topics: ${e.message}`, 'error');
+            }
+        }
+
+        async function runArchivistTopic(topicId, options = {}) {
+            try {
+                const response = await fetch(`${API_BASE}/api/archivist/topics/${encodeURIComponent(topicId)}/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        force: options.force === true,
+                        dry_run: options.dryRun === true
+                    })
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Failed to run archivist topic');
+                }
+                const result = Array.isArray(payload.results) && payload.results.length > 0
+                    ? payload.results[0]
+                    : null;
+                const status = result?.status || 'ok';
+                const reason = result?.reason ? ` (${result.reason})` : '';
+                showAlert(`Archivist topic ${topicId}: ${status}${reason}`);
+                await loadArchivistRegistry();
+            } catch (e) {
+                showAlert(`Failed to run archivist topic ${topicId}: ${e.message}`, 'error');
+            }
+        }
+
         async function queueArchivistForce(topicId) {
             try {
                 const response = await fetch(`${API_BASE}/api/archivist/topics/${encodeURIComponent(topicId)}/force`, {
@@ -2265,7 +2340,21 @@
                 if (!response.ok) {
                     throw new Error(payload.detail || 'Failed to queue archivist force');
                 }
-                showAlert(`Queued force run for archivist topic ${topicId}`);
+                const runResponse = await fetch(`${API_BASE}/api/archivist/topics/${encodeURIComponent(topicId)}/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ force: true, dry_run: false })
+                });
+                const runPayload = await runResponse.json();
+                if (!runResponse.ok) {
+                    throw new Error(runPayload.detail || 'Failed to execute forced archivist run');
+                }
+                const result = Array.isArray(runPayload.results) && runPayload.results.length > 0
+                    ? runPayload.results[0]
+                    : null;
+                showAlert(
+                    `Forced archivist topic ${topicId}: ${result?.status || 'ok'}${result?.reason ? ` (${result.reason})` : ''}`
+                );
                 await loadArchivistRegistry();
             } catch (e) {
                 showAlert(`Failed to queue archivist force: ${e.message}`, 'error');
@@ -2434,6 +2523,13 @@
                 document.getElementById('automation-x-api-max-results').value = xApiSync.max_results || 100;
                 document.getElementById('automation-x-api-max-pages').value = xApiSync.max_pages || '';
 
+                const archivistAutomation = config.automation?.archivist || {};
+                document.getElementById('automation-archivist-enabled').checked = archivistAutomation.enabled === true;
+                document.getElementById('automation-archivist-run-on-startup').checked =
+                    archivistAutomation.run_on_startup === true;
+                document.getElementById('automation-archivist-interval-hours').value =
+                    archivistAutomation.interval_hours || 12;
+
                 document.getElementById('source-github-token-status').textContent =
                     `Stored: ${config.env?.GITHUB_API ? 'yes' : 'no'}`;
                 document.getElementById('source-hf-token-status').textContent =
@@ -2443,8 +2539,6 @@
 
                 const runtime = config.runtime || {};
                 const layout = runtime.layout || {};
-                setFieldValue('runtime-raw-root', layout.raw_root || layout.error || '');
-                setFieldValue('runtime-library-root', layout.library_root || layout.error || '');
                 setFieldValue('runtime-wiki-root', layout.wiki_root || layout.error || '');
                 setFieldValue('runtime-system-root', layout.system_root || layout.error || '');
 
@@ -2465,7 +2559,9 @@
                     'runtime-web-clipper-watch-dirs',
                     runtimeWebClipper.error
                         ? `ERROR: ${runtimeWebClipper.error}`
-                        : multilineFromValue(runtimeWebClipper.watch_dirs || [])
+                        : runtimeWebClipper.enabled
+                            ? multilineFromValue(runtimeWebClipper.watch_dirs || [])
+                            : 'Disabled'
                 );
 
                 await refreshXApiStatus();
@@ -2661,6 +2757,11 @@
                     }
                 },
                 automation: {
+                    archivist: {
+                        enabled: document.getElementById('automation-archivist-enabled').checked,
+                        run_on_startup: document.getElementById('automation-archivist-run-on-startup').checked,
+                        interval_hours: parseInt(document.getElementById('automation-archivist-interval-hours').value || '12', 10)
+                    },
                     social_sync: {
                         enabled: document.getElementById('automation-social-enabled').checked,
                         run_on_startup: document.getElementById('automation-social-run-on-startup').checked,

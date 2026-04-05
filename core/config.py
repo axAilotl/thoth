@@ -309,6 +309,23 @@ class Config:
                         f"{MIN_NON_LIVE_INTERVAL_HOURS:g}"
                     )
 
+        archivist_sync_config = self.get("automation.archivist", {})
+        if archivist_sync_config:
+            if not isinstance(archivist_sync_config, dict):
+                errors.append("automation.archivist must be an object")
+            elif archivist_sync_config.get("enabled", False):
+                try:
+                    archivist_interval_hours = float(
+                        archivist_sync_config.get("interval_hours", 0)
+                    )
+                except (TypeError, ValueError):
+                    archivist_interval_hours = 0
+                if archivist_interval_hours < MIN_NON_LIVE_INTERVAL_HOURS:
+                    errors.append(
+                        "automation.archivist.interval_hours must be at least "
+                        f"{MIN_NON_LIVE_INTERVAL_HOURS:g}"
+                    )
+
         llm_config = self.get('llm', {})
         if not isinstance(llm_config, dict):
             llm_config = {}

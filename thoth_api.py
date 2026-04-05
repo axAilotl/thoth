@@ -25,7 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from core import (
     ArchivistAdminError,
+    ArchivistCompilerError,
+    ArchivistRuntimeError,
     Tweet,
+    ARCHIVIST_JOB_NAME,
     build_archivist_admin_payload,
     config,
     build_graphql_cache_filename,
@@ -51,6 +54,8 @@ from core import (
     ensure_wiki_scaffold,
     run_x_api_bookmark_backfill,
     queue_archivist_topic_force,
+    resolve_archivist_sync_config as resolve_archivist_runtime_config,
+    run_archivist_topics,
     save_archivist_registry_text,
 )
 from core.bookmark_ingest import (
@@ -91,6 +96,7 @@ pipeline_lock = asyncio.Lock()
 github_trigger_lock = asyncio.Lock()
 huggingface_trigger_lock = asyncio.Lock()
 x_api_trigger_lock = asyncio.Lock()
+archivist_trigger_lock = asyncio.Lock()
 
 BASE_CONFIG_PATH = Path(__file__).parent / "config.example.json"
 LOCAL_CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -525,6 +531,11 @@ def resolve_x_api_sync_config() -> Dict[str, Any]:
     }
 
 
+def resolve_archivist_sync_config() -> Dict[str, Any]:
+    """Return normalized archivist automation settings from runtime config."""
+    return resolve_archivist_runtime_config(config)
+
+
 async def run_github_stars_sync(limit: Optional[int] = None, resume: bool = True):
     """Run the GitHub stars processor with shared locking."""
     async with github_trigger_lock:
@@ -597,6 +608,25 @@ async def run_x_api_bookmark_sync(
             }
         )
         return sync_result
+
+
+async def run_archivist_compilation(
+    *,
+    topic_ids: Optional[List[str]] = None,
+    force: bool = False,
+    dry_run: bool = False,
+    limit: Optional[int] = None,
+):
+    """Run archivist topic compilation with shared locking."""
+    async with archivist_trigger_lock:
+        return await run_archivist_topics(
+            load_runtime_settings(),
+            project_root=BASE_CONFIG_PATH.parent,
+            topic_ids=topic_ids,
+            force=force,
+            dry_run=dry_run,
+            limit=limit,
+        )
 
 
 async def load_pending_bookmarks_from_db():
@@ -691,6 +721,14 @@ class ArchivistForceRequest(BaseModel):
     """Request payload for queueing an archivist force run."""
 
     reason: Optional[str] = None
+
+
+class ArchivistRunRequest(BaseModel):
+    """Request payload for executing archivist compilation."""
+
+    force: bool = False
+    dry_run: bool = False
+    limit: Optional[int] = Field(default=None, gt=0)
 
 
 class BookmarkStatusRequest(BaseModel):
@@ -1074,6 +1112,41 @@ async def force_archivist_topic(topic_id: str, payload: ArchivistForceRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error queueing archivist force for {topic_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/archivist/run")
+async def run_archivist_now(payload: ArchivistRunRequest):
+    """Execute the archivist compiler immediately for due or selected topics."""
+    try:
+        return await run_archivist_compilation(
+            force=payload.force,
+            dry_run=payload.dry_run,
+            limit=payload.limit,
+        )
+    except (ArchivistRuntimeError, ArchivistCompilerError, ValueError) as e:
+        logger.error(f"Error running archivist compiler: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error running archivist compiler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/archivist/topics/{topic_id}/run")
+async def run_archivist_topic_now(topic_id: str, payload: ArchivistRunRequest):
+    """Execute the archivist compiler immediately for a single topic."""
+    try:
+        return await run_archivist_compilation(
+            topic_ids=[topic_id],
+            force=payload.force,
+            dry_run=payload.dry_run,
+            limit=1,
+        )
+    except (ArchivistRuntimeError, ArchivistCompilerError, ValueError) as e:
+        logger.error(f"Error running archivist topic {topic_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error running archivist topic {topic_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1900,6 +1973,7 @@ _background_task = None
 _ingestion_task = None
 _social_sync_task = None
 _x_api_sync_task = None
+_archivist_task = None
 
 
 async def run_periodic_social_sync(sync_config: Optional[Dict[str, Any]] = None):
@@ -2096,6 +2170,76 @@ async def x_api_sync_scheduler():
             continue
 
 
+async def archivist_scheduler():
+    """Periodically run archivist topic compilation."""
+    metadata_db = get_metadata_db()
+
+    while not _shutdown_event.is_set():
+        try:
+            sync_config = resolve_archivist_sync_config()
+        except (ArchivistRuntimeError, ValueError) as exc:
+            logger.warning(f"Archivist scheduler configuration invalid: {exc}")
+            try:
+                await asyncio.wait_for(_shutdown_event.wait(), timeout=60.0)
+            except asyncio.TimeoutError:
+                continue
+            break
+
+        if not sync_config["enabled"]:
+            try:
+                await asyncio.wait_for(_shutdown_event.wait(), timeout=60.0)
+            except asyncio.TimeoutError:
+                continue
+            break
+
+        now = datetime.now(timezone.utc)
+        next_run_at = get_non_live_next_run_at(
+            metadata_db,
+            job_name=ARCHIVIST_JOB_NAME,
+            interval_hours=sync_config["interval_hours"],
+            run_on_startup=sync_config["run_on_startup"],
+            now=now,
+        )
+
+        if now >= next_run_at:
+            run_error: str | None = None
+            mark_non_live_run_started(
+                metadata_db,
+                job_name=ARCHIVIST_JOB_NAME,
+                interval_hours=sync_config["interval_hours"],
+                now=now,
+            )
+            try:
+                await run_archivist_compilation()
+            except Exception as exc:
+                run_error = str(exc)
+                logger.warning(f"Scheduled archivist run failed: {exc}")
+            finally:
+                mark_non_live_run_finished(
+                    metadata_db,
+                    job_name=ARCHIVIST_JOB_NAME,
+                    success=run_error is None,
+                    error=run_error,
+                    now=datetime.now(timezone.utc),
+                )
+            next_run_at = get_non_live_next_run_at(
+                metadata_db,
+                job_name=ARCHIVIST_JOB_NAME,
+                interval_hours=sync_config["interval_hours"],
+                run_on_startup=False,
+                now=datetime.now(timezone.utc),
+            )
+
+        delay = max(
+            1.0,
+            min(60.0, (next_run_at - datetime.now(timezone.utc)).total_seconds()),
+        )
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            continue
+
+
 async def background_processor():
     """Process bookmarks from queue in background with graceful shutdown support"""
     while not _shutdown_event.is_set():
@@ -2131,7 +2275,7 @@ async def background_processor():
 @app.on_event("startup")
 async def startup_event():
     """Start background processor on startup"""
-    global _shutdown_event, _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task
+    global _shutdown_event, _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task
     _shutdown_event = asyncio.Event()
     ensure_wiki_scaffold(config)
     _background_task = asyncio.create_task(background_processor())
@@ -2139,6 +2283,7 @@ async def startup_event():
     _social_sync_task = asyncio.create_task(social_sync_scheduler())
     resolve_x_api_sync_config()
     _x_api_sync_task = asyncio.create_task(x_api_sync_scheduler())
+    _archivist_task = asyncio.create_task(archivist_scheduler())
     await load_pending_bookmarks_from_db()
     logger.info("Thoth API server started")
 
@@ -2146,7 +2291,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Gracefully shutdown background processor"""
-    global _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task
+    global _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task
     logger.info("Shutting down Thoth API server...")
     _shutdown_event.set()
     if _background_task:
@@ -2171,6 +2316,12 @@ async def shutdown_event():
         _x_api_sync_task.cancel()
         try:
             await _x_api_sync_task
+        except asyncio.CancelledError:
+            pass
+    if _archivist_task:
+        _archivist_task.cancel()
+        try:
+            await _archivist_task
         except asyncio.CancelledError:
             pass
     logger.info("Thoth API server stopped")

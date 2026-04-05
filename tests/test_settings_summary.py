@@ -79,3 +79,13 @@ def test_settings_summary_surfaces_archivist_and_web_clipper_errors(tmp_path: Pa
 
     assert "Archivist topic registry file not found" in summary["archivist"]["error"]
     assert "must stay inside the raw source root" in summary["web_clipper"]["error"]
+
+
+def test_settings_summary_hides_web_clipper_watch_dirs_when_disabled(tmp_path: Path):
+    config_data = make_config_data(tmp_path)
+    config_data["sources"]["web_clipper"]["enabled"] = False
+
+    summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
+
+    assert summary["web_clipper"]["configured"] is False
+    assert summary["web_clipper"]["watch_dirs"] == []

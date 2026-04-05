@@ -56,6 +56,13 @@ from .archivist_compiler import (
     ArchivistCompiler,
     ArchivistCompilerError,
 )
+from .archivist_runtime import (
+    ARCHIVIST_JOB_NAME,
+    ArchivistRuntimeError,
+    resolve_archivist_sync_config,
+    run_archivist_topics,
+    serialize_archivist_run,
+)
 from .path_layout import PathLayout, build_path_layout
 from .x_api_auth import (
     XApiAuthConfig,
@@ -162,6 +169,11 @@ __all__ = [
     'ArchivistCompileResult',
     'ArchivistCompiler',
     'ArchivistCompilerError',
+    'ARCHIVIST_JOB_NAME',
+    'ArchivistRuntimeError',
+    'resolve_archivist_sync_config',
+    'run_archivist_topics',
+    'serialize_archivist_run',
     'PathLayout',
     'build_path_layout',
     'XApiAuthConfig',
