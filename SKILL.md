@@ -1,182 +1,149 @@
 ---
 name: thoth
 description: >
-  Universal knowledge pipeline for processing Twitter bookmarks, ArXiv papers, GitHub stars,
-  HuggingFace likes, and personal data into an Obsidian-ready knowledge vault. Use when the
-  user asks to process bookmarks, run the pipeline, discover papers, check stats, generate
-  digests, or work with any thoth data ingestion or enrichment task.
+  Thoth operator guide for the live CLI, settings UI, wiki tooling, and archivist registry
+  flow. Use when the user asks to run collectors, inspect stats, manage pipeline work, or
+  work with Thoth's local control surfaces.
 allowed-tools: "Read,Bash(python*,uvicorn*,pytest*,black*,flake8*,mypy*)"
 version: "1.0.0"
 ---
 
-# Thoth — Universal Knowledge Processor
+# Thoth Operator Guide
 
-Polymorphic knowledge pipeline built on a `KnowledgeArtifact` architecture. Transforms
-Twitter bookmarks, research papers, GitHub stars, and personal data into a structured,
-queryable Obsidian vault at `knowledge_vault/`.
+This file is the agent-facing runbook. User-facing operational context belongs in `README.md`.
+If something matters and is missing there, add it there instead of creating another broad doc.
 
-## Critical Safety Rules
+## Ground Rules
 
-- **NEVER read** `twitter-bookmarks-merged.json`, `bookmarks_processed.json`, or any file
-  in `graphql_cache/` — these are large JSON files that will flood context
-- Always prefer `--dry-run` before destructive pipeline operations
-- Always prefer `--use-cache` over live downloads when testing
+- Prefer `.venv/bin/python thoth.py ...` or `uv run python thoth.py ...` unless the venv is already active.
+- Do not assume a command exists. Check `.venv/bin/python thoth.py --help` and `.venv/bin/python thoth.py <command> --help` before documenting or invoking unusual paths.
+- Prefer resume-safe and cache-aware commands unless the user explicitly wants a force reprocess.
+- Avoid loading large raw cache files into context unless the task truly requires it.
+- Treat `config.example.json` as tracked defaults and `config.json`, `control.json`, and `archivist_topics.yaml` as local operator files.
 
----
+## First Commands
 
-## Common Workflows
+Show the current CLI surface:
 
-### Check status
 ```bash
-python thoth.py stats
-python thoth.py stats --verbose
-python thoth.py db stats
+.venv/bin/python thoth.py --help
+.venv/bin/python thoth.py <command> --help
 ```
 
-### Process cached data (fast, no rate limits)
+Check current state:
+
 ```bash
-python thoth.py pipeline --use-cache --batch-size 10
-python thoth.py pipeline --use-cache --dry-run      # preview first
-python thoth.py pipeline --use-cache --rerun-llm    # force LLM re-run
+.venv/bin/python thoth.py stats
+.venv/bin/python thoth.py stats --verbose
+.venv/bin/python thoth.py db stats
 ```
 
-### Discover and process research papers
+## Core CLI Workflows
+
+Single-pass processing:
+
 ```bash
-python thoth.py arxiv --discover
-python thoth.py arxiv --discover --topics "agentic ai,ai security" --limit 20
+.venv/bin/python thoth.py pipeline --use-cache --batch-size 10
+.venv/bin/python thoth.py pipeline --use-cache --rerun-llm
 ```
 
-### Sync GitHub stars and HuggingFace likes
+Bookmark backfill:
+
 ```bash
-python thoth.py social --sync --github-user <user> --hf-user <user>
-python thoth.py github-stars --limit 50
-python thoth.py huggingface-likes --limit 50
+.venv/bin/python thoth.py x-api-sync --max-pages 3 --max-results 100
 ```
 
-### Download new Twitter/X GraphQL data (slow — 45 req/15 min rate limit)
+Discovery and source sync:
+
 ```bash
-python thoth.py download --resume --limit 50
+.venv/bin/python thoth.py arxiv --discover --topics "agent systems,multimodal reasoning"
+.venv/bin/python thoth.py social --sync --github-user <user> --hf-user <user>
+.venv/bin/python thoth.py web-clipper
+.venv/bin/python thoth.py ingest-queue --limit 25
 ```
 
-### Full pipeline (download + process)
+Media and transcript follow-up:
+
 ```bash
-python thoth.py full --resume
+.venv/bin/python thoth.py youtube --limit 100
+.venv/bin/python thoth.py update-videos
+.venv/bin/python thoth.py twitter-transcripts --limit 20 --verbose
 ```
 
-### YouTube and video transcripts
+Wiki operations:
+
 ```bash
-python thoth.py youtube --limit 100
-python thoth.py update-videos
-python thoth.py twitter-transcripts --limit 20 --verbose
+.venv/bin/python thoth.py wiki-query "companion ai"
+.venv/bin/python thoth.py wiki-query "companion ai" --write-back --title "Companion AI Notes"
+.venv/bin/python thoth.py wiki-lint --stale-after-days 30
 ```
 
-### Generate Obsidian digests
+Maintenance:
+
 ```bash
-python thoth.py digest all
-python thoth.py digest weekly
-python thoth.py digest inbox
-python thoth.py digest dashboard
-python thoth.py digest all --notify    # with notification
+.venv/bin/python thoth.py delete <tweet_id> --dry-run
+.venv/bin/python thoth.py migrate-filenames --dry-run
+.venv/bin/python thoth.py migrate-frontmatter --dry-run
+.venv/bin/python thoth.py db vacuum
 ```
 
-### Delete artifacts
+## API and Settings
+
+Start the API:
+
 ```bash
-python thoth.py delete <tweet_id> --dry-run   # always dry-run first
-python thoth.py delete <tweet_id>
+.venv/bin/python thoth_api.py
 ```
 
-### Database maintenance
-```bash
-python thoth.py db stats
-python thoth.py db vacuum
-```
+Open `/settings` for:
+- provider credentials and task routing
+- model aliases per provider
+- X API auth and manual sync
+- Web Clipper source configuration
+- path layout inspection
+- archivist topic registry editing and force controls
 
-### Start the real-time capture API
-```bash
-uvicorn thoth_api:app --reload --port 19100   # use high port
-```
+## Archivist
 
-### Development
+Archivist currently ships as a control plane plus topic/state plumbing.
+
+What exists:
+- `archivist_topics.example.yaml` as the tracked template
+- local `archivist_topics.yaml` bootstrapped from the template
+- source gates by root scope
+- source-type, tag, and term filters
+- cadence and dirty-check state
+- manual force flags
+- dedicated `archivist` task routing in settings
+- the `Archivist` tab in `/settings`
+
+How to work with it now:
+
+1. Run `.venv/bin/python thoth_api.py`.
+2. Open `/settings`.
+3. Edit `archivist_topics.yaml` in the `Archivist` tab or directly on disk.
+4. Set the `archivist` provider/model route in settings.
+5. Use `Queue Force` if the next run should ignore normal cadence.
+
+Important reality check:
+- There is not yet a standalone `thoth.py archivist ...` runtime command.
+- Do not tell users to run a non-existent archivist CLI.
+- The topic registry and force/state controls are real; the dedicated compiler/runtime command is still under implementation.
+
+## Current Data Boundaries
+
+- Raw and processed artifacts belong in the vault.
+- The compiled wiki belongs outside the vault.
+- `.thoth_system` holds local-only operational state.
+- `repos/` holds raw README source files.
+- `stars/` holds generated repo summary notes.
+
+## Validation
+
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/
+python3 -m compileall -q core collectors processors thoth.py thoth_api.py tests
 black .
 flake8 core processors thoth.py
 mypy core processors
-```
-
----
-
-## Architecture at a Glance
-
-| Layer | What |
-|---|---|
-| `thoth.py` | CLI entry point (argparse) |
-| `thoth_api.py` | FastAPI server for real-time browser capture |
-| `core/artifacts/` | KnowledgeArtifact base + Tweet, Paper, Repo subclasses |
-| `core/router.py` | CapabilityRouter — dispatches artifacts to processors |
-| `core/metadata_db.py` | SQLite at `.thoth/meta.db` — queue, file index, LLM cache |
-| `collectors/` | ArXiv discovery, GitHub/HF sync, browser extension receiver |
-| `processors/` | Media, URL, LLM, transcription, document processors |
-| `knowledge_vault/` | Output — Obsidian-ready markdown (git-ignored) |
-
-### Pipeline stages (in order)
-`url_expansion → media_download → documents → transcripts → llm_processing → markdown`
-
-### Output directories
-```
-knowledge_vault/
-├── tweets/        ← individual tweet .md files
-├── threads/       ← multi-tweet threads
-├── transcripts/   ← YouTube/Twitter video transcripts
-├── repos/         ← GitHub/HF READMEs
-├── stars/         ← GitHub stars summaries
-├── papers/        ← ArXiv papers
-├── pdfs/          ← general PDFs
-└── media/         ← images and videos
-```
-
----
-
-## Configuration
-
-- `config.json` — pipeline stages, LLM providers, output paths
-- `.env` — API keys: `OPENAI_API_KEY`, `ANTHROPIC_API`, `OPEN_ROUTER_API_KEY`,
-  `YOUTUBE_API_KEY`, `DEEPGRAM_API_KEY`, `GITHUB_API`, `HF_USER`
-- Config access pattern: `config.get('pipeline.stages.media_download')`
-
-### LLM task routing (in `config.json`)
-```json
-{
-  "llm": {
-    "tasks": {
-      "tags":       {"provider": "anthropic", "enabled": true},
-      "summary":    {"provider": "anthropic", "enabled": true},
-      "alt_text":   {"provider": "openrouter", "model": "vision", "enabled": true},
-      "transcript": {"provider": "openrouter", "model": "transcript", "enabled": true}
-    }
-  }
-}
-```
-
----
-
-## Key Patterns
-
-- **Resume by default** — most commands skip already-processed items; pass `--no-resume`
-  to force reprocessing
-- **Dry-run** — `--dry-run` on pipeline/delete shows what would happen without changes
-- **Async processing** — concurrency configured at `processing.llm_async` in `config.json`
-- **Thread detection** — uses Twitter's `tweetDisplayType: "SelfThread"` (not time gaps)
-- **GraphQL cache** — controlled by `pipeline.keep_graphql_cache`; kept by default
-
----
-
-## Dataview Queries (Obsidian)
-
-All artifact frontmatter is Dataview-compatible. Example:
-```dataview
-TABLE author, title, importance
-FROM "papers"
-WHERE relevance_score > 0.8
-SORT created DESC
 ```

@@ -2,213 +2,233 @@
   <img src="static/thoth.png" alt="Chibi Thoth" width="220">
 </p>
 
-# Thoth 1.0 – Universal Knowledge Processor
+# Thoth
 
-Thoth is the evolution of the earlier `xmarks` system: `xmarks` handled high-volume bookmark capture and raw ingestion, while Thoth takes the next step and turns that material into structured knowledge. The current stack separates raw/source material from generated library outputs and a compiled wiki layer, with durable local metadata and caches kept outside the synced vault.
+Thoth is the evolution of the earlier `xmarks` system. `xmarks` handled high-volume raw capture and bookmark ingestion; Thoth keeps that ingestion layer, adds stronger storage boundaries, and builds a compiled knowledge layer on top. The wiki side is explicitly inspired by Andrej Karpathy's persistent LLM wiki idea, but adapted to a larger historical corpus and a more automated ingest stack.
 
-It is also explicitly influenced by Andrej Karpathy's persistent LLM wiki idea: instead of treating every question as a one-off retrieval problem, Thoth maintains a compiled knowledge layer that can be updated over time from accumulated source material.
+Thoth separates:
+- raw and processed source material in the vault
+- compiled wiki output outside the vault
+- local operational state in `.thoth_system`
 
-Built on a polymorphic `KnowledgeArtifact` architecture, Thoth automates discovery via userscript capture, X API backfill, ArXiv and social APIs, Obsidian Web Clipper source directories, linked media downloads, LLM-powered enrichment, and incremental compilation into higher-level knowledge artifacts.
-
-> *"The god of wisdom, writing, and knowledge. The scribe who records all things."*
-
-## Lineage
-
-- `xmarks`: focused on high-scale raw bookmark capture and first-pass processing.
-- `thoth`: closes the loop on universal ingestion, storage boundaries, translation, compilation, and long-lived knowledge maintenance.
-- `karpathy/llm-wiki`: inspired the compiled wiki layer and the idea that the system should maintain an evolving knowledge artifact, not just raw notes.
-
-## Core Flow
-
-1. Ingest source material from live and scheduled collectors.
-2. Normalize, enrich, download, translate, and cache artifacts safely.
-3. Publish raw and generated outputs into the vault.
-4. Compile selected material into a separate wiki layer for deeper analysis.
-5. Hand the compiled layer to interactive agents for refinement, comparison, and retrieval.
-
----
-
-## Quick Start
-
-### 1. Setup Environment (Recommended: `uv`)
-```bash
-# Clone the repo
-git clone https://github.com/axAilotl/thoth.git
-cd thoth
-
-# Install uv and create venv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv
-source .venv/bin/activate
-
-# Install dependencies
-uv pip install -r requirements.txt
-```
-
-### 2. Configure
-```bash
-cp config.example.json config.json    # local-only override; do not commit
-cp .env.example .env                  # add API keys (Anthropic, GitHub, etc.)
-```
-
-Important defaults:
-- `config.example.json` is the tracked default config for the repo.
-- `config.json` is your local untracked override layer.
-- `control.json` is local untracked operator state written by the settings UI.
-- `archivist_topics.example.yaml` is the tracked template; the live local `archivist_topics.yaml` is bootstrapped from it and stays untracked.
-- `paths.vault_dir` is the synced Obsidian vault for source and generated content.
-- `paths.system_dir` is local-only state for auth, databases, caches, logs, and temp files.
-- `paths.wiki_dir` is resolved outside the vault by default so the compiled wiki is distinct from raw source storage.
-
-### 3. Start Collectors
-```bash
-# Discover research papers based on your keywords
-python thoth.py arxiv --discover
-
-# Scan arXiv category feeds directly
-python thoth.py arxiv --discover --source rss --categories "cs.AI,cs.LG"
-
-# Backfill bookmarks from the X API
-python thoth.py x-api-sync --max-pages 3 --max-results 100
-
-# Sync GitHub stars and HuggingFace likes
-python thoth.py social --sync --github-user youruser --hf-user youruser
-
-# Index Obsidian Web Clipper source directories
-python thoth.py web-clipper
-
-# Start the real-time Twitter capture API
-python thoth_api.py
-```
-
----
-
-## CLI Overview (`thoth.py`)
-
-| Command | Purpose | Most useful flags |
-| --- | --- | --- |
-| `arxiv` | **NEW**: Discover research papers via ArXiv API or category feeds. | `--discover`, `--source`, `--topics`, `--categories`, `--limit` |
-| `social` | **NEW**: Sync GitHub stars and HuggingFace likes. | `--sync`, `--github-user`, `--hf-user` |
-| `web-clipper` | Index the explicit Obsidian Web Clipper source directories under `paths.raw_dir`, stage attachments, and publish English companions for non-English notes. | none |
-| `x-api-sync` | Backfill bookmarks from the X API and process them immediately. | `--max-results`, `--max-pages`, `--no-resume` |
-| `pipeline` | Single-pass ingestion → enrichment → markdown. | `--use-cache`, `--batch-size`, `--rerun-llm` |
-| `digest` | Generate discovery views (Inbox, Weekly, Dashboard). | `weekly`, `inbox`, `dashboard`, `all` |
-| `stats` | Snapshot of all artifacts and database state. | `--verbose` |
-| `db` | Database maintenance and stats. | `db stats`, `db vacuum` |
-| `youtube` | Process YouTube videos for transcripts/metadata. | `--limit`, `--transcripts` |
-| `twitter-transcripts` | Transcribe Twitter videos using local Whisper. | `--limit`, `--verbose` |
-
----
-
-## Research Discovery
-Thoth is designed for deep research. Configure your keywords in your local `config.json` override or pass them via CLI to cut through the firehose:
-
-```bash
-python thoth.py arxiv --discover --topics "agent systems,multimodal reasoning"
-```
-
----
-
-## Project Structure
-```
-thoth/
-├── thoth.py                  # Main CLI entry point
-├── thoth_api.py              # FastAPI capture service
-├── core/
-│   ├── artifacts/             # KnowledgeArtifact models (Tweet, Paper, Repo, etc.)
-│   ├── router.py              # Capability-based processor routing
-│   ├── metadata_db.py         # SQLite source of truth (.thoth/meta.db)
-│   └── pipeline_registry.py   # Modular stage registry
-├── collectors/                # Inbound data collectors
-│   ├── arxiv_collector.py     # ArXiv discovery pipeline
-│   ├── social_collector.py    # GitHub/HuggingFace sync
-│   ├── web_clipper_collector.py # Web Clipper source indexing
-│   └── personal/              # Scaffolding for Takeout, Health, AI Exports
-├── core/path_layout.py        # Canonical vault + system storage layout
-├── processors/                # LLM, Media, and Document enrichment
-├── knowledge_vault/
-│   ├── raw/                   # Immutable source captures
-│   ├── library/               # Processed artifacts for Obsidian use
-│   │   └── translations/      # English companions for non-English source docs
-│   ├── tweets/                # Tweet markdown
-│   ├── threads/               # Thread markdown
-│   ├── repos/                 # Raw GitHub / Hugging Face READMEs
-│   └── stars/                 # Generated repo summary notes
-├── wiki/                      # Compiled LLM-maintained knowledge layer
-└── .thoth_system/             # Database, auth, caches, logs, and temp state
-```
-
-## Storage Layout
-
-Thoth now treats the vault and system state as separate concerns:
-
-- `paths.vault_dir` is the synced vault root.
-- `paths.raw_dir` is for immutable source captures.
-- `paths.library_dir` is for processed artifacts and generated markdown.
-- `paths.library_dir/translations` holds English companion outputs for non-English source docs.
-- `paths.wiki_dir` is for the compiled Karpathy-style wiki layer and resolves outside the vault by default.
-- `paths.system_dir` is for local-only operational state such as databases, logs, auth tokens, and temporary files.
-- `sources.web_clipper.note_dirs` and `sources.web_clipper.attachment_dirs` define the exact directories under `paths.raw_dir` that the Web Clipper collector will watch.
-- See [docs/web_clipper_ingest.md](docs/web_clipper_ingest.md) for the operator runbook.
-
-## Wiki Contract
-
-The compiled wiki is a curated layer, not raw source storage.
-
-- `wiki/index.md` is the navigation entry point.
-- `wiki/log.md` is the chronological maintenance log.
-- `wiki/pages/{slug}.md` holds compiled pages, where slugs are lower-kebab-case and max 80 characters.
-- Wiki page frontmatter uses `thoth_type`, `title`, `slug`, `kind`, `aliases`, `source_paths`, `related_slugs`, `language`, `translated_from`, `created_at`, and `updated_at`.
-- Supported page kinds are `topic`, `entity`, and `concept`.
-- Source documents stay in `raw/` or `library/`; wiki pages should link back to them instead of copying them into the compiled layer.
-
-## Wiki Scaffolding
-
-The runtime seeds the wiki structure on startup:
-
-- `thoth_api.py` and `thoth.py` both ensure `wiki/index.md`, `wiki/log.md`, and `wiki/pages/` exist before processing starts.
-- `core/wiki_scaffold.py` owns the seed content and append-only log primitive.
-- The scaffold lives in `paths.wiki_dir`, while operational state remains under `.thoth_system/`.
+That split is the core contract. Raw sources stay raw. Generated artifacts stay traceable. Local metadata, caches, auth, and temp state do not get synced with the vault.
 
 ## Operating Model
 
-Thoth now spans three layers of work:
+Thoth currently has three layers:
 
 1. Ingestion
-Raw capture, normalization, downloads, media/document extraction, and durable caching.
+Raw capture, normalization, translation, downloads, transcripts, summaries, and safe artifact publishing.
 
 2. Archivist
-Topic-scoped compilation from selected source folders and tags into first-pass wiki/topic pages.
+Topic-scoped compilation over selected source folders, types, tags, and terms.
 
 3. Analyst / Agent
-Interactive refinement over the compiled layer, where higher-cost models can be used for deeper comparisons, synthesis, and conversation.
+Higher-cost interactive work over the compiled layer for synthesis, comparison, and refinement.
 
----
+## Quick Start
 
-## Digest & Discovery (Obsidian + Dataview)
-Thoth generates Dataview-compatible frontmatter for all artifacts. Use the `digest` command to build your research hub.
+### Setup
 
 ```bash
-python thoth.py digest all --notify
+git clone https://github.com/axAilotl/thoth.git
+cd thoth
+
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
-**Query Example:**
-```dataview
-TABLE author, title, importance
-FROM "papers"
-WHERE relevance_score > 0.8
-SORT created DESC
-```
+If you do not want to activate the venv globally, use `.venv/bin/python thoth.py ...` or `uv run python thoth.py ...`.
 
----
+### Configure
 
-## Testing & Dev Tooling
 ```bash
-# Use the uv-managed environment
+cp config.example.json config.json
+cp .env.example .env
+```
+
+Important config layers:
+- `config.example.json` is the tracked default config.
+- `config.json` is your local untracked config override.
+- `control.json` is local untracked operator state written by the settings UI.
+- `archivist_topics.example.yaml` is the tracked archivist template.
+- `archivist_topics.yaml` is the live local registry bootstrapped from the template and kept untracked.
+
+Important paths:
+- `paths.vault_dir` is the synced vault root for raw and processed artifacts.
+- `paths.raw_dir` is the raw source area inside the vault.
+- `paths.library_dir` is the processed artifact area inside the vault.
+- `paths.wiki_dir` is the compiled wiki root and resolves outside the vault by default.
+- `paths.system_dir` is local-only state for auth, databases, caches, logs, and temp files.
+
+### Start the API
+
+```bash
+.venv/bin/python thoth_api.py
+```
+
+Then open `/settings` for the operator control plane.
+
+## Settings UI
+
+The settings UI exposes:
+- provider credentials and task routing
+- model aliases per provider
+- X API auth and manual sync controls
+- Web Clipper source directory settings
+- path layout for vault, raw, library, wiki, and system state
+- archivist registry editing and per-topic force controls
+
+## CLI Overview
+
+Use `python thoth.py --help` for the full command list and `python thoth.py <command> --help` for the exact flags on a subcommand.
+
+| Command | Purpose | Typical flags |
+| --- | --- | --- |
+| `process` | Process tweet/bookmark material into markdown. | `--limit`, `--use-cache`, `--no-resume` |
+| `pipeline` | Run the single-pass enrichment pipeline. | `--use-cache`, `--batch-size`, `--rerun-llm` |
+| `x-api-sync` | Backfill bookmarks from the X API and process them. | `--max-pages`, `--max-results`, `--no-resume` |
+| `arxiv` | Discover research papers from ArXiv. | `--discover`, `--source`, `--topics`, `--categories`, `--limit` |
+| `social` | Sync GitHub stars and Hugging Face likes. | `--sync`, `--github-user`, `--hf-user`, `--limit` |
+| `github-stars` | Pull GitHub stars directly. | `--limit`, `--no-resume` |
+| `huggingface-likes` | Pull Hugging Face likes directly. | `--limit`, `--no-resume`, `--no-models` |
+| `web-clipper` | Index configured Obsidian Web Clipper source directories. | none |
+| `youtube` | Post-process existing tweets for YouTube metadata and transcripts. | `--limit`, `--no-resume`, `--no-transcripts` |
+| `update-videos` | Refresh existing tweet/thread outputs with video data. | none |
+| `twitter-transcripts` | Run local Whisper over Twitter video media. | `--limit`, `--no-resume`, `--verbose` |
+| `wiki-query` | Search the compiled wiki and optionally write back a curated page. | `--limit`, `--write-back`, `--selected-slugs`, `--title` |
+| `wiki-lint` | Check wiki health. | `--stale-after-days` |
+| `ingest-queue` | Drain the generalized ingestion queue. | `--limit` |
+| `digest` | Generate Obsidian-facing discovery notes. | `weekly`, `inbox`, `dashboard`, `all`, `--notify` |
+| `stats` | Show current artifact and queue stats. | `--verbose` |
+| `db` | Database maintenance commands. | `stats`, `vacuum`, `export` |
+| `delete` | Delete a tweet and its artifacts. | `--dry-run` |
+| `migrate-filenames` | Normalize legacy filenames. | `--dry-run`, `--analyze` |
+| `migrate-frontmatter` | Upgrade legacy frontmatter. | `--dry-run` |
+
+## Common Commands
+
+Check state:
+
+```bash
+.venv/bin/python thoth.py stats
+.venv/bin/python thoth.py stats --verbose
+.venv/bin/python thoth.py db stats
+```
+
+Process cached data:
+
+```bash
+.venv/bin/python thoth.py pipeline --use-cache --batch-size 10
+.venv/bin/python thoth.py pipeline --use-cache --rerun-llm
+```
+
+Backfill X bookmarks:
+
+```bash
+.venv/bin/python thoth.py x-api-sync --max-pages 3 --max-results 100
+```
+
+Run discovery:
+
+```bash
+.venv/bin/python thoth.py arxiv --discover --topics "agent systems,multimodal reasoning"
+.venv/bin/python thoth.py social --sync --github-user <user> --hf-user <user>
+.venv/bin/python thoth.py web-clipper
+```
+
+Work the wiki:
+
+```bash
+.venv/bin/python thoth.py wiki-query "companion ai"
+.venv/bin/python thoth.py wiki-query "companion ai" --write-back --title "Companion AI Notes"
+.venv/bin/python thoth.py wiki-lint --stale-after-days 30
+```
+
+## Archivist
+
+Archivist is topic-scoped compilation, not free-roaming summarization.
+
+What exists now:
+- topic registry loading and validation
+- hard source gates by folder scope
+- source-type, tag, and term filtering
+- cadence and dirty-check state
+- manual force flags
+- settings UI support for editing the registry and viewing parsed topics/state
+- task routing support for a dedicated `archivist` model route
+
+Current archivist workflow:
+
+1. Start `thoth_api.py`.
+2. Open `/settings` and go to the `Archivist` tab.
+3. Edit the live local `archivist_topics.yaml`, either in the built-in editor or on disk.
+4. Configure the `archivist` task route to the provider/model alias you want.
+5. Use `Queue Force` to mark a topic for the next archivist runtime pass.
+
+Current limitation:
+- There is not yet a standalone `thoth.py archivist ...` compile command.
+
+The control plane is shipped. The dedicated archivist page compiler/runtime is still being implemented.
+
+## Storage Layout
+
+Repo-level tracked files:
+
+```text
+thoth.py
+thoth_api.py
+config.example.json
+archivist_topics.example.yaml
+README.md
+docs/
+core/
+collectors/
+processors/
+static/
+tests/
+```
+
+Logical runtime layout:
+
+```text
+vault/
+  raw/
+  library/
+    translations/
+  tweets/
+  threads/
+  papers/
+  repos/
+  stars/
+  media/
+  videos/
+  images/
+  transcripts/
+
+wiki/
+
+.thoth_system/
+```
+
+Key rules:
+- raw tweets and threads stay in the vault
+- repo `README` source files live in `repos/`
+- generated repo summaries live in `stars/`
+- the compiled wiki stays outside the vault
+- databases, caches, auth, temp files, and logs stay in `.thoth_system/`
+
+## Development
+
+Validation:
+
+```bash
 PYTHONPATH=. .venv/bin/pytest tests/
+python3 -m compileall -q core collectors processors thoth.py thoth_api.py tests
 ```
-
----
 
 ## License
-MIT — see [LICENSE](./LICENSE).
+
+MIT. See [LICENSE](LICENSE).
