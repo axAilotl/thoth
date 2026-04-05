@@ -215,7 +215,9 @@ class TwitterVideoTranscriptProcessor:
                     context_id = f"{tweet.id}:{getattr(video, 'media_id', '')}"
                     cleaned_transcript = await self.transcript_llm_processor.process_transcript(
                         raw_transcript,
-                        context_id=context_id
+                        context_id=context_id,
+                        source_label=f"tweet {tweet.id} by @{tweet.screen_name} / media {getattr(video, 'media_id', '')}",
+                        output_path=self.transcripts_dir / f"twitter_{tweet.id}_{tweet.screen_name}.md",
                     )
                     if not cleaned_transcript:
                         logger.warning("LLM transcript cleaning failed, using raw transcript")
@@ -333,7 +335,9 @@ class TwitterVideoTranscriptProcessor:
                         try:
                             formatted_result = await self.transcript_llm_processor.process_transcript(
                                 raw_transcript,
-                                context_id=f"{tweet.id}:{getattr(video, 'media_id', '')}"
+                                context_id=f"{tweet.id}:{getattr(video, 'media_id', '')}",
+                                source_label=f"tweet {tweet.id} by @{tweet.screen_name} / media {getattr(video, 'media_id', '')}",
+                                output_path=self.transcripts_dir / f"twitter_{tweet.id}_{tweet.screen_name}.md",
                             )
                             if formatted_result and isinstance(formatted_result, dict):
                                 logger.info(f"LLM formatted single file transcript: {len(formatted_result['text'])} characters")
@@ -464,7 +468,9 @@ class TwitterVideoTranscriptProcessor:
                     try:
                         formatted_result = await self.transcript_llm_processor.process_transcript(
                             full_transcript,
-                            context_id=f"{tweet.id}:{getattr(video, 'media_id', '')}"
+                            context_id=f"{tweet.id}:{getattr(video, 'media_id', '')}",
+                            source_label=f"tweet {tweet.id} by @{tweet.screen_name} / media {getattr(video, 'media_id', '')}",
+                            output_path=self.transcripts_dir / f"twitter_{tweet.id}_{tweet.screen_name}.md",
                         )
                         if formatted_result and isinstance(formatted_result, dict):
                             logger.info(f"LLM formatted transcript: {len(formatted_result['text'])} characters")

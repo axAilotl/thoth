@@ -298,7 +298,8 @@ class YouTubeProcessor:
         self,
         video_id: str,
         resume_metadata: bool = True,
-        resume_transcripts: bool = True
+        resume_transcripts: bool = True,
+        source_label: Optional[str] = None,
     ) -> Tuple[Optional[YouTubeVideo], Dict[str, Any]]:
         """Process a single YouTube video and capture timing/health metrics."""
         metrics = {
@@ -310,14 +311,25 @@ class YouTubeProcessor:
         }
 
         try:
-            logger.debug(f"📺 [YT] Start video {video_id}")
+            log_source = source_label or "unattributed source"
+            logger.info("📺 [YT] Start video %s for %s", video_id, log_source)
 
             existing_transcripts = self.find_existing_transcript_files(video_id)
             if resume_transcripts and existing_transcripts:
-                logger.debug(f"Skipping existing video transcript: {video_id}")
+                logger.info(
+                    "Skipping YouTube transcript for video %s from %s - existing note %s",
+                    video_id,
+                    log_source,
+                    existing_transcripts[0],
+                )
                 return None, metrics
             if not resume_transcripts and existing_transcripts:
-                logger.debug(f"Removing {len(existing_transcripts)} existing transcript(s) for video {video_id} (rerun)")
+                logger.info(
+                    "Removing %s existing transcript note(s) for video %s from %s (rerun)",
+                    len(existing_transcripts),
+                    video_id,
+                    log_source,
+                )
                 for existing in existing_transcripts:
                     try:
                         existing.unlink()
@@ -339,6 +351,15 @@ class YouTubeProcessor:
                     channel_title="Unknown"
                 )
 
+            safe_title = f"youtube_{video_id}_{self._sanitize_filename(video.title)}"
+            transcript_file = self.transcripts_dir / f"{safe_title}.md"
+            logger.info(
+                "YouTube transcript target for video %s from %s: %s",
+                video_id,
+                log_source,
+                transcript_file,
+            )
+
             chunk_metadata: Optional[Dict[str, Any]] = None
 
             # Get transcript if enabled
@@ -351,12 +372,19 @@ class YouTubeProcessor:
                 formatted_transcript = None
                 if raw_transcript and self.transcript_llm_processor and self.transcript_llm_processor.is_enabled():
                     logger.debug(f"🤖 [YT] LLM format transcript {video_id}")
-                    logger.info(f"Processing transcript with LLM for video {video_id}")
+                    logger.info(
+                        "Processing transcript with LLM for video %s from %s -> %s",
+                        video_id,
+                        log_source,
+                        transcript_file,
+                    )
                     metrics['transcript_attempts'] += 1
                     llm_start = time.time()
                     formatted_transcript = await self.transcript_llm_processor.process_transcript(
                         raw_transcript,
-                        context_id=video_id
+                        context_id=video_id,
+                        source_label=f"{log_source} / youtube:{video_id}",
+                        output_path=transcript_file,
                     )
                     metrics['transcript_seconds'] += time.time() - llm_start
 
@@ -403,18 +431,19 @@ class YouTubeProcessor:
             else:
                 video.chunk_metadata = None
 
-            # Create safe filename
-            safe_title = f"youtube_{video_id}_{self._sanitize_filename(video.title)}"
-            transcript_file = self.transcripts_dir / f"{safe_title}.md"
-
             logger.debug(f"💾 [YT] Write transcript file {transcript_file.name}")
             await self._create_transcript_file(video, transcript_file)
 
-            logger.info(f"✅ Processed YouTube video: {video.title}")
+            logger.info(
+                "✅ Processed YouTube video %s for %s -> %s",
+                video.title,
+                log_source,
+                transcript_file,
+            )
             return video, metrics
 
         except Exception as e:
-            logger.error(f"Error processing video {video_id}: {e}")
+            logger.error(f"Error processing video {video_id} for {source_label or 'unattributed source'}: {e}")
             metrics['transcript_failed'] += 1
             return None, metrics
     
@@ -549,7 +578,8 @@ processed_at: {datetime.now().isoformat()}
         self,
         urls: List[str],
         resume_metadata: bool = True,
-        resume_transcripts: bool = True
+        resume_transcripts: bool = True,
+        source_label: Optional[str] = None,
     ) -> ProcessingStats:
         """Process multiple YouTube URLs while tracking timing/health metrics."""
         stats = ProcessingStats()
@@ -573,7 +603,8 @@ processed_at: {datetime.now().isoformat()}
                 video, metrics = await self.process_video(
                     video_id,
                     resume_metadata=resume_metadata,
-                    resume_transcripts=resume_transcripts
+                    resume_transcripts=resume_transcripts,
+                    source_label=source_label,
                 )
                 for key in aggregate:
                     aggregate[key] += metrics.get(key, 0)
@@ -586,7 +617,12 @@ processed_at: {datetime.now().isoformat()}
                 stats.total_processed += 1
 
             except Exception as e:
-                logger.error(f"Error processing YouTube URL {url}: {e}")
+                logger.error(
+                    "Error processing YouTube URL %s for %s: %s",
+                    url,
+                    source_label or "unattributed source",
+                    e,
+                )
                 stats.errors += 1
 
         stats.extras.update(aggregate)

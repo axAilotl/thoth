@@ -161,9 +161,12 @@ class DeepgramTranscriptProcessor:
                 return False
             
             # Transcribe audio
+            transcript_file = self.transcripts_dir / f"twitter_{tweet.id}_{tweet.screen_name}.md"
             transcript = await self._transcribe_audio(
                 audio_path,
-                context_id=f"{tweet.id}:{video.media_id}"
+                context_id=f"{tweet.id}:{video.media_id}",
+                source_label=f"tweet {tweet.id} by @{tweet.screen_name} / media {video.media_id}",
+                output_path=transcript_file,
             )
             if not transcript:
                 return False
@@ -256,7 +259,14 @@ class DeepgramTranscriptProcessor:
             logger.error(f"Error extracting audio: {e}")
             return None
     
-    async def _transcribe_audio(self, audio_path: Path, context_id: Optional[str] = None) -> Optional[str]:
+    async def _transcribe_audio(
+        self,
+        audio_path: Path,
+        context_id: Optional[str] = None,
+        *,
+        source_label: Optional[str] = None,
+        output_path: Optional[Path] = None,
+    ) -> Optional[str]:
         """Transcribe audio file using Deepgram API"""
         try:
             # Get audio duration to determine if we need to chunk
@@ -275,7 +285,9 @@ class DeepgramTranscriptProcessor:
                         try:
                             formatted_result = await self.transcript_llm_processor.process_transcript(
                                 raw_transcript,
-                                context_id=context_id
+                                context_id=context_id,
+                                source_label=source_label,
+                                output_path=output_path,
                             )
                             if formatted_result and isinstance(formatted_result, dict):
                                 logger.info(f"LLM formatted single file transcript: {len(formatted_result['text'])} characters")
@@ -295,7 +307,9 @@ class DeepgramTranscriptProcessor:
                     audio_path,
                     duration,
                     chunk_duration_seconds,
-                    context_id=context_id
+                    context_id=context_id,
+                    source_label=source_label,
+                    output_path=output_path,
                 )
                 
         except Exception as e:
@@ -361,7 +375,10 @@ class DeepgramTranscriptProcessor:
         audio_path: Path,
         total_duration: float,
         chunk_duration_seconds: float,
-        context_id: Optional[str] = None
+        context_id: Optional[str] = None,
+        *,
+        source_label: Optional[str] = None,
+        output_path: Optional[Path] = None,
     ) -> Optional[str]:
         """Split large audio file and transcribe chunks by time intervals"""
         try:
@@ -420,7 +437,9 @@ class DeepgramTranscriptProcessor:
                     try:
                         formatted_result = await self.transcript_llm_processor.process_transcript(
                             full_transcript,
-                            context_id=context_id
+                            context_id=context_id,
+                            source_label=source_label,
+                            output_path=output_path,
                         )
                         if formatted_result and isinstance(formatted_result, dict):
                             logger.info(f"LLM formatted transcript: {len(formatted_result['text'])} characters")

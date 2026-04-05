@@ -769,6 +769,7 @@ class PipelineProcessor:
                 youtube_urls,
                 resume_metadata=resume_metadata,
                 resume_transcripts=resume_transcripts,
+                source_label=f"tweet {tweet.id} by @{tweet.screen_name}",
             )
             if stats.updated > 0:
                 extras = stats.extras or {}

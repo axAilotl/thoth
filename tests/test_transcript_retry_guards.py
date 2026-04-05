@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ from core.llm_cache import LLMCache
 from core.metadata_db import MetadataDB
 from processors.pipeline_processor import PipelineProcessor
 from processors.transcript_llm_processor import TranscriptLLMProcessor
+from processors.youtube_processor import YouTubeProcessor, YouTubeVideo
 
 
 @pytest.fixture
@@ -218,3 +220,116 @@ def test_pipeline_should_process_youtube_skips_when_transcript_markdown_exists(
     )
 
     assert processor._should_process_youtube(_build_tweet(), resume=True) is False
+
+
+def test_transcript_llm_logs_source_label_and_output_path(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+    restore_runtime_config,
+):
+    _configure_runtime_paths(tmp_path)
+    config.set("youtube.transcript_chunk_size", 20)
+    metadata_db = MetadataDB(db_path=str(tmp_path / "meta.db"))
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.pipeline_registry.is_enabled",
+        lambda name: True,
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.get_metadata_db",
+        lambda: metadata_db,
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.llm_cache",
+        LLMCache(str(tmp_path / "llm_cache")),
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.LLMInterface",
+        _FakeLLMInterface,
+    )
+    _FakeLLMInterface.calls = 0
+
+    processor = TranscriptLLMProcessor()
+    transcript_text = "line one\nline two\nline three\nline four"
+
+    with caplog.at_level(logging.INFO, logger="processors.transcript_llm_processor"):
+        result = asyncio.run(
+            processor.process_transcript(
+                transcript_text,
+                context_id="video-999",
+                source_label="tweet 123 by @alice",
+                output_path=tmp_path / "vault" / "transcripts" / "youtube_999_example.md",
+            )
+        )
+
+    assert result is not None
+    joined = "\n".join(record.message for record in caplog.records)
+    assert "tweet 123 by @alice" in joined
+    assert "context=video-999" in joined
+    assert "youtube_999_example.md" in joined
+
+
+def test_youtube_processor_passs_source_context_to_transcript_llm(tmp_path: Path):
+    class RecordingTranscriptProcessor:
+        def __init__(self):
+            self.calls = []
+
+        def is_enabled(self):
+            return True
+
+        async def process_transcript(self, raw_transcript, context_id=None, **kwargs):
+            self.calls.append(
+                {
+                    "raw_transcript": raw_transcript,
+                    "context_id": context_id,
+                    **kwargs,
+                }
+            )
+            return {
+                "text": "clean transcript",
+                "summary": "summary",
+                "tags": "alpha, beta",
+                "chunk_metadata": {},
+            }
+
+    processor = object.__new__(YouTubeProcessor)
+    processor.transcripts_dir = tmp_path / "vault" / "transcripts"
+    processor.transcripts_dir.mkdir(parents=True, exist_ok=True)
+    processor.enable_transcripts = True
+    processor.enable_embeddings = False
+    processor.transcript_llm_processor = RecordingTranscriptProcessor()
+
+    async def fake_get_video_info(video_id: str):
+        return YouTubeVideo(
+            video_id=video_id,
+            title="Example Title",
+            description="desc",
+            published_at="2026-04-04T00:00:00Z",
+            channel_id="chan-1",
+            channel_title="Channel",
+        )
+
+    async def fake_get_video_transcript(video_id: str):
+        return "raw transcript"
+
+    created_paths = []
+
+    async def fake_create_transcript_file(video, file_path: Path):
+        created_paths.append(file_path)
+
+    processor.get_video_info = fake_get_video_info
+    processor.get_video_transcript = fake_get_video_transcript
+    processor._create_transcript_file = fake_create_transcript_file
+
+    video, metrics = asyncio.run(
+        processor.process_video("abc123", source_label="tweet 123 by @alice")
+    )
+
+    assert video is not None
+    assert metrics["transcript_attempts"] == 1
+    assert len(processor.transcript_llm_processor.calls) == 1
+    call = processor.transcript_llm_processor.calls[0]
+    assert call["context_id"] == "abc123"
+    assert call["source_label"] == "tweet 123 by @alice / youtube:abc123"
+    assert call["output_path"] == processor.transcripts_dir / "youtube_abc123_Example_Title.md"
+    assert created_paths == [processor.transcripts_dir / "youtube_abc123_Example_Title.md"]

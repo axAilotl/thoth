@@ -545,6 +545,7 @@ async def cmd_youtube(args):
                     youtube_urls,
                     resume_metadata=args.resume,
                     resume_transcripts=args.resume,
+                    source_label=f"tweet {tweet.id} by @{tweet.screen_name}",
                 )
                 total_processed += 1
                 total_videos += stats.updated

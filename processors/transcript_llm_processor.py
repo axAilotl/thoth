@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional, List, Dict
 
 from core.config import config
@@ -79,7 +80,14 @@ class TranscriptLLMProcessor:
                 logger.debug(f"Transcript chunk cache unavailable: {exc}")
                 self.metadata_db = None
     
-    async def process_transcript(self, raw_transcript: str, context_id: Optional[str] = None) -> Optional[dict]:
+    async def process_transcript(
+        self,
+        raw_transcript: str,
+        context_id: Optional[str] = None,
+        *,
+        source_label: Optional[str] = None,
+        output_path: Optional[str | Path] = None,
+    ) -> Optional[dict]:
         """
         Process a raw transcript with timestamps into formatted paragraphs with summary and tags
         For long transcripts, splits into chunks and processes each separately
@@ -100,6 +108,11 @@ class TranscriptLLMProcessor:
                 return None
 
             provider, model, _ = route
+            target_label = self._format_target_label(
+                context_id=context_id,
+                source_label=source_label,
+                output_path=output_path,
+            )
             prompt = config.get('youtube.transcript_processing_prompt', 
                               "Process the following transcript. Combine fragmented sentences into coherent paragraphs, remove all timestamps, and insert newlines between paragraphs where the context shifts. Do not edit the content beyond paragraph formation.\n\nReturn the result strictly as a JSON object with the following fields:\n- \"text\": the processed transcript in plain text paragraphs\n- \"summary\": a concise 2–4 sentence summary of the transcript\n- \"tags\": 3–8 relevant tags, returned as a single comma-separated string with no # symbols and no explanations\n\nReturn ONLY the JSON object, with no preamble or extra text.")
             cache_provider = f"{provider}:{model}" if provider or model else ""
@@ -107,25 +120,38 @@ class TranscriptLLMProcessor:
             # Check if we need to chunk the transcript
             if len(raw_transcript) <= self.chunk_size:
                 # Single chunk processing
-                logger.info(f"Processing transcript with {provider} ({model}) - single chunk")
+                logger.info(
+                    "Processing transcript with %s (%s) for %s - single chunk",
+                    provider,
+                    model,
+                    target_label,
+                )
                 return await self._process_single_chunk(
                     raw_transcript,
                     prompt,
                     provider,
                     model,
                     cache_provider,
+                    target_label=target_label,
                     context_id=context_id,
                     chunk_index=1
                 )
             else:
                 # Multi-chunk processing
-                logger.info(f"Processing transcript with {provider} ({model}) - splitting into chunks of {self.chunk_size} chars")
+                logger.info(
+                    "Processing transcript with %s (%s) for %s - splitting into %s-char chunks",
+                    provider,
+                    model,
+                    target_label,
+                    self.chunk_size,
+                )
                 return await self._process_chunked_transcript(
                     raw_transcript,
                     prompt,
                     provider,
                     model,
                     cache_provider,
+                    target_label=target_label,
                     context_id=context_id
                 )
                 
@@ -140,6 +166,7 @@ class TranscriptLLMProcessor:
         provider: str,
         model: str,
         cache_provider: str,
+        target_label: str,
         context_id: Optional[str] = None,
         chunk_index: Optional[int] = None
     ) -> Optional[dict]:
@@ -157,7 +184,11 @@ class TranscriptLLMProcessor:
             # Try cache first
             cached = llm_cache.get(transcript_text, 'transcript_fmt', cache_provider)
             if cached and all(k in cached for k in ['text', 'summary', 'tags']):
-                logger.debug("Transcript LLM cache HIT for single chunk")
+                logger.debug(
+                    "Transcript LLM cache HIT for %s chunk %s",
+                    target_label,
+                    chunk_index if chunk_index is not None else 1,
+                )
                 return self._normalize_cached_chunk_result(cached, chunk_info)
 
             cached_record = self._load_transcript_chunk_record(
@@ -168,13 +199,17 @@ class TranscriptLLMProcessor:
             )
             cached_result = self._parse_cached_chunk_result(cached_record)
             if cached_result:
-                logger.debug("Transcript chunk cache HIT for single chunk")
+                logger.debug(
+                    "Transcript chunk cache HIT for %s chunk %s",
+                    target_label,
+                    chunk_index if chunk_index is not None else 1,
+                )
                 return self._normalize_cached_chunk_result(cached_result, chunk_info)
 
             if self._should_backoff_failed_chunk(cached_record):
                 logger.info(
                     "Skipping transcript LLM retry for %s chunk %s due to recent failure",
-                    context_id or "transcript",
+                    target_label,
                     chunk_index if chunk_index is not None else 1,
                 )
                 return self._build_fallback_chunk_result(
@@ -205,7 +240,11 @@ class TranscriptLLMProcessor:
                     
                     # Validate the JSON structure
                     if not result or not all(key in result for key in ['text', 'summary', 'tags']):
-                        logger.error("Invalid JSON response: missing required fields")
+                        logger.error(
+                            "Invalid JSON response for %s chunk %s: missing required fields",
+                            target_label,
+                            chunk_index if chunk_index is not None else 1,
+                        )
                         # Minimal fallback: wrap raw response as text if parse failed
                         # This avoids dropping the chunk entirely
                         result = {
@@ -225,7 +264,13 @@ class TranscriptLLMProcessor:
                     except Exception:
                         pass
 
-                    logger.info(f"✅ Successfully formatted single chunk: {len(transcript_text)} → {len(result['text'])} characters")
+                    logger.info(
+                        "✅ Successfully formatted %s chunk %s: %s → %s characters",
+                        target_label,
+                        chunk_index if chunk_index is not None else 1,
+                        len(transcript_text),
+                        len(result['text']),
+                    )
                     chunk_info['chunks_processed'] = 1 if not chunk_info['chunks_failed'] else 0
                     result['chunk_metadata'] = chunk_info
                     if context_id and chunk_index is not None and self.metadata_db:
@@ -241,8 +286,13 @@ class TranscriptLLMProcessor:
                             pass
                     return result
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse JSON response: {e}")
-                    logger.debug(f"Raw response: {response.content}")
+                    logger.error(
+                        "Failed to parse JSON response for %s chunk %s: %s",
+                        target_label,
+                        chunk_index if chunk_index is not None else 1,
+                        e,
+                    )
+                    logger.debug(f"Raw response for {target_label}: {response.content}")
                     chunk_info['fallback_used'] = True
                     chunk_info['chunks_failed'] = 1
                     if chunk_index is not None:
@@ -251,12 +301,22 @@ class TranscriptLLMProcessor:
                     return None
             else:
                 error_msg = response.error if response else "No response received"
-                logger.warning(f"❌ Single chunk formatting failed: {error_msg}")
+                logger.warning(
+                    "❌ Single chunk formatting failed for %s chunk %s: %s",
+                    target_label,
+                    chunk_index if chunk_index is not None else 1,
+                    error_msg,
+                )
                 self._record_chunk_failure(context_id, chunk_index, chunk_hash, cache_provider, error_msg or 'no_response')
                 return None
                 
         except Exception as e:
-            logger.error(f"Error processing single chunk: {e}")
+            logger.error(
+                "Error processing single chunk for %s chunk %s: %s",
+                target_label,
+                chunk_index if chunk_index is not None else 1,
+                e,
+            )
             self._record_chunk_failure(context_id, chunk_index, chunk_hash, cache_provider, str(e))
             return None
     
@@ -267,19 +327,26 @@ class TranscriptLLMProcessor:
         provider: str,
         model: str,
         cache_provider: str,
+        target_label: str,
         context_id: Optional[str] = None
     ) -> Optional[dict]:
         """Process transcript in chunks and stitch results together"""
         try:
             # Split transcript into chunks at line boundaries
             chunks = self._split_transcript_into_chunks(raw_transcript)
-            logger.info(f"Split transcript into {len(chunks)} chunks")
+            logger.info("Split transcript for %s into %s chunks", target_label, len(chunks))
             
             # Process each chunk
             processed_chunks: List[dict] = []
             fallback_chunks: List[Tuple[int, str, str]] = []
             for i, chunk in enumerate(chunks, 1):
-                logger.info(f"Processing chunk {i}/{len(chunks)} ({len(chunk)} characters)")
+                logger.info(
+                    "Processing %s chunk %s/%s (%s characters)",
+                    target_label,
+                    i,
+                    len(chunks),
+                    len(chunk),
+                )
 
                 chunk_hash = self._hash_content(chunk)
                 cached_record = self._load_transcript_chunk_record(
@@ -292,13 +359,13 @@ class TranscriptLLMProcessor:
 
                 if cached_chunk:
                     processed_chunks.append(cached_chunk)
-                    logger.info(f"♻️ Reused cached chunk {i}")
+                    logger.info("♻️ Reused cached %s chunk %s/%s", target_label, i, len(chunks))
                     continue
 
                 if self._should_backoff_failed_chunk(cached_record):
                     logger.info(
                         "Skipping transcript LLM retry for %s chunk %s due to recent failure",
-                        context_id or "transcript",
+                        target_label,
                         i,
                     )
                     fallback_chunks.append((i, chunk, chunk_hash))
@@ -310,14 +377,15 @@ class TranscriptLLMProcessor:
                     provider,
                     model,
                     cache_provider,
+                    target_label=target_label,
                     context_id=context_id,
                     chunk_index=i
                 )
                 if processed_chunk:
                     processed_chunks.append(processed_chunk)
-                    logger.info(f"✅ Chunk {i} processed successfully")
+                    logger.info("✅ %s chunk %s/%s processed successfully", target_label, i, len(chunks))
                 else:
-                    logger.warning(f"❌ Failed to process chunk {i}")
+                    logger.warning("❌ Failed to process %s chunk %s/%s", target_label, i, len(chunks))
                     fallback_chunks.append((i, chunk, chunk_hash))
                     self._record_chunk_failure(context_id, i, chunk_hash, cache_provider, 'llm_failure')
                     # Continue with other chunks even if one fails
@@ -327,7 +395,11 @@ class TranscriptLLMProcessor:
                 combined_text_segments = [chunk['text'] for chunk in processed_chunks if chunk.get('text')]
 
                 if fallback_chunks:
-                    logger.warning(f"Using raw transcript text for {len(fallback_chunks)} chunk(s) due to LLM failures")
+                    logger.warning(
+                        "Using raw transcript text for %s due to %s failed chunk(s)",
+                        target_label,
+                        len(fallback_chunks),
+                    )
                     combined_text_segments.extend(chunk for _, chunk, _ in fallback_chunks)
 
                 combined_text = '\n\n'.join(segment for segment in combined_text_segments if segment)
@@ -347,7 +419,15 @@ class TranscriptLLMProcessor:
                     'failed_chunks': [idx for idx, _, _ in fallback_chunks],
                 }
 
-                logger.info(f"✅ Successfully processed {len(processed_chunks)}/{len(chunks)} chunks: {len(raw_transcript)} → {len(result['text'])} characters")
+                logger.info(
+                    "✅ Successfully processed %s chunks for %s: %s/%s chunks, %s → %s characters",
+                    target_label,
+                    target_label,
+                    len(processed_chunks),
+                    len(chunks),
+                    len(raw_transcript),
+                    len(result['text']),
+                )
                 if context_id and self.metadata_db and not fallback_chunks:
                     try:
                         self.metadata_db.clear_transcript_chunks(context_id)
@@ -356,7 +436,10 @@ class TranscriptLLMProcessor:
                 result['chunk_metadata'] = chunk_metadata
                 return result
             elif fallback_chunks:
-                logger.warning("Returning raw transcript fallback because all LLM chunk attempts failed")
+                logger.warning(
+                    "Returning raw transcript fallback for %s because all LLM chunk attempts failed",
+                    target_label,
+                )
                 fallback_text = '\n\n'.join(chunk for _, chunk, _ in fallback_chunks)
                 return {
                     'text': fallback_text,
@@ -371,11 +454,11 @@ class TranscriptLLMProcessor:
                     }
                 }
             else:
-                logger.error("❌ No chunks were processed successfully")
+                logger.error("❌ No chunks were processed successfully for %s", target_label)
                 return None
                 
         except Exception as e:
-            logger.error(f"Error processing chunked transcript: {e}")
+            logger.error(f"Error processing chunked transcript for {target_label}: {e}")
             return None
 
     def _load_cached_chunk(self, context_id: str, chunk_index: int, expected_hash: str, cache_provider: str) -> Optional[Dict[str, str]]:
@@ -589,6 +672,27 @@ class TranscriptLLMProcessor:
             chunks.append('\n'.join(current_chunk))
         
         return chunks
+
+    def _format_target_label(
+        self,
+        *,
+        context_id: Optional[str],
+        source_label: Optional[str],
+        output_path: Optional[str | Path],
+    ) -> str:
+        """Build a stable operator-facing label for transcript work."""
+        parts: List[str] = []
+
+        if source_label:
+            parts.append(str(source_label))
+        if context_id:
+            parts.append(f"context={context_id}")
+        if output_path:
+            parts.append(f"note={Path(output_path)}")
+
+        if not parts:
+            return "transcript"
+        return " | ".join(parts)
 
     def _extract_json_object(self, text: str) -> Optional[str]:
         """Best-effort extraction of a JSON object from an LLM response.
