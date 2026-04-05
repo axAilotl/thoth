@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from core.data_models import Tweet, ProcessingStats
+from core.config import config
+from core.path_layout import resolve_vault_relative_path, resolve_vault_root
 from processors.media_processor import MediaProcessor
 from processors.cache_loader import CacheLoader
 from processors.content_processor import ContentProcessor
@@ -19,12 +21,12 @@ logger = logging.getLogger(__name__)
 class VideoUpdater:
     """Handles retroactive updates for video content in existing tweets and threads"""
     
-    def __init__(self, vault_dir: str = 'knowledge_vault'):
-        self.vault_dir = Path(vault_dir)
+    def __init__(self, vault_dir: str = None):
+        self.vault_dir = resolve_vault_root(config, override=vault_dir)
         self.media_processor = MediaProcessor()
         self.cache_loader = CacheLoader()
-        self.content_processor = ContentProcessor(vault_dir)
-        self.thread_processor = ThreadProcessor(vault_dir)
+        self.content_processor = ContentProcessor(str(self.vault_dir))
+        self.thread_processor = ThreadProcessor(str(self.vault_dir))
     
     def update_videos_in_tweets(self, resume: bool = True) -> ProcessingStats:
         """Update all existing tweet files to include video links and download videos"""
@@ -308,14 +310,7 @@ class VideoUpdater:
                 stats['total_tweets_with_videos'] = int(len(cache_files) * video_ratio)
         
         # Count video and thumbnail files in both new directories and legacy media directory
-        from core.config import config
-        
-        # Check new videos directory (handle absolute vs relative paths)
-        videos_path = config.get('paths.videos_dir', 'videos')
-        if Path(videos_path).is_absolute():
-            videos_dir = Path(videos_path)
-        else:
-            videos_dir = self.vault_dir / videos_path
+        videos_dir = resolve_vault_relative_path(config, 'paths.videos_dir')
         if videos_dir.exists():
             for media_file in videos_dir.glob('*'):
                 if media_file.is_file():
@@ -327,12 +322,7 @@ class VideoUpdater:
                         stats['total_thumbnail_files'] += 1
                         stats['thumbnail_files_size_mb'] += file_size / (1024 * 1024)
         
-        # Check new images directory for thumbnails (handle absolute vs relative paths)
-        images_path = config.get('paths.images_dir', 'images')
-        if Path(images_path).is_absolute():
-            images_dir = Path(images_path)
-        else:
-            images_dir = self.vault_dir / images_path
+        images_dir = resolve_vault_relative_path(config, 'paths.images_dir')
         if images_dir.exists():
             for media_file in images_dir.glob('*'):
                 if media_file.is_file():
@@ -341,8 +331,7 @@ class VideoUpdater:
                         stats['total_thumbnail_files'] += 1
                         stats['thumbnail_files_size_mb'] += file_size / (1024 * 1024)
         
-        # Check legacy media directory for backward compatibility
-        legacy_media_dir = self.vault_dir / 'media'
+        legacy_media_dir = resolve_vault_relative_path(config, 'paths.media_dir')
         if legacy_media_dir.exists():
             for media_file in legacy_media_dir.glob('*'):
                 if media_file.is_file():

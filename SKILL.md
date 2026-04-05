@@ -19,7 +19,7 @@ If something matters and is missing there, add it there instead of creating anot
 - Do not assume a command exists. Check `.venv/bin/python thoth.py --help` and `.venv/bin/python thoth.py <command> --help` before documenting or invoking unusual paths.
 - Prefer resume-safe and cache-aware commands unless the user explicitly wants a force reprocess.
 - Avoid loading large raw cache files into context unless the task truly requires it.
-- Treat `config.example.json` as tracked defaults and `config.json`, `control.json`, and `archivist_topics.yaml` as local operator files.
+- Treat `config.json` plus `control.json` as the live runtime config surface. `config.example.json` is only a template for seeding new installs.
 - Archivist prompt text lives in tracked files under `prompts/`, not in Python. Adjust those files when the synthesis contract needs to change.
 
 ## First Commands

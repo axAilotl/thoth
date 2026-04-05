@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from core.data_models import Tweet, ProcessingStats
 from core.config import config
+from core.path_layout import resolve_vault_root
 from core.pipeline_registry import pipeline_registry
 from .url_processor import URLProcessor
 from .media_processor import MediaProcessor
@@ -166,7 +167,7 @@ class PipelineProcessor:
     """Single-pass pipeline processor that applies all enhancements to tweets in one iteration"""
 
     def __init__(self, vault_path: str = None):
-        self.vault_path = Path(vault_path or config.get("vault_dir", "knowledge_vault"))
+        self.vault_path = resolve_vault_root(config, override=vault_path)
 
         # Initialize all processors
         self.url_processor = URLProcessor()
@@ -1072,16 +1073,15 @@ class PipelineProcessor:
     def _reuse_readme_summary(self, repo_link) -> Optional[str]:
         """Attempt to reuse README summary from stars directory if present."""
         try:
-            vault_dir = Path(config.get("vault_dir", "knowledge_vault"))
             safe_name = (
                 repo_link.repo_name.replace("/", "_")
                 if getattr(repo_link, "repo_name", None)
                 else "unknown"
             )
             if getattr(repo_link, "platform", "github") == "github":
-                summary_file = vault_dir / "stars" / f"github_{safe_name}_summary.md"
+                summary_file = self.vault_path / "stars" / f"github_{safe_name}_summary.md"
             elif getattr(repo_link, "platform", "") == "huggingface":
-                summary_file = vault_dir / "stars" / f"hf_{safe_name}_summary.md"
+                summary_file = self.vault_path / "stars" / f"hf_{safe_name}_summary.md"
             else:
                 return None
 

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from core.data_models import ProcessingStats
 from core.config import config
+from core.path_layout import resolve_vault_root
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 
 logger = logging.getLogger(__name__)
@@ -88,9 +89,9 @@ class YouTubeVideo:
 
 class YouTubeProcessor:
     """Processes YouTube videos from tweets"""
-    
+
     def __init__(self, vault_path: str = None):
-        self.vault_path = Path(vault_path or config.get('vault_dir', 'knowledge_vault'))
+        self.vault_path = resolve_vault_root(config, override=vault_path)
         self.transcripts_dir = self.vault_path / 'transcripts'
         
         # Create directories

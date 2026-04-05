@@ -4,12 +4,12 @@ Extracted and cleaned from real_thread_and_url_fix.py
 """
 
 import time
-from pathlib import Path
 from typing import List, Dict
 import logging
 
 from core.data_models import Tweet, ProcessingStats
 from core.config import config
+from core.path_layout import resolve_vault_root
 from .markdown_generator import MarkdownGenerator
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class ContentProcessor:
     """Generates markdown content for tweets"""
 
     def __init__(self, vault_path: str = None):
-        self.vault_path = Path(vault_path or config.get("vault_dir", "knowledge_vault"))
+        self.vault_path = resolve_vault_root(config, override=vault_path)
         self.tweets_dir = self.vault_path / "tweets"
         self.tweets_dir.mkdir(parents=True, exist_ok=True)
 

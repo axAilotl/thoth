@@ -12,6 +12,7 @@ import requests
 
 from core.data_models import Tweet
 from core.config import config
+from core.path_layout import resolve_vault_root
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 from .document_processor import DocumentProcessor, DocumentLink, URL_PATTERNS
 
@@ -64,11 +65,11 @@ class ArXivPaper(DocumentLink):
 
 class ArXivProcessorV2(DocumentProcessor):
     """Enhanced ArXiv processor using DocumentProcessor base"""
-    
+
     def __init__(self, output_dir: str = None):
-        self.papers_dir = Path(output_dir or config.get('vault_dir', 'knowledge_vault')) / 'papers'
+        self.papers_dir = resolve_vault_root(config, override=output_dir) / 'papers'
         super().__init__(self.papers_dir)
-    
+
     def extract_urls_from_tweet(self, tweet: Tweet) -> List[str]:
         """Extract ArXiv URLs from tweet"""
         urls = self._extract_urls_from_text_and_mappings(tweet, URL_PATTERNS['arxiv'])
@@ -126,9 +127,8 @@ class ArXivProcessorV2(DocumentProcessor):
                         from core.metadata_db import get_metadata_db, FileMetadata, DownloadMetadata
                         from datetime import datetime
                         db = get_metadata_db()
-                        vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
                         try:
-                            rel_path = pdf_path.relative_to(vault_dir)
+                            rel_path = pdf_path.relative_to(self.papers_dir.parent)
                         except Exception:
                             rel_path = pdf_path
                         size_bytes = pdf_path.stat().st_size
@@ -161,9 +161,8 @@ class ArXivProcessorV2(DocumentProcessor):
                                 from core.metadata_db import get_metadata_db, FileMetadata, DownloadMetadata
                                 from datetime import datetime
                                 db = get_metadata_db()
-                                vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
                                 try:
-                                    rel_path = pdf_path.relative_to(vault_dir)
+                                    rel_path = pdf_path.relative_to(self.papers_dir.parent)
                                 except Exception:
                                     rel_path = pdf_path
                                 size_bytes = pdf_path.stat().st_size
@@ -195,9 +194,8 @@ class ArXivProcessorV2(DocumentProcessor):
                                 from core.metadata_db import get_metadata_db, FileMetadata, DownloadMetadata
                                 from datetime import datetime
                                 db = get_metadata_db()
-                                vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
                                 try:
-                                    rel_path = pdf_path.relative_to(vault_dir)
+                                    rel_path = pdf_path.relative_to(self.papers_dir.parent)
                                 except Exception:
                                     rel_path = pdf_path
                                 size_bytes = pdf_path.stat().st_size

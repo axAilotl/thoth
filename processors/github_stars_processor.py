@@ -23,6 +23,7 @@ from core.non_live_state import (
     record_readme_probe_outcome,
     should_skip_readme_probe,
 )
+from core.path_layout import resolve_vault_root
 from .document_processor import DocumentProcessor, DocumentLink
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ class GitHubStarsProcessor:
     """Processes GitHub starred repositories"""
     
     def __init__(self, vault_path: str = None, *, metadata_db: MetadataDB | None = None):
-        self.vault_path = Path(vault_path or config.get('vault_dir', 'knowledge_vault'))
+        self.vault_path = resolve_vault_root(config, override=vault_path)
         self.stars_dir = self.vault_path / 'stars'
         self.repos_dir = self.vault_path / 'repos'
         self.metadata_db = metadata_db or MetadataDB()

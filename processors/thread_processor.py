@@ -5,10 +5,10 @@ Extracted and cleaned from real_thread_and_url_fix.py
 
 import time
 import logging
-from pathlib import Path
 from typing import List, Dict
 from core.data_models import Tweet, ThreadInfo, ProcessingStats
 from core.config import config
+from core.path_layout import resolve_vault_root
 from .content_processor import ContentProcessor
 from .markdown_generator import MarkdownGenerator
 
@@ -19,7 +19,7 @@ class ThreadProcessor:
     """Processes thread data and generates thread markdown files"""
 
     def __init__(self, vault_path: str = None):
-        self.vault_path = Path(vault_path or config.get("vault_dir", "knowledge_vault"))
+        self.vault_path = resolve_vault_root(config, override=vault_path)
         self.threads_dir = self.vault_path / "threads"
         self.threads_dir.mkdir(parents=True, exist_ok=True)
         self.content_processor = ContentProcessor(vault_path)

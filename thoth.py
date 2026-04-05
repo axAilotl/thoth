@@ -27,6 +27,7 @@ from core import (
 )
 from core.archivist_benchmark import benchmark_archivist_topics
 from core.graphql_cache import maybe_cleanup_graphql_cache
+from core.path_layout import resolve_vault_relative_path, resolve_vault_root
 from processors import URLProcessor, CacheLoader, VideoUpdater
 from processors.pipeline_processor import PipelineProcessor
 from processors.async_llm_processor import AsyncLLMProcessor, AsyncProcessingConfig
@@ -87,6 +88,10 @@ def setup_logging(verbose: bool = False):
 
     # Reduce noise from other libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+def _vault_subpath(*parts: str) -> Path:
+    return build_path_layout(config).vault_root.joinpath(*parts)
 
 
 def has_cache_file(tweet_id: str) -> bool:
@@ -351,14 +356,18 @@ async def cmd_github_stars(args):
     print("⭐ Fetching GitHub Starred Repositories")
 
     try:
+        stars_dir = _vault_subpath("stars")
+        repos_dir = _vault_subpath("repos")
+        stars_index = stars_dir / "starred_repos_index.json"
+
         # Create GitHub stars processor
         stars_processor = GitHubStarsProcessor()
 
         print(
             f"🎯 Processing {'all' if not args.limit else args.limit} starred repositories"
         )
-        print(f"📂 Summaries will be saved to: knowledge_vault/stars/")
-        print(f"📄 READMEs will be saved to: knowledge_vault/repos/")
+        print(f"📂 Summaries will be saved to: {stars_dir}/")
+        print(f"📄 READMEs will be saved to: {repos_dir}/")
 
         # Measure processing time
         import time
@@ -385,9 +394,9 @@ async def cmd_github_stars(args):
             print(f"📈 Throughput: {stats.total_processed/elapsed:.2f} repos/second")
 
         print(f"\n📁 Files created:")
-        print(f"   📋 Summaries: knowledge_vault/stars/*_summary.md")
-        print(f"   📄 READMEs: knowledge_vault/repos/*_README.md")
-        print(f"   📇 Index: knowledge_vault/stars/starred_repos_index.json")
+        print(f"   📋 Summaries: {stars_dir}/*_summary.md")
+        print(f"   📄 READMEs: {repos_dir}/*_README.md")
+        print(f"   📇 Index: {stars_index}")
 
     except ValueError as e:
         print(f"❌ Configuration error: {e}")
@@ -402,14 +411,18 @@ async def cmd_huggingface_likes(args):
     print("🤗 Fetching HuggingFace Liked Repositories")
 
     try:
+        stars_dir = _vault_subpath("stars")
+        repos_dir = _vault_subpath("repos")
+        liked_index = stars_dir / "huggingface_liked_repos_index.json"
+
         # Create HuggingFace likes processor
         hf_processor = HuggingFaceLikesProcessor()
 
         print(
             f"🎯 Processing {'all' if not args.limit else args.limit} liked repositories"
         )
-        print(f"📂 Summaries will be saved to: knowledge_vault/stars/")
-        print(f"📄 READMEs will be saved to: knowledge_vault/repos/")
+        print(f"📂 Summaries will be saved to: {stars_dir}/")
+        print(f"📄 READMEs will be saved to: {repos_dir}/")
 
         # Show what types will be included
         types = []
@@ -450,9 +463,9 @@ async def cmd_huggingface_likes(args):
             print(f"📈 Throughput: {stats.total_processed/elapsed:.2f} repos/second")
 
         print(f"\n📁 Files created:")
-        print(f"   📋 Summaries: knowledge_vault/stars/hf_*_summary.md")
-        print(f"   📄 READMEs: knowledge_vault/repos/hf_*_README.md")
-        print(f"   📇 Index: knowledge_vault/stars/huggingface_liked_repos_index.json")
+        print(f"   📋 Summaries: {stars_dir}/hf_*_summary.md")
+        print(f"   📄 READMEs: {repos_dir}/hf_*_README.md")
+        print(f"   📇 Index: {liked_index}")
 
     except ValueError as e:
         print(f"❌ Configuration error: {e}")
@@ -470,6 +483,7 @@ async def cmd_youtube(args):
     print("📺 Post-Processing Tweets for YouTube Videos")
 
     try:
+        transcripts_dir = _vault_subpath("transcripts")
         # Validate configuration
         if not config.validate_and_warn():
             print("⚠️ Configuration issues detected")
@@ -497,7 +511,7 @@ async def cmd_youtube(args):
         print(
             f"📄 Transcripts: {'enabled' if config.get('youtube.enable_transcripts', True) else 'disabled'}"
         )
-        print(f"📂 Transcripts will be saved to: knowledge_vault/transcripts/")
+        print(f"📂 Transcripts will be saved to: {transcripts_dir}/")
 
         # Measure processing time
         import time
@@ -581,7 +595,7 @@ async def cmd_youtube(args):
             print(f"📈 Throughput: {total_processed/elapsed:.2f} tweets/second")
 
         print(f"\n📁 Files created:")
-        print(f"   📄 Video transcripts: knowledge_vault/transcripts/youtube_*.md")
+        print(f"   📄 Video transcripts: {transcripts_dir}/youtube_*.md")
 
         if config.get("youtube.enable_embeddings", True):
             print("\n💡 To regenerate tweet markdown files with YouTube embeds, run:")
@@ -685,6 +699,7 @@ async def cmd_twitter_transcripts(args):
     print("🎤 Processing Twitter Video Transcripts")
 
     try:
+        transcripts_dir = _vault_subpath("transcripts")
         # Validate configuration
         if not config.validate_and_warn():
             print("⚠️ Configuration issues detected")
@@ -715,7 +730,7 @@ async def cmd_twitter_transcripts(args):
             f"🎤 Model: {config.get('whisper.model', 'Systran/faster-distil-whisper-large-v3')}"
         )
         print(f"🎤 Min duration: {config.get('whisper.min_duration_seconds', 60)}s")
-        print(f"📂 Transcripts will be saved to: knowledge_vault/transcripts/")
+        print(f"📂 Transcripts will be saved to: {transcripts_dir}/")
 
         # Measure processing time
         import time
@@ -744,7 +759,7 @@ async def cmd_twitter_transcripts(args):
         print(f"   ⏱️ Time: {elapsed_time:.1f}s")
 
         if stats.updated > 0:
-            print(f"   📄 Video transcripts: knowledge_vault/transcripts/*.md")
+            print(f"   📄 Video transcripts: {transcripts_dir}/*.md")
 
     except Exception as e:
         logger.error(f"Twitter video transcript processing failed: {e}")
@@ -1049,25 +1064,10 @@ def cmd_stats(args):
                         f"     {file_type:12} {stats.get('count', 0):,} files ({size_mb} MB)"
                     )
 
-    # Check both new media directories and legacy
-    vault_dir = Path(config.get("vault_dir", "knowledge_vault"))
-    
-    # Handle absolute vs relative paths for images
-    images_path = config.get("images_dir", "images")
-    if Path(images_path).is_absolute():
-        images_dir = Path(images_path)
-    else:
-        images_dir = vault_dir / images_path
-    
-    # Handle absolute vs relative paths for videos
-    videos_path = config.get("videos_dir", "videos")
-    if Path(videos_path).is_absolute():
-        videos_dir = Path(videos_path)
-    else:
-        videos_dir = vault_dir / videos_path
-    
-    # Legacy media is always relative to vault
-    legacy_media_dir = vault_dir / config.get("media_dir", "media")
+    vault_dir = resolve_vault_root(config)
+    images_dir = resolve_vault_relative_path(config, "paths.images_dir")
+    videos_dir = resolve_vault_relative_path(config, "paths.videos_dir")
+    legacy_media_dir = resolve_vault_relative_path(config, "paths.media_dir")
     
     image_files = len(list(images_dir.glob("*"))) if images_dir.exists() else 0
     video_files = len(list(videos_dir.glob("*"))) if videos_dir.exists() else 0
@@ -1924,7 +1924,7 @@ Examples:
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     parser.add_argument(
         "--bookmarks",
-        default=config.get("bookmarks_file"),
+        default=config.get("paths.bookmarks_file"),
         help="Bookmarks JSON file (default: %(default)s)",
     )
     # Subcommands

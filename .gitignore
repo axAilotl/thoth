@@ -28,6 +28,7 @@ temp_audio/
 media/
 cache/
 llm_cache/
+knowledge_vault/
 *.db-wal
 *.db-shm
 *.sqlite

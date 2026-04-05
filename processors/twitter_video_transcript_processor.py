@@ -18,6 +18,7 @@ from openai import OpenAI
 
 from core.data_models import Tweet, ProcessingStats
 from core.config import config
+from core.path_layout import resolve_vault_root
 from processors.transcript_llm_processor import TranscriptLLMProcessor
 from processors.deepgram_transcript_processor import DeepgramTranscriptProcessor
 
@@ -29,7 +30,7 @@ class TwitterVideoTranscriptProcessor:
     
     def __init__(self, vault_path: str = None):
         self.config = config
-        self.vault_path = Path(vault_path or config.get('vault_dir', 'knowledge_vault'))
+        self.vault_path = resolve_vault_root(config, override=vault_path)
         self.transcripts_dir = self.vault_path / 'transcripts'
         self.temp_dir = Path(config.get('whisper.temp_dir', 'temp_audio'))
         

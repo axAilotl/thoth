@@ -24,18 +24,14 @@ def _configure_runtime_paths(tmp_path: Path) -> None:
     config.set("paths.cache_dir", "graphql_cache")
     config.set("paths.images_dir", "images")
     config.set("paths.videos_dir", "videos")
+    config.set("paths.media_dir", "media")
     config.set("paths.raw_dir", "raw")
     config.set("paths.library_dir", "library")
     config.set("paths.wiki_dir", "wiki")
     config.set("paths.digests_dir", "_digests")
     config.set("database.path", "meta.db")
     config.set("database.enabled", False)
-
-    # MediaProcessor still reads the compatibility aliases directly.
-    config.set("vault_dir", str(vault_root))
-    config.set("images_dir", "images")
-    config.set("videos_dir", "videos")
-    config.set("system_dir", ".thoth_system")
+    (tmp_path / ".thoth_system").mkdir(parents=True, exist_ok=True)
 
 
 def test_media_processor_reuses_tracked_download_without_network(

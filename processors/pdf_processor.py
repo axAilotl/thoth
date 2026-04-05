@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from core.data_models import Tweet
 from core.config import config
+from core.path_layout import resolve_vault_root
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 from .document_processor import DocumentProcessor, DocumentLink, URL_PATTERNS
 
@@ -60,11 +61,11 @@ class PDFDocument(DocumentLink):
 
 class PDFProcessor(DocumentProcessor):
     """PDF processor using DocumentProcessor base"""
-    
+
     def __init__(self, output_dir: str = None):
-        self.pdfs_dir = Path(output_dir or config.get('vault_dir', 'knowledge_vault')) / 'pdfs'
+        self.pdfs_dir = resolve_vault_root(config, override=output_dir) / 'pdfs'
         super().__init__(self.pdfs_dir)
-    
+
     def extract_urls_from_tweet(self, tweet: Tweet) -> List[str]:
         """Extract PDF URLs from tweet"""
         # Exclude ArXiv PDFs as they're handled by ArXivProcessor

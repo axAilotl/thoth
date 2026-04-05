@@ -70,8 +70,8 @@ topics:
     )
 
     monkeypatch.setattr(thoth_api, "load_runtime_settings", lambda: config_data)
-    monkeypatch.setattr(thoth_api, "BASE_CONFIG_PATH", tmp_path / "config.example.json")
-    monkeypatch.setattr(thoth_api, "LOCAL_CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr(thoth_api, "RUNTIME_CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr(thoth_api, "EXAMPLE_CONFIG_PATH", tmp_path / "config.example.json")
 
     with TestClient(thoth_api.app) as client:
         response = client.get("/api/settings")
@@ -85,7 +85,7 @@ topics:
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
     assert payload["config_files"] == {
-        "base": str(tmp_path / "config.example.json"),
-        "local": str(tmp_path / "config.json"),
+        "runtime": str(tmp_path / "config.json"),
         "control": str(thoth_api.CONTROL_CONFIG_PATH),
+        "example_template": str(tmp_path / "config.example.json"),
     }

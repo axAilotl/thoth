@@ -940,7 +940,7 @@
                 <div class="toggle-container">
                     <div class="toggle-info">
                         <div class="toggle-label">Vault Source Ingest Enabled</div>
-                        <div class="toggle-description">Scan only the explicit knowledge_vault directories you allow for imported markdown and attachments</div>
+                        <div class="toggle-description">Scan only the explicit vault directories you allow for imported markdown and attachments</div>
                     </div>
                     <label class="toggle">
                         <input type="checkbox" id="source-web-clipper-enabled">
@@ -949,7 +949,7 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Source Note Directories <span class="hint">One per line, relative to the vault root. These must stay inside <code>knowledge_vault</code>.</span></label>
+                    <label>Source Note Directories <span class="hint">One per line, relative to the vault root. These must stay inside the configured vault.</span></label>
                     <textarea id="source-web-clipper-note-dirs" rows="3" placeholder="imports/articles&#10;notes/inbox"></textarea>
                 </div>
 
@@ -1224,7 +1224,7 @@
 
                 <div class="form-group">
                     <label>Knowledge Vault Directory</label>
-                    <input type="text" id="path-vault" placeholder="knowledge_vault">
+                    <input type="text" id="path-vault" placeholder="/absolute/path/to/your-vault">
                 </div>
                 <div class="form-group">
                     <label>Wiki Directory <span class="hint">Relative to the vault parent so the compiled wiki stays outside the vault.</span></label>

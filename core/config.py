@@ -13,7 +13,7 @@ from .non_live_state import MIN_NON_LIVE_INTERVAL_HOURS
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_FILES = ["config.example.json", "config.json", "control.json"]
+DEFAULT_CONFIG_FILES = ["config.json", "control.json"]
 
 
 def _validate_llm_task_route(
@@ -89,8 +89,7 @@ class Config:
     """Simple configuration manager"""
     
     def __init__(self):
-        # Tracked defaults live in config.example.json. config.json is a local
-        # override and control.json stores operator state.
+        # Production runtime is driven by config.json plus control.json.
         self.data = {}
     
     def get(self, key: str, default: Any = None) -> Any:
@@ -126,7 +125,6 @@ class Config:
                 with open(config_path, 'r') as f:
                     file_config = json.load(f)
                 self._merge_config(self.data, file_config)
-                self._apply_legacy_path_aliases()
             except Exception as e:
                 print(f"Warning: Could not load config file {config_file}: {e}")
 
@@ -144,14 +142,6 @@ class Config:
                 self._merge_config(base[key], value)
             else:
                 base[key] = value
-    
-    def _apply_legacy_path_aliases(self):
-        """Lift values from paths.* to top-level keys for backward compatibility."""
-        paths = self.get('paths', {})
-        if isinstance(paths, dict):
-            for key in ['bookmarks_file', 'cookies_file', 'cache_dir', 'images_dir', 'videos_dir', 'media_dir', 'vault_dir', 'system_dir']:
-                if key not in self.data and key in paths:
-                    self.data[key] = paths[key]
     
     def validate(self) -> List[str]:
         """Validate configuration and return list of errors"""

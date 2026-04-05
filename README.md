@@ -50,9 +50,9 @@ cp .env.example .env
 ```
 
 Important config layers:
-- `config.example.json` is the tracked default config.
-- `config.json` is your local untracked config override.
-- `control.json` is local untracked operator state written by the settings UI.
+- `config.example.json` is the tracked template only.
+- `config.json` is the live runtime config and must exist before Thoth starts.
+- `control.json` is local untracked operator state written by the settings UI and overlaid on top of the live runtime config.
 - `archivist_topics.example.yaml` is the tracked archivist template.
 - `archivist_topics.yaml` is the live local registry bootstrapped from the template and kept untracked.
 - `prompts/archivist_*.md` are tracked archivist prompt files for source briefs, repository relevance briefs, and final synthesis, and can be edited without changing Python.

@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from .config import config
 from .download_tracker import get_download_tracker
+from .path_layout import resolve_vault_root
 
 logger = logging.getLogger(__name__)
 
@@ -207,13 +208,13 @@ class FilenameNormalizer:
 
 class FilenameMigrator:
     """Handles migration from legacy filenames to normalized format"""
-    
+
     def __init__(self, vault_path: str = None):
-        vault_dir = Path(vault_path or config.get('vault_dir', 'knowledge_vault'))
+        vault_dir = resolve_vault_root(config, override=vault_path)
         self.vault_path = vault_dir
         self.normalizer = FilenameNormalizer()
         self.download_tracker = get_download_tracker()
-        
+
         # Directory mappings
         self.directories = {
             'tweets': self.vault_path / 'tweets',

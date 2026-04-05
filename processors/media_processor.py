@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from core.data_models import Tweet, ProcessingStats
 from core.config import config
 from core.download_tracker import get_download_tracker
+from core.path_layout import resolve_vault_relative_path, resolve_vault_root
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 from core.staged_assets import (
     StagedAssetPublisher,
@@ -41,35 +42,23 @@ class MediaProcessor:
     """Handles media downloads and Obsidian linking"""
     
     def __init__(self, images_dir: str = None, videos_dir: str = None):
-        # Set up separate directories for images and videos
-        vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
-        
-        if images_dir:
-            self.images_dir = Path(images_dir)
-        else:
-            # Check if images_dir is an absolute path, otherwise make it relative to vault
-            images_path = config.get('paths.images_dir', 'images')
-            if Path(images_path).is_absolute():
-                self.images_dir = Path(images_path)
-            else:
-                self.images_dir = vault_dir / images_path
-        
-        if videos_dir:
-            self.videos_dir = Path(videos_dir)
-        else:
-            # Check if videos_dir is an absolute path, otherwise make it relative to vault
-            videos_path = config.get('paths.videos_dir', 'videos')
-            if Path(videos_path).is_absolute():
-                self.videos_dir = Path(videos_path)
-            else:
-                self.videos_dir = vault_dir / videos_path
+        self.vault_dir = resolve_vault_root(config)
+        self.images_dir = resolve_vault_relative_path(
+            config,
+            "paths.images_dir",
+            override=images_dir,
+        )
+        self.videos_dir = resolve_vault_relative_path(
+            config,
+            "paths.videos_dir",
+            override=videos_dir,
+        )
             
         # Create directories
         self.images_dir.mkdir(parents=True, exist_ok=True)
         self.videos_dir.mkdir(parents=True, exist_ok=True)
         
-        # Keep media_dir for backward compatibility (legacy single directory)
-        self.media_dir = vault_dir / config.get('paths.media_dir', 'media')
+        self.media_dir = resolve_vault_relative_path(config, "paths.media_dir")
         
         # Session for efficient HTTP requests
         self.session = requests.Session()
@@ -212,9 +201,8 @@ class MediaProcessor:
                 from core.metadata_db import FileMetadata, DownloadMetadata
                 from datetime import datetime
 
-                vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
                 try:
-                    rel_path = filepath.relative_to(vault_dir)
+                    rel_path = filepath.relative_to(self.vault_dir)
                 except Exception:
                     rel_path = filepath
                 self.metadata_db.upsert_file(FileMetadata(
@@ -343,9 +331,8 @@ class MediaProcessor:
                 try:
                     from core.metadata_db import FileMetadata, DownloadMetadata
                     from datetime import datetime
-                    vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
                     try:
-                        rel_path = filepath.relative_to(vault_dir)
+                        rel_path = filepath.relative_to(self.vault_dir)
                     except Exception:
                         rel_path = filepath
                     self.metadata_db.upsert_file(FileMetadata(
@@ -471,9 +458,8 @@ class MediaProcessor:
                 try:
                     from core.metadata_db import FileMetadata, DownloadMetadata
                     from datetime import datetime
-                    vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
                     try:
-                        rel_path = filepath.relative_to(vault_dir)
+                        rel_path = filepath.relative_to(self.vault_dir)
                     except Exception:
                         rel_path = filepath
                     self.metadata_db.upsert_file(FileMetadata(

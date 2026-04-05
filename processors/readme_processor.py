@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from core.data_models import Tweet
 from core.config import config
+from core.path_layout import resolve_vault_root
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 from .document_processor import DocumentProcessor, DocumentLink, URL_PATTERNS
 
@@ -91,10 +92,9 @@ class RepositoryREADME(DocumentLink):
 
 class READMEProcessor(DocumentProcessor):
     """Repository README processor using DocumentProcessor base"""
-    
+
     def __init__(self, output_dir: str = None):
-        # Unify to knowledge_vault/repos to match URL and pipeline processors
-        self.readmes_dir = Path(output_dir or config.get('vault_dir', 'knowledge_vault')) / 'repos'
+        self.readmes_dir = resolve_vault_root(config, override=output_dir) / 'repos'
         super().__init__(self.readmes_dir)
     
     def extract_urls_from_tweet(self, tweet: Tweet) -> List[str]:

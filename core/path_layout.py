@@ -38,6 +38,36 @@ def _resolve_optional_path(
     return relative_to / path
 
 
+def resolve_required_config_path(
+    config: ConfigLike,
+    config_key: str,
+    *,
+    relative_to: Path | None = None,
+) -> Path:
+    """Resolve a required configured path without introducing hard-coded fallbacks."""
+
+    return _resolve_required_path(
+        config.get(config_key),
+        config_key=config_key,
+        relative_to=relative_to,
+    )
+
+
+def resolve_system_root(
+    config: ConfigLike,
+    *,
+    project_root: Path | None = None,
+) -> Path:
+    """Resolve the canonical system root from live config."""
+
+    base_root = project_root or Path.cwd()
+    return resolve_required_config_path(
+        config,
+        "paths.system_dir",
+        relative_to=base_root,
+    )
+
+
 @dataclass(frozen=True)
 class PathLayout:
     vault_root: Path
@@ -74,16 +104,8 @@ class PathLayout:
 
 def build_path_layout(config: ConfigLike, *, project_root: Path | None = None) -> PathLayout:
     base_root = project_root or Path.cwd()
-    vault_root = _resolve_required_path(
-        config.get("paths.vault_dir"),
-        config_key="paths.vault_dir",
-        relative_to=base_root,
-    )
-    system_root = _resolve_required_path(
-        config.get("paths.system_dir"),
-        config_key="paths.system_dir",
-        relative_to=base_root,
-    )
+    vault_root = resolve_vault_root(config, project_root=base_root)
+    system_root = resolve_system_root(config, project_root=base_root)
     temp_root = system_root / "tmp"
     auth_root = system_root / "auth"
     raw_root = _resolve_optional_path(
@@ -136,4 +158,41 @@ def build_path_layout(config: ConfigLike, *, project_root: Path | None = None) -
         download_tracking_file=download_tracking_file,
         realtime_bookmarks_file=realtime_bookmarks_file,
         log_file=log_file,
+    )
+
+
+def resolve_vault_root(
+    config: ConfigLike,
+    *,
+    override: str | Path | None = None,
+    project_root: Path | None = None,
+) -> Path:
+    """Resolve the canonical vault root from live config, or an explicit override."""
+
+    if override is not None:
+        return Path(override)
+    base_root = project_root or Path.cwd()
+    return resolve_required_config_path(
+        config,
+        "paths.vault_dir",
+        relative_to=base_root,
+    )
+
+
+def resolve_vault_relative_path(
+    config: ConfigLike,
+    config_key: str,
+    *,
+    override: str | Path | None = None,
+    project_root: Path | None = None,
+) -> Path:
+    """Resolve a configured path relative to the canonical vault root."""
+
+    if override is not None:
+        return Path(override)
+    vault_root = resolve_vault_root(config, project_root=project_root)
+    return resolve_required_config_path(
+        config,
+        config_key,
+        relative_to=vault_root,
     )

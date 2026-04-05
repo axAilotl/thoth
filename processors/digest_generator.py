@@ -16,6 +16,7 @@ import yaml
 import requests
 
 from core.config import config
+from core.path_layout import resolve_vault_root
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +143,13 @@ class DigestGenerator:
     """Generates periodic digest notes for content discovery"""
 
     def __init__(self, vault_path: str = None):
-        self.vault_path = Path(vault_path or config.get("paths.vault_dir", "knowledge_vault"))
+        self.vault_path = resolve_vault_root(config, override=vault_path)
         self.digests_dir = self.vault_path / "_digests"
         self.tweets_dir = self.vault_path / "tweets"
         self.threads_dir = self.vault_path / "threads"
 
         # Dataview paths - relative to Obsidian vault root
-        # If knowledge_vault is a subfolder of the Obsidian vault, we need the prefix
-        self.dv_prefix = config.get("dataview.path_prefix", "knowledge_vault")
+        self.dv_prefix = config.get("dataview.path_prefix", self.vault_path.name)
         self.dv_tweets = f'"{self.dv_prefix}/tweets"' if self.dv_prefix else '"tweets"'
         self.dv_threads = f'"{self.dv_prefix}/threads"' if self.dv_prefix else '"threads"'
         self.dv_digests = f'"{self.dv_prefix}/_digests"' if self.dv_prefix else '"_digests"'

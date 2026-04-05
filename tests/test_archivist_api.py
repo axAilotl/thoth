@@ -36,8 +36,8 @@ def patch_background_tasks(monkeypatch):
     )
 
 
-def _write_base_config(tmp_path: Path) -> None:
-    base_config = {
+def _write_runtime_config(tmp_path: Path) -> None:
+    runtime_config = {
         "paths": {
             "vault_dir": str(tmp_path / "vault"),
             "raw_dir": "raw",
@@ -51,14 +51,14 @@ def _write_base_config(tmp_path: Path) -> None:
             "path": "meta.db",
         },
     }
-    (tmp_path / "config.example.json").write_text(
-        json.dumps(base_config),
+    (tmp_path / "config.json").write_text(
+        json.dumps(runtime_config),
         encoding="utf-8",
     )
 
 
 def test_archivist_registry_endpoint_returns_topics_and_state(monkeypatch, tmp_path: Path):
-    _write_base_config(tmp_path)
+    _write_runtime_config(tmp_path)
     registry_path = tmp_path / "topics" / "archivist_topics.yaml"
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     registry_path.write_text(
@@ -80,8 +80,7 @@ topics:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(thoth_api, "BASE_CONFIG_PATH", tmp_path / "config.example.json")
-    monkeypatch.setattr(thoth_api, "LOCAL_CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr(thoth_api, "RUNTIME_CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr(thoth_api, "CONTROL_CONFIG_PATH", tmp_path / "control.json")
 
     with TestClient(thoth_api.app) as client:
@@ -99,7 +98,7 @@ topics:
 def test_archivist_registry_endpoint_bootstraps_live_registry_from_example(
     monkeypatch, tmp_path: Path
 ):
-    _write_base_config(tmp_path)
+    _write_runtime_config(tmp_path)
     example_path = tmp_path / "archivist_topics.example.yaml"
     example_path.write_text(
         """
@@ -114,8 +113,7 @@ topics:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(thoth_api, "BASE_CONFIG_PATH", tmp_path / "config.example.json")
-    monkeypatch.setattr(thoth_api, "LOCAL_CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr(thoth_api, "RUNTIME_CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr(thoth_api, "CONTROL_CONFIG_PATH", tmp_path / "control.json")
 
     with TestClient(thoth_api.app) as client:
@@ -131,9 +129,8 @@ topics:
 
 
 def test_archivist_registry_save_and_force_cycle(monkeypatch, tmp_path: Path):
-    _write_base_config(tmp_path)
-    monkeypatch.setattr(thoth_api, "BASE_CONFIG_PATH", tmp_path / "config.example.json")
-    monkeypatch.setattr(thoth_api, "LOCAL_CONFIG_PATH", tmp_path / "config.json")
+    _write_runtime_config(tmp_path)
+    monkeypatch.setattr(thoth_api, "RUNTIME_CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr(thoth_api, "CONTROL_CONFIG_PATH", tmp_path / "control.json")
 
     content = """
@@ -176,9 +173,8 @@ topics:
 
 
 def test_archivist_registry_rejects_invalid_yaml(monkeypatch, tmp_path: Path):
-    _write_base_config(tmp_path)
-    monkeypatch.setattr(thoth_api, "BASE_CONFIG_PATH", tmp_path / "config.example.json")
-    monkeypatch.setattr(thoth_api, "LOCAL_CONFIG_PATH", tmp_path / "config.json")
+    _write_runtime_config(tmp_path)
+    monkeypatch.setattr(thoth_api, "RUNTIME_CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr(thoth_api, "CONTROL_CONFIG_PATH", tmp_path / "control.json")
 
     with TestClient(thoth_api.app) as client:
@@ -193,9 +189,8 @@ def test_archivist_registry_rejects_invalid_yaml(monkeypatch, tmp_path: Path):
 
 
 def test_archivist_topic_run_endpoint_executes_immediately(monkeypatch, tmp_path: Path):
-    _write_base_config(tmp_path)
-    monkeypatch.setattr(thoth_api, "BASE_CONFIG_PATH", tmp_path / "config.example.json")
-    monkeypatch.setattr(thoth_api, "LOCAL_CONFIG_PATH", tmp_path / "config.json")
+    _write_runtime_config(tmp_path)
+    monkeypatch.setattr(thoth_api, "RUNTIME_CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr(thoth_api, "CONTROL_CONFIG_PATH", tmp_path / "control.json")
 
     async def fake_run_archivist_compilation(**kwargs):

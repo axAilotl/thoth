@@ -13,6 +13,7 @@ from core.data_models import Tweet, ProcessingStats
 from core.config import config
 from core.download_tracker import get_download_tracker
 from core.github_utils import convert_github_url_for_download
+from core.path_layout import resolve_vault_root
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 from core.staged_assets import (
     StagedAssetPublisher,
@@ -54,12 +55,10 @@ class URLProcessor:
     def __init__(self, pdfs_dir: str = None):
         self.url_cache: Dict[str, str] = {}
         
-        # Store PDFs in knowledge_vault/pdfs for easy organization
-        vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
-        self.pdfs_dir = vault_dir / (pdfs_dir or 'pdfs')
+        vault_dir = resolve_vault_root(config, override=pdfs_dir)
+        self.pdfs_dir = vault_dir / 'pdfs'
         self.pdfs_dir.mkdir(parents=True, exist_ok=True)
         
-        # Store READMEs in knowledge_vault/repos
         self.repos_dir = vault_dir / 'repos'
         self.repos_dir.mkdir(parents=True, exist_ok=True)
         

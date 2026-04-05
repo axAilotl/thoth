@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from core.data_models import Tweet, ProcessingStats
 from core.config import config
+from core.path_layout import resolve_vault_relative_path, resolve_vault_root
 from core.llm_interface import LLMInterface
 from core.pipeline_registry import PipelineStage, pipeline_registry, register_pipeline_stages
 
@@ -71,7 +72,7 @@ class LLMProcessor:
     def __init__(self):
         self.llm_config = config.get('llm', {})
         self.processing_config = config.get('processing', {})
-        self.vault_path = Path(config.get('vault_dir', 'knowledge_vault'))
+        self.vault_path = resolve_vault_root(config)
         self.llm_interface = None
         
         # Initialize LLM interface if enabled
@@ -479,8 +480,7 @@ class LLMProcessor:
         try:
             logger.debug(f"🤖 [LLM] README summary start: {repo_link.filename}")
             # Load README content
-            vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
-            readme_path = vault_dir / 'repos' / repo_link.filename
+            readme_path = self.vault_path / 'repos' / repo_link.filename
             
             if not readme_path.exists():
                 logger.warning(f"README file not found: {readme_path}")
@@ -522,13 +522,7 @@ class LLMProcessor:
 
             for media_item in tweet.media_items:
                 if media_item.filename and media_item.media_type == 'photo':
-                    # Build full path to media file using configured images_dir
-                    vault_dir = Path(config.get('vault_dir', 'knowledge_vault'))
-                    images_path = config.get('paths.images_dir', 'images')
-                    if Path(images_path).is_absolute():
-                        images_dir = Path(images_path)
-                    else:
-                        images_dir = vault_dir / images_path
+                    images_dir = resolve_vault_relative_path(config, 'paths.images_dir')
                     media_path = images_dir / media_item.filename
                     
                     if media_path.exists():

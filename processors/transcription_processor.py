@@ -5,11 +5,11 @@ and provides a consistent interface for the rest of the codebase.
 """
 
 import logging
-from pathlib import Path
 from typing import List, Optional
 
 from core.config import config
 from core.data_models import Tweet, ProcessingStats
+from core.path_layout import resolve_vault_root
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class TranscriptionProcessor:
 
     def __init__(self, vault_path: str = None):
         self.config = config
-        self.vault_path = Path(vault_path or config.get('vault_dir', 'knowledge_vault'))
+        self.vault_path = resolve_vault_root(config, override=vault_path)
         self.backend = None
         self.backend_name: Optional[str] = None
         self._select_backend()

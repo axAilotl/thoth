@@ -517,12 +517,14 @@
     }
   },
   "paths": {
-    "vault_dir": "knowledge_vault",
+    "vault_dir": "/absolute/path/to/your-vault",
     "raw_dir": "raw",
     "library_dir": "library",
     "wiki_dir": "wiki",
     "archivist_topics_file": "archivist_topics.yaml",
     "cache_dir": "graphql_cache",
+    "images_dir": "images",
+    "videos_dir": "videos",
     "media_dir": "media",
     "system_dir": ".thoth_system",
     "digests_dir": "_digests",

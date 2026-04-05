@@ -13,6 +13,7 @@ from typing import Optional
 
 from core.config import config
 from core.data_models import Tweet, MediaItem
+from core.path_layout import resolve_vault_root
 from processors.transcript_llm_processor import TranscriptLLMProcessor
 
 logger = logging.getLogger(__name__)
@@ -23,10 +24,9 @@ class DeepgramTranscriptProcessor:
     
     def __init__(self, config_path: str = 'config.json'):
         self.config = config
-        
+
         # Paths
-        vault_path = self.config.get('vault_dir', 'knowledge_vault')
-        self.vault_path = Path(vault_path)
+        self.vault_path = resolve_vault_root(self.config)
         self.transcripts_dir = self.vault_path / 'transcripts'
         self.temp_dir = Path(self.config.get('deepgram.temp_dir', 'temp_audio'))
         

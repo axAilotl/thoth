@@ -98,9 +98,9 @@ huggingface_trigger_lock = asyncio.Lock()
 x_api_trigger_lock = asyncio.Lock()
 archivist_trigger_lock = asyncio.Lock()
 
-BASE_CONFIG_PATH = Path(__file__).parent / "config.example.json"
-LOCAL_CONFIG_PATH = Path(__file__).parent / "config.json"
+RUNTIME_CONFIG_PATH = Path(__file__).parent / "config.json"
 CONTROL_CONFIG_PATH = Path(__file__).parent / "control.json"
+EXAMPLE_CONFIG_PATH = Path(__file__).parent / "config.example.json"
 SOCIAL_SYNC_JOB_NAME = "social_sync"
 X_API_SYNC_JOB_NAME = "x_api_sync"
 
@@ -116,20 +116,21 @@ def deep_merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str
     return result
 
 
-def load_json_file(path: Path) -> Dict[str, Any]:
-    """Load a JSON file if it exists, otherwise return an empty dict."""
+def load_json_file(path: Path, *, required: bool = False) -> Dict[str, Any]:
+    """Load a JSON file, optionally failing closed when it is required."""
     if not path.exists():
+        if required:
+            raise FileNotFoundError(f"Required config file not found: {path}")
         return {}
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def load_runtime_settings() -> Dict[str, Any]:
-    """Return tracked defaults overlaid by local and operator settings."""
-    base = load_json_file(BASE_CONFIG_PATH)
-    local = load_json_file(LOCAL_CONFIG_PATH)
+    """Return live runtime settings overlaid by operator control settings."""
+    runtime = load_json_file(RUNTIME_CONFIG_PATH, required=True)
     control = load_json_file(CONTROL_CONFIG_PATH)
-    return deep_merge_dicts(deep_merge_dicts(base, local), control)
+    return deep_merge_dicts(runtime, control)
 
 
 def write_control_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -138,7 +139,7 @@ def write_control_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
     merged = deep_merge_dicts(control_data, updates)
     with open(CONTROL_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(merged, f, indent=2)
-    config.reload([str(BASE_CONFIG_PATH), str(LOCAL_CONFIG_PATH), str(CONTROL_CONFIG_PATH)])
+    config.reload([str(RUNTIME_CONFIG_PATH), str(CONTROL_CONFIG_PATH)])
     return merged
 
 
@@ -621,7 +622,7 @@ async def run_archivist_compilation(
     async with archivist_trigger_lock:
         return await run_archivist_topics(
             load_runtime_settings(),
-            project_root=BASE_CONFIG_PATH.parent,
+            project_root=RUNTIME_CONFIG_PATH.parent,
             topic_ids=topic_ids,
             force=force,
             dry_run=dry_run,
@@ -976,7 +977,7 @@ async def get_settings():
         config_data = load_runtime_settings()
         runtime_summary = build_settings_runtime_summary(
             config_data,
-            project_root=BASE_CONFIG_PATH.parent,
+            project_root=RUNTIME_CONFIG_PATH.parent,
         )
 
         # Check which env vars are set (masked)
@@ -997,9 +998,9 @@ async def get_settings():
             'runtime': runtime_summary,
             'env': env_status,
             'config_files': {
-                'base': str(BASE_CONFIG_PATH),
-                'local': str(LOCAL_CONFIG_PATH),
-                'control': str(CONTROL_CONFIG_PATH)
+                'runtime': str(RUNTIME_CONFIG_PATH),
+                'control': str(CONTROL_CONFIG_PATH),
+                'example_template': str(EXAMPLE_CONFIG_PATH),
             }
         }
     except Exception as e:
@@ -1072,7 +1073,7 @@ async def get_archivist_registry():
     try:
         return build_archivist_admin_payload(
             load_runtime_settings(),
-            project_root=BASE_CONFIG_PATH.parent,
+            project_root=RUNTIME_CONFIG_PATH.parent,
         )
     except Exception as e:
         logger.error(f"Error loading archivist registry: {e}")
@@ -1085,7 +1086,7 @@ async def update_archivist_registry(payload: ArchivistRegistryUpdateRequest):
     try:
         result = save_archivist_registry_text(
             load_runtime_settings(),
-            project_root=BASE_CONFIG_PATH.parent,
+            project_root=RUNTIME_CONFIG_PATH.parent,
             content=payload.content,
         )
         return {"status": "ok", **result}
@@ -1103,7 +1104,7 @@ async def force_archivist_topic(topic_id: str, payload: ArchivistForceRequest):
     try:
         return queue_archivist_topic_force(
             load_runtime_settings(),
-            project_root=BASE_CONFIG_PATH.parent,
+            project_root=RUNTIME_CONFIG_PATH.parent,
             topic_id=topic_id,
             reason=payload.reason,
         )
@@ -1156,7 +1157,7 @@ async def clear_archivist_topic_force_endpoint(topic_id: str):
     try:
         return clear_archivist_topic_force_request(
             load_runtime_settings(),
-            project_root=BASE_CONFIG_PATH.parent,
+            project_root=RUNTIME_CONFIG_PATH.parent,
             topic_id=topic_id,
         )
     except (ArchivistAdminError, ValueError) as e:
