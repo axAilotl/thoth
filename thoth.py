@@ -17,6 +17,7 @@ from typing import Dict, List, Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core import (
+    ArchivistCompiler,
     Tweet,
     config,
     build_path_layout,
@@ -1701,6 +1702,43 @@ async def cmd_ingest_queue(args):
         print(f"   {result.artifact_type}:{result.artifact_id} -> {result.status}")
 
 
+async def cmd_archivist(args):
+    """Compile archivist topic pages from configured source material."""
+    compiler = ArchivistCompiler(config, project_root=Path.cwd())
+    topic_ids = None
+    if getattr(args, "topics", None):
+        topic_ids = [
+            item.strip().lower()
+            for item in str(args.topics).split(",")
+            if item.strip()
+        ]
+
+    print("📚 Running archivist topic compiler...")
+    results = await compiler.run(
+        topic_ids=topic_ids,
+        force=bool(getattr(args, "force", False)),
+        dry_run=bool(getattr(args, "dry_run", False)),
+        limit=getattr(args, "limit", None),
+    )
+    if not results:
+        print("✅ No archivist topics matched the requested scope")
+        return
+
+    for result in results:
+        page = str(result.page_path) if result.page_path else "-"
+        print(
+            f"   - {result.topic_id}: {result.status} "
+            f"(reason={result.reason}, sources={result.candidate_count}, page={page})"
+        )
+
+    compiled = sum(1 for result in results if result.status == "compiled")
+    skipped = sum(1 for result in results if result.status == "skipped")
+    dry_runs = sum(1 for result in results if result.status == "dry_run")
+    print(
+        f"✅ Archivist complete: compiled={compiled}, skipped={skipped}, dry_run={dry_runs}"
+    )
+
+
 async def cmd_wiki_query(args):
     """Search the compiled wiki and optionally write back a curated result."""
     layout = build_path_layout(config)
@@ -2209,6 +2247,33 @@ Examples:
         help="Index files from the configured Web Clipper source directories",
     )
 
+    archivist_parser = subparsers.add_parser(
+        "archivist",
+        help="Compile archivist topic pages from configured source material",
+    )
+    archivist_parser.add_argument(
+        "--topics",
+        type=str,
+        default=None,
+        help="Comma-separated archivist topic IDs to compile",
+    )
+    archivist_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of topics to evaluate",
+    )
+    archivist_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run selected topics even if the dirty check says they are up to date",
+    )
+    archivist_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Evaluate topics without calling the LLM or writing wiki pages",
+    )
+
     wiki_query_parser = subparsers.add_parser(
         "wiki-query",
         help="Search the compiled wiki and optionally write a curated result back",
@@ -2340,6 +2405,8 @@ Examples:
             asyncio.run(cmd_x_api_sync(args))
         elif args.command == "web-clipper":
             asyncio.run(cmd_web_clipper(args))
+        elif args.command == "archivist":
+            asyncio.run(cmd_archivist(args))
         elif args.command == "wiki-query":
             asyncio.run(cmd_wiki_query(args))
         elif args.command == "wiki-lint":

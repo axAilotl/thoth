@@ -51,6 +51,11 @@ from .archivist_admin import (
     queue_archivist_topic_force,
     save_archivist_registry_text,
 )
+from .archivist_compiler import (
+    ArchivistCompileResult,
+    ArchivistCompiler,
+    ArchivistCompilerError,
+)
 from .path_layout import PathLayout, build_path_layout
 from .x_api_auth import (
     XApiAuthConfig,
@@ -154,6 +159,9 @@ __all__ = [
     'clear_archivist_topic_force_request',
     'queue_archivist_topic_force',
     'save_archivist_registry_text',
+    'ArchivistCompileResult',
+    'ArchivistCompiler',
+    'ArchivistCompilerError',
     'PathLayout',
     'build_path_layout',
     'XApiAuthConfig',

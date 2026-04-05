@@ -110,6 +110,14 @@
                 "system": { "type": "string" }
               },
               "additionalProperties": true
+            },
+            "archivist": {
+              "type": "object",
+              "properties": {
+                "system_file": { "type": "string" },
+                "user_file": { "type": "string" }
+              },
+              "additionalProperties": true
             }
           },
           "additionalProperties": true

@@ -55,6 +55,7 @@ Important config layers:
 - `control.json` is local untracked operator state written by the settings UI.
 - `archivist_topics.example.yaml` is the tracked archivist template.
 - `archivist_topics.yaml` is the live local registry bootstrapped from the template and kept untracked.
+- `prompts/archivist_system.md` and `prompts/archivist_user.md` are tracked prompt files for the archivist compiler and can be edited without changing Python.
 
 Important paths:
 - `paths.vault_dir` is the synced vault root for raw and processed artifacts.
@@ -95,6 +96,7 @@ Use `python thoth.py --help` for the full command list and `python thoth.py <com
 | `github-stars` | Pull GitHub stars directly. | `--limit`, `--no-resume` |
 | `huggingface-likes` | Pull Hugging Face likes directly. | `--limit`, `--no-resume`, `--no-models` |
 | `web-clipper` | Index configured Obsidian Web Clipper source directories. | none |
+| `archivist` | Compile archivist topic pages from selected source material. | `--topics`, `--force`, `--dry-run`, `--limit` |
 | `youtube` | Post-process existing tweets for YouTube metadata and transcripts. | `--limit`, `--no-resume`, `--no-transcripts` |
 | `update-videos` | Refresh existing tweet/thread outputs with video data. | none |
 | `twitter-transcripts` | Run local Whisper over Twitter video media. | `--limit`, `--no-resume`, `--verbose` |
@@ -157,21 +159,21 @@ What exists now:
 - source-type, tag, and term filtering
 - cadence and dirty-check state
 - manual force flags
+- prompt files outside the codebase at `prompts/archivist_system.md` and `prompts/archivist_user.md`
+- a standalone `archivist` CLI command that compiles selected topics
 - settings UI support for editing the registry and viewing parsed topics/state
 - task routing support for a dedicated `archivist` model route
 
 Current archivist workflow:
 
-1. Start `thoth_api.py`.
-2. Open `/settings` and go to the `Archivist` tab.
-3. Edit the live local `archivist_topics.yaml`, either in the built-in editor or on disk.
-4. Configure the `archivist` task route to the provider/model alias you want.
-5. Use `Queue Force` to mark a topic for the next archivist runtime pass.
+1. Edit the live local `archivist_topics.yaml`, either in `/settings` or on disk.
+2. Adjust the archivist prompt files in `prompts/` if you want to change synthesis style or sectioning.
+3. Configure the `archivist` task route to the provider/model alias you want.
+4. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
+5. Use `Queue Force` in `/settings` when you want the next archivist runtime pass to ignore normal cadence.
 
 Current limitation:
-- There is not yet a standalone `thoth.py archivist ...` compile command.
-
-The control plane is shipped. The dedicated archivist page compiler/runtime is still being implemented.
+- The scheduler and direct UI-triggered execution are still separate follow-on work. The compiler itself is now live through the CLI path.
 
 ## Storage Layout
 
