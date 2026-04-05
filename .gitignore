@@ -1,0 +1,44 @@
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+.beads/
+*.db
+.beads-credential-key
+
+# Local environment and tooling
+.env
+archivist_topics.yaml
+config.json
+control.json
+CLAUDE.md
+.claude/
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+
+# Runtime state and caches
+.thoth/
+.thoth_system/
+.thoth_system/**
+.thoth_system/.thoth_system/
+graphql_cache/
+temp_audio/
+media/
+cache/
+llm_cache/
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.log
+realtime_bookmarks.json
+download_tracking.json
+
+# Local agent and scraping state
+.firecrawl/
+
+# Local backups and nested repos
+xmarks_backup/

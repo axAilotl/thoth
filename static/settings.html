@@ -1,0 +1,2776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thoth Settings</title>
+    <link rel="icon" type="image/png" href="/static/thoth.png">
+    <style>
+        :root {
+            --bg-primary: #140f0a;
+            --bg-secondary: #1f1711;
+            --bg-card: #271d15;
+            --bg-elevated: #322418;
+            --accent: #caa25e;
+            --accent-hover: #e1bf83;
+            --text-primary: #fffdf8;
+            --text-secondary: #d7c4a0;
+            --success: #8fbc8f;
+            --warning: #d9a441;
+            --error: #d2775d;
+            --border: #5a4430;
+            --border-strong: #8b6a43;
+            --shadow: rgba(0, 0, 0, 0.34);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+            background:
+                linear-gradient(180deg, rgba(202, 162, 94, 0.06), transparent 24%),
+                linear-gradient(180deg, #110c08 0%, #17110c 36%, #100b07 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            letter-spacing: 0.01em;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        header {
+            background:
+                linear-gradient(180deg, rgba(202, 162, 94, 0.08), transparent 70%),
+                var(--bg-secondary);
+            padding: 20px 0 24px;
+            border-bottom: 1px solid var(--border-strong);
+            margin-bottom: 30px;
+            position: relative;
+        }
+
+        header::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            height: 10px;
+            background:
+                linear-gradient(90deg,
+                    transparent 0,
+                    transparent 3%,
+                    rgba(202, 162, 94, 0.65) 3%,
+                    rgba(202, 162, 94, 0.65) 7%,
+                    transparent 7%,
+                    transparent 12%,
+                    rgba(202, 162, 94, 0.4) 12%,
+                    rgba(202, 162, 94, 0.4) 16%,
+                    transparent 16%,
+                    transparent 100%);
+            opacity: 0.75;
+        }
+
+        header .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            font-family: "Palatino Linotype", "Book Antiqua", "URW Palladio L", serif;
+            font-size: 1.95rem;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        h1 .logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 62px;
+            height: 62px;
+            border: 1px solid var(--border-strong);
+            padding: 4px;
+            background:
+                linear-gradient(180deg, rgba(202, 162, 94, 0.12), rgba(255, 253, 248, 0.02)),
+                rgba(15, 10, 7, 0.55);
+            box-shadow: inset 0 0 0 1px rgba(255, 253, 248, 0.04);
+        }
+        h1 .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .brand-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .brand-kicker {
+            font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+            font-size: 0.68rem;
+            letter-spacing: 0.28em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+        .brand-title {
+            line-height: 1.05;
+        }
+
+        @media (max-width: 680px) {
+            h1 {
+                gap: 10px;
+            }
+            h1 .logo {
+                width: 48px;
+                height: 48px;
+            }
+            .brand-kicker {
+                font-size: 0.6rem;
+                letter-spacing: 0.18em;
+            }
+        }
+
+        .status-badge {
+            padding: 7px 12px;
+            border-radius: 0;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            border: 1px solid currentColor;
+        }
+        .status-badge.connected { background: rgba(143, 188, 143, 0.12); color: var(--success); }
+        .status-badge.disconnected { background: rgba(210, 119, 93, 0.12); color: var(--error); }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border-strong);
+            padding-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            padding: 10px 16px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-bottom: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 0;
+            font-size: 0.82rem;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+        }
+        .tab:hover {
+            background: rgba(202, 162, 94, 0.06);
+            color: var(--text-primary);
+            border-color: rgba(202, 162, 94, 0.18);
+        }
+        .tab.active {
+            background: var(--bg-card);
+            color: var(--accent-hover);
+            font-weight: 600;
+            border-color: var(--border-strong);
+        }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 0;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            box-shadow: 0 18px 34px -28px var(--shadow);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-title {
+            font-family: "Palatino Linotype", "Book Antiqua", "URW Palladio L", serif;
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .card-description { color: var(--text-secondary); font-size: 0.9rem; margin-top: 5px; max-width: 72ch; }
+
+        .form-group { margin-bottom: 16px; }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+        }
+        label .hint { font-weight: normal; color: var(--text-secondary); font-size: 0.8rem; }
+
+        input[type="text"], input[type="password"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(15, 10, 7, 0.55);
+            border: 1px solid var(--border);
+            border-radius: 0;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(26, 18, 12, 0.82);
+        }
+        input[type="password"] { font-family: monospace; }
+
+        .input-group { display: flex; gap: 8px; }
+        .input-group input, .input-group select { flex: 1; }
+        .input-group button { padding: 10px 14px; white-space: nowrap; }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: rgba(15, 10, 7, 0.42);
+            border-radius: 0;
+            border: 1px solid rgba(202, 162, 94, 0.08);
+            margin-bottom: 8px;
+        }
+        .toggle-info { flex: 1; }
+        .toggle-label { font-weight: 500; font-size: 0.9rem; }
+        .toggle-description { font-size: 0.8rem; color: var(--text-secondary); }
+
+        .toggle {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--border);
+            transition: 0.3s;
+            border-radius: 0;
+            border: 1px solid rgba(255, 253, 248, 0.1);
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px; width: 18px;
+            left: 3px; bottom: 3px;
+            background: #f3e8d0;
+            transition: 0.3s;
+            border-radius: 0;
+        }
+        .toggle input:checked + .toggle-slider { background: rgba(202, 162, 94, 0.35); border-color: var(--accent); }
+        .toggle input:checked + .toggle-slider:before { transform: translateX(20px); }
+
+        .btn {
+            padding: 10px 20px;
+            border: 1px solid var(--border-strong);
+            border-radius: 0;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .btn-primary { background: linear-gradient(180deg, rgba(202, 162, 94, 0.18), rgba(202, 162, 94, 0.08)); color: var(--text-primary); }
+        .btn-primary:hover { background: linear-gradient(180deg, rgba(202, 162, 94, 0.26), rgba(202, 162, 94, 0.12)); border-color: var(--accent-hover); }
+        .btn-secondary { background: rgba(15, 10, 7, 0.4); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-secondary:hover { background: rgba(202, 162, 94, 0.08); border-color: var(--border-strong); }
+        .btn-danger { background: rgba(210, 119, 93, 0.12); color: var(--text-primary); border-color: rgba(210, 119, 93, 0.45); }
+        .btn-danger:hover { background: rgba(210, 119, 93, 0.2); }
+        .btn-small { padding: 6px 12px; font-size: 0.8rem; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-group { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+
+        /* Provider Cards */
+        .providers-container { display: flex; flex-direction: column; gap: 16px; }
+
+        .provider-card {
+            background: linear-gradient(180deg, rgba(202, 162, 94, 0.04), transparent 24%), var(--bg-secondary);
+            border-radius: 0;
+            padding: 20px;
+            border: 1px solid var(--border);
+            position: relative;
+        }
+        .provider-card.disabled { opacity: 0.6; }
+
+        .provider-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .provider-type-badge {
+            padding: 4px 10px;
+            border-radius: 0;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            border: 1px solid currentColor;
+        }
+        .provider-type-badge.openai { background: rgba(202, 162, 94, 0.08); color: #d8b677; }
+        .provider-type-badge.anthropic { background: rgba(179, 136, 86, 0.12); color: #d0a36d; }
+        .provider-type-badge.openrouter { background: rgba(156, 120, 74, 0.12); color: #d7b06b; }
+        .provider-type-badge.local { background: rgba(130, 105, 70, 0.12); color: #c5a26e; }
+
+        .provider-name-input {
+            flex: 1;
+            font-size: 1.1rem;
+            font-weight: 600;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-radius: 0;
+        }
+        .provider-name-input:hover { background: rgba(15, 10, 7, 0.45); }
+        .provider-name-input:focus { background: rgba(15, 10, 7, 0.62); outline: 1px solid var(--accent); }
+
+        .provider-controls { display: flex; gap: 8px; align-items: center; }
+
+        .provider-body { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 768px) { .provider-body { grid-template-columns: 1fr; } }
+
+        .provider-section h4 {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .model-select-group { display: flex; gap: 8px; align-items: flex-end; }
+        .model-select-group select, .model-select-group input { flex: 1; }
+        .provider-model-list { display: grid; gap: 10px; }
+        .provider-model-row {
+            display: grid;
+            grid-template-columns: 110px 1fr auto;
+            gap: 8px;
+            align-items: end;
+        }
+        .provider-model-row input[disabled] { opacity: 0.7; }
+
+        .vision-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 0;
+            font-size: 0.75rem;
+            background: rgba(202, 162, 94, 0.12);
+            color: var(--accent-hover);
+            border: 1px solid rgba(202, 162, 94, 0.35);
+        }
+
+        .add-provider-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 16px;
+            border: 2px dashed var(--border);
+            border-radius: 0;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        }
+        .add-provider-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(202, 162, 94, 0.06);
+        }
+
+        /* Task Routing */
+        .task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+
+        .task-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(15, 10, 7, 0.42);
+            border-radius: 0;
+            border: 1px solid rgba(202, 162, 94, 0.08);
+        }
+        .task-name { flex: 1; font-weight: 500; font-size: 0.9rem; }
+        .task-row select { width: 160px; }
+        .task-row input[type="number"] { width: 120px; }
+
+        /* Archivist */
+        .archivist-toolbar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: end;
+            margin-bottom: 18px;
+        }
+        .archivist-toolbar .form-group {
+            flex: 1 1 240px;
+            margin-bottom: 0;
+        }
+        .archivist-toolbar .btn-group {
+            margin-top: 0;
+        }
+        .archivist-editor {
+            min-height: 320px;
+            font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+            resize: vertical;
+        }
+        .archivist-topic-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 14px;
+        }
+        .archivist-topic-card {
+            background: rgba(15, 10, 7, 0.42);
+            border: 1px solid rgba(202, 162, 94, 0.12);
+            padding: 16px;
+        }
+        .archivist-topic-card h3 {
+            font-family: "Palatino Linotype", "Book Antiqua", "URW Palladio L", serif;
+            font-size: 1rem;
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+        }
+        .archivist-topic-card .topic-id {
+            color: var(--accent-hover);
+            font-size: 0.82rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .archivist-topic-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 12px;
+        }
+        .archivist-topic-meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px 12px;
+            margin-bottom: 12px;
+            font-size: 0.84rem;
+        }
+        .archivist-topic-meta strong {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .archivist-pill-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .archivist-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 8px;
+            border: 1px solid rgba(202, 162, 94, 0.18);
+            color: var(--text-primary);
+            background: rgba(202, 162, 94, 0.08);
+            font-size: 0.78rem;
+            letter-spacing: 0.04em;
+        }
+        .archivist-section-label {
+            color: var(--text-secondary);
+            font-size: 0.76rem;
+            text-transform: uppercase;
+            letter-spacing: 0.09em;
+            margin-bottom: 6px;
+        }
+        .archivist-state-box {
+            border: 1px solid rgba(202, 162, 94, 0.1);
+            background: rgba(15, 10, 7, 0.3);
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            font-size: 0.84rem;
+        }
+        .archivist-state-box.error-state {
+            border-color: rgba(210, 119, 93, 0.35);
+            color: var(--error);
+        }
+        .archivist-empty {
+            padding: 20px;
+            border: 1px dashed var(--border);
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        /* Alerts */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 0;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+        .alert-success { background: rgba(143, 188, 143, 0.08); border: 1px solid rgba(143, 188, 143, 0.28); color: var(--success); }
+        .alert-warning { background: rgba(217, 164, 65, 0.08); border: 1px solid rgba(217, 164, 65, 0.28); color: var(--warning); }
+        .alert-error { background: rgba(210, 119, 93, 0.08); border: 1px solid rgba(210, 119, 93, 0.28); color: var(--error); }
+
+        /* Stats */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        .stat-card {
+            background: rgba(15, 10, 7, 0.42);
+            padding: 16px;
+            border-radius: 0;
+            text-align: center;
+            border: 1px solid rgba(202, 162, 94, 0.08);
+        }
+        .stat-value {
+            font-family: "Palatino Linotype", "Book Antiqua", "URW Palladio L", serif;
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--accent-hover);
+        }
+        .stat-label { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: var(--bg-card);
+            border-radius: 0;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 1px solid var(--border-strong);
+        }
+        .modal h3 { margin-bottom: 16px; }
+
+        .provider-type-select {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .provider-type-option {
+            padding: 16px;
+            border: 2px solid var(--border);
+            border-radius: 0;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        .provider-type-option:hover { border-color: var(--accent); }
+        .provider-type-option.selected { border-color: var(--accent); background: rgba(202, 162, 94, 0.08); }
+        .provider-type-option .icon { font-size: 1.5rem; margin-bottom: 6px; }
+        .provider-type-option .name { font-weight: 600; }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 0;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+        footer a { color: var(--accent); }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>
+                <span class="logo"><img src="/static/thoth.png" alt="Thoth"></span>
+                <span class="brand-copy">
+                    <span class="brand-kicker">House of Thoth</span>
+                    <span class="brand-title">Thoth Settings</span>
+                </span>
+            </h1>
+            <span id="connection-status" class="status-badge disconnected">Checking...</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <div id="alerts"></div>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="providers">LLM Providers</button>
+            <button class="tab" data-tab="tasks">Task Routing</button>
+            <button class="tab" data-tab="pipeline">Pipeline</button>
+            <button class="tab" data-tab="paths">Paths</button>
+            <button class="tab" data-tab="archivist">Archivist</button>
+            <button class="tab" data-tab="stats">Stats</button>
+        </div>
+
+        <!-- LLM Providers Tab -->
+        <div id="providers" class="tab-content active">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">LLM Providers</h2>
+                        <p class="card-description">Configure AI providers, API keys, and models. Providers with vision support can be used for image alt-text generation.</p>
+                    </div>
+                </div>
+
+                <div id="providers-list" class="providers-container">
+                    <!-- Providers will be dynamically inserted here -->
+                </div>
+
+                <button class="add-provider-btn" onclick="showAddProviderModal()">
+                    <span>➕</span> Add Provider
+                </button>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveProviders()">💾 Save All Providers</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Task Routing Tab -->
+        <div id="tasks" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Task Routing</h2>
+                        <p class="card-description">Configure which provider and model alias handles each AI task. Translation routing is used for English companion generation.</p>
+                    </div>
+                </div>
+
+                <div class="task-grid">
+                    <div class="task-row">
+                        <span class="task-name">🏷️ Tag Generation</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="task-tags-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <select id="task-tags-provider" onchange="updateTaskModelDropdown('tags')"></select>
+                        <select id="task-tags-model"></select>
+                    </div>
+
+                    <div class="task-row">
+                        <span class="task-name">📝 Summaries</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="task-summary-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <select id="task-summary-provider" onchange="updateTaskModelDropdown('summary')"></select>
+                        <select id="task-summary-model"></select>
+                    </div>
+
+                    <div class="task-row">
+                        <span class="task-name">🖼️ Alt Text (Vision)</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="task-alt_text-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <select id="task-alt_text-provider" onchange="updateTaskModelDropdown('alt_text')"></select>
+                        <select id="task-alt_text-model"></select>
+                    </div>
+
+                    <div class="task-row">
+                        <span class="task-name">🎤 Transcripts</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="task-transcript-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <select id="task-transcript-provider" onchange="updateTaskModelDropdown('transcript')"></select>
+                        <select id="task-transcript-model"></select>
+                    </div>
+
+                    <div class="task-row">
+                        <span class="task-name">↻ Transcript Retry Hours</span>
+                        <span class="status-text">Cooldown after failed transcript cleanup</span>
+                        <input type="number" id="task-transcript-retry-hours" min="0" step="0.25" value="12">
+                    </div>
+
+                    <div class="task-row">
+                        <span class="task-name">🌐 Translation Companions</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="task-translation-enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <select id="task-translation-provider" onchange="updateTaskModelDropdown('translation')"></select>
+                        <select id="task-translation-model"></select>
+                    </div>
+
+                    <div class="task-row">
+                        <span class="task-name">🏛️ Archivist Compilation</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="task-archivist-enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <select id="task-archivist-provider" onchange="updateTaskModelDropdown('archivist')"></select>
+                        <select id="task-archivist-model"></select>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveTasks()">💾 Save Task Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pipeline Tab -->
+        <div id="pipeline" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Pipeline Stages</h2>
+                        <p class="card-description">Enable or disable processing stages</p>
+                    </div>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Enable LLM Features</div>
+                        <div class="toggle-description">Master switch for all AI features</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="enable-llm" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">URL Expansion</div>
+                        <div class="toggle-description">Expand shortened URLs (t.co links)</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="stage-url-expansion" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Media Download</div>
+                        <div class="toggle-description">Download images and videos from tweets</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="stage-media-download" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <h4 style="margin: 16px 0 12px; color: var(--text-secondary);">Documents</h4>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">ArXiv Papers</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="stage-arxiv" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">GitHub READMEs</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="stage-github-readmes" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">HuggingFace READMEs</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="stage-hf-readmes" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">General PDFs</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="stage-pdfs" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <h4 style="margin: 16px 0 12px; color: var(--text-secondary);">Transcripts</h4>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Twitter Videos</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="stage-twitter-videos" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">YouTube Videos</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="stage-youtube-videos" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Keep GraphQL Cache</div>
+                        <div class="toggle-description">Retain cache files after processing</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="keep-cache" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="savePipeline()">💾 Save Pipeline Settings</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Research Sources</h2>
+                        <p class="card-description">Tune arXiv filters and background GitHub/HuggingFace polling. Operator overrides are saved to <code>control.json</code>.</p>
+                    </div>
+                </div>
+
+                <h4 style="margin: 0 0 12px; color: var(--text-secondary);">ArXiv Discovery</h4>
+
+                <div class="form-group">
+                    <label>Discovery Source</label>
+                    <select id="source-arxiv-mode">
+                        <option value="rss">RSS category feeds</option>
+                        <option value="api">Search API</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Feed Format</label>
+                    <select id="source-arxiv-feed-format">
+                        <option value="rss">RSS</option>
+                        <option value="atom">ATOM</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Topics</label>
+                    <textarea id="source-arxiv-topics" rows="3" placeholder="low resource languages, gen ai, hci, ai consciousness"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Category Filters</label>
+                    <textarea id="source-arxiv-categories" rows="3" placeholder="cs.AI, cs.CL, cs.HC, cs.LG, cs.MA"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Result Limit</label>
+                    <input type="number" id="source-arxiv-limit" min="1" step="1" placeholder="50">
+                </div>
+
+                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Obsidian Web Clipper</h4>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Web Clipper Ingest Enabled</div>
+                        <div class="toggle-description">Scan the explicit raw-source allowlist for clipped notes and attachments</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-web-clipper-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>Clipper Note Directories <span class="hint">One per line, relative to the raw root. These must stay inside <code>raw/</code>.</span></label>
+                    <textarea id="source-web-clipper-note-dirs" rows="3" placeholder="web-clipper/notes&#10;web-clipper/drafts"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Clipper Attachment Directories <span class="hint">One per line, relative to the raw root.</span></label>
+                    <textarea id="source-web-clipper-attachment-dirs" rows="3" placeholder="web-clipper/assets"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Note Extensions <span class="hint">Comma or newline separated.</span></label>
+                    <textarea id="source-web-clipper-note-extensions" rows="2" placeholder=".md, .markdown"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Attachment Extensions <span class="hint">Comma or newline separated.</span></label>
+                    <textarea id="source-web-clipper-attachment-extensions" rows="3" placeholder=".png, .jpg, .pdf, .mp4"></textarea>
+                </div>
+
+                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Social Sources</h4>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">GitHub Sync Enabled</div>
+                        <div class="toggle-description">Poll starred repositories for the authenticated GitHub account</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-github-enabled" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>GitHub Username Override</label>
+                    <input type="text" id="source-github-username" placeholder="Optional; leave blank to use the authenticated account">
+                </div>
+
+                <div class="form-group">
+                    <label>GitHub Sync Limit</label>
+                    <input type="number" id="source-github-limit" min="1" step="1" placeholder="100">
+                </div>
+
+                <div class="form-group">
+                    <label>GitHub Token</label>
+                    <input type="password" id="social-github-token" placeholder="Leave blank to keep current token">
+                    <small id="source-github-token-status" style="color: var(--text-secondary); display: block; margin-top: 6px;">Stored: unknown</small>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">HuggingFace Sync Enabled</div>
+                        <div class="toggle-description">Poll liked repos and enrich them with HuggingFace metadata</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-hf-enabled" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>HuggingFace Username</label>
+                    <input type="text" id="source-hf-username" placeholder="HF username">
+                </div>
+
+                <div class="form-group">
+                    <label>HuggingFace Sync Limit</label>
+                    <input type="number" id="source-hf-limit" min="1" step="1" placeholder="100">
+                </div>
+
+                <div class="form-group">
+                    <label>HuggingFace Token</label>
+                    <input type="password" id="social-hf-token" placeholder="Leave blank to keep current token">
+                    <small id="source-hf-token-status" style="color: var(--text-secondary); display: block; margin-top: 6px;">Stored: unknown</small>
+                </div>
+
+                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">X API Bookmarks</h4>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">X API Sync Enabled</div>
+                        <div class="toggle-description">Use the authenticated X account for bookmark backfill and mobile coverage</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-x-api-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>X OAuth Client ID <span class="hint">Required for PKCE. This should be the OAuth 2.0 client ID from X app settings.</span></label>
+                    <input type="text" id="source-x-api-client-id" placeholder="OAuth 2.0 client ID">
+                </div>
+
+                <div class="form-group">
+                    <label>X OAuth Redirect URI</label>
+                    <input type="text" id="source-x-api-redirect-uri" placeholder="http://127.0.0.1:8000/api/x-api/auth/callback">
+                </div>
+
+                <div class="form-group">
+                    <label>X Client Secret <span class="hint">Stored in <code>.env</code> as <code>X_API_CLIENT_SECRET</code>.</span></label>
+                    <input type="password" id="social-x-api-client-secret" placeholder="Leave blank to keep current secret">
+                    <small id="source-x-api-secret-status" style="color: var(--text-secondary); display: block; margin-top: 6px;">Stored: unknown</small>
+                </div>
+
+                <div class="card" style="margin-top: 16px; padding: 16px;">
+                    <div style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start;">
+                        <div>
+                            <div class="card-title" style="font-size: 1rem;">X Account Association</div>
+                            <p class="card-description" style="margin-top: 4px;">Save the X settings, then start the PKCE flow to connect the local Thoth instance to your X account.</p>
+                        </div>
+                        <div class="btn-group" style="margin-top: 0;">
+                            <button class="btn btn-secondary btn-small" onclick="refreshXApiStatus()">🔄 Refresh Status</button>
+                            <button class="btn btn-secondary btn-small" onclick="refreshXApiAuth()">♻️ Refresh Token</button>
+                            <button class="btn btn-primary btn-small" onclick="startXApiAuth()">🔐 Connect X Account</button>
+                            <button class="btn btn-primary btn-small" onclick="runXApiSync()">📥 Run Bookmark Sync</button>
+                        </div>
+                    </div>
+                    <div style="margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                        <div class="stat-card" style="text-align: left;">
+                            <div class="stat-label">Status</div>
+                            <div id="x-api-auth-status" style="margin-top: 6px; font-weight: 600;">Unknown</div>
+                        </div>
+                        <div class="stat-card" style="text-align: left;">
+                            <div class="stat-label">User</div>
+                            <div id="x-api-auth-user" style="margin-top: 6px; font-weight: 600;">-</div>
+                        </div>
+                        <div class="stat-card" style="text-align: left;">
+                            <div class="stat-label">Expires</div>
+                            <div id="x-api-auth-expires" style="margin-top: 6px; font-weight: 600;">-</div>
+                        </div>
+                        <div class="stat-card" style="text-align: left;">
+                            <div class="stat-label">Scopes</div>
+                            <div id="x-api-auth-scopes" style="margin-top: 6px; font-weight: 600;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Include Models</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-hf-models" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Include Datasets</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-hf-datasets" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Include Spaces</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-hf-spaces" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Automation</h4>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Background Social Sync</div>
+                        <div class="toggle-description">Run GH/HF polling in the API service on a fixed interval</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="automation-social-enabled" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Run On Startup</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="automation-social-run-on-startup">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>Sync Interval (Hours)</label>
+                    <input type="number" id="automation-social-interval-hours" min="5" step="1" placeholder="8">
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Background X Bookmark Sync</div>
+                        <div class="toggle-description">Run X bookmark backfill in the API service on a fixed interval</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="automation-x-api-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Run X Sync On Startup</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="automation-x-api-run-on-startup">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>X Sync Interval (Hours)</label>
+                    <input type="number" id="automation-x-api-interval-hours" min="5" step="1" placeholder="8">
+                </div>
+
+                <div class="form-group">
+                    <label>X Sync Page Size</label>
+                    <input type="number" id="automation-x-api-max-results" min="1" max="100" step="1" placeholder="100">
+                </div>
+
+                <div class="form-group">
+                    <label>X Sync Max Pages <span class="hint">Leave blank for unbounded checkpointed sync.</span></label>
+                    <input type="number" id="automation-x-api-max-pages" min="1" step="1" placeholder="">
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveSources()">💾 Save Source Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Paths Tab -->
+        <div id="paths" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">File Paths</h2>
+                        <p class="card-description">Configure canonical vault and system locations. Relative paths resolve from the repo root unless noted otherwise.</p>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Knowledge Vault Directory</label>
+                    <input type="text" id="path-vault" placeholder="knowledge_vault">
+                </div>
+                <div class="form-group">
+                    <label>Raw Source Directory <span class="hint">Relative to the vault root.</span></label>
+                    <input type="text" id="path-raw" placeholder="raw">
+                </div>
+                <div class="form-group">
+                    <label>Library Directory <span class="hint">Relative to the vault root.</span></label>
+                    <input type="text" id="path-library" placeholder="library">
+                </div>
+                <div class="form-group">
+                    <label>Wiki Directory <span class="hint">Relative to the vault parent so the compiled wiki stays outside the raw vault.</span></label>
+                    <input type="text" id="path-wiki" placeholder="wiki">
+                </div>
+                <div class="form-group">
+                    <label>System Directory <span class="hint">Keeps DBs, caches, auth, temp files, and logs outside sync.</span></label>
+                    <input type="text" id="path-system" placeholder=".thoth_system">
+                </div>
+                <div class="form-group">
+                    <label>GraphQL Cache Directory</label>
+                    <input type="text" id="path-cache" placeholder="graphql_cache">
+                </div>
+                <div class="form-group">
+                    <label>Shared Media Directory</label>
+                    <input type="text" id="path-media" placeholder="media">
+                </div>
+                <div class="form-group">
+                    <label>Images Directory</label>
+                    <input type="text" id="path-images" placeholder="images">
+                </div>
+                <div class="form-group">
+                    <label>Videos Directory</label>
+                    <input type="text" id="path-videos" placeholder="videos">
+                </div>
+                <div class="form-group">
+                    <label>Digests Directory <span class="hint">Relative to the vault root.</span></label>
+                    <input type="text" id="path-digests" placeholder="_digests">
+                </div>
+                <div class="form-group">
+                    <label>Archivist Topic Registry</label>
+                    <input type="text" id="path-archivist-topics" placeholder="archivist_topics.yaml">
+                </div>
+                <div class="form-group">
+                    <label>Bookmarks File</label>
+                    <input type="text" id="path-bookmarks" placeholder="twitter-bookmarks-merged.json">
+                </div>
+                <div class="form-group">
+                    <label>Cookies File</label>
+                    <input type="text" id="path-cookies" placeholder="twitter_cookies.json">
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="savePaths()">💾 Save Paths</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Resolved Runtime Layout</h2>
+                        <p class="card-description">Read-only runtime resolution from the current merged config.</p>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Resolved Raw Root</label>
+                    <input type="text" id="runtime-raw-root" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Resolved Library Root</label>
+                    <input type="text" id="runtime-library-root" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Resolved Wiki Root</label>
+                    <input type="text" id="runtime-wiki-root" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Resolved System Root</label>
+                    <input type="text" id="runtime-system-root" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Resolved Archivist Registry</label>
+                    <input type="text" id="runtime-archivist-registry" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Archivist Topic IDs <span class="hint">Loaded from the registry when available.</span></label>
+                    <textarea id="runtime-archivist-topics" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Web Clipper Watch Roots</label>
+                    <textarea id="runtime-web-clipper-watch-dirs" rows="4" readonly></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Archivist Tab -->
+        <div id="archivist" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Archivist Control</h2>
+                        <p class="card-description">Manage the archivist topic registry directly from the UI. The raw YAML stays authoritative; parsed topics and run state are shown below for validation.</p>
+                    </div>
+                </div>
+
+                <div class="archivist-toolbar">
+                    <div class="form-group">
+                        <label>Archivist Route</label>
+                        <input type="text" id="archivist-route-summary" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Registry File</label>
+                        <input type="text" id="archivist-registry-path" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Topic Count</label>
+                        <input type="text" id="archivist-topic-count" readonly>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-secondary" onclick="loadArchivistRegistry()">↻ Reload Registry</button>
+                        <button class="btn btn-primary" onclick="saveArchivistRegistry()">💾 Save Registry</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Registry YAML</label>
+                    <textarea id="archivist-registry-editor" class="archivist-editor" spellcheck="false"></textarea>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Parsed Topics</h2>
+                        <p class="card-description">Read-only normalized view of the registry plus durable topic state. Queue force only marks the next archivist run; it does not bypass other safety checks.</p>
+                    </div>
+                </div>
+
+                <div id="archivist-registry-error" class="alert alert-error" style="display:none;"></div>
+                <div id="archivist-topics-list" class="archivist-topic-list"></div>
+            </div>
+        </div>
+
+        <!-- Stats Tab -->
+        <div id="stats" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Processing Statistics</h2>
+                        <p class="card-description">Current status of your knowledge vault</p>
+                    </div>
+                    <button class="btn btn-secondary btn-small" onclick="refreshStats()">🔄 Refresh</button>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-bookmarks">-</div>
+                        <div class="stat-label">Current Bookmarks</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-queue">-</div>
+                        <div class="stat-label">Current Processed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-pending">-</div>
+                        <div class="stat-label">Queue Pending</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-processed">-</div>
+                        <div class="stat-label">Queue Processed (Lifetime)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Provider Modal -->
+    <div id="add-provider-modal" class="modal-overlay">
+        <div class="modal">
+            <h3>Add New Provider</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">Select the provider type:</p>
+
+            <div class="provider-type-select">
+                <div class="provider-type-option" data-type="openai" onclick="selectProviderType('openai')">
+                    <div class="icon">🤖</div>
+                    <div class="name">OpenAI</div>
+                </div>
+                <div class="provider-type-option" data-type="anthropic" onclick="selectProviderType('anthropic')">
+                    <div class="icon">🧠</div>
+                    <div class="name">Anthropic</div>
+                </div>
+                <div class="provider-type-option" data-type="openrouter" onclick="selectProviderType('openrouter')">
+                    <div class="icon">🌐</div>
+                    <div class="name">OpenRouter</div>
+                </div>
+                <div class="provider-type-option" data-type="local" onclick="selectProviderType('local')">
+                    <div class="icon">💻</div>
+                    <div class="name">Local (Ollama)</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Provider Name <span class="hint">(unique identifier)</span></label>
+                <input type="text" id="new-provider-name" placeholder="e.g., openai-gpt4, anthropic-claude">
+            </div>
+
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="addProvider()">Add Provider</button>
+                <button class="btn btn-secondary" onclick="hideAddProviderModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        Thoth Settings &middot; <a href="https://github.com/anthropics/xmarks">GitHub</a>
+    </footer>
+
+    <script>
+        const API_BASE = '';
+        const TASK_ROUTE_KEYS = ['tags', 'summary', 'alt_text', 'transcript', 'translation', 'archivist'];
+        let providersConfig = {};
+        let tasksConfig = {};
+        let modelsCache = {};
+        let selectedNewProviderType = null;
+        let xApiAuthWindow = null;
+        let archivistRegistryState = null;
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        function showAlert(message, type = 'success') {
+            const alerts = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.innerHTML = `<span>${type === 'success' ? '✓' : type === 'error' ? '✕' : '⚠'}</span> ${message}`;
+            alerts.appendChild(alert);
+            setTimeout(() => alert.remove(), 5000);
+        }
+
+        function toggleVisibility(inputId) {
+            const input = document.getElementById(inputId);
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        async function checkConnection() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                const badge = document.getElementById('connection-status');
+                if (data.status === 'healthy') {
+                    badge.textContent = 'Connected';
+                    badge.className = 'status-badge connected';
+                } else {
+                    throw new Error('Unhealthy');
+                }
+            } catch (e) {
+                const badge = document.getElementById('connection-status');
+                badge.textContent = 'Disconnected';
+                badge.className = 'status-badge disconnected';
+            }
+        }
+
+        function getEnvKeyForType(providerType) {
+            const envKeys = {
+                'openai': 'OPENAI_API_KEY',
+                'anthropic': 'ANTHROPIC_API',
+                'openrouter': 'OPEN_ROUTER_API_KEY',
+                'local': null
+            };
+            return envKeys[providerType];
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function ensureProviderModels(provider) {
+            if (!provider.models || typeof provider.models !== 'object') {
+                provider.models = {};
+            }
+            if (!provider.models.default || typeof provider.models.default !== 'object') {
+                provider.models.default = { id: '' };
+            }
+            return provider.models;
+        }
+
+        function getProviderModelEntries(provider) {
+            return Object.entries(ensureProviderModels(provider)).sort(([left], [right]) => {
+                if (left === 'default') return -1;
+                if (right === 'default') return 1;
+                return left.localeCompare(right);
+            });
+        }
+
+        function getProviderModelSuggestions(providerName, provider) {
+            const suggestions = new Set();
+            const cached = modelsCache[providerName] || [];
+            cached.forEach(model => {
+                const modelId = typeof model === 'string' ? model : model.id;
+                if (modelId) suggestions.add(modelId);
+            });
+            getProviderModelEntries(provider).forEach(([_, modelCfg]) => {
+                const modelId = modelCfg?.id || '';
+                if (modelId) suggestions.add(modelId);
+            });
+            return Array.from(suggestions).sort();
+        }
+
+        function renderProviderModels(name, provider) {
+            const datalistId = `provider-model-options-${name}`;
+            const datalist = getProviderModelSuggestions(name, provider)
+                .map(modelId => `<option value="${escapeHtml(modelId)}"></option>`)
+                .join('');
+            const rows = getProviderModelEntries(provider).map(([alias, modelCfg]) => `
+                <div class="provider-model-row">
+                    <div class="form-group">
+                        <label>Alias</label>
+                        <input type="text"
+                               value="${escapeHtml(alias)}"
+                               ${alias === 'default' ? 'disabled' : ''}
+                               onchange="renameProviderModelAlias('${name}', '${alias}', this.value)">
+                    </div>
+                    <div class="form-group">
+                        <label>Model ID</label>
+                        <input type="text"
+                               list="${datalistId}"
+                               value="${escapeHtml(modelCfg?.id || '')}"
+                               placeholder="provider/model-id"
+                               onchange="updateProviderModelId('${name}', '${alias}', this.value)">
+                    </div>
+                    ${alias === 'default'
+                        ? '<span></span>'
+                        : `<button class="btn btn-danger btn-small" onclick="removeProviderModelAlias('${name}', '${alias}')" title="Remove alias">🗑</button>`}
+                </div>
+            `).join('');
+
+            return `
+                <datalist id="${datalistId}">${datalist}</datalist>
+                <div class="provider-model-list">${rows}</div>
+                <div class="btn-group">
+                    <button class="btn btn-secondary btn-small" onclick="addProviderModelAlias('${name}')">➕ Add Alias</button>
+                    <button class="btn btn-secondary btn-small" onclick="fetchModels('${name}')" title="Fetch models from API">
+                        <span id="fetch-spinner-${name}" style="display:none" class="loading-spinner"></span>
+                        <span id="fetch-text-${name}">🔄 Fetch Models</span>
+                    </button>
+                </div>
+            `;
+        }
+
+        function renderProviderCard(name, provider) {
+            const providerType = provider.type || name;
+            const isEnabled = provider.enabled !== false;
+            const hasVision = provider.has_vision === true;
+            const apiKey = provider.api_key || '';
+            const baseUrl = provider.base_url || '';
+            ensureProviderModels(provider);
+
+            return `
+                <div class="provider-card ${!isEnabled ? 'disabled' : ''}" data-provider="${name}">
+                    <div class="provider-header">
+                        <span class="provider-type-badge ${providerType}">${providerType}</span>
+                        <input type="text" class="provider-name-input" value="${name}"
+                               onchange="renameProvider('${name}', this.value)" title="Provider name">
+                        <div class="provider-controls">
+                            ${hasVision ? '<span class="vision-badge">👁 Vision</span>' : ''}
+                            <label class="toggle" title="Enable/Disable">
+                                <input type="checkbox" ${isEnabled ? 'checked' : ''}
+                                       onchange="toggleProvider('${name}', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <button class="btn btn-danger btn-small" onclick="removeProvider('${name}')" title="Remove">🗑</button>
+                        </div>
+                    </div>
+                    <div class="provider-body">
+                        <div class="provider-section">
+                            <h4>Configuration</h4>
+                            ${providerType !== 'local' ? `
+                            <div class="form-group">
+                                <label>API Key</label>
+                                <div class="input-group">
+                                    <input type="password" id="apikey-${name}" value="${apiKey}"
+                                           placeholder="${apiKey ? '••••••••' : 'Enter API key'}"
+                                           onchange="updateProviderField('${name}', 'api_key', this.value)">
+                                    <button class="btn btn-secondary btn-small" onclick="toggleVisibility('apikey-${name}')">👁</button>
+                                </div>
+                            </div>
+                            ` : ''}
+                            ${providerType === 'openrouter' || providerType === 'local' ? `
+                            <div class="form-group">
+                                <label>Base URL</label>
+                                <input type="text" value="${baseUrl}" placeholder="${providerType === 'local' ? 'http://localhost:11434/v1' : 'https://openrouter.ai/api/v1'}"
+                                       onchange="updateProviderField('${name}', 'base_url', this.value)">
+                            </div>
+                            ` : ''}
+                            <div class="toggle-container">
+                                <div class="toggle-info">
+                                    <div class="toggle-label">Has Vision Support</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" ${hasVision ? 'checked' : ''}
+                                           onchange="updateProviderField('${name}', 'has_vision', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="provider-section">
+                            <h4>Model Aliases</h4>
+                            ${renderProviderModels(name, provider)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderProviders() {
+            const container = document.getElementById('providers-list');
+            container.innerHTML = Object.entries(providersConfig)
+                .map(([name, provider]) => renderProviderCard(name, provider))
+                .join('');
+            updateTaskProviderDropdowns();
+        }
+
+        function updateProviderField(name, field, value) {
+            if (!providersConfig[name]) return;
+            if (field === 'has_vision') {
+                providersConfig[name].has_vision = value;
+            } else if (field === 'api_key') {
+                providersConfig[name].api_key = value;
+            } else if (field === 'base_url') {
+                providersConfig[name].base_url = value;
+            }
+            // Re-render to update vision badge
+            if (field === 'has_vision') {
+                renderProviders();
+            }
+        }
+
+        function updateProviderModelId(name, alias, modelId) {
+            if (!providersConfig[name]) return;
+            const models = ensureProviderModels(providersConfig[name]);
+            if (!models[alias]) models[alias] = {};
+            models[alias].id = modelId;
+        }
+
+        function renameProviderModelAlias(name, oldAlias, nextAlias) {
+            if (!providersConfig[name]) return;
+            const trimmed = (nextAlias || '').trim();
+            if (!trimmed || trimmed === oldAlias) {
+                renderProviders();
+                return;
+            }
+            if (trimmed === 'default' && oldAlias !== 'default') {
+                showAlert('Only the built-in default alias can use the name "default"', 'error');
+                renderProviders();
+                return;
+            }
+
+            const models = ensureProviderModels(providersConfig[name]);
+            if (models[trimmed]) {
+                showAlert(`Model alias "${trimmed}" already exists on ${name}`, 'error');
+                renderProviders();
+                return;
+            }
+
+            models[trimmed] = models[oldAlias] || { id: '' };
+            delete models[oldAlias];
+            renderProviders();
+        }
+
+        function addProviderModelAlias(name) {
+            if (!providersConfig[name]) return;
+            const models = ensureProviderModels(providersConfig[name]);
+            let counter = 1;
+            let alias = `model_${counter}`;
+            while (models[alias]) {
+                counter += 1;
+                alias = `model_${counter}`;
+            }
+            models[alias] = { id: '' };
+            renderProviders();
+        }
+
+        function removeProviderModelAlias(name, alias) {
+            if (!providersConfig[name] || alias === 'default') return;
+            const models = ensureProviderModels(providersConfig[name]);
+            delete models[alias];
+            renderProviders();
+        }
+
+        function toggleProvider(name, enabled) {
+            if (!providersConfig[name]) return;
+            providersConfig[name].enabled = enabled;
+            renderProviders();
+        }
+
+        function renameProvider(oldName, newName) {
+            if (oldName === newName || !newName.trim()) return;
+            if (providersConfig[newName]) {
+                showAlert('A provider with that name already exists', 'error');
+                renderProviders();
+                return;
+            }
+            providersConfig[newName] = providersConfig[oldName];
+            delete providersConfig[oldName];
+            renderProviders();
+        }
+
+        function removeProvider(name) {
+            if (!confirm(`Remove provider "${name}"?`)) return;
+            delete providersConfig[name];
+            renderProviders();
+        }
+
+        function showAddProviderModal() {
+            document.getElementById('add-provider-modal').classList.add('active');
+            selectedNewProviderType = null;
+            document.querySelectorAll('.provider-type-option').forEach(o => o.classList.remove('selected'));
+            document.getElementById('new-provider-name').value = '';
+        }
+
+        function hideAddProviderModal() {
+            document.getElementById('add-provider-modal').classList.remove('active');
+        }
+
+        function selectProviderType(type) {
+            selectedNewProviderType = type;
+            document.querySelectorAll('.provider-type-option').forEach(o => {
+                o.classList.toggle('selected', o.dataset.type === type);
+            });
+            // Auto-generate name suggestion
+            const nameInput = document.getElementById('new-provider-name');
+            if (!nameInput.value) {
+                let baseName = type;
+                let counter = 1;
+                while (providersConfig[baseName]) {
+                    baseName = `${type}-${counter++}`;
+                }
+                nameInput.value = baseName;
+            }
+        }
+
+        function addProvider() {
+            if (!selectedNewProviderType) {
+                showAlert('Please select a provider type', 'error');
+                return;
+            }
+            const name = document.getElementById('new-provider-name').value.trim();
+            if (!name) {
+                showAlert('Please enter a provider name', 'error');
+                return;
+            }
+            if (providersConfig[name]) {
+                showAlert('A provider with that name already exists', 'error');
+                return;
+            }
+
+            // Find existing provider of same type to copy API key
+            let existingApiKey = '';
+            for (const [pName, pConfig] of Object.entries(providersConfig)) {
+                if ((pConfig.type || pName) === selectedNewProviderType && pConfig.api_key) {
+                    existingApiKey = pConfig.api_key;
+                    break;
+                }
+            }
+
+            const defaultUrls = {
+                'openrouter': 'https://openrouter.ai/api/v1',
+                'local': 'http://localhost:11434/v1'
+            };
+
+            providersConfig[name] = {
+                type: selectedNewProviderType,
+                enabled: true,
+                has_vision: false,
+                api_key: existingApiKey,
+                base_url: defaultUrls[selectedNewProviderType] || '',
+                models: { default: { id: '' } }
+            };
+
+            hideAddProviderModal();
+            renderProviders();
+            showAlert(`Provider "${name}" added`);
+        }
+
+        async function fetchModels(providerName) {
+            const provider = providersConfig[providerName];
+            if (!provider) return;
+
+            const spinner = document.getElementById(`fetch-spinner-${providerName}`);
+            const text = document.getElementById(`fetch-text-${providerName}`);
+
+            spinner.style.display = 'inline-block';
+            text.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/providers/${providerName}/models`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: provider.type || providerName,
+                        api_key: provider.api_key,
+                        base_url: provider.base_url
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to fetch models');
+
+                const data = await response.json();
+                modelsCache[providerName] = data.models || [];
+                renderProviders();
+                showAlert(`Loaded ${modelsCache[providerName].length} models for ${providerName}`);
+            } catch (e) {
+                showAlert(`Failed to fetch models: ${e.message}`, 'error');
+            } finally {
+                spinner.style.display = 'none';
+                text.style.display = 'inline';
+            }
+        }
+
+        function getTaskProviderOptions(task) {
+            const enabledProviders = Object.entries(providersConfig)
+                .filter(([_, p]) => p.enabled !== false);
+            const visionProviders = enabledProviders.filter(([_, p]) => p.has_vision);
+            return task === 'alt_text' ? visionProviders : enabledProviders;
+        }
+
+        function updateTaskModelDropdown(task) {
+            const providerSelect = document.getElementById(`task-${task}-provider`);
+            const modelSelect = document.getElementById(`task-${task}-model`);
+            if (!providerSelect || !modelSelect) return;
+
+            const providerName = providerSelect.value;
+            const provider = providersConfig[providerName];
+            if (!provider) {
+                modelSelect.innerHTML = '<option value="">default</option>';
+                return;
+            }
+
+            const currentValue = modelSelect.value;
+            const entries = getProviderModelEntries(provider);
+            const aliases = entries.map(([alias]) => alias);
+            const options = entries.map(([alias, modelCfg]) => {
+                const label = alias === 'default'
+                    ? `default (${modelCfg?.id || 'unset'})`
+                    : `${alias} (${modelCfg?.id || 'unset'})`;
+                return `<option value="${escapeHtml(alias)}">${escapeHtml(label)}</option>`;
+            });
+
+            if (currentValue && !aliases.includes(currentValue)) {
+                options.unshift(
+                    `<option value="${escapeHtml(currentValue)}">raw: ${escapeHtml(currentValue)}</option>`
+                );
+            }
+
+            modelSelect.innerHTML = options.join('');
+            if (currentValue && (aliases.includes(currentValue) || !aliases.length)) {
+                modelSelect.value = currentValue;
+            } else if (currentValue && !aliases.includes(currentValue)) {
+                modelSelect.value = currentValue;
+            } else {
+                modelSelect.value = aliases.includes('default') ? 'default' : (aliases[0] || '');
+            }
+        }
+
+        function updateTaskProviderDropdowns() {
+            TASK_ROUTE_KEYS.forEach(task => {
+                const select = document.getElementById(`task-${task}-provider`);
+                if (!select) return;
+
+                const currentValue = select.value;
+                const providers = getTaskProviderOptions(task);
+
+                select.innerHTML = providers.map(([name, _]) =>
+                    `<option value="${name}" ${name === currentValue ? 'selected' : ''}>${name}</option>`
+                ).join('');
+
+                // Restore selection if still valid
+                if (currentValue && providers.some(([n]) => n === currentValue)) {
+                    select.value = currentValue;
+                } else if (providers.length > 0) {
+                    select.value = providers[0][0];
+                }
+
+                updateTaskModelDropdown(task);
+            });
+        }
+
+        function splitCsv(value) {
+            return (value || '')
+                .split(',')
+                .map(item => item.trim())
+                .filter(Boolean);
+        }
+
+        function csvFromValue(value) {
+            if (Array.isArray(value)) {
+                return value.join(', ');
+            }
+            return value || '';
+        }
+
+        function splitListField(value) {
+            return (value || '')
+                .split(/[\n,]+/)
+                .map(item => item.trim())
+                .filter(Boolean);
+        }
+
+        function multilineFromValue(value) {
+            if (Array.isArray(value)) {
+                return value.join('\n');
+            }
+            return value || '';
+        }
+
+        function setFieldValue(id, value) {
+            const element = document.getElementById(id);
+            if (!element) return;
+            element.value = value || '';
+        }
+
+        function formatOptionalDate(value) {
+            if (!value) return 'Never';
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+        }
+
+        function joinList(values) {
+            return Array.isArray(values) && values.length > 0 ? values.join(', ') : 'None';
+        }
+
+        function renderArchivistPills(values) {
+            if (!Array.isArray(values) || values.length === 0) {
+                return '<span class="archivist-pill">None</span>';
+            }
+            return values
+                .map(value => `<span class="archivist-pill">${escapeHtml(value)}</span>`)
+                .join('');
+        }
+
+        function getTaskRouteSummary(task) {
+            const taskConfig = tasksConfig[task] || {};
+            const enabled = taskConfig.enabled !== false;
+            const route = taskConfig.fallback?.[0] || {};
+            if (!enabled) {
+                return 'Disabled';
+            }
+            if (!route.provider) {
+                return 'No route selected';
+            }
+            return route.model
+                ? `${route.provider} / ${route.model}`
+                : `${route.provider} / default`;
+        }
+
+        function updateArchivistRouteSummary() {
+            setFieldValue('archivist-route-summary', getTaskRouteSummary('archivist'));
+        }
+
+        function renderArchivistTopics(topics) {
+            const container = document.getElementById('archivist-topics-list');
+            if (!container) return;
+
+            if (!Array.isArray(topics) || topics.length === 0) {
+                container.innerHTML = '<div class="archivist-empty">No archivist topics are defined yet.</div>';
+                return;
+            }
+
+            container.innerHTML = topics.map(topic => {
+                const state = topic.state || {};
+                const stateError = topic.state_error
+                    ? `<div class="archivist-state-box error-state">${escapeHtml(topic.state_error)}</div>`
+                    : `
+                        <div class="archivist-state-box">
+                            <div><strong>Last Success</strong> ${escapeHtml(formatOptionalDate(state.last_success_at))}</div>
+                            <div><strong>Last Run</strong> ${escapeHtml(formatOptionalDate(state.last_run_at))}</div>
+                            <div><strong>Next Due</strong> ${escapeHtml(formatOptionalDate(state.next_due_at))}</div>
+                            <div><strong>Last Route</strong> ${escapeHtml(
+                                state.last_model_provider
+                                    ? `${state.last_model_provider} / ${state.last_model || 'default'}`
+                                    : 'Never run'
+                            )}</div>
+                            <div><strong>Last Candidate Count</strong> ${escapeHtml(String(state.last_candidate_count || 0))}</div>
+                            <div><strong>Force Queued</strong> ${escapeHtml(formatOptionalDate(state.force_requested_at))}</div>
+                        </div>
+                    `;
+
+                const forceButtons = topic.allow_manual_force
+                    ? `
+                        <div class="btn-group">
+                            <button class="btn btn-secondary btn-small" onclick="queueArchivistForce('${escapeHtml(topic.id)}')">Queue Force</button>
+                            <button class="btn btn-secondary btn-small" onclick="clearArchivistForce('${escapeHtml(topic.id)}')">Clear Force</button>
+                        </div>
+                    `
+                    : '';
+
+                return `
+                    <article class="archivist-topic-card">
+                        <h3>${escapeHtml(topic.title)}</h3>
+                        <div class="topic-id">${escapeHtml(topic.id)}</div>
+                        ${topic.description ? `<p>${escapeHtml(topic.description)}</p>` : ''}
+                        <div class="archivist-topic-meta">
+                            <div><strong>Output</strong>${escapeHtml(topic.output_path)}</div>
+                            <div><strong>Cadence</strong>${escapeHtml(String(topic.cadence_hours))}h</div>
+                            <div><strong>Max Sources</strong>${escapeHtml(topic.max_sources == null ? 'Unlimited' : String(topic.max_sources))}</div>
+                            <div><strong>Manual Force</strong>${topic.allow_manual_force ? 'Allowed' : 'Disabled'}</div>
+                        </div>
+                        ${stateError}
+                        <div class="archivist-section-label">Include Roots</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_roots)}</div>
+                        <div class="archivist-section-label">Exclude Roots</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_roots)}</div>
+                        <div class="archivist-section-label">Source Types</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(topic.source_types)}</div>
+                        <div class="archivist-section-label">Include Tags</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_tags)}</div>
+                        <div class="archivist-section-label">Exclude Tags</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_tags)}</div>
+                        <div class="archivist-section-label">Include Terms</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_terms)}</div>
+                        <div class="archivist-section-label">Exclude Terms</div>
+                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_terms)}</div>
+                        ${forceButtons}
+                    </article>
+                `;
+            }).join('');
+        }
+
+        function renderArchivistRegistry(payload) {
+            archivistRegistryState = payload || {};
+            setFieldValue('archivist-registry-path', archivistRegistryState.registry_path || '');
+            setFieldValue('archivist-registry-editor', archivistRegistryState.raw_text || '');
+            setFieldValue('archivist-topic-count', String((archivistRegistryState.topics || []).length));
+            updateArchivistRouteSummary();
+
+            const errorNode = document.getElementById('archivist-registry-error');
+            if (archivistRegistryState.error) {
+                errorNode.style.display = 'flex';
+                errorNode.innerHTML = `<span>✕</span> ${escapeHtml(archivistRegistryState.error)}`;
+            } else {
+                errorNode.style.display = 'none';
+                errorNode.textContent = '';
+            }
+
+            renderArchivistTopics(archivistRegistryState.topics || []);
+        }
+
+        function normalizeXApiUser(userPayload) {
+            if (!userPayload || typeof userPayload !== 'object') {
+                return null;
+            }
+            if (userPayload.data && typeof userPayload.data === 'object') {
+                return userPayload.data;
+            }
+            return userPayload;
+        }
+
+        function consumeXApiAuthQueryParams() {
+            const params = new URLSearchParams(window.location.search);
+            const authState = params.get('x_api_auth');
+            if (!authState) {
+                return;
+            }
+
+            const username = params.get('x_user');
+            const error = params.get('x_error');
+            if (authState === 'ok') {
+                showAlert(username ? `Connected X account @${username}` : 'Connected X account');
+            } else {
+                showAlert(error ? `X auth failed: ${error}` : 'X auth failed', 'error');
+            }
+
+            params.delete('x_api_auth');
+            params.delete('x_user');
+            params.delete('x_error');
+            const nextQuery = params.toString();
+            const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}`;
+            window.history.replaceState({}, document.title, nextUrl);
+        }
+
+        async function refreshXApiStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/x-api/auth/status`);
+                if (!response.ok) throw new Error('Failed to load X auth status');
+                const status = await response.json();
+                const userData = normalizeXApiUser(status.user);
+
+                const label = !status.enabled
+                    ? 'Disabled'
+                    : status.has_token
+                        ? (status.token_expired ? 'Token expired' : 'Connected')
+                        : (status.pending ? 'Pending authorization' : 'Not connected');
+
+                const user = userData?.username
+                    ? `@${userData.username}`
+                    : (userData?.id || '-');
+
+                document.getElementById('x-api-auth-status').textContent = label;
+                document.getElementById('x-api-auth-user').textContent = user;
+                document.getElementById('x-api-auth-expires').textContent = status.expires_at || '-';
+                document.getElementById('x-api-auth-scopes').textContent =
+                    Array.isArray(status.scopes) && status.scopes.length > 0
+                        ? status.scopes.join(', ')
+                        : '-';
+            } catch (e) {
+                document.getElementById('x-api-auth-status').textContent = 'Unavailable';
+                document.getElementById('x-api-auth-user').textContent = '-';
+                document.getElementById('x-api-auth-expires').textContent = '-';
+                document.getElementById('x-api-auth-scopes').textContent = '-';
+            }
+        }
+
+        async function startXApiAuth() {
+            try {
+                const response = await fetch(`${API_BASE}/api/x-api/auth/start`, {
+                    method: 'POST'
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Failed to start X auth');
+                }
+                if (!payload.authorize_url) {
+                    throw new Error('X auth did not return an authorization URL');
+                }
+                xApiAuthWindow = window.open(
+                    payload.authorize_url,
+                    'thoth-x-api-auth',
+                    'popup=yes,width=720,height=820'
+                );
+                if (xApiAuthWindow) {
+                    xApiAuthWindow.focus();
+                    showAlert('Opened the X authorization popup. After approval, this page will update automatically.');
+                } else {
+                    window.location.assign(payload.authorize_url);
+                    return;
+                }
+                await refreshXApiStatus();
+            } catch (e) {
+                showAlert(`Failed to start X auth: ${e.message}`, 'error');
+            }
+        }
+
+        window.addEventListener('message', async (event) => {
+            if (event.origin !== window.location.origin) {
+                return;
+            }
+            if (event.data?.type !== 'thoth:x-api-auth-complete') {
+                return;
+            }
+
+            const payload = event.data.payload || {};
+            const userData = normalizeXApiUser(payload.user);
+            await refreshXApiStatus();
+
+            if (payload.status === 'ok') {
+                showAlert(
+                    userData?.username
+                        ? `Connected X account @${userData.username}`
+                        : 'Connected X account'
+                );
+            } else {
+                showAlert(
+                    payload.detail
+                        ? `X auth failed: ${payload.detail}`
+                        : 'X auth failed',
+                    'error'
+                );
+            }
+
+            if (xApiAuthWindow && !xApiAuthWindow.closed) {
+                xApiAuthWindow.close();
+            }
+            xApiAuthWindow = null;
+        });
+
+        async function refreshXApiAuth() {
+            try {
+                const response = await fetch(`${API_BASE}/api/x-api/auth/refresh`, {
+                    method: 'POST'
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Failed to refresh X token');
+                }
+                await refreshXApiStatus();
+                showAlert('X token refreshed successfully');
+            } catch (e) {
+                showAlert(`Failed to refresh X token: ${e.message}`, 'error');
+            }
+        }
+
+        async function runXApiSync() {
+            try {
+                const payload = {
+                    max_results: parseInt(document.getElementById('automation-x-api-max-results').value || '100', 10),
+                    resume_from_checkpoint: true
+                };
+                const maxPagesValue = document.getElementById('automation-x-api-max-pages').value.trim();
+                if (maxPagesValue) {
+                    payload.max_pages = parseInt(maxPagesValue, 10);
+                }
+
+                const response = await fetch(`${API_BASE}/api/x-api/bookmarks/sync`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.detail || 'Failed to start X bookmark sync');
+                }
+                showAlert(`X sync complete: ${result.bookmarks_emitted || 0} bookmarks emitted`);
+                await refreshXApiStatus();
+            } catch (e) {
+                showAlert(`Failed to run X bookmark sync: ${e.message}`, 'error');
+            }
+        }
+
+        async function loadArchivistRegistry() {
+            try {
+                const response = await fetch(`${API_BASE}/api/archivist/registry`);
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Failed to load archivist registry');
+                }
+                renderArchivistRegistry(payload);
+                if (payload.seeded_from_example) {
+                    showAlert('Seeded local archivist_topics.yaml from the tracked example template');
+                }
+            } catch (e) {
+                showAlert(`Failed to load archivist registry: ${e.message}`, 'error');
+            }
+        }
+
+        async function saveArchivistRegistry() {
+            try {
+                const response = await fetch(`${API_BASE}/api/archivist/registry`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content: document.getElementById('archivist-registry-editor').value
+                    })
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Failed to save archivist registry');
+                }
+                renderArchivistRegistry(payload);
+                showAlert('Archivist registry saved successfully');
+            } catch (e) {
+                showAlert(`Failed to save archivist registry: ${e.message}`, 'error');
+            }
+        }
+
+        async function queueArchivistForce(topicId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/archivist/topics/${encodeURIComponent(topicId)}/force`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'settings_ui' })
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Failed to queue archivist force');
+                }
+                showAlert(`Queued force run for archivist topic ${topicId}`);
+                await loadArchivistRegistry();
+            } catch (e) {
+                showAlert(`Failed to queue archivist force: ${e.message}`, 'error');
+            }
+        }
+
+        async function clearArchivistForce(topicId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/archivist/topics/${encodeURIComponent(topicId)}/force`, {
+                    method: 'DELETE'
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Failed to clear archivist force');
+                }
+                showAlert(`Cleared force run for archivist topic ${topicId}`);
+                await loadArchivistRegistry();
+            } catch (e) {
+                showAlert(`Failed to clear archivist force: ${e.message}`, 'error');
+            }
+        }
+
+        async function loadConfig() {
+            try {
+                const response = await fetch(`${API_BASE}/api/settings`);
+                if (!response.ok) throw new Error('Failed to load settings');
+                const config = await response.json();
+
+                // Load providers with type inference
+                if (config.llm?.providers) {
+                    providersConfig = {};
+                    for (const [name, pConfig] of Object.entries(config.llm.providers)) {
+                        providersConfig[name] = {
+                            ...pConfig,
+                            type: pConfig.type || name,
+                            has_vision: pConfig.has_vision || (pConfig.models?.vision ? true : false)
+                        };
+                    }
+                }
+
+                // Load tasks config
+                if (config.llm?.tasks) {
+                    tasksConfig = config.llm.tasks;
+                    TASK_ROUTE_KEYS.forEach(task => {
+                        const enabled = document.getElementById(`task-${task}-enabled`);
+                        if (!enabled) return;
+
+                        if (tasksConfig[task]) {
+                            enabled.checked = tasksConfig[task].enabled !== false;
+                            return;
+                        }
+
+                        enabled.checked = !['translation', 'archivist'].includes(task);
+                    });
+
+                    setFieldValue(
+                        'task-transcript-retry-hours',
+                        tasksConfig.transcript?.retry_interval_hours ?? 12
+                    );
+                }
+
+                renderProviders();
+
+                // Set task dropdowns after providers are loaded
+                TASK_ROUTE_KEYS.forEach(task => {
+                    const route = tasksConfig[task]?.fallback?.[0] || {};
+                    const select = document.getElementById(`task-${task}-provider`);
+                    const modelSelect = document.getElementById(`task-${task}-model`);
+                    if (select && route.provider) {
+                        select.value = route.provider;
+                        updateTaskModelDropdown(task);
+                    }
+                    if (modelSelect && route.model) {
+                        const hasOption = Array.from(modelSelect.options).some(
+                            option => option.value === route.model
+                        );
+                        if (!hasOption) {
+                            modelSelect.innerHTML =
+                                `<option value="${escapeHtml(route.model)}">raw: ${escapeHtml(route.model)}</option>` +
+                                modelSelect.innerHTML;
+                        }
+                        modelSelect.value = route.model;
+                    }
+                });
+                updateArchivistRouteSummary();
+
+                // Load pipeline settings
+                if (config.pipeline?.stages) {
+                    const stages = config.pipeline.stages;
+                    document.getElementById('stage-url-expansion').checked = stages.url_expansion !== false;
+                    document.getElementById('stage-media-download').checked = stages.media_download !== false;
+                    if (stages.documents) {
+                        document.getElementById('stage-arxiv').checked = stages.documents.arxiv_papers !== false;
+                        document.getElementById('stage-github-readmes').checked = stages.documents.github_readmes !== false;
+                        document.getElementById('stage-hf-readmes').checked = stages.documents.huggingface_readmes !== false;
+                        document.getElementById('stage-pdfs').checked = stages.documents.general_pdfs !== false;
+                    }
+                    if (stages.transcripts) {
+                        document.getElementById('stage-twitter-videos').checked = stages.transcripts.twitter_videos !== false;
+                        document.getElementById('stage-youtube-videos').checked = stages.transcripts.youtube_videos !== false;
+                    }
+                }
+                document.getElementById('keep-cache').checked = config.pipeline?.keep_graphql_cache !== false;
+                document.getElementById('enable-llm').checked = config.processing?.enable_llm_features !== false;
+
+                // Load paths
+                if (config.paths) {
+                    document.getElementById('path-vault').value = config.paths.vault_dir || '';
+                    document.getElementById('path-raw').value = config.paths.raw_dir || '';
+                    document.getElementById('path-library').value = config.paths.library_dir || '';
+                    document.getElementById('path-wiki').value = config.paths.wiki_dir || '';
+                    document.getElementById('path-system').value = config.paths.system_dir || '';
+                    document.getElementById('path-cache').value = config.paths.cache_dir || '';
+                    document.getElementById('path-media').value = config.paths.media_dir || '';
+                    document.getElementById('path-images').value = config.paths.images_dir || '';
+                    document.getElementById('path-videos').value = config.paths.videos_dir || '';
+                    document.getElementById('path-digests').value = config.paths.digests_dir || '';
+                    document.getElementById('path-archivist-topics').value = config.paths.archivist_topics_file || '';
+                    document.getElementById('path-bookmarks').value = config.paths.bookmarks_file || '';
+                    document.getElementById('path-cookies').value = config.paths.cookies_file || '';
+                }
+
+                const arxiv = config.sources?.arxiv || {};
+                document.getElementById('source-arxiv-mode').value = arxiv.source || 'rss';
+                document.getElementById('source-arxiv-feed-format').value = arxiv.feed_format || 'rss';
+                document.getElementById('source-arxiv-topics').value = csvFromValue(arxiv.topics);
+                document.getElementById('source-arxiv-categories').value = csvFromValue(arxiv.categories);
+                document.getElementById('source-arxiv-limit').value = arxiv.limit || 50;
+
+                const webClipper = config.sources?.web_clipper || {};
+                document.getElementById('source-web-clipper-enabled').checked = webClipper.enabled === true;
+                document.getElementById('source-web-clipper-note-dirs').value = multilineFromValue(webClipper.note_dirs);
+                document.getElementById('source-web-clipper-attachment-dirs').value = multilineFromValue(webClipper.attachment_dirs);
+                document.getElementById('source-web-clipper-note-extensions').value = multilineFromValue(webClipper.note_extensions);
+                document.getElementById('source-web-clipper-attachment-extensions').value =
+                    multilineFromValue(webClipper.attachment_extensions);
+
+                const githubSource = config.sources?.github || {};
+                document.getElementById('source-github-enabled').checked = githubSource.enabled !== false;
+                document.getElementById('source-github-username').value = githubSource.username || '';
+                document.getElementById('source-github-limit').value = githubSource.limit || 100;
+
+                const hfSource = config.sources?.huggingface || {};
+                document.getElementById('source-hf-enabled').checked = hfSource.enabled !== false;
+                document.getElementById('source-hf-username').value = hfSource.username || config.env?.HF_USER || '';
+                document.getElementById('source-hf-limit').value = hfSource.limit || 100;
+                document.getElementById('source-hf-models').checked = hfSource.include_models !== false;
+                document.getElementById('source-hf-datasets').checked = hfSource.include_datasets !== false;
+                document.getElementById('source-hf-spaces').checked = hfSource.include_spaces !== false;
+
+                const xApiSource = config.sources?.x_api || {};
+                document.getElementById('source-x-api-enabled').checked = xApiSource.enabled === true;
+                document.getElementById('source-x-api-client-id').value = xApiSource.client_id || '';
+                document.getElementById('source-x-api-redirect-uri').value =
+                    xApiSource.redirect_uri || 'http://127.0.0.1:8000/api/x-api/auth/callback';
+
+                const socialSync = config.automation?.social_sync || {};
+                document.getElementById('automation-social-enabled').checked = socialSync.enabled !== false;
+                document.getElementById('automation-social-run-on-startup').checked = socialSync.run_on_startup === true;
+                document.getElementById('automation-social-interval-hours').value = socialSync.interval_hours || 8;
+
+                const xApiSync = config.automation?.x_api_sync || {};
+                document.getElementById('automation-x-api-enabled').checked = xApiSync.enabled === true;
+                document.getElementById('automation-x-api-run-on-startup').checked = xApiSync.run_on_startup === true;
+                document.getElementById('automation-x-api-interval-hours').value = xApiSync.interval_hours || 8;
+                document.getElementById('automation-x-api-max-results').value = xApiSync.max_results || 100;
+                document.getElementById('automation-x-api-max-pages').value = xApiSync.max_pages || '';
+
+                document.getElementById('source-github-token-status').textContent =
+                    `Stored: ${config.env?.GITHUB_API ? 'yes' : 'no'}`;
+                document.getElementById('source-hf-token-status').textContent =
+                    `Stored: ${config.env?.HF_TOKEN ? 'yes' : 'no'}`;
+                document.getElementById('source-x-api-secret-status').textContent =
+                    `Stored: ${config.env?.X_API_CLIENT_SECRET ? 'yes' : 'no'}`;
+
+                const runtime = config.runtime || {};
+                const layout = runtime.layout || {};
+                setFieldValue('runtime-raw-root', layout.raw_root || layout.error || '');
+                setFieldValue('runtime-library-root', layout.library_root || layout.error || '');
+                setFieldValue('runtime-wiki-root', layout.wiki_root || layout.error || '');
+                setFieldValue('runtime-system-root', layout.system_root || layout.error || '');
+
+                const archivist = runtime.archivist || {};
+                setFieldValue(
+                    'runtime-archivist-registry',
+                    archivist.registry_path || archivist.error || ''
+                );
+                setFieldValue(
+                    'runtime-archivist-topics',
+                    archivist.error
+                        ? `ERROR: ${archivist.error}`
+                        : multilineFromValue(archivist.topics || [])
+                );
+
+                const runtimeWebClipper = runtime.web_clipper || {};
+                setFieldValue(
+                    'runtime-web-clipper-watch-dirs',
+                    runtimeWebClipper.error
+                        ? `ERROR: ${runtimeWebClipper.error}`
+                        : multilineFromValue(runtimeWebClipper.watch_dirs || [])
+                );
+
+                await refreshXApiStatus();
+                consumeXApiAuthQueryParams();
+                await loadArchivistRegistry();
+
+            } catch (e) {
+                console.error('Failed to load config:', e);
+                showAlert('Failed to load configuration', 'error');
+            }
+        }
+
+        async function saveProviders() {
+            // Build config structure
+            const llmProviders = {};
+            const envUpdates = {};
+
+            for (const [name, provider] of Object.entries(providersConfig)) {
+                const providerConfig = {
+                    enabled: provider.enabled !== false,
+                    has_vision: provider.has_vision || false,
+                    models: provider.models || { default: { id: '' } }
+                };
+
+                if (provider.base_url) {
+                    providerConfig.base_url = provider.base_url;
+                }
+
+                // Store type if different from name
+                if (provider.type && provider.type !== name) {
+                    providerConfig.type = provider.type;
+                }
+
+                llmProviders[name] = providerConfig;
+
+                // Collect API keys for env update
+                if (provider.api_key) {
+                    const envKey = getEnvKeyForType(provider.type || name);
+                    if (envKey) {
+                        envUpdates[envKey] = provider.api_key;
+                    }
+                }
+            }
+
+            try {
+                // Save config
+                const configResponse = await fetch(`${API_BASE}/api/settings/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ llm: { providers: llmProviders } })
+                });
+                if (!configResponse.ok) throw new Error('Failed to save config');
+
+                // Save env vars
+                if (Object.keys(envUpdates).length > 0) {
+                    const envResponse = await fetch(`${API_BASE}/api/settings/env`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(envUpdates)
+                    });
+                    if (!envResponse.ok) throw new Error('Failed to save API keys');
+                }
+
+                showAlert('Provider settings saved successfully');
+            } catch (e) {
+                showAlert(`Failed to save: ${e.message}`, 'error');
+            }
+        }
+
+        async function saveTasks() {
+            const tasks = {};
+            TASK_ROUTE_KEYS.forEach(task => {
+                const enabled = document.getElementById(`task-${task}-enabled`)?.checked ?? true;
+                const provider = document.getElementById(`task-${task}-provider`)?.value;
+                const model = document.getElementById(`task-${task}-model`)?.value;
+                const fallback = [];
+                if (provider) {
+                    const route = { provider };
+                    if (model && model !== 'default') {
+                        route.model = model;
+                    }
+                    fallback.push(route);
+                }
+                tasks[task] = {
+                    enabled,
+                    fallback
+                };
+            });
+
+            const transcriptRetryHours = parseFloat(
+                document.getElementById('task-transcript-retry-hours')?.value || '12'
+            );
+            tasks.transcript.retry_interval_hours = Number.isFinite(transcriptRetryHours)
+                ? transcriptRetryHours
+                : 12;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/settings/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ llm: { tasks } })
+                });
+                if (response.ok) {
+                    tasksConfig = tasks;
+                    updateArchivistRouteSummary();
+                    showAlert('Task settings saved successfully');
+                } else {
+                    throw new Error('Failed to save');
+                }
+            } catch (e) {
+                showAlert('Failed to save task settings', 'error');
+            }
+        }
+
+        async function savePipeline() {
+            const config = {
+                processing: {
+                    enable_llm_features: document.getElementById('enable-llm').checked
+                },
+                pipeline: {
+                    keep_graphql_cache: document.getElementById('keep-cache').checked,
+                    stages: {
+                        url_expansion: document.getElementById('stage-url-expansion').checked,
+                        media_download: document.getElementById('stage-media-download').checked,
+                        documents: {
+                            arxiv_papers: document.getElementById('stage-arxiv').checked,
+                            github_readmes: document.getElementById('stage-github-readmes').checked,
+                            huggingface_readmes: document.getElementById('stage-hf-readmes').checked,
+                            general_pdfs: document.getElementById('stage-pdfs').checked
+                        },
+                        transcripts: {
+                            twitter_videos: document.getElementById('stage-twitter-videos').checked,
+                            youtube_videos: document.getElementById('stage-youtube-videos').checked
+                        }
+                    }
+                }
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/api/settings/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                if (response.ok) {
+                    showAlert('Pipeline settings saved successfully');
+                } else {
+                    throw new Error('Failed to save');
+                }
+            } catch (e) {
+                showAlert('Failed to save pipeline settings', 'error');
+            }
+        }
+
+        async function saveSources() {
+            const configPayload = {
+                sources: {
+                    arxiv: {
+                        source: document.getElementById('source-arxiv-mode').value,
+                        feed_format: document.getElementById('source-arxiv-feed-format').value,
+                        topics: splitCsv(document.getElementById('source-arxiv-topics').value),
+                        categories: splitCsv(document.getElementById('source-arxiv-categories').value),
+                        limit: parseInt(document.getElementById('source-arxiv-limit').value || '50', 10)
+                    },
+                    web_clipper: {
+                        enabled: document.getElementById('source-web-clipper-enabled').checked,
+                        note_dirs: splitListField(document.getElementById('source-web-clipper-note-dirs').value),
+                        attachment_dirs: splitListField(document.getElementById('source-web-clipper-attachment-dirs').value),
+                        note_extensions: splitListField(document.getElementById('source-web-clipper-note-extensions').value),
+                        attachment_extensions: splitListField(
+                            document.getElementById('source-web-clipper-attachment-extensions').value
+                        )
+                    },
+                    github: {
+                        enabled: document.getElementById('source-github-enabled').checked,
+                        username: document.getElementById('source-github-username').value.trim(),
+                        limit: parseInt(document.getElementById('source-github-limit').value || '100', 10)
+                    },
+                    huggingface: {
+                        enabled: document.getElementById('source-hf-enabled').checked,
+                        username: document.getElementById('source-hf-username').value.trim(),
+                        limit: parseInt(document.getElementById('source-hf-limit').value || '100', 10),
+                        include_models: document.getElementById('source-hf-models').checked,
+                        include_datasets: document.getElementById('source-hf-datasets').checked,
+                        include_spaces: document.getElementById('source-hf-spaces').checked
+                    },
+                    x_api: {
+                        enabled: document.getElementById('source-x-api-enabled').checked,
+                        client_id: document.getElementById('source-x-api-client-id').value.trim(),
+                        client_secret_env: 'X_API_CLIENT_SECRET',
+                        redirect_uri: document.getElementById('source-x-api-redirect-uri').value.trim(),
+                        scopes: ['bookmark.read', 'tweet.read', 'users.read', 'offline.access']
+                    }
+                },
+                automation: {
+                    social_sync: {
+                        enabled: document.getElementById('automation-social-enabled').checked,
+                        run_on_startup: document.getElementById('automation-social-run-on-startup').checked,
+                        interval_hours: parseInt(document.getElementById('automation-social-interval-hours').value || '8', 10)
+                    },
+                    x_api_sync: {
+                        enabled: document.getElementById('automation-x-api-enabled').checked,
+                        run_on_startup: document.getElementById('automation-x-api-run-on-startup').checked,
+                        interval_hours: parseInt(document.getElementById('automation-x-api-interval-hours').value || '8', 10),
+                        max_results: parseInt(document.getElementById('automation-x-api-max-results').value || '100', 10),
+                        max_pages: document.getElementById('automation-x-api-max-pages').value.trim()
+                            ? parseInt(document.getElementById('automation-x-api-max-pages').value.trim(), 10)
+                            : null,
+                        resume_from_checkpoint: true
+                    }
+                }
+            };
+
+            const envPayload = {};
+            const githubToken = document.getElementById('social-github-token').value.trim();
+            const hfToken = document.getElementById('social-hf-token').value.trim();
+            const hfUser = document.getElementById('source-hf-username').value.trim();
+            const xApiClientSecret = document.getElementById('social-x-api-client-secret').value.trim();
+
+            if (githubToken) envPayload.GITHUB_API = githubToken;
+            if (hfToken) envPayload.HF_TOKEN = hfToken;
+            if (hfUser) envPayload.HF_USER = hfUser;
+            if (xApiClientSecret) envPayload.X_API_CLIENT_SECRET = xApiClientSecret;
+
+            try {
+                const configResponse = await fetch(`${API_BASE}/api/settings/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(configPayload)
+                });
+                if (!configResponse.ok) throw new Error('Failed to save source settings');
+
+                if (Object.keys(envPayload).length > 0) {
+                    const envResponse = await fetch(`${API_BASE}/api/settings/env`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(envPayload)
+                    });
+                    if (!envResponse.ok) throw new Error('Failed to save social credentials');
+                }
+
+                document.getElementById('social-github-token').value = '';
+                document.getElementById('social-hf-token').value = '';
+                document.getElementById('social-x-api-client-secret').value = '';
+                showAlert('Source settings saved successfully');
+                await loadConfig();
+            } catch (e) {
+                showAlert(`Failed to save source settings: ${e.message}`, 'error');
+            }
+        }
+
+        async function savePaths() {
+            const config = {
+                paths: {
+                    vault_dir: document.getElementById('path-vault').value,
+                    raw_dir: document.getElementById('path-raw').value,
+                    library_dir: document.getElementById('path-library').value,
+                    wiki_dir: document.getElementById('path-wiki').value,
+                    system_dir: document.getElementById('path-system').value,
+                    cache_dir: document.getElementById('path-cache').value,
+                    media_dir: document.getElementById('path-media').value,
+                    images_dir: document.getElementById('path-images').value,
+                    videos_dir: document.getElementById('path-videos').value,
+                    digests_dir: document.getElementById('path-digests').value,
+                    archivist_topics_file: document.getElementById('path-archivist-topics').value,
+                    bookmarks_file: document.getElementById('path-bookmarks').value,
+                    cookies_file: document.getElementById('path-cookies').value
+                }
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/api/settings/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                if (response.ok) {
+                    showAlert('Paths saved successfully');
+                    await loadConfig();
+                } else {
+                    throw new Error('Failed to save');
+                }
+            } catch (e) {
+                showAlert('Failed to save paths', 'error');
+            }
+        }
+
+        async function refreshStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/stats`);
+                const stats = await response.json();
+                document.getElementById('stat-bookmarks').textContent = stats.realtime_counts?.total || stats.total_bookmarks || 0;
+                document.getElementById('stat-queue').textContent = stats.realtime_counts?.processed || 0;
+                document.getElementById('stat-pending').textContent = stats.queue_counts?.pending || 0;
+                document.getElementById('stat-processed').textContent = stats.queue_counts?.processed || 0;
+            } catch (e) {
+                console.error('Failed to load stats:', e);
+            }
+        }
+
+        // Initialize
+        checkConnection();
+        loadConfig();
+        refreshStats();
+        setInterval(checkConnection, 30000);
+    </script>
+</body>
+</html>

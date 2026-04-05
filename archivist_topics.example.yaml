@@ -1,0 +1,73 @@
+version: 1
+
+defaults:
+  cadence_hours: 12
+  max_sources: 120
+  allow_manual_force: true
+
+topics:
+  - id: companion-ai-research
+    title: Companion AI Research
+    output_path: pages/topic-companion-ai-research.md
+    description: >
+      Baseline synthesis of companion AI research from public research-oriented
+      sources.
+    include_roots:
+      - tweets
+      - threads
+      - papers
+      - repos
+    exclude_roots:
+      - journals
+      - transcripts
+      - private-notes
+    source_types:
+      - tweet
+      - paper
+      - repository
+    include_tags:
+      - companion_ai
+      - personas
+      - introspection
+      - chatbots
+    exclude_tags:
+      - personal
+    include_terms:
+      - companion ai
+      - persona
+      - llm introspection
+      - chatbot
+    exclude_terms:
+      - customer support
+      - sales bot
+
+  - id: model-evals-and-benchmarks
+    title: Model Evals and Benchmarks
+    output_path: pages/topic-model-evals-and-benchmarks.md
+    description: >
+      Baseline synthesis of public benchmark, eval, and measurement-oriented
+      sources.
+    include_roots:
+      - tweets
+      - threads
+      - papers
+      - repos
+    exclude_roots:
+      - transcripts
+    source_types:
+      - tweet
+      - paper
+      - repository
+    include_tags:
+      - evals
+      - benchmarks
+      - leaderboards
+    exclude_tags:
+      - personal
+    include_terms:
+      - benchmark
+      - evaluation
+      - leaderboard
+      - model performance
+    cadence_hours: 24
+    max_sources: 60

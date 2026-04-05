@@ -1,0 +1,508 @@
+{
+  "llm": {
+    "providers": {
+      "openai": {
+        "enabled": false,
+        "base_url": null,
+        "models": {
+          "default": {
+            "id": "gpt-4o-mini"
+          }
+        }
+      },
+      "openrouter": {
+        "enabled": true,
+        "base_url": "https://openrouter.ai/api/v1",
+        "models": {
+          "default": {
+            "id": "moonshotai/kimi-k2-0905"
+          },
+          "vision": {
+            "id": "google/gemini-2.5-flash"
+          },
+          "transcript": {
+            "id": "openai/gpt-5-mini"
+          }
+        }
+      },
+      "anthropic": {
+        "enabled": true,
+        "base_url": null,
+        "models": {
+          "default": {
+            "id": "claude-sonnet-4-20250514"
+          }
+        }
+      },
+      "local": {
+        "enabled": false,
+        "base_url": "http://localhost:11434/v1",
+        "models": {
+          "default": {
+            "id": "llama3.1:8b"
+          },
+          "embedding": {
+            "id": "snowflake-arctic-embed2:latest"
+          }
+        }
+      }
+    },
+    "tasks": {
+      "tags": {
+        "enabled": true,
+        "fallback": [
+          {
+            "provider": "anthropic"
+          }
+        ]
+      },
+      "summary": {
+        "enabled": true,
+        "fallback": [
+          {
+            "provider": "anthropic"
+          },
+          {
+            "provider": "openrouter"
+          }
+        ]
+      },
+      "alt_text": {
+        "enabled": true,
+        "fallback": [
+          {
+            "provider": "openrouter",
+            "model": "vision"
+          }
+        ]
+      },
+      "transcript": {
+        "enabled": true,
+        "retry_interval_hours": 12,
+        "fallback": [
+          {
+            "provider": "openrouter",
+            "model": "transcript"
+          }
+        ]
+      },
+      "translation": {
+        "enabled": true,
+        "fallback": [
+          {
+            "provider": "anthropic"
+          }
+        ]
+      },
+      "archivist": {
+        "enabled": false,
+        "fallback": [
+          {
+            "provider": "openrouter"
+          }
+        ]
+      }
+    },
+    "prompts": {
+      "summary": {
+        "tweet": "You are a tweet summarization system. Provide a concise 1-2 sentence summary of this long-form tweet, capturing the main point and key insights.",
+        "thread": "You are a thread summarization system. Provide a concise 2-4 sentence summary of this Twitter thread, capturing the main points and key insights from all tweets in the thread.",
+        "readme": "You are a README summarization system. Provide a concise 4-6 sentence summary of this GitHub/HuggingFace repository README, focusing on what the project does and its key features."
+      },
+      "tags": "You are a tagging system. Generate 3-8 relevant hashtag-style tags for the given content. Focus on topics, technologies, concepts, and themes. Return only comma-separated tags without # symbols, no explanations.",
+      "alt_text": "Provide a concise, descriptive alt text for this image for accessibility. Focus on the main content and context. Return ONLY the alt text description, under 200 characters, without any preamble or explanation.",
+      "transcript": "Combine fragmented sentences into coherent paragraphs. Remove all timestamps. Process the following transcript and generate the text output in plain text paragraphs without editing the content, only forming paragraphs that flow logically based on context inserting newlines between paragraphs. Return ONLY the processed transcript text with no preamble or explanation., followed by a concise 2-4 sentence summary followed by 3-8 relevant hashtag-style tags for the given content. Focus on topics, technologies, concepts, and themes. Return only comma-separated tags without # symbols, no explanations.",
+      "translation": {
+        "system": "You translate markdown source documents into English. Preserve markdown structure, headings, lists, tables, links, code blocks, and inline formatting. Return only valid JSON with keys \"title\" and \"body\". \"title\" must be the translated title. \"body\" must be the translated markdown body without a top-level title heading. Do not include code fences, commentary, or extra keys."
+      }
+    }
+  },
+  "processing": {
+    "enable_llm_features": true,
+    "batch_size": 10,
+    "rate_limit_delay": 1.0,
+    "summary_min_chars": 280,
+    "alt_text_delay_seconds": 2.0,
+    "readme_summary_max_chars": 8000,
+    "documents": {
+      "concurrent_workers": 3
+    },
+    "llm_async": {
+      "max_concurrent_requests": 8,
+      "max_concurrent_batches": 2,
+      "rate_limit_delay": 0.05,
+      "request_timeout": 20.0,
+      "retry_attempts": 3,
+      "retry_delay": 1.0
+    }
+  },
+  "pipeline": {
+    "keep_graphql_cache": true,
+    "stages": {
+      "url_expansion": true,
+      "media_download": true,
+      "documents": {
+        "arxiv_papers": true,
+        "github_readmes": true,
+        "huggingface_readmes": true,
+        "general_pdfs": true
+      },
+      "transcripts": {
+        "twitter_videos": true,
+        "youtube_videos": true,
+        "min_duration_seconds": 60
+      },
+      "llm_processing": {
+        "tweet_tags": true,
+        "tweet_summaries": true,
+        "thread_summaries": true,
+        "alt_text": true,
+        "readme_summaries": true,
+        "transcript_formatting": true
+      }
+    },
+    "stage_reference": {
+      "documents.arxiv_papers": {
+        "processor": "ArXivProcessorV2",
+        "description": "Download arXiv PDFs and metadata.",
+        "capabilities": [
+          "documents",
+          "arxiv"
+        ],
+        "config_keys": [
+          "paths.vault_dir",
+          "processing.documents.concurrent_workers",
+          "database.enabled"
+        ]
+      },
+      "documents.general_pdfs": {
+        "processor": "PDFProcessor",
+        "description": "Download non-arXiv PDF documents referenced in tweets.",
+        "capabilities": [
+          "documents",
+          "pdf"
+        ],
+        "config_keys": [
+          "paths.vault_dir",
+          "processing.documents.concurrent_workers"
+        ]
+      },
+      "documents.github_readmes": {
+        "processor": "READMEProcessor",
+        "description": "Download README files from GitHub repositories.",
+        "capabilities": [
+          "documents",
+          "readme",
+          "github"
+        ],
+        "config_keys": [
+          "paths.vault_dir",
+          "processing.documents.concurrent_workers"
+        ]
+      },
+      "documents.huggingface_readmes": {
+        "processor": "READMEProcessor",
+        "description": "Download README files from HuggingFace repositories.",
+        "capabilities": [
+          "documents",
+          "readme",
+          "huggingface"
+        ],
+        "config_keys": [
+          "paths.vault_dir",
+          "processing.documents.concurrent_workers"
+        ]
+      },
+      "llm_processing.alt_text": {
+        "processor": "LLMProcessor",
+        "description": "Generate alt text for tweet media.",
+        "capabilities": [
+          "llm",
+          "alt_text"
+        ],
+        "config_keys": [
+          "processing.enable_llm_features",
+          "processing.alt_text_delay_seconds",
+          "llm.tasks.alt_text.enabled"
+        ]
+      },
+      "llm_processing.readme_summaries": {
+        "processor": "LLMProcessor",
+        "description": "Summarize repository README files.",
+        "capabilities": [
+          "llm",
+          "summary",
+          "readme"
+        ],
+        "config_keys": [
+          "processing.enable_llm_features",
+          "processing.readme_summary_max_chars",
+          "llm.tasks.summary.enabled"
+        ]
+      },
+      "llm_processing.thread_summaries": {
+        "processor": "LLMProcessor",
+        "description": "Summarize detected threads with LLM output.",
+        "capabilities": [
+          "llm",
+          "summary",
+          "threads"
+        ],
+        "config_keys": [
+          "processing.enable_llm_features",
+          "llm.tasks.summary.enabled"
+        ]
+      },
+      "llm_processing.transcript_formatting": {
+        "processor": "TranscriptLLMProcessor",
+        "description": "Format transcripts with LLM post-processing.",
+        "capabilities": [
+          "llm",
+          "transcript"
+        ],
+        "config_keys": [
+          "processing.enable_llm_features",
+          "llm.tasks.transcript.enabled",
+          "youtube.enable_llm_transcript_processing",
+          "youtube.transcript_chunk_size"
+        ]
+      },
+      "llm_processing.tweet_summaries": {
+        "processor": "LLMProcessor",
+        "description": "Create AI summaries for tweets.",
+        "capabilities": [
+          "llm",
+          "summary"
+        ],
+        "config_keys": [
+          "processing.enable_llm_features",
+          "processing.summary_min_chars",
+          "llm.tasks.summary.enabled"
+        ]
+      },
+      "llm_processing.tweet_tags": {
+        "processor": "LLMProcessor",
+        "description": "Generate AI tags for individual tweets.",
+        "capabilities": [
+          "llm",
+          "tags"
+        ],
+        "config_keys": [
+          "processing.enable_llm_features",
+          "processing.batch_size",
+          "llm.tasks.tags.enabled"
+        ]
+      },
+      "media_download": {
+        "processor": "MediaProcessor",
+        "description": "Download tweet media attachments and thumbnails.",
+        "capabilities": [
+          "media"
+        ],
+        "config_keys": [
+          "paths.vault_dir",
+          "database.enabled"
+        ]
+      },
+      "transcripts.twitter_videos": {
+        "processor": "TranscriptionProcessor",
+        "description": "Generate transcripts for Twitter-hosted videos.",
+        "capabilities": [
+          "transcripts",
+          "twitter"
+        ],
+        "config_keys": [
+          "paths.vault_dir",
+          "whisper.enabled",
+          "whisper.min_duration_seconds",
+          "deepgram.enabled",
+          "deepgram.min_duration_seconds"
+        ]
+      },
+      "transcripts.youtube_videos": {
+        "processor": "YouTubeProcessor",
+        "description": "Fetch YouTube video metadata, transcripts, and embeddings.",
+        "capabilities": [
+          "transcripts",
+          "youtube"
+        ],
+        "config_keys": [
+          "paths.vault_dir",
+          "youtube.enable_transcripts",
+          "youtube.enable_embeddings",
+          "youtube.api_timeout_seconds",
+          "youtube.transcript_chunk_size",
+          "youtube.enable_llm_transcript_processing"
+        ]
+      },
+      "url_expansion": {
+        "processor": "URLProcessor",
+        "description": "Expand shortened URLs using cached GraphQL mappings.",
+        "capabilities": [
+          "url_expansion"
+        ],
+        "config_keys": [
+          "paths.vault_dir",
+          "database.enabled"
+        ]
+      }
+    }
+  },
+  "downloads": {
+    "timeout_seconds": 30,
+    "retry_attempts": 3,
+    "user_agent": "Mozilla/5.0 (compatible; Thoth/2.0)"
+  },
+  "files": {
+    "naming_patterns": {
+      "tweet": "tweets_{tweet_id}_{screen_name}.md",
+      "thread": "thread_{thread_id}_{screen_name}.md",
+      "media": "{tweet_id}_media_{post_num}_{file_num}.{ext}",
+      "transcript_twitter": "twitter_{tweet_id}_{screen_name}.md",
+      "transcript_youtube": "youtube_{video_id}_{sanitized_title}.md",
+      "readme_github": "github_{owner}_{repo}_README.md",
+      "readme_huggingface": "hf_{owner}_{repo}_README.md"
+    }
+  },
+  "database": {
+    "enabled": true,
+    "path": ".thoth_system/meta.db",
+    "wal_mode": true,
+    "auto_vacuum": true
+  },
+  "youtube": {
+    "enable_embeddings": true,
+    "enable_transcripts": true,
+    "enable_llm_transcript_processing": true,
+    "api_timeout_seconds": 30,
+    "transcript_chunk_size": 75000,
+    "transcript_processing_prompt": "Process the following transcript. Combine fragmented sentences into coherent paragraphs, remove all timestamps, and insert newlines between paragraphs where the context shifts. Do not edit the content beyond paragraph formation.\n\nReturn the result strictly as a JSON object with the following fields:\n- \"text\": the processed transcript in plain text paragraphs\n- \"summary\": a concise 2–4 sentence summary of the transcript\n- \"tags\": 3–8 relevant tags, returned as a single comma-separated string with no # symbols and no explanations\n\nReturn ONLY the JSON object, with no preamble or extra text.\n\nExample:\n{\n  \"text\": \"We started by reviewing the deployment pipeline issues. Several models were failing due to outdated dependencies, which blocked testing. The team decided to containerize the environment to prevent further version mismatches.\\n\\nLater, the discussion shifted to monitoring. We agreed that better logging and alerting would help catch failures earlier. The action items included setting up Grafana dashboards and scheduling a follow-up in two weeks.\",\n  \"summary\": \"The team discussed problems with the AI model deployment pipeline caused by dependency issues. They decided to containerize the environment to stabilize builds and testing. They also highlighted the need for stronger monitoring and planned to implement dashboards and alerts, with a follow-up meeting scheduled.\",\n  \"tags\": \"AI, deployment, containerization, monitoring, logging, infrastructure\"\n}"
+  },
+  "whisper": {
+    "enabled": false,
+    "base_url": "http://localhost:8090",
+    "model": "Systran/faster-whisper-large-v3",
+    "response_format": "text",
+    "max_chunk_mb": 25,
+    "chunk_duration_minutes": 10,
+    "min_duration_seconds": 60,
+    "ffmpeg_path": "ffmpeg",
+    "ffprobe_path": "ffprobe",
+    "temp_dir": "temp_audio",
+    "target_bitrate_kbps": 128
+  },
+  "deepgram": {
+    "enabled": true,
+    "api_key_env": "DEEPGRAM_API_KEY",
+    "model": "nova-2",
+    "smart_format": true,
+    "chunk_duration_minutes": 10,
+    "min_duration_seconds": 60
+  },
+  "ntfy": {
+    "server": "",
+    "topic": "thoth",
+    "user": "",
+    "password": ""
+  },
+  "sources": {
+    "arxiv": {
+      "source": "rss",
+      "feed_format": "rss",
+      "topics": [
+        "agentic ai",
+        "ai security"
+      ],
+      "categories": [
+        "cs.AI",
+        "cs.CL",
+        "cs.HC",
+        "cs.LG",
+        "cs.MA"
+      ],
+      "limit": 50
+    },
+    "web_clipper": {
+      "enabled": false,
+      "note_dirs": [
+        "web-clipper/notes"
+      ],
+      "attachment_dirs": [
+        "web-clipper/assets"
+      ],
+      "note_extensions": [
+        ".md",
+        ".markdown"
+      ],
+      "attachment_extensions": [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".pdf",
+        ".mp4",
+        ".mov",
+        ".m4a",
+        ".mp3",
+        ".wav"
+      ]
+    },
+    "github": {
+      "enabled": true,
+      "username": "",
+      "limit": 100,
+      "resume": true
+    },
+    "huggingface": {
+      "enabled": true,
+      "username": "",
+      "limit": 100,
+      "resume": true,
+      "include_models": true,
+      "include_datasets": true,
+      "include_spaces": true
+    },
+    "x_api": {
+      "enabled": false,
+      "client_id": "",
+      "client_secret_env": "X_API_CLIENT_SECRET",
+      "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+      "scopes": [
+        "bookmark.read",
+        "tweet.read",
+        "users.read",
+        "offline.access"
+      ]
+    }
+  },
+  "automation": {
+    "social_sync": {
+      "enabled": false,
+      "interval_hours": 8,
+      "run_on_startup": false
+    },
+    "x_api_sync": {
+      "enabled": false,
+      "interval_hours": 8,
+      "run_on_startup": false,
+      "max_results": 100,
+      "max_pages": null,
+      "resume_from_checkpoint": true
+    }
+  },
+  "paths": {
+    "vault_dir": "knowledge_vault",
+    "raw_dir": "raw",
+    "library_dir": "library",
+    "wiki_dir": "wiki",
+    "archivist_topics_file": "archivist_topics.yaml",
+    "cache_dir": "graphql_cache",
+    "media_dir": "media",
+    "system_dir": ".thoth_system",
+    "digests_dir": "_digests",
+    "bookmarks_file": "twitter-bookmarks-merged.json",
+    "cookies_file": "twitter_cookies.json"
+  }
+}
