@@ -21,6 +21,7 @@ If something matters and is missing there, add it there instead of creating anot
 - Avoid loading large raw cache files into context unless the task truly requires it.
 - Treat `config.json` plus `control.json` as the live runtime config surface. `config.example.json` is only a template for seeding new installs.
 - Archivist prompt text lives in tracked files under `prompts/`, not in Python. Adjust those files when the synthesis contract needs to change.
+- Fresh arXiv ingestion should trust arXiv entry metadata for the canonical filename. Only use local PDF title extraction when repairing legacy or non-canonical files that arrived through another route.
 
 ## First Commands
 
@@ -104,10 +105,13 @@ Start the API:
 .venv/bin/python thoth_api.py
 ```
 
-Open `/settings` for:
+The local API binds to `127.0.0.1:8090` by default unless `THOTH_API_PORT` or `PORT` overrides it.
+
+Open `http://127.0.0.1:8090/settings` for:
 - provider credentials and task routing
 - model aliases per provider
 - X API auth and manual sync
+- monitored-account X webhooks with `llm.tasks.x_monitor`, `THOTH_X_MONITOR_WEBHOOK_SECRET`, and `bookmark.write`
 - Web Clipper source configuration
 - path layout inspection for active shared roots
 - archivist topic registry editing, immediate runs, and background automation
@@ -123,6 +127,7 @@ What exists:
 - source gates by root scope
 - source-type, tag, and term filters plus modular retrieval policy
 - incremental corpus inventory, full-text retrieval, semantic retrieval, and hybrid ranking
+- SQLite-backed corpus metadata plus lazy cached document embeddings in `archivist_corpus_embeddings`
 - staged source-type briefing followed by final topic synthesis
 - durable topic/source usage tracking so automated runs skip unchanged never-used sources
 - cadence and dirty-check state
@@ -133,6 +138,7 @@ What exists:
 - the `thoth.py archivist --benchmark` retrieval benchmark path
 - immediate API/UI archivist execution
 - scheduled archivist automation via `automation.archivist`
+- PDF text extraction in corpus indexing, including `pdfs/` roots and paper-grade weighting for whitepapers/manual PDFs
 
 How to work with it now:
 
@@ -145,6 +151,20 @@ How to work with it now:
 7. Use `Run Due Topics` or a topic card `Run Now` / `Force Run` action in `/settings` for immediate execution.
 8. Use `automation.archivist` in settings when you want the API service to compile due topics on a fixed interval.
 9. Use `retrieval.source_type_limits` and `carryover_limit_per_type` in the topic registry when one source type is crowding out the others.
+10. Include `papers` and `pdfs` in topic roots when manual PDFs or whitepapers should enter the same research pool as downloaded papers.
+
+Semantic retrieval details that matter operationally:
+- Full-text indexing covers the corpus inventory in SQLite.
+- Document embeddings are generated lazily for the filtered candidate set, not precomputed for the whole vault.
+- Cached embeddings are reused until the document content, embedding provider, or embedding model changes.
+- The query embedding is generated each run, and `max_new_embeddings_per_run` limits how many missing document embeddings get filled in one pass.
+
+## X Monitor Webhooks
+
+- Configure `sources.x_api.monitoring.accounts` with usernames or numeric ids for accounts that should be watched outside the normal bookmark flow.
+- Webhook callers must send `X-Thoth-Webhook-Secret`, backed by `THOTH_X_MONITOR_WEBHOOK_SECRET`.
+- `llm.tasks.x_monitor` is the classifier route for deciding whether a monitored post is useful enough to auto-bookmark and queue.
+- When `auto_bookmark` is enabled, the connected X account must have `bookmark.write` in `sources.x_api.scopes`.
 
 ## Current Data Boundaries
 

@@ -407,32 +407,37 @@ class LLMInterface:
                 models = cfg.get('models', {}) or {}
                 self.provider_models[name] = models
                 default_model = models.get('default', {}).get('id')
+                provider_kind = str(cfg.get('type') or name).strip().lower()
 
-                env_var = cfg.get('api_key_env') or default_env.get(name)
+                env_var = cfg.get('api_key_env') or default_env.get(provider_kind)
                 api_key = os.getenv(env_var) if env_var else None
 
                 try:
-                    if name == 'openai':
+                    if provider_kind == 'openai':
                         if not api_key:
                             logger.warning("OpenAI provider enabled but OPENAI_API_KEY missing")
                             continue
                         instance = OpenAIProvider(api_key=api_key, model=default_model or 'gpt-4o-mini')
-                    elif name == 'openrouter':
+                    elif provider_kind == 'openrouter':
                         if not api_key:
                             logger.warning("OpenRouter provider enabled but OPEN_ROUTER_API_KEY missing")
                             continue
                         base_url = cfg.get('base_url', 'https://openrouter.ai/api/v1')
                         instance = OpenRouterProvider(api_key=api_key, base_url=base_url, model=default_model or 'anthropic/claude-3-haiku')
-                    elif name == 'anthropic':
+                    elif provider_kind == 'anthropic':
                         if not api_key:
                             logger.warning("Anthropic provider enabled but ANTHROPIC_API missing")
                             continue
                         instance = AnthropicProvider(api_key=api_key, model=default_model or 'claude-3-haiku-20240307')
-                    elif name == 'local':
+                    elif provider_kind == 'local':
                         base_url = cfg.get('base_url', 'http://localhost:11434/v1')
                         instance = LocalProvider(base_url=base_url, model=default_model or 'llama3.2')
                     else:
-                        logger.warning(f"Unknown LLM provider '{name}' - skipping")
+                        logger.warning(
+                            "Unknown LLM provider '%s' with type '%s' - skipping",
+                            name,
+                            provider_kind,
+                        )
                         continue
 
                     self.providers[name] = instance

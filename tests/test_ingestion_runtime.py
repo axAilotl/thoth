@@ -193,3 +193,60 @@ async def test_bookmark_payload_uses_shared_runtime(
     assert result.tweet_id == "123"
     assert result.tweet_count == 1
     assert result.url_mapping_count == 0
+
+
+@pytest.mark.anyio
+async def test_non_arxiv_paper_artifact_uses_pdf_processor_under_papers_dir(
+    tmp_path: Path,
+    monkeypatch,
+    restore_runtime_config,
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    runtime = KnowledgeArtifactRuntime()
+    calls = []
+
+    def fake_download(self, url, tweet_id, resume=True, filename_prefix=None, title_override=None):
+        calls.append(
+            {
+                "dir_name": self.pdfs_dir.name,
+                "url": url,
+                "tweet_id": tweet_id,
+                "resume": resume,
+                "filename_prefix": filename_prefix,
+                "title_override": title_override,
+            }
+        )
+        return SimpleNamespace(
+            filename="paper-1-companion-whitepaper.pdf",
+            downloaded=True,
+        )
+
+    monkeypatch.setattr(
+        "processors.pdf_processor.PDFProcessor.download_document",
+        fake_download,
+    )
+
+    artifact = PaperArtifact(
+        id="paper-1",
+        source_type="pdf",
+        raw_content="{}",
+        title="Companion Whitepaper",
+        pdf_url="https://example.com/companion-whitepaper.pdf",
+    )
+
+    result = await runtime.dispatch_artifact(artifact)
+
+    assert result.status == "processed"
+    assert result.details["filename"] == "paper-1-companion-whitepaper.pdf"
+    assert calls == [
+        {
+            "dir_name": "papers",
+            "url": "https://example.com/companion-whitepaper.pdf",
+            "tweet_id": "paper-1",
+            "resume": True,
+            "filename_prefix": "paper-1",
+            "title_override": "Companion Whitepaper",
+        }
+    ]

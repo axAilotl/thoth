@@ -20,14 +20,8 @@ from .config import Config
 from .non_live_state import validate_non_live_interval_hours
 from .path_layout import build_path_layout
 from .x_api_auth import (
-    XApiAuthConfig,
-    XApiAuthStateError,
-    XApiTokenError,
-    fetch_current_x_user,
-    load_x_api_token_bundle,
-    refresh_x_api_tokens,
+    resolve_authenticated_x_api_context,
     resolve_x_api_auth_config,
-    store_x_api_token_bundle,
 )
 
 X_API_BOOKMARKS_URL = "https://api.x.com/2/users/{user_id}/bookmarks"
@@ -402,65 +396,6 @@ async def _fetch_bookmark_page(
     return payload
 
 
-async def _resolve_bundle_and_user_id(
-    config: Config,
-    *,
-    layout,
-) -> tuple[XApiAuthConfig, dict[str, Any], str]:
-    auth_config = resolve_x_api_auth_config(config)
-    bundle = load_x_api_token_bundle(layout)
-    if not bundle:
-        raise XApiAuthStateError("No stored X API token bundle was found")
-
-    expires_at = str(bundle.get("expires_at") or "").strip()
-    refresh_token = str(bundle.get("refresh_token") or "").strip()
-    if expires_at:
-        try:
-            is_expired = datetime.fromisoformat(expires_at)
-            if is_expired.tzinfo is None:
-                is_expired = is_expired.replace(tzinfo=timezone.utc)
-            else:
-                is_expired = is_expired.astimezone(timezone.utc)
-            if is_expired <= _now_utc():
-                if not refresh_token:
-                    raise XApiTokenError(
-                        "Stored X API token bundle is expired and lacks a refresh token"
-                    )
-                refreshed_bundle = await refresh_x_api_tokens(
-                    auth_config,
-                    refresh_token=refresh_token,
-                )
-                refreshed_payload = refreshed_bundle.to_dict()
-                refreshed_payload["user"] = bundle.get("user")
-                bundle = store_x_api_token_bundle(layout, refreshed_payload)
-        except ValueError as exc:
-            raise XApiTokenError("Stored X API token bundle has an invalid expires_at") from exc
-
-    access_token = str(bundle.get("access_token") or "").strip()
-    if not access_token:
-        raise XApiTokenError("Stored X API token bundle is missing access_token")
-
-    user = bundle.get("user")
-    user_id = None
-    if isinstance(user, dict):
-        user_data = user.get("data") if isinstance(user.get("data"), dict) else user
-        if isinstance(user_data, dict):
-            user_id = str(user_data.get("id", "")).strip() or None
-
-    if not user_id:
-        user_payload = await fetch_current_x_user(auth_config, access_token=access_token)
-        user_data = user_payload.get("data") if isinstance(user_payload, dict) else None
-        if not isinstance(user_data, dict):
-            raise XApiTokenError("X API /2/users/me response did not contain a user object")
-        user_id = str(user_data.get("id", "")).strip()
-        if not user_id:
-            raise XApiTokenError("X API /2/users/me response did not contain id")
-        bundle["user"] = user_payload
-        bundle = store_x_api_token_bundle(layout, bundle)
-
-    return auth_config, bundle, user_id
-
-
 def _merge_seen_ids(existing: tuple[str, ...], new_ids: list[str]) -> tuple[str, ...]:
     merged = list(existing)
     seen = set(existing)
@@ -491,8 +426,9 @@ async def sync_x_api_bookmarks(
 
     resolved_layout = layout or build_path_layout(config)
     resolved_layout.ensure_directories()
-    auth_config, bundle, user_id = await _resolve_bundle_and_user_id(
-        config, layout=resolved_layout
+    auth_config, bundle, user_id = await resolve_authenticated_x_api_context(
+        config,
+        layout=resolved_layout,
     )
 
     checkpoint = load_x_api_bookmark_sync_checkpoint(resolved_layout)

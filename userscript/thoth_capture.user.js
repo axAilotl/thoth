@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-    const THOTH_API_URL = 'http://127.0.0.1:8001';
+    const THOTH_API_URL = 'http://127.0.0.1:8090';
     const STORAGE_KEYS = {
         QUEUE: 'thoth_queue',
         LAST_SENT: 'thoth_last_sent',

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+import logging
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Optional
 
@@ -17,6 +18,7 @@ from collectors.web_clipper_parser import parse_web_clipper_markdown
 from ..config import Config
 from ..metadata_db import MetadataDB, get_metadata_db
 from ..path_layout import PathLayout, build_path_layout
+from ..pdf_text import PDFTextExtractionError, extract_pdf_text, extract_pdf_title
 from ..wiki_io import read_document
 from .models import (
     ArchivistCandidate,
@@ -40,6 +42,8 @@ KNOWN_VAULT_ROOTS = {
 }
 KNOWN_LIBRARY_ROOTS = {"translations"}
 EXPLICIT_SCOPES = {"vault", "raw", "library"}
+
+logger = logging.getLogger(__name__)
 
 
 class ArchivistInventoryError(ValueError):
@@ -265,16 +269,11 @@ def _load_or_parse_document(
             web_clipper_contract=web_clipper_contract,
         )
     else:
-        title = _prettify_name(path.stem)
-        content_text = ""
-        tags = ()
-        source_type = _detect_source_type(
+        title, content_text, tags, source_type, file_type, source_hash = _read_pdf_document(
+            path,
             scope=root.scope,
             scope_relative_path=scope_relative_path,
-            default_type="pdf",
         )
-        file_type = "pdf"
-        source_hash = _sha256_file(path)
 
     document = ArchivistCorpusDocument(
         candidate_key=candidate_key,
@@ -353,6 +352,56 @@ def _read_text_document(
     return title, document.body.strip(), tags, source_type, file_type, _sha256_text(raw_text)
 
 
+def _read_pdf_document(
+    path: Path,
+    *,
+    scope: str,
+    scope_relative_path: str,
+) -> tuple[str, str, tuple[str, ...], str, str, str]:
+    title = _prettify_name(path.stem)
+    content_text = ""
+    try:
+        extracted_title = extract_pdf_title(path)
+        if extracted_title:
+            title = extracted_title
+    except PDFTextExtractionError as exc:
+        logger.warning("Failed to extract PDF title for %s: %s", path, exc)
+
+    try:
+        content_text = extract_pdf_text(path)
+    except PDFTextExtractionError as exc:
+        logger.warning("Failed to extract PDF text for %s: %s", path, exc)
+
+    source_type = _detect_source_type(
+        scope=scope,
+        scope_relative_path=scope_relative_path,
+        default_type="pdf",
+    )
+    return (
+        title,
+        content_text,
+        _infer_pdf_tags(path=path, title=title, content_text=content_text),
+        source_type,
+        "pdf",
+        _sha256_file(path),
+    )
+
+
+def _infer_pdf_tags(
+    *,
+    path: Path,
+    title: str,
+    content_text: str,
+) -> tuple[str, ...]:
+    corpus = " ".join(
+        part for part in (path.stem, title, content_text[:1000]) if part
+    ).lower()
+    tags: list[str] = []
+    if "whitepaper" in corpus or "white paper" in corpus:
+        tags.append("whitepaper")
+    return tuple(tags)
+
+
 def _detect_source_type(
     *,
     scope: str,
@@ -375,7 +424,7 @@ def _detect_source_type(
         return "tweet"
     if normalized_first == "threads":
         return "thread"
-    if normalized_first == "papers":
+    if normalized_first in {"papers", "pdfs"}:
         return "paper"
     if normalized_first in {"stars", "repos"}:
         return "repository"

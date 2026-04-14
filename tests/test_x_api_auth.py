@@ -38,7 +38,7 @@ def make_config(tmp_path: Path) -> Config:
     config.set("sources.x_api.client_id", "client-123")
     config.set(
         "sources.x_api.redirect_uri",
-        "http://127.0.0.1:8000/api/x-api/auth/callback",
+        "http://127.0.0.1:8090/api/x-api/auth/callback",
     )
     config.set(
         "sources.x_api.scopes",
@@ -98,11 +98,39 @@ def restore_thoth_config():
     thoth_api.config.data = original
 
 
+def patch_api_startup(monkeypatch):
+    def noop(*args, **kwargs):
+        return None
+
+    async def noop_async(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(thoth_api, "ensure_wiki_scaffold", noop)
+    monkeypatch.setattr(thoth_api, "background_processor", noop_async)
+    monkeypatch.setattr(thoth_api, "ingestion_worker", noop_async)
+    monkeypatch.setattr(thoth_api, "social_sync_scheduler", noop_async)
+    monkeypatch.setattr(thoth_api, "x_api_sync_scheduler", noop_async)
+    monkeypatch.setattr(thoth_api, "archivist_scheduler", noop_async)
+    monkeypatch.setattr(thoth_api, "load_pending_bookmarks_from_db", noop_async)
+    monkeypatch.setattr(
+        thoth_api,
+        "resolve_x_api_sync_config",
+        lambda: {
+            "enabled": False,
+            "interval_hours": 6,
+            "run_on_startup": False,
+            "max_results": 100,
+            "max_pages": 3,
+            "resume_from_checkpoint": True,
+        },
+    )
+
+
 def test_generate_pkce_pair_and_authorize_url():
     verifier, challenge = generate_pkce_pair()
     auth_config = XApiAuthConfig(
         client_id="client-123",
-        redirect_uri="http://127.0.0.1:8000/api/x-api/auth/callback",
+        redirect_uri="http://127.0.0.1:8090/api/x-api/auth/callback",
         scopes=("bookmark.read", "tweet.read", "users.read", "offline.access"),
     )
 
@@ -229,9 +257,14 @@ def test_refresh_x_api_tokens_updates_bundle(tmp_path: Path):
     assert user["data"]["username"] == "thoth"
 
 
-def test_x_api_start_route_wires_into_fastapi(tmp_path: Path, restore_thoth_config):
+def test_x_api_start_route_wires_into_fastapi(
+    tmp_path: Path,
+    restore_thoth_config,
+    monkeypatch,
+):
     config = make_config(tmp_path)
     thoth_api.config.data = deepcopy(config.data)
+    patch_api_startup(monkeypatch)
 
     with TestClient(thoth_api.app) as client:
         response = client.post("/api/x-api/auth/start")
@@ -250,6 +283,7 @@ def test_x_api_status_route_flattens_nested_user(
 ):
     config = make_config(tmp_path)
     thoth_api.config.data = deepcopy(config.data)
+    patch_api_startup(monkeypatch)
     monkeypatch.setattr(
         thoth_api,
         "build_path_layout",
@@ -267,7 +301,7 @@ def test_x_api_status_route_flattens_nested_user(
             "expires_at": "2026-04-05T00:00:00+00:00",
             "obtained_at": "2026-04-04T23:00:00+00:00",
             "client_id": "client-123",
-            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+            "redirect_uri": "http://127.0.0.1:8090/api/x-api/auth/callback",
             "user": {
                 "data": {
                     "id": "42",
@@ -294,6 +328,7 @@ def test_x_api_callback_returns_html_for_browser_requests(
 ):
     config = make_config(tmp_path)
     thoth_api.config.data = deepcopy(config.data)
+    patch_api_startup(monkeypatch)
     monkeypatch.setattr(
         thoth_api,
         "build_path_layout",
@@ -311,7 +346,7 @@ def test_x_api_callback_returns_html_for_browser_requests(
                 "expires_at": "2026-04-05T00:00:00+00:00",
                 "obtained_at": "2026-04-04T23:00:00+00:00",
                 "client_id": "client-123",
-                "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+                "redirect_uri": "http://127.0.0.1:8090/api/x-api/auth/callback",
                 "user": {
                     "data": {
                         "id": "42",

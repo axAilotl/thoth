@@ -30,7 +30,7 @@ def make_config(tmp_path: Path) -> Config:
     config.set("sources.x_api.client_id", "client-123")
     config.set(
         "sources.x_api.redirect_uri",
-        "http://127.0.0.1:8000/api/x-api/auth/callback",
+        "http://127.0.0.1:8090/api/x-api/auth/callback",
     )
     config.set(
         "sources.x_api.scopes",

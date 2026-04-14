@@ -255,6 +255,46 @@ class Config:
                     "sources.x_api.scopes must include offline.access so refresh tokens can be stored"
                 )
 
+            monitoring_config = x_api_config.get("monitoring", {}) or {}
+            if monitoring_config:
+                if not isinstance(monitoring_config, dict):
+                    errors.append("sources.x_api.monitoring must be an object")
+                elif monitoring_config.get("enabled", False):
+                    accounts = monitoring_config.get("accounts")
+                    if not isinstance(accounts, list) or not accounts:
+                        errors.append(
+                            "sources.x_api.monitoring.accounts must be a non-empty list when monitored-account capture is enabled"
+                        )
+
+                    webhook_secret_env = str(
+                        monitoring_config.get("webhook_secret_env") or ""
+                    ).strip()
+                    if not webhook_secret_env:
+                        errors.append(
+                            "sources.x_api.monitoring.webhook_secret_env is required when monitored-account capture is enabled"
+                        )
+                    elif not os.getenv(webhook_secret_env):
+                        errors.append(
+                            f"{webhook_secret_env} is required when monitored-account capture is enabled"
+                        )
+
+                    normalized_scopes = {
+                        str(scope).strip() for scope in scopes or [] if str(scope).strip()
+                    }
+                    if (
+                        monitoring_config.get("auto_bookmark", True)
+                        and "bookmark.write" not in normalized_scopes
+                    ):
+                        errors.append(
+                            "sources.x_api.scopes must include bookmark.write when monitored-account auto-bookmarking is enabled"
+                        )
+
+                    x_monitor_cfg = llm_tasks_config.get("x_monitor", {})
+                    if not isinstance(x_monitor_cfg, dict) or not x_monitor_cfg.get("enabled", False):
+                        errors.append(
+                            "llm.tasks.x_monitor must be enabled when monitored-account capture is enabled"
+                        )
+
         x_api_sync_config = self.get("automation.x_api_sync", {})
         if x_api_sync_config:
             if not isinstance(x_api_sync_config, dict):
@@ -338,6 +378,11 @@ class Config:
             errors=errors,
             llm_tasks_config=llm_tasks_config,
             task_name="embedding",
+        )
+        _validate_llm_task_route(
+            errors=errors,
+            llm_tasks_config=llm_tasks_config,
+            task_name="x_monitor",
         )
 
         if archivist_registry and any(

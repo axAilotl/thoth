@@ -62,8 +62,8 @@ class PDFDocument(DocumentLink):
 class PDFProcessor(DocumentProcessor):
     """PDF processor using DocumentProcessor base"""
 
-    def __init__(self, output_dir: str = None):
-        self.pdfs_dir = resolve_vault_root(config, override=output_dir) / 'pdfs'
+    def __init__(self, output_dir: str = None, *, target_dir_name: str = "pdfs"):
+        self.pdfs_dir = resolve_vault_root(config, override=output_dir) / target_dir_name
         super().__init__(self.pdfs_dir)
 
     def extract_urls_from_tweet(self, tweet: Tweet) -> List[str]:
@@ -79,17 +79,28 @@ class PDFProcessor(DocumentProcessor):
         
         return non_arxiv_pdfs
     
-    def download_document(self, url: str, tweet_id: str, resume: bool = True) -> Optional[PDFDocument]:
+    def download_document(
+        self,
+        url: str,
+        tweet_id: str,
+        resume: bool = True,
+        filename_prefix: Optional[str] = None,
+        title_override: Optional[str] = None,
+    ) -> Optional[PDFDocument]:
         """Download PDF document"""
         try:
             # Extract title from URL
-            title = self._extract_title_from_url(url)
+            title = title_override or self._extract_title_from_url(url)
             
             # Create PDF document object
             pdf_doc = PDFDocument(url, title)
             
             # Create safe filename
             filename = self._create_safe_filename(url, title, 'pdf')
+            if filename_prefix:
+                safe_prefix = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(filename_prefix).strip()).strip("-")
+                if safe_prefix:
+                    filename = f"{safe_prefix}-{filename}"
             pdf_doc.filename = filename
             
             # Download PDF if not resuming or if file doesn't exist

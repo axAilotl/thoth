@@ -360,20 +360,37 @@ class KnowledgeArtifactRuntime:
         self, artifact: PaperArtifact
     ) -> IngestionDispatchResult:
         """Process a paper artifact by downloading and indexing the PDF."""
-        from processors.arxiv_processor_v2 import ArXivProcessorV2
-
         if not artifact.pdf_url:
             raise IngestionRuntimeError(
                 f"Paper artifact {artifact.id} is missing pdf_url"
             )
 
-        processor = ArXivProcessorV2(output_dir=str(self.layout.vault_root))
-        document = await asyncio.to_thread(
-            processor.download_document,
-            artifact.pdf_url,
-            artifact.id,
-            True,
-        )
+        source_type = str(artifact.source_type or "").strip().lower()
+        if source_type == "arxiv" or "arxiv.org" in str(artifact.pdf_url).lower():
+            from processors.arxiv_processor_v2 import ArXivProcessorV2
+
+            processor = ArXivProcessorV2(output_dir=str(self.layout.vault_root))
+            document = await asyncio.to_thread(
+                processor.download_document,
+                artifact.pdf_url,
+                artifact.id,
+                True,
+            )
+        else:
+            from processors.pdf_processor import PDFProcessor
+
+            processor = PDFProcessor(
+                output_dir=str(self.layout.vault_root),
+                target_dir_name="papers",
+            )
+            document = await asyncio.to_thread(
+                processor.download_document,
+                artifact.pdf_url,
+                artifact.id,
+                True,
+                artifact.id,
+                artifact.title or None,
+            )
         if not document:
             raise IngestionRuntimeError(
                 f"Failed to process paper artifact {artifact.id}"

@@ -5,6 +5,7 @@ ArXiv Processor V2 - Enhanced ArXiv processor using unified DocumentProcessor ba
 import json
 import logging
 import re
+import subprocess
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import xml.etree.ElementTree as ET
@@ -93,27 +94,27 @@ class ArXivProcessorV2(DocumentProcessor):
             
             # Create paper object
             paper = ArXivPaper(url, "", arxiv_id)
+            legacy_route_path = self._find_legacy_route_path(arxiv_id=arxiv_id)
             
             # Get metadata from ArXiv API
             metadata = self._fetch_arxiv_metadata(arxiv_id)
+            metadata_title = None
             if metadata:
-                paper.title = metadata.get('title', f"ArXiv Paper {arxiv_id}")
+                metadata_title = metadata.get('title')
+                paper.title = metadata_title or f"ArXiv Paper {arxiv_id}"
                 paper.abstract = metadata.get('abstract', '')
                 paper.authors = metadata.get('authors', [])
                 paper.categories = metadata.get('categories', [])
             else:
                 paper.title = f"ArXiv Paper {arxiv_id}"
+
+            paper.title = self._resolve_paper_title(
+                arxiv_id=arxiv_id,
+                metadata_title=metadata_title,
+                candidate_paths=(legacy_route_path,),
+            )
             
-            # Create hyphenated slug for title (no spaces), max 80 chars
-            title_clean = paper.title.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
-            title_clean = ''.join(ch for ch in title_clean if ord(ch) >= 32)
-            title_clean = re.sub(r'\s+', ' ', title_clean).strip().lower()
-            # Replace non-alnum with hyphens, collapse multiples
-            slug = re.sub(r'[^a-z0-9]+', '-', title_clean)
-            slug = slug.strip('-')[:80]
-            if not slug:
-                slug = 'paper'
-            filename = f"{arxiv_id}-{slug}.pdf"
+            filename = self._build_filename(arxiv_id=arxiv_id, title=paper.title)
             paper.filename = filename
             
             # Download PDF if not resuming or if file doesn't exist
@@ -148,13 +149,15 @@ class ArXivProcessorV2(DocumentProcessor):
                 except Exception:
                     pass
             else:
-                # Migrate legacy id.pdf if present
-                legacy_path = self.papers_dir / f"{arxiv_id}.pdf"
-                if legacy_path.exists() and not pdf_path.exists():
+                if (
+                    legacy_route_path is not None
+                    and legacy_route_path.exists()
+                    and not pdf_path.exists()
+                ):
                     try:
-                        legacy_path.rename(pdf_path)
+                        legacy_route_path.rename(pdf_path)
                         paper.downloaded = True
-                        logger.info(f"Renamed legacy ArXiv file {legacy_path.name} -> {filename}")
+                        logger.info(f"Renamed legacy ArXiv file {legacy_route_path.name} -> {filename}")
                         # Upsert DB for renamed file
                         try:
                             if config.get('database.enabled', False):
@@ -182,8 +185,14 @@ class ArXivProcessorV2(DocumentProcessor):
                         except Exception:
                             pass
                     except Exception as e:
-                        logger.warning(f"Failed to rename legacy ArXiv file {legacy_path.name}: {e}")
+                        logger.warning(f"Failed to rename legacy ArXiv file {legacy_route_path.name}: {e}")
                         paper.downloaded = False
+                    else:
+                        self._rename_db_file_entry(
+                            old_path=legacy_route_path,
+                            new_path=pdf_path,
+                            tweet_id=tweet_id,
+                        )
                 if not paper.downloaded:
                     success = self._download_file(paper.pdf_url, pdf_path)
                     paper.downloaded = success
@@ -291,3 +300,162 @@ class ArXivProcessorV2(DocumentProcessor):
         if element is None or element.text is None:
             return ""
         return " ".join(element.text.split())
+
+    def _find_legacy_query_title_path(self, *, arxiv_id: str) -> Optional[Path]:
+        """Return the old query-title filename for an arXiv id, if present."""
+        matches = sorted(self.papers_dir.glob(f"{arxiv_id}-arxiv-query-*.pdf"))
+        if not matches:
+            return None
+        return matches[0]
+
+    def _find_legacy_generic_title_path(self, *, arxiv_id: str) -> Optional[Path]:
+        """Return the old generic placeholder filename for an arXiv id, if present."""
+        matches = sorted(self.papers_dir.glob(f"{arxiv_id}-arxiv-paper-*.pdf"))
+        if not matches:
+            return None
+        return matches[0]
+
+    def _find_legacy_route_path(self, *, arxiv_id: str) -> Optional[Path]:
+        """Return a noncanonical existing file that should be normalized by PDF title."""
+        candidates = (
+            self._find_legacy_query_title_path(arxiv_id=arxiv_id),
+            self._find_legacy_generic_title_path(arxiv_id=arxiv_id),
+            self.papers_dir / f"{arxiv_id}.pdf",
+        )
+        for path in candidates:
+            if path is not None and path.exists():
+                return path
+        return None
+
+    def _build_filename(self, *, arxiv_id: str, title: str) -> str:
+        """Build the canonical PDF filename for an arXiv paper."""
+        title_clean = title.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+        title_clean = ''.join(ch for ch in title_clean if ord(ch) >= 32)
+        title_clean = re.sub(r'\s+', ' ', title_clean).strip().lower()
+        slug = re.sub(r'[^a-z0-9]+', '-', title_clean)
+        slug = slug.strip('-')[:80]
+        if not slug:
+            slug = 'paper'
+        return f"{arxiv_id}-{slug}.pdf"
+
+    def _resolve_paper_title(
+        self,
+        *,
+        arxiv_id: str,
+        metadata_title: Optional[str],
+        candidate_paths: tuple[Optional[Path], ...],
+    ) -> str:
+        """Choose the best available paper title, preferring metadata then local PDF."""
+        normalized_metadata_title = self._normalize_title(metadata_title)
+        if normalized_metadata_title and not self._looks_like_query_title(normalized_metadata_title):
+            return normalized_metadata_title
+
+        for path in candidate_paths:
+            if path is None or not path.exists():
+                continue
+            pdf_title = self._extract_title_from_pdf(path)
+            if pdf_title:
+                return pdf_title
+
+        if normalized_metadata_title and not self._looks_like_query_title(normalized_metadata_title):
+            return normalized_metadata_title
+        return f"ArXiv Paper {arxiv_id}"
+
+    def _normalize_title(self, title: Optional[str]) -> str:
+        """Normalize title whitespace and control characters."""
+        if not title:
+            return ""
+        cleaned = title.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+        cleaned = ''.join(ch for ch in cleaned if ord(ch) >= 32)
+        return re.sub(r'\s+', ' ', cleaned).strip()
+
+    def _looks_like_query_title(self, title: str) -> bool:
+        """Detect arXiv API/query titles that should never become filenames."""
+        lowered = title.lower()
+        return (
+            lowered.startswith("arxiv query:")
+            or "search_query=" in lowered
+            or "id_list=" in lowered
+            or "max_results=" in lowered
+        )
+
+    def _extract_title_from_pdf(self, path: Path) -> str:
+        """Extract a plausible title from PDF metadata or first-page text."""
+        metadata_title = self._extract_pdfinfo_title(path)
+        if metadata_title:
+            return metadata_title
+
+        return self._extract_pdftotext_title(path)
+
+    def _extract_pdfinfo_title(self, path: Path) -> str:
+        """Read the PDF metadata title via pdfinfo."""
+        try:
+            result = subprocess.run(
+                ["pdfinfo", str(path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        except Exception:
+            return ""
+        if result.returncode != 0:
+            return ""
+
+        for line in result.stdout.splitlines():
+            if not line.startswith("Title:"):
+                continue
+            title = self._normalize_title(line.split(":", 1)[1])
+            if title and not self._looks_like_query_title(title):
+                return title
+        return ""
+
+    def _extract_pdftotext_title(self, path: Path) -> str:
+        """Read the first-page text and use the leading line as a title fallback."""
+        try:
+            result = subprocess.run(
+                ["pdftotext", "-f", "1", "-l", "1", str(path), "-"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+        except Exception:
+            return ""
+        if result.returncode != 0:
+            return ""
+
+        for raw_line in result.stdout.splitlines():
+            line = self._normalize_title(raw_line)
+            if not line:
+                continue
+            if line.lower().startswith("arxiv:"):
+                continue
+            if self._looks_like_query_title(line):
+                continue
+            return line
+        return ""
+
+    def _rename_db_file_entry(self, *, old_path: Path, new_path: Path, tweet_id: str) -> None:
+        """Keep the file index aligned with on-disk legacy filename migrations."""
+        if not config.get('database.enabled', False):
+            return
+        from core.metadata_db import get_metadata_db
+
+        db = get_metadata_db()
+        try:
+            old_rel_path = old_path.relative_to(self.papers_dir.parent)
+        except Exception:
+            old_rel_path = old_path
+        try:
+            new_rel_path = new_path.relative_to(self.papers_dir.parent)
+        except Exception:
+            new_rel_path = new_path
+
+        db.rename_file_entry(
+            old_path=str(old_rel_path),
+            new_path=str(new_rel_path),
+            file_type="pdf",
+            size_bytes=new_path.stat().st_size,
+            source_id=tweet_id,
+        )

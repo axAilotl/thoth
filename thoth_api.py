@@ -58,6 +58,7 @@ from core import (
     run_archivist_topics,
     save_archivist_registry_text,
 )
+from core.api_server_runtime import resolve_api_server_options
 from core.bookmark_ingest import (
     build_bookmark_queue_payload,
     build_realtime_bookmark_record,
@@ -72,6 +73,14 @@ from core.non_live_state import (
     validate_non_live_interval_hours,
 )
 from core.settings_summary import build_settings_runtime_summary
+from core.llm_interface import LLMInterface
+from core.x_api_monitoring import (
+    X_API_MONITOR_SECRET_HEADER,
+    XApiMonitoringConfigError,
+    XApiMonitoringError,
+    process_x_api_monitoring_webhook,
+    verify_x_api_monitoring_webhook_secret,
+)
 from processors.pipeline_processor import PipelineProcessor
 from processors.cache_loader import CacheLoader
 from processors.github_stars_processor import GitHubStarsProcessor
@@ -989,6 +998,7 @@ async def get_settings():
             'DEEPGRAM_API_KEY': bool(os.getenv('DEEPGRAM_API_KEY')),
             'GITHUB_API': bool(os.getenv('GITHUB_API')),
             'X_API_CLIENT_SECRET': bool(os.getenv('X_API_CLIENT_SECRET')),
+            'THOTH_X_MONITOR_WEBHOOK_SECRET': bool(os.getenv('THOTH_X_MONITOR_WEBHOOK_SECRET')),
             'HF_TOKEN': bool(os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACEHUB_API_TOKEN')),
             'HF_USER': os.getenv('HF_USER', '')
         }
@@ -1355,6 +1365,51 @@ async def trigger_x_api_bookmark_sync(request: XApiBackfillRequest):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.error(f"Unexpected X API bookmark sync error: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/x-api/monitoring/webhook")
+async def receive_x_api_monitoring_webhook(request: Request):
+    """Receive monitored-account post webhooks and promote useful posts into bookmarks."""
+    try:
+        verify_x_api_monitoring_webhook_secret(
+            request.headers.get(X_API_MONITOR_SECRET_HEADER),
+            runtime_config=config,
+        )
+        payload = await request.json()
+        result = await process_x_api_monitoring_webhook(
+            payload,
+            runtime_config=config,
+            llm_interface=LLMInterface(config.get("llm", {}) or {}),
+            layout=build_path_layout(config),
+        )
+        bookmark_payload = result.pop("bookmark_payload", None)
+        if bookmark_payload is not None:
+            await ingest_bookmark_capture(
+                bookmark_payload,
+                process_immediately=False,
+                queue_bookmark=True,
+                reset_processed=True,
+                force=True,
+            )
+            result["queued"] = True
+        else:
+            result["queued"] = False
+        return result
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid webhook JSON: {exc}") from exc
+    except (
+        XApiAuthConfigError,
+        XApiAuthStateError,
+        XApiTokenError,
+        XApiMonitoringConfigError,
+        XApiMonitoringError,
+        ValueError,
+    ) as exc:
+        logger.error(f"X monitored-account webhook failed: {exc}")
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Unexpected monitored-account webhook error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -2330,9 +2385,13 @@ async def shutdown_event():
 
 def main():
     """Run the API server"""
-    uvicorn.run(
-        "thoth_api:app", host="0.0.0.0", port=8001, reload=True, log_level="info"
+    server_options = resolve_api_server_options()
+    logger.info(
+        "Starting Thoth API on http://%s:%s (override with THOTH_API_HOST/THOTH_API_PORT)",
+        server_options["host"],
+        server_options["port"],
     )
+    uvicorn.run("thoth_api:app", log_level="info", **server_options)
 
 
 if __name__ == "__main__":

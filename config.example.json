@@ -17,14 +17,19 @@
           "default": {
             "id": "moonshotai/kimi-k2-0905"
           },
-          "archivist": {
-            "id": "anthropic/claude-3-haiku",
-            "max_tokens": 1800,
-            "temperature": 0.2
-          },
-          "vision": {
-            "id": "google/gemini-2.5-flash"
-          },
+        "archivist": {
+          "id": "anthropic/claude-3-haiku",
+          "max_tokens": 1800,
+          "temperature": 0.2
+        },
+        "classifier": {
+          "id": "anthropic/claude-3-haiku",
+          "max_tokens": 220,
+          "temperature": 0.1
+        },
+        "vision": {
+          "id": "google/gemini-2.5-flash"
+        },
           "transcript": {
             "id": "openai/gpt-5-mini"
           }
@@ -108,6 +113,15 @@
           }
         ]
       },
+      "x_monitor": {
+        "enabled": true,
+        "fallback": [
+          {
+            "provider": "openrouter",
+            "model": "classifier"
+          }
+        ]
+      },
       "embedding": {
         "enabled": false,
         "fallback": [
@@ -127,6 +141,7 @@
       "tags": "You are a tagging system. Generate 3-8 relevant hashtag-style tags for the given content. Focus on topics, technologies, concepts, and themes. Return only comma-separated tags without # symbols, no explanations.",
       "alt_text": "Provide a concise, descriptive alt text for this image for accessibility. Focus on the main content and context. Return ONLY the alt text description, under 200 characters, without any preamble or explanation.",
       "transcript": "Combine fragmented sentences into coherent paragraphs. Remove all timestamps. Process the following transcript and generate the text output in plain text paragraphs without editing the content, only forming paragraphs that flow logically based on context inserting newlines between paragraphs. Return ONLY the processed transcript text with no preamble or explanation., followed by a concise 2-4 sentence summary followed by 3-8 relevant hashtag-style tags for the given content. Focus on topics, technologies, concepts, and themes. Return only comma-separated tags without # symbols, no explanations.",
+      "x_monitor": "You classify monitored X posts for capture into Thoth. Be conservative. Favor posts that add durable research, technical, or operator signal relative to the active archivist topics. Ignore generic hype, personal chatter, and low-information engagement bait. Return only valid JSON with keys useful, confidence, reason, and matched_topics.",
       "archivist": {
         "system_file": "prompts/archivist_system.md",
         "user_file": "prompts/archivist_user.md",
@@ -487,13 +502,20 @@
       "enabled": false,
       "client_id": "",
       "client_secret_env": "X_API_CLIENT_SECRET",
-      "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+      "redirect_uri": "http://127.0.0.1:8090/api/x-api/auth/callback",
       "scopes": [
         "bookmark.read",
+        "bookmark.write",
         "tweet.read",
         "users.read",
         "offline.access"
-      ]
+      ],
+      "monitoring": {
+        "enabled": false,
+        "auto_bookmark": true,
+        "webhook_secret_env": "THOTH_X_MONITOR_WEBHOOK_SECRET",
+        "accounts": []
+      }
     }
   },
   "automation": {

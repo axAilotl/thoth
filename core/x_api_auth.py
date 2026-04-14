@@ -374,6 +374,23 @@ def _normalize_scope_response(value: Any) -> tuple[str, ...]:
     return tuple(scopes)
 
 
+def token_bundle_has_scopes(
+    bundle: Mapping[str, Any] | None,
+    required_scopes: tuple[str, ...] | list[str],
+) -> bool:
+    """Return True when a stored token bundle includes every required scope."""
+    if not required_scopes:
+        return True
+    if not isinstance(bundle, Mapping):
+        return False
+    available = set(_normalize_scope_response(bundle.get("scopes")))
+    return all(
+        str(scope).strip() in available
+        for scope in required_scopes
+        if str(scope).strip()
+    )
+
+
 def _parse_token_response(
     auth_config: XApiAuthConfig,
     payload: Mapping[str, Any],
@@ -495,6 +512,76 @@ async def fetch_current_x_user(auth_config: XApiAuthConfig, *, access_token: str
     if not isinstance(payload, dict):
         raise XApiTokenError("X API user response must be a JSON object")
     return payload
+
+
+async def resolve_authenticated_x_api_context(
+    config: Config,
+    *,
+    layout=None,
+    required_scopes: tuple[str, ...] = (),
+) -> tuple[XApiAuthConfig, dict[str, Any], str]:
+    """Resolve a valid token bundle and authenticated X user id for API calls."""
+    auth_config = resolve_x_api_auth_config(config)
+    resolved_layout = layout or build_path_layout(config)
+    resolved_layout.ensure_directories()
+    bundle = load_x_api_token_bundle(resolved_layout)
+    if not bundle:
+        raise XApiAuthStateError("No stored X API token bundle was found")
+
+    expires_at = str(bundle.get("expires_at") or "").strip()
+    refresh_token = str(bundle.get("refresh_token") or "").strip()
+    if expires_at:
+        try:
+            is_expired = _parse_iso_utc(expires_at)
+            if is_expired <= _now_utc():
+                if not refresh_token:
+                    raise XApiTokenError(
+                        "Stored X API token bundle is expired and lacks a refresh token"
+                    )
+                refreshed_bundle = await refresh_x_api_tokens(
+                    auth_config,
+                    refresh_token=refresh_token,
+                )
+                refreshed_payload = refreshed_bundle.to_dict()
+                refreshed_payload["user"] = bundle.get("user")
+                bundle = store_x_api_token_bundle(resolved_layout, refreshed_payload)
+        except ValueError as exc:
+            raise XApiTokenError("Stored X API token bundle has an invalid expires_at") from exc
+
+    access_token = str(bundle.get("access_token") or "").strip()
+    if not access_token:
+        raise XApiTokenError("Stored X API token bundle is missing access_token")
+
+    if required_scopes and not token_bundle_has_scopes(bundle, required_scopes):
+        available = set(_normalize_scope_response(bundle.get("scopes")))
+        missing = [
+            scope
+            for scope in required_scopes
+            if str(scope).strip() and str(scope).strip() not in available
+        ]
+        raise XApiTokenError(
+            "Stored X API token bundle is missing scopes: " + ", ".join(missing)
+        )
+
+    user = bundle.get("user")
+    user_id = None
+    if isinstance(user, dict):
+        user_data = user.get("data") if isinstance(user.get("data"), dict) else user
+        if isinstance(user_data, dict):
+            user_id = str(user_data.get("id", "")).strip() or None
+
+    if not user_id:
+        user_payload = await fetch_current_x_user(auth_config, access_token=access_token)
+        user_data = user_payload.get("data") if isinstance(user_payload, dict) else None
+        if not isinstance(user_data, dict):
+            raise XApiTokenError("X API /2/users/me response did not contain a user object")
+        user_id = str(user_data.get("id", "")).strip()
+        if not user_id:
+            raise XApiTokenError("X API /2/users/me response did not contain id")
+        bundle["user"] = user_payload
+        bundle = store_x_api_token_bundle(resolved_layout, bundle)
+
+    return auth_config, bundle, user_id
 
 
 async def complete_x_api_auth(

@@ -68,7 +68,9 @@ Important paths:
 .venv/bin/python thoth_api.py
 ```
 
-Then open `/settings` for the operator control plane.
+The local API binds to `127.0.0.1:8090` by default unless `THOTH_API_PORT` or `PORT` overrides it.
+
+Then open `http://127.0.0.1:8090/settings` for the operator control plane.
 
 ## Settings UI
 
@@ -77,9 +79,17 @@ The settings UI exposes:
 - model aliases per provider
 - a dedicated embedding route for semantic archivist retrieval
 - X API auth and manual sync controls
+- monitored-account X webhooks with `llm.tasks.x_monitor`, `THOTH_X_MONITOR_WEBHOOK_SECRET`, and `bookmark.write` auto-bookmarking
 - Web Clipper source directory settings
 - path layout for active shared roots and registries
 - archivist registry editing, corpus diagnostics, due-topic runs, force runs, and background automation
+
+## Ingestion Notes
+
+- Fresh arXiv downloads use the arXiv entry title as the canonical filename, producing names like `<arxiv_id>-<title>.pdf`.
+- If Thoth encounters legacy `arxiv-query-*` or `arxiv-paper-*` filenames created by another route, it repairs them using local PDF metadata/text and updates the metadata index to match the canonical filename.
+- Non-arXiv paper artifacts now download into `vault/papers/` with stable prefixed filenames so the archivist and wiki updater can find them through the same paper path.
+- Archivist corpus indexing now extracts text from PDFs with `pdftotext`, tags detected whitepapers, and treats research PDFs as paper-grade sources instead of letting tweets dominate by default.
 
 ## CLI Overview
 
@@ -158,6 +168,7 @@ What exists now:
 - incremental corpus inventory with reuse-safe change detection
 - source-type, tag, and term filters plus modular retrieval policy
 - full-text retrieval, semantic retrieval, and hybrid ranking
+- SQLite-backed corpus metadata plus lazy cached document embeddings for semantic and hybrid retrieval
 - cadence and dirty-check state
 - staged compilation: one brief per source type, then final page synthesis
 - repository handling as topic-relevance evidence instead of standalone README dumping
@@ -169,6 +180,7 @@ What exists now:
 - API routes for direct archivist execution
 - background archivist automation driven by `automation.archivist`
 - task routing support for dedicated `archivist` and `embedding` model routes
+- paper and PDF indexing through the same corpus inventory, with `pdfs/` roots available alongside `papers/`
 
 Current archivist workflow:
 
@@ -180,6 +192,21 @@ Current archivist workflow:
 6. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
 7. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
 8. Tune `retrieval.source_type_limits` and `carryover_limit_per_type` in `archivist_topics.yaml` when a topic needs stricter staged caps by source type.
+9. Include `papers` and `pdfs` in topic roots when you want uploaded whitepapers and manual PDFs to compete as first-class research sources.
+
+Semantic retrieval behavior:
+- There is no separate vector database. Corpus inventory, full-text search, and cached document embeddings live in SQLite.
+- Thoth does not pre-embed the whole vault. It embeds only the filtered candidate documents needed by semantic or hybrid topics, then reuses those cached document embeddings on later runs.
+- Cached document embeddings are invalidated when the source content changes or when the embedding provider/model changes.
+- The topic query is embedded each run, and `max_new_embeddings_per_run` caps how many missing document embeddings are filled in one pass.
+
+## X Monitor Webhooks
+
+- Use `sources.x_api.monitoring.accounts` to declare usernames or numeric account ids that should be watched for new posts outside your manual bookmarks.
+- Send webhook payloads to `POST /api/x-api/monitoring/webhook` with the shared header `X-Thoth-Webhook-Secret`.
+- Store the shared secret in `THOTH_X_MONITOR_WEBHOOK_SECRET`.
+- Enable `llm.tasks.x_monitor` to run a cheap classifier against the live archivist topic context.
+- Include `bookmark.write` in `sources.x_api.scopes` when auto-bookmarking is enabled, so accepted posts are pushed back into X and then reused by the existing bookmark pipeline.
 
 ## Storage Layout
 

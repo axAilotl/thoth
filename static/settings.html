@@ -709,6 +709,16 @@
                     </div>
 
                     <div class="task-row">
+                        <span class="task-name">📡 X Monitor Classifier</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="task-x_monitor-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <select id="task-x_monitor-provider" onchange="updateTaskModelDropdown('x_monitor')"></select>
+                        <select id="task-x_monitor-model"></select>
+                    </div>
+
+                    <div class="task-row">
                         <span class="task-name">🖼️ Alt Text (Vision)</span>
                         <label class="toggle">
                             <input type="checkbox" id="task-alt_text-enabled" checked>
@@ -1044,13 +1054,46 @@
 
                 <div class="form-group">
                     <label>X OAuth Redirect URI</label>
-                    <input type="text" id="source-x-api-redirect-uri" placeholder="http://127.0.0.1:8000/api/x-api/auth/callback">
+                    <input type="text" id="source-x-api-redirect-uri" placeholder="http://127.0.0.1:8090/api/x-api/auth/callback">
                 </div>
 
                 <div class="form-group">
                     <label>X Client Secret <span class="hint">Stored in <code>.env</code> as <code>X_API_CLIENT_SECRET</code>.</span></label>
                     <input type="password" id="social-x-api-client-secret" placeholder="Leave blank to keep current secret">
                     <small id="source-x-api-secret-status" style="color: var(--text-secondary); display: block; margin-top: 6px;">Stored: unknown</small>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Monitored Account Webhooks</div>
+                        <div class="toggle-description">Accept webhook posts for a curated list of accounts, classify them with the X monitor route, and auto-bookmark useful posts.</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-x-api-monitoring-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Auto-Bookmark Useful Posts</div>
+                        <div class="toggle-description">Requires <code>bookmark.write</code> scope on the connected X account.</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-x-api-monitoring-auto-bookmark" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>Monitored Accounts <span class="hint">One X username or numeric user ID per line. Usernames may include or omit <code>@</code>.</span></label>
+                    <textarea id="source-x-api-monitoring-accounts" rows="4" placeholder="@XDevelopers&#10;openai"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Webhook Secret <span class="hint">Stored in <code>.env</code> as <code>THOTH_X_MONITOR_WEBHOOK_SECRET</code>. Send it in the <code>X-Thoth-Webhook-Secret</code> header.</span></label>
+                    <input type="password" id="social-x-api-monitoring-webhook-secret" placeholder="Leave blank to keep current secret">
+                    <small id="source-x-api-monitoring-secret-status" style="color: var(--text-secondary); display: block; margin-top: 6px;">Stored: unknown</small>
                 </div>
 
                 <div class="card" style="margin-top: 16px; padding: 16px;">
@@ -1437,7 +1480,8 @@
 
     <script>
         const API_BASE = '';
-        const TASK_ROUTE_KEYS = ['tags', 'summary', 'alt_text', 'transcript', 'translation', 'embedding', 'archivist'];
+        const DEFAULT_X_API_REDIRECT_PATH = '/api/x-api/auth/callback';
+        const TASK_ROUTE_KEYS = ['tags', 'summary', 'x_monitor', 'alt_text', 'transcript', 'translation', 'embedding', 'archivist'];
         let providersConfig = {};
         let tasksConfig = {};
         let modelsCache = {};
@@ -1467,6 +1511,10 @@
         function toggleVisibility(inputId) {
             const input = document.getElementById(inputId);
             input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        function getDefaultXApiRedirectUri() {
+            return `${window.location.origin}${DEFAULT_X_API_REDIRECT_PATH}`;
         }
 
         async function checkConnection() {
@@ -2547,7 +2595,14 @@
                 document.getElementById('source-x-api-enabled').checked = xApiSource.enabled === true;
                 document.getElementById('source-x-api-client-id').value = xApiSource.client_id || '';
                 document.getElementById('source-x-api-redirect-uri').value =
-                    xApiSource.redirect_uri || 'http://127.0.0.1:8000/api/x-api/auth/callback';
+                    xApiSource.redirect_uri || getDefaultXApiRedirectUri();
+                const xApiMonitoring = xApiSource.monitoring || {};
+                document.getElementById('source-x-api-monitoring-enabled').checked =
+                    xApiMonitoring.enabled === true;
+                document.getElementById('source-x-api-monitoring-auto-bookmark').checked =
+                    xApiMonitoring.auto_bookmark !== false;
+                document.getElementById('source-x-api-monitoring-accounts').value =
+                    multilineFromValue(xApiMonitoring.accounts || []);
 
                 const socialSync = config.automation?.social_sync || {};
                 document.getElementById('automation-social-enabled').checked = socialSync.enabled !== false;
@@ -2574,6 +2629,8 @@
                     `Stored: ${config.env?.HF_TOKEN ? 'yes' : 'no'}`;
                 document.getElementById('source-x-api-secret-status').textContent =
                     `Stored: ${config.env?.X_API_CLIENT_SECRET ? 'yes' : 'no'}`;
+                document.getElementById('source-x-api-monitoring-secret-status').textContent =
+                    `Stored: ${config.env?.THOTH_X_MONITOR_WEBHOOK_SECRET ? 'yes' : 'no'}`;
 
                 const runtime = config.runtime || {};
                 const layout = runtime.layout || {};
@@ -2805,7 +2862,13 @@
                         client_id: document.getElementById('source-x-api-client-id').value.trim(),
                         client_secret_env: 'X_API_CLIENT_SECRET',
                         redirect_uri: document.getElementById('source-x-api-redirect-uri').value.trim(),
-                        scopes: ['bookmark.read', 'tweet.read', 'users.read', 'offline.access']
+                        scopes: ['bookmark.read', 'bookmark.write', 'tweet.read', 'users.read', 'offline.access'],
+                        monitoring: {
+                            enabled: document.getElementById('source-x-api-monitoring-enabled').checked,
+                            auto_bookmark: document.getElementById('source-x-api-monitoring-auto-bookmark').checked,
+                            webhook_secret_env: 'THOTH_X_MONITOR_WEBHOOK_SECRET',
+                            accounts: splitListField(document.getElementById('source-x-api-monitoring-accounts').value)
+                        }
                     }
                 },
                 automation: {
@@ -2837,11 +2900,13 @@
             const hfToken = document.getElementById('social-hf-token').value.trim();
             const hfUser = document.getElementById('source-hf-username').value.trim();
             const xApiClientSecret = document.getElementById('social-x-api-client-secret').value.trim();
+            const xApiMonitoringSecret = document.getElementById('social-x-api-monitoring-webhook-secret').value.trim();
 
             if (githubToken) envPayload.GITHUB_API = githubToken;
             if (hfToken) envPayload.HF_TOKEN = hfToken;
             if (hfUser) envPayload.HF_USER = hfUser;
             if (xApiClientSecret) envPayload.X_API_CLIENT_SECRET = xApiClientSecret;
+            if (xApiMonitoringSecret) envPayload.THOTH_X_MONITOR_WEBHOOK_SECRET = xApiMonitoringSecret;
 
             try {
                 const configResponse = await fetch(`${API_BASE}/api/settings/config`, {
@@ -2863,6 +2928,7 @@
                 document.getElementById('social-github-token').value = '';
                 document.getElementById('social-hf-token').value = '';
                 document.getElementById('social-x-api-client-secret').value = '';
+                document.getElementById('social-x-api-monitoring-webhook-secret').value = '';
                 showAlert('Source settings saved successfully');
                 await loadConfig();
             } catch (e) {

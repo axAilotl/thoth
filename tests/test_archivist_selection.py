@@ -2,6 +2,7 @@ from pathlib import Path
 
 from core.archivist_selection import select_archivist_candidates
 from core.archivist_topics import ArchivistTopicDefinition
+from core.archivist_retrieval.models import ArchivistRetrievalPolicy
 from core.config import Config
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
@@ -168,3 +169,117 @@ def test_archivist_selection_reports_missing_roots_without_broadening_scope(tmp_
     assert result.scanned_roots == ("tweets",)
     assert result.missing_roots == ("missing-root",)
     assert [candidate.path for candidate in result.candidates] == [tweet_path]
+
+
+def test_archivist_selection_uses_pdf_text_for_full_text_queries(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config, db = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    pdfs_dir = layout.vault_root / "pdfs"
+    pdfs_dir.mkdir(parents=True, exist_ok=True)
+
+    pdf_path = pdfs_dir / "companion-alignment-whitepaper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\nplaceholder\n")
+
+    monkeypatch.setattr(
+        "core.archivist_retrieval.inventory.extract_pdf_title",
+        lambda path: "Companion Alignment Whitepaper",
+    )
+    monkeypatch.setattr(
+        "core.archivist_retrieval.inventory.extract_pdf_text",
+        lambda path: "alignment roadmap for companion memory systems",
+    )
+
+    topic = ArchivistTopicDefinition(
+        id="companion-whitepapers",
+        title="Companion Whitepapers",
+        output_path="pages/topic-companion-whitepapers.md",
+        include_roots=("pdfs",),
+        source_types=("paper",),
+        include_terms=("alignment roadmap", "companion memory"),
+        retrieval=ArchivistRetrievalPolicy(
+            mode="full_text",
+            tag_mode="query",
+            term_mode="query",
+            full_text_limit=10,
+            rerank_limit=10,
+        ),
+    )
+
+    result = select_archivist_candidates(
+        topic,
+        config=config,
+        layout=layout,
+        db=db,
+    )
+
+    assert [candidate.path for candidate in result.candidates] == [pdf_path]
+    assert result.candidates[0].content_text == "alignment roadmap for companion memory systems"
+    assert result.candidates[0].source_type == "paper"
+    assert result.candidates[0].tags == ("whitepaper",)
+
+
+def test_archivist_selection_prefers_pdf_whitepapers_over_tweets(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config, db = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+
+    tweets_dir = layout.vault_root / "tweets"
+    pdfs_dir = layout.vault_root / "pdfs"
+    tweets_dir.mkdir(parents=True, exist_ok=True)
+    pdfs_dir.mkdir(parents=True, exist_ok=True)
+
+    tweet_path = tweets_dir / "companion-roadmap.md"
+    tweet_path.write_text(
+        "---\n"
+        "type: tweet\n"
+        "---\n"
+        "\n"
+        "# Companion roadmap\n"
+        "\n"
+        "companion roadmap\n",
+        encoding="utf-8",
+    )
+    pdf_path = pdfs_dir / "companion-roadmap-whitepaper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\nplaceholder\n")
+
+    monkeypatch.setattr(
+        "core.archivist_retrieval.inventory.extract_pdf_title",
+        lambda path: "Companion roadmap",
+    )
+    monkeypatch.setattr(
+        "core.archivist_retrieval.inventory.extract_pdf_text",
+        lambda path: "companion roadmap",
+    )
+
+    topic = ArchivistTopicDefinition(
+        id="companion-weighting",
+        title="Companion Weighting",
+        output_path="pages/topic-companion-weighting.md",
+        include_roots=("tweets", "pdfs"),
+        source_types=("tweet", "paper"),
+        include_terms=("companion roadmap",),
+        retrieval=ArchivistRetrievalPolicy(
+            mode="literal",
+            tag_mode="query",
+            term_mode="query",
+            source_type_weights=(("paper", 1.4), ("tweet", 0.8)),
+            rerank_limit=10,
+        ),
+    )
+
+    result = select_archivist_candidates(
+        topic,
+        config=config,
+        layout=layout,
+        db=db,
+    )
+
+    assert [candidate.path for candidate in result.candidates] == [pdf_path, tweet_path]
+    assert [candidate.source_type for candidate in result.candidates] == ["paper", "tweet"]

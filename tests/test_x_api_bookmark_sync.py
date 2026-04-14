@@ -29,7 +29,7 @@ def make_config(tmp_path: Path) -> Config:
     config.set("sources.x_api.client_id", "client-123")
     config.set(
         "sources.x_api.redirect_uri",
-        "http://127.0.0.1:8000/api/x-api/auth/callback",
+        "http://127.0.0.1:8090/api/x-api/auth/callback",
     )
     config.set(
         "sources.x_api.scopes",
@@ -85,7 +85,7 @@ def write_token_bundle(layout):
             "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             "obtained_at": datetime.now(timezone.utc).isoformat(),
             "client_id": "client-123",
-            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+            "redirect_uri": "http://127.0.0.1:8090/api/x-api/auth/callback",
             "user": {
                 "data": {
                     "id": "42",
