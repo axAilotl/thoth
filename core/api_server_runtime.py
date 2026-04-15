@@ -33,7 +33,10 @@ def resolve_api_server_options(
     if not host:
         host = "0.0.0.0"
 
-    raw_port = (source.get("THOTH_API_PORT") or source.get("PORT") or "8090").strip()
+    # Only the Thoth-specific env var may override the local bind port.
+    # Generic PORT is often injected by unrelated wrappers and should not
+    # silently move the API off the documented operator default.
+    raw_port = (source.get("THOTH_API_PORT") or "8090").strip()
     try:
         port = int(raw_port)
     except ValueError as exc:

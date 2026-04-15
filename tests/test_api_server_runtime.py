@@ -16,6 +16,7 @@ def test_resolve_api_server_options_respects_explicit_env():
         {
             "THOTH_API_HOST": "127.0.0.1",
             "THOTH_API_PORT": "8002",
+            "PORT": "8001",
             "THOTH_API_RELOAD": "false",
         }
     )
@@ -24,6 +25,16 @@ def test_resolve_api_server_options_respects_explicit_env():
         "host": "127.0.0.1",
         "port": 8002,
         "reload": False,
+    }
+
+
+def test_resolve_api_server_options_ignores_generic_port_env():
+    options = resolve_api_server_options({"PORT": "8001"})
+
+    assert options == {
+        "host": "0.0.0.0",
+        "port": 8090,
+        "reload": True,
     }
 
 

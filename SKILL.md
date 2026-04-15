@@ -105,7 +105,8 @@ Start the API:
 .venv/bin/python thoth_api.py
 ```
 
-The local API binds to `127.0.0.1:8090` by default unless `THOTH_API_PORT` or `PORT` overrides it.
+The local API binds to `127.0.0.1:8090` by default unless `THOTH_API_PORT` overrides it.
+Generic `PORT` is intentionally ignored so unrelated local wrappers do not silently move Thoth onto another port.
 
 Open `http://127.0.0.1:8090/settings` for:
 - provider credentials and task routing
