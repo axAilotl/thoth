@@ -91,6 +91,7 @@ The settings UI exposes:
 - If Thoth encounters legacy `arxiv-query-*` or `arxiv-paper-*` filenames created by another route, it repairs them using local PDF metadata/text and updates the metadata index to match the canonical filename.
 - Non-arXiv paper artifacts now download into `vault/papers/` with stable prefixed filenames so the archivist and wiki updater can find them through the same paper path.
 - Archivist corpus indexing now extracts text from PDFs with `pdftotext`, tags detected whitepapers, and treats research PDFs as paper-grade sources instead of letting tweets dominate by default.
+- GitHub star ingestion reads the configured token plus `GITHUB_API`, `GITHUB_TOKEN`, `GITHUB_API_ALT`, and `GITHUB_API_2` through `GITHUB_API_9`, then de-duplicates starred repositories across accounts.
 
 ## CLI Overview
 
@@ -168,6 +169,7 @@ What exists now:
 - hard source gates by folder scope
 - incremental corpus inventory with reuse-safe change detection
 - source-type, tag, and term filters plus modular retrieval policy
+- topic-level `max_age_days` and `source_type_max_age_days` filters for recency-sensitive source pools
 - full-text retrieval, semantic retrieval, and hybrid ranking
 - SQLite-backed corpus metadata plus lazy cached document embeddings for semantic and hybrid retrieval
 - cadence and dirty-check state
@@ -189,10 +191,10 @@ Current archivist workflow:
 2. Adjust the archivist prompt files in `prompts/` if you want to change source-type briefing, repository framing, or final synthesis style.
 3. Configure the `archivist` task route, and configure `embedding` too if any topic uses semantic or hybrid retrieval.
 4. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
-5. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages.
+5. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages, including corpus, eligible, candidate, and newly indexed counts.
 6. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
 7. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
-8. Tune `retrieval.source_type_limits` and `carryover_limit_per_type` in `archivist_topics.yaml` when a topic needs stricter staged caps by source type.
+8. Tune `max_age_days`, `source_type_max_age_days`, `retrieval.source_type_limits`, and `carryover_limit_per_type` in `archivist_topics.yaml` when a topic needs stricter staged caps by source type or recency.
 9. Include `papers` and `pdfs` in topic roots when you want uploaded whitepapers and manual PDFs to compete as first-class research sources.
 
 Semantic retrieval behavior:

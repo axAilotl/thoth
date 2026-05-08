@@ -1,3 +1,5 @@
+import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -119,6 +121,51 @@ def test_archivist_full_text_query_mode_searches_beyond_required_tags(tmp_path: 
     }
 
 
+def test_archivist_age_filters_honor_source_type_overrides(tmp_path: Path):
+    config, db = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    repos_dir = layout.vault_root / "repos"
+    notes_dir = layout.vault_root / "notes"
+    repos_dir.mkdir(parents=True, exist_ok=True)
+    notes_dir.mkdir(parents=True, exist_ok=True)
+
+    fresh_repo = repos_dir / "fresh_repo.md"
+    stale_repo = repos_dir / "stale_repo.md"
+    stale_note = notes_dir / "stale_note.md"
+    for path in (fresh_repo, stale_repo, stale_note):
+        path.write_text("# Companion\n\nCompanion AI notes.\n", encoding="utf-8")
+
+    stale_timestamp = (datetime.now(timezone.utc) - timedelta(days=40)).timestamp()
+    os.utime(stale_repo, (stale_timestamp, stale_timestamp))
+    os.utime(stale_note, (stale_timestamp, stale_timestamp))
+
+    topic = ArchivistTopicDefinition(
+        id="companion",
+        title="Companion",
+        output_path="pages/topic-companion.md",
+        include_roots=("repos", "notes"),
+        source_types=("repository", "note"),
+        include_terms=("companion",),
+        max_age_days=7,
+        source_type_max_age_days=(("repository", 60),),
+        retrieval=ArchivistRetrievalPolicy(
+            mode="literal",
+            tag_mode="query",
+            term_mode="query",
+        ),
+    )
+
+    result = select_archivist_candidates(topic, config=config, layout=layout, db=db)
+
+    assert result.corpus_count == 3
+    assert result.eligible_count == 2
+    assert {candidate.scope_relative_path for candidate in result.candidates} == {
+        "repos/fresh_repo.md",
+        "repos/stale_repo.md",
+    }
+
+
 def test_archivist_semantic_retrieval_uses_embedding_route(tmp_path: Path):
     config, db = make_config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)
@@ -163,4 +210,54 @@ def test_archivist_semantic_retrieval_uses_embedding_route(tmp_path: Path):
 
     assert result.retrieval_mode == "semantic"
     assert result.candidates[0].scope_relative_path == "repos/companion.md"
+    assert result.candidates[0].semantic_score is not None
+
+
+def test_archivist_hybrid_retrieval_merges_scores_by_candidate_key(tmp_path: Path):
+    config, db = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    repos_dir = layout.vault_root / "repos"
+    repos_dir.mkdir(parents=True, exist_ok=True)
+    (repos_dir / "companion.md").write_text(
+        "# Companion Training\n\nCompanion AI fine-tuning with memory reflection and persona training.\n",
+        encoding="utf-8",
+    )
+    (repos_dir / "security.md").write_text(
+        "# Security Audit\n\nPrompt injection attack surface and model hardening.\n",
+        encoding="utf-8",
+    )
+
+    topic = ArchivistTopicDefinition(
+        id="companion-training",
+        title="Companion Training",
+        output_path="pages/topic-companion-training.md",
+        include_roots=("repos",),
+        source_types=("repository",),
+        include_terms=("companion ai", "fine-tuning", "memory"),
+        retrieval=ArchivistRetrievalPolicy(
+            mode="hybrid",
+            tag_mode="query",
+            term_mode="query",
+            full_text_limit=10,
+            semantic_limit=10,
+            rerank_limit=10,
+            max_new_embeddings_per_run=10,
+        ),
+    )
+
+    result = __import__("asyncio").run(
+        select_archivist_candidates_async(
+            topic,
+            config=config,
+            layout=layout,
+            db=db,
+            llm_interface=FakeEmbeddingLLM(),
+        )
+    )
+
+    assert result.retrieval_mode == "hybrid"
+    assert len(result.candidates) == 2
+    assert result.candidates[0].scope_relative_path == "repos/companion.md"
+    assert result.candidates[0].full_text_score is not None
     assert result.candidates[0].semantic_score is not None

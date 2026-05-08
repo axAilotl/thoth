@@ -75,5 +75,7 @@ topics:
     result = results[0]
     assert result.topic_id == "companion"
     assert result.candidate_count == 1
+    assert result.eligible_count == 1
+    assert result.corpus_count == 1
     assert result.indexed_count == 1
     assert result.top_candidate_paths == ("repos/companion.md",)

@@ -42,6 +42,8 @@ cp -rf source dest          # NOT: cp -r source dest
 2. Error handling: no swallowing.
 3. No legacy code paths or compatibility shims.
 4. No silent fallbacks for required config or security-sensitive dependencies.
+5. Use authoritative source metadata on ingestion. For arXiv, fresh downloads should use arXiv entry metadata for canonical filenames; local PDF title extraction is only for repairing legacy or non-canonical files from other routes.
+6. When operator-visible runtime behavior changes, update `SKILL.md` and `README.md` in the same change set.
 
 ## Structure Requirements
 

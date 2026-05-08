@@ -37,7 +37,7 @@ def test_settings_ui_exposes_archivist_web_clipper_and_translation_controls():
         'id="archivist-corpus-summary"',
         'id="archivist-topics-list"',
         'id="runtime-web-clipper-watch-dirs"',
-        "const TASK_ROUTE_KEYS = ['tags', 'summary', 'alt_text', 'transcript', 'translation', 'embedding', 'archivist'];",
+        "const TASK_ROUTE_KEYS = ['tags', 'summary', 'x_monitor', 'alt_text', 'transcript', 'translation', 'embedding', 'archivist'];",
         "function renderProviderModels(name, provider)",
         "function updateTaskModelDropdown(task)",
         "async function loadArchivistRegistry()",

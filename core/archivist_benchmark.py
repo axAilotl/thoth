@@ -22,6 +22,8 @@ class ArchivistBenchmarkResult:
     topic_id: str
     retrieval_mode: str
     candidate_count: int
+    corpus_count: int
+    eligible_count: int
     indexed_count: int
     scanned_roots: tuple[str, ...]
     missing_roots: tuple[str, ...]
@@ -65,6 +67,8 @@ async def benchmark_archivist_topics(
                 topic_id=topic.id,
                 retrieval_mode=selection.retrieval_mode,
                 candidate_count=len(selection.candidates),
+                corpus_count=selection.corpus_count,
+                eligible_count=selection.eligible_count,
                 indexed_count=selection.indexed_count,
                 scanned_roots=selection.scanned_roots,
                 missing_roots=selection.missing_roots,

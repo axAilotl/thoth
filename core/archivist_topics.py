@@ -57,6 +57,10 @@ class ArchivistTopicDefinition:
     max_sources: int | None = 120
     allow_manual_force: bool = True
     retrieval: ArchivistRetrievalPolicy = field(default_factory=ArchivistRetrievalPolicy)
+    # Age filtering: exclude sources older than N days (None = no limit)
+    max_age_days: int | None = None
+    # Per-source-type age overrides: [("tweet", 30), ("paper", 365)]
+    source_type_max_age_days: tuple[tuple[str, int], ...] = ()
 
     def output_path_for_root(self, wiki_root: Path) -> Path:
         """Resolve the topic output path inside the compiled wiki root."""
@@ -295,6 +299,15 @@ def _parse_topic(
             field_name=f"{field_prefix}.retrieval",
             fallback=defaults.retrieval,
         ),
+        max_age_days=_parse_positive_int(
+            raw_topic.get("max_age_days"),
+            field_name=f"{field_prefix}.max_age_days",
+            allow_none=True,
+        ),
+        source_type_max_age_days=_parse_source_type_max_age_days(
+            raw_topic.get("source_type_max_age_days"),
+            field_name=f"{field_prefix}.source_type_max_age_days",
+        ),
     )
 
 
@@ -428,6 +441,31 @@ def _parse_source_type_limits(
             (
                 token,
                 _parse_positive_int(raw_limit, field_name=f"{field_name}.{token}"),
+            )
+        )
+    return tuple(normalized)
+
+
+def _parse_source_type_max_age_days(
+    value: Any,
+    *,
+    field_name: str,
+) -> tuple[tuple[str, int], ...]:
+    """Parse source_type_max_age_days mapping from raw config."""
+    if value in (None, {}):
+        return ()
+    if isinstance(value, tuple):
+        return tuple(value)
+    if not isinstance(value, dict):
+        raise ArchivistTopicConfigError(f"{field_name} must be an object")
+
+    normalized: list[tuple[str, int]] = []
+    for raw_key, raw_days in value.items():
+        token = _normalize_generic_token(raw_key)
+        normalized.append(
+            (
+                token,
+                _parse_positive_int(raw_days, field_name=f"{field_name}.{token}"),
             )
         )
     return tuple(normalized)

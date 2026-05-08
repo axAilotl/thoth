@@ -107,6 +107,8 @@ class ArchivistSelectionResult:
     candidates: tuple[ArchivistCandidate, ...]
     scanned_roots: tuple[str, ...]
     missing_roots: tuple[str, ...]
+    corpus_count: int = 0
+    eligible_count: int = 0
     indexed_count: int = 0
     retrieval_mode: str = "literal"
 

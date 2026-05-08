@@ -243,6 +243,10 @@ def test_archivist_registry_parses_staged_retrieval_controls(tmp_path: Path):
         "    output_path: pages/topic-companion-ai-research.md\n"
         "    include_roots:\n"
         "      - tweets\n"
+        "    max_age_days: 45\n"
+        "    source_type_max_age_days:\n"
+        "      tweet: 7\n"
+        "      repository: 365\n"
         "    retrieval:\n"
         "      carryover_limit_per_type: 3\n"
         "      source_type_limits:\n"
@@ -254,5 +258,7 @@ def test_archivist_registry_parses_staged_retrieval_controls(tmp_path: Path):
     registry = load_archivist_topic_registry(config, project_root=tmp_path, required=True)
 
     topic = registry.topics[0]
+    assert topic.max_age_days == 45
+    assert dict(topic.source_type_max_age_days) == {"tweet": 7, "repository": 365}
     assert topic.retrieval.carryover_limit_per_type == 3
     assert dict(topic.retrieval.source_type_limits) == {"tweet": 12, "repository": 6}

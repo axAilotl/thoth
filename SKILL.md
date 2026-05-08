@@ -127,6 +127,7 @@ What exists:
 - tracked staged prompt files at `prompts/archivist_*.md`
 - source gates by root scope
 - source-type, tag, and term filters plus modular retrieval policy
+- topic-level `max_age_days` and `source_type_max_age_days` filters for recency-sensitive topics
 - incremental corpus inventory, full-text retrieval, semantic retrieval, and hybrid ranking
 - SQLite-backed corpus metadata plus lazy cached document embeddings in `archivist_corpus_embeddings`
 - staged source-type briefing followed by final topic synthesis
@@ -148,10 +149,10 @@ How to work with it now:
 3. Set the `archivist` provider/model route in settings, and set `embedding` too if any topic uses semantic or hybrid retrieval.
 4. Run `.venv/bin/python thoth.py archivist` to compile due topics.
 5. Use `.venv/bin/python thoth.py archivist --topics <id> --force` for intentional reruns.
-6. Use `.venv/bin/python thoth.py archivist --benchmark --topics <id>` to inspect retrieval quality without writing wiki pages.
+6. Use `.venv/bin/python thoth.py archivist --benchmark --topics <id>` to inspect retrieval quality without writing wiki pages, including corpus, eligible, candidate, and newly indexed counts.
 7. Use `Run Due Topics` or a topic card `Run Now` / `Force Run` action in `/settings` for immediate execution.
 8. Use `automation.archivist` in settings when you want the API service to compile due topics on a fixed interval.
-9. Use `retrieval.source_type_limits` and `carryover_limit_per_type` in the topic registry when one source type is crowding out the others.
+9. Use `max_age_days`, `source_type_max_age_days`, `retrieval.source_type_limits`, and `carryover_limit_per_type` in the topic registry when one source type is crowding out the others or a topic needs stricter recency.
 10. Include `papers` and `pdfs` in topic roots when manual PDFs or whitepapers should enter the same research pool as downloaded papers.
 
 Semantic retrieval details that matter operationally:
@@ -174,6 +175,7 @@ Semantic retrieval details that matter operationally:
 - `.thoth_system` holds local-only operational state.
 - `repos/` holds raw README source files.
 - `stars/` holds generated repo summary notes.
+- GitHub stars can be read from multiple accounts via `GITHUB_API`, `GITHUB_TOKEN`, `GITHUB_API_ALT`, and `GITHUB_API_2` through `GITHUB_API_9`; repositories are de-duplicated before processing.
 
 ## Validation
 

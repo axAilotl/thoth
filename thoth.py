@@ -1729,7 +1729,8 @@ async def cmd_archivist(args):
         for result in results:
             print(
                 f"   - {result.topic_id}: mode={result.retrieval_mode} "
-                f"candidates={result.candidate_count} indexed={result.indexed_count}"
+                f"candidates={result.candidate_count} eligible={result.eligible_count} "
+                f"corpus={result.corpus_count} indexed_new={result.indexed_count}"
             )
             if result.scanned_roots:
                 print(f"     scanned: {', '.join(result.scanned_roots)}")
@@ -2403,6 +2404,7 @@ Examples:
             "wiki-lint",
             "ingest-queue",
             "db",
+            "archivist",
         }
         if args.command not in offline_safe:  # Block only network-heavy commands
             print("❌ Cannot proceed with invalid configuration for this command")

@@ -55,6 +55,7 @@ async def select_archivist_candidates_async(
         for document in inventory.documents
         if _passes_required_filters(document, topic)
         and _passes_exclusion_filters(document, topic)
+        and _passes_age_filter(document, topic)
     )
 
     if topic.retrieval.mode == "literal":
@@ -102,6 +103,8 @@ async def select_archivist_candidates_async(
         candidates=tuple(candidates),
         scanned_roots=inventory.scanned_roots,
         missing_roots=inventory.missing_roots,
+        corpus_count=len(inventory.documents),
+        eligible_count=len(eligible_documents),
         indexed_count=inventory.indexed_count,
         retrieval_mode=topic.retrieval.mode,
     )
@@ -210,8 +213,14 @@ async def _rank_hybrid_documents(
     if not full_text_results and not semantic_results:
         return _rank_literal_documents(documents, include_roots=include_roots, topic=topic)
 
-    full_text_scores = dict(_normalize_full_text_scores(full_text_results))
-    semantic_scores = dict(_normalize_semantic_scores(semantic_results))
+    full_text_scores = {
+        document.candidate_key: score
+        for document, score in _normalize_full_text_scores(full_text_results)
+    }
+    semantic_scores = {
+        document.candidate_key: score
+        for document, score in _normalize_semantic_scores(semantic_results)
+    }
     merged_documents = {
         document.candidate_key: document for document in documents
         if document.candidate_key in full_text_scores or document.candidate_key in semantic_scores
@@ -316,6 +325,32 @@ def _passes_exclusion_filters(
     return True
 
 
+def _passes_age_filter(
+    document: ArchivistCorpusDocument,
+    topic: ArchivistTopicDefinition,
+) -> bool:
+    max_age_days = _max_age_days_for_source_type(document.source_type, topic)
+    if max_age_days is None:
+        return True
+
+    timestamp = _parse_updated_at(document.updated_at)
+    if timestamp is None:
+        return False
+
+    age_days = (datetime.now(timezone.utc) - timestamp).total_seconds() / 86400.0
+    return age_days <= max_age_days
+
+
+def _max_age_days_for_source_type(
+    source_type: str,
+    topic: ArchivistTopicDefinition,
+) -> int | None:
+    for candidate_type, max_age_days in topic.source_type_max_age_days:
+        if candidate_type == source_type:
+            return max_age_days
+    return topic.max_age_days
+
+
 def _literal_query_score(
     document: ArchivistCorpusDocument,
     topic: ArchivistTopicDefinition,
@@ -368,14 +403,21 @@ def _apply_topic_weight(
 def _recency_score(updated_at: str, *, recency_weight: float) -> float:
     if recency_weight <= 0:
         return 0.0
-    try:
-        timestamp = datetime.fromisoformat(updated_at)
-    except ValueError:
+    timestamp = _parse_updated_at(updated_at)
+    if timestamp is None:
         return 0.0
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
     age_days = max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds() / 86400.0)
     return recency_weight * (1.0 / (1.0 + age_days / 30.0))
+
+
+def _parse_updated_at(updated_at: str) -> datetime | None:
+    try:
+        timestamp = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)
 
 
 def _root_spec_for_document(document: ArchivistCorpusDocument, include_roots) -> str:

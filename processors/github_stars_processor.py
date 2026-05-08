@@ -47,7 +47,7 @@ class GitHubRepo:
     license_name: Optional[str]
     readme_content: Optional[str] = None
     llm_summary: Optional[str] = None
-    
+
     @classmethod
     def from_api_response(cls, data: Dict[str, Any]) -> 'GitHubRepo':
         """Create GitHubRepo from GitHub API response"""
@@ -66,7 +66,7 @@ class GitHubRepo:
             pushed_at=data.get('pushed_at', ''),
             license_name=data.get('license', {}).get('name') if data.get('license') else None
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
@@ -90,34 +90,49 @@ class GitHubRepo:
 
 class GitHubStarsProcessor:
     """Processes GitHub starred repositories"""
-    
+
     def __init__(self, vault_path: str = None, *, metadata_db: MetadataDB | None = None):
         self.vault_path = resolve_vault_root(config, override=vault_path)
         self.stars_dir = self.vault_path / 'stars'
         self.repos_dir = self.vault_path / 'repos'
         self.metadata_db = metadata_db or MetadataDB()
-        
+
         # Create directories
         self.stars_dir.mkdir(parents=True, exist_ok=True)
         self.repos_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Get GitHub API key
-        self.github_token = (
-            config.get('sources.github.token')
-            or os.getenv('GITHUB_API')
-            or os.getenv('GITHUB_TOKEN')
-        )
-        if not self.github_token:
+
+        # Collect all GitHub tokens (supports multiple accounts via GITHUB_API + GITHUB_API_ALT)
+        tokens = []
+        primary = config.get('sources.github.token') or os.getenv('GITHUB_API') or os.getenv('GITHUB_TOKEN')
+        if primary:
+            tokens.append(primary)
+        alt = os.getenv('GITHUB_API_ALT')
+        if alt:
+            tokens.append(alt)
+        # Also support GITHUB_API_2, GITHUB_API_3, etc.
+        for i in range(2, 10):
+            extra = os.getenv(f'GITHUB_API_{i}')
+            if extra:
+                tokens.append(extra)
+
+        if not tokens:
             raise ValueError("GITHUB_API, GITHUB_TOKEN, or sources.github.token is required")
-        
-        # Setup session with GitHub API headers
-        self.session = requests.Session()
-        self.session.headers.update({
-            'Accept': 'application/vnd.github+json',
-            'Authorization': f'Bearer {self.github_token}',
-            'X-GitHub-Api-Version': '2022-11-28'
-        })
-        
+
+        self.github_token = tokens[0]
+        self.github_tokens = tokens
+
+        # Setup sessions (one per account token)
+        self.sessions = []
+        for token in tokens:
+            session = requests.Session()
+            session.headers.update({
+                'Accept': 'application/vnd.github+json',
+                'Authorization': f'Bearer {token}',
+                'X-GitHub-Api-Version': '2022-11-28'
+            })
+            self.sessions.append(session)
+        self.session = self.sessions[0]
+
         # Initialize LLM interface for summaries
         self.llm_interface = None
         llm_config = config.get('llm', {})
@@ -127,57 +142,73 @@ class GitHubStarsProcessor:
                 logger.info("LLM interface initialized for GitHub stars summaries")
             except Exception as e:
                 logger.warning(f"Could not initialize LLM interface: {e}")
-    
+
     async def fetch_and_process_starred_repos(self, limit: int = None, resume: bool = True) -> ProcessingStats:
         """Fetch starred repositories and process them"""
         stats = ProcessingStats()
-        
+
         try:
-            # Fetch starred repositories
-            logger.info("📡 Fetching starred repositories from GitHub API...")
-            repos = await self._fetch_starred_repos(limit)
-            
+            # Fetch starred repositories from all configured accounts, deduplicate
+            logger.info(f"📡 Fetching starred repositories from {len(self.sessions)} GitHub account(s)...")
+            all_repos: dict[str, GitHubRepo] = {}
+            repo_sessions: dict[str, requests.Session] = {}
+            for idx, session in enumerate(self.sessions):
+                account_repos = await self._fetch_starred_repos(session, limit)
+                new_count = 0
+                for repo in account_repos:
+                    if repo.full_name not in all_repos:
+                        all_repos[repo.full_name] = repo
+                        repo_sessions[repo.full_name] = session
+                        new_count += 1
+                logger.info(f"  Account {idx + 1}: {len(account_repos)} starred, {new_count} unique new")
+
+            repos = list(all_repos.values())
+
             if not repos:
                 logger.warning("No starred repositories found")
                 return stats
-            
-            logger.info(f"📦 Found {len(repos)} starred repositories")
-            
+
+            logger.info(f"📦 Found {len(repos)} unique starred repositories across all accounts")
+
             # Process repositories
             for repo in repos:
                 try:
-                    processed = await self._process_single_repo(repo, resume)
+                    processed = await self._process_single_repo(
+                        repo,
+                        resume,
+                        session=repo_sessions.get(repo.full_name),
+                    )
                     if processed:
                         stats.updated += 1
                     else:
                         stats.skipped += 1
-                    
+
                     stats.total_processed += 1
-                    
+
                 except Exception as e:
                     logger.error(f"Error processing repo {repo.full_name}: {e}")
                     stats.errors += 1
-            
+
             # Save repository index
             await self._save_repos_index(repos)
-            
+
             logger.info(f"⭐ GitHub stars processing complete: {stats.updated} processed, {stats.skipped} skipped, {stats.errors} errors")
             return stats
-            
+
         except Exception as e:
             logger.error(f"Failed to fetch starred repositories: {e}")
             stats.errors = 1
             return stats
-    
-    async def _fetch_starred_repos(self, limit: int = None) -> List[GitHubRepo]:
-        """Fetch starred repositories from GitHub API"""
+
+    async def _fetch_starred_repos(self, session: requests.Session, limit: int = None) -> List[GitHubRepo]:
+        """Fetch starred repositories from a single GitHub account session"""
         repos = []
         page = 1
         per_page = 100
-        
+
         while True:
             try:
-                response = self.session.get(
+                response = session.get(
                     'https://api.github.com/user/starred',
                     params={
                         'page': page,
@@ -187,43 +218,49 @@ class GitHubStarsProcessor:
                     timeout=30
                 )
                 response.raise_for_status()
-                
+
                 batch_repos = response.json()
                 if not batch_repos:
                     break
-                
+
                 # Convert to GitHubRepo objects
                 for repo_data in batch_repos:
                     repo = GitHubRepo.from_api_response(repo_data)
                     repos.append(repo)
-                
+
                 logger.debug(f"Fetched page {page}: {len(batch_repos)} repositories")
-                
+
                 # Check if we've reached the limit
                 if limit and len(repos) >= limit:
                     repos = repos[:limit]
                     break
-                
+
                 # Check if we've fetched all repositories
                 if len(batch_repos) < per_page:
                     break
-                
+
                 page += 1
-                
+
                 # Rate limiting - GitHub allows 5000 requests/hour for authenticated requests
                 await asyncio.sleep(0.1)
-                
+
             except Exception as e:
                 logger.error(f"Error fetching starred repos page {page}: {e}")
                 break
-        
+
         return repos
-    
-    async def _process_single_repo(self, repo: GitHubRepo, resume: bool) -> bool:
+
+    async def _process_single_repo(
+        self,
+        repo: GitHubRepo,
+        resume: bool,
+        *,
+        session: requests.Session | None = None,
+    ) -> bool:
         """Process a single repository"""
         try:
             summary_file, readme_file = self._repo_paths(repo.full_name)
-            
+
             cached_readme_exists = (
                 readme_file.exists() and readme_file.is_file() and readme_file.stat().st_size > 0
             )
@@ -254,7 +291,7 @@ class GitHubStarsProcessor:
             ):
                 logger.debug(f"Skipping cached missing GitHub README probe: {repo.full_name}")
                 return False
-            
+
             # Download README
             known_filename = get_known_readme_filename(
                 self.metadata_db,
@@ -262,11 +299,15 @@ class GitHubStarsProcessor:
                 repo_name=repo.full_name,
                 repo_revision=repo.updated_at or repo.pushed_at,
             )
-            download_result = await self._download_readme(repo, preferred_filename=known_filename)
+            download_result = await self._download_readme(
+                repo,
+                preferred_filename=known_filename,
+                session=session,
+            )
             if download_result:
                 readme_content, downloaded_filename = download_result
                 repo.readme_content = readme_content
-                
+
                 # Save README to repos folder
                 with open(readme_file, 'w', encoding='utf-8') as f:
                     f.write(readme_content)
@@ -278,15 +319,15 @@ class GitHubStarsProcessor:
                     found=True,
                     filename=downloaded_filename,
                 )
-                
+
                 # Generate LLM summary if available
                 if self.llm_interface:
                     summary = await self._generate_repo_summary(repo)
                     repo.llm_summary = summary
-                
+
                 # Create summary markdown file
                 await self._create_summary_file(repo, summary_file)
-                
+
                 logger.info(f"✅ Processed repo: {repo.full_name} ({repo.stargazers_count} ⭐)")
                 return True
             else:
@@ -299,7 +340,7 @@ class GitHubStarsProcessor:
                 )
                 logger.warning(f"Could not download README for {repo.full_name}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error processing repo {repo.full_name}: {e}")
             raise
@@ -320,72 +361,74 @@ class GitHubStarsProcessor:
         except Exception as e:
             logger.warning(f"Failed to read cached GitHub README {readme_file}: {e}")
             return None
-    
+
     async def _download_readme(
         self,
         repo: GitHubRepo,
         *,
         preferred_filename: Optional[str] = None,
+        session: requests.Session | None = None,
     ) -> Optional[tuple[str, str]]:
         """Download README content for a repository"""
         try:
+            http_session = session or self.session
             readme_files: List[str] = []
             if preferred_filename:
                 readme_files.append(preferred_filename)
             readme_files.extend(['README.md', 'README.rst', 'README.txt', 'README'])
             unique_readme_files = list(dict.fromkeys(readme_files))
-            
+
             for readme_file in unique_readme_files:
                 try:
                     url = f"https://api.github.com/repos/{repo.full_name}/contents/{readme_file}"
-                    response = self.session.get(url, timeout=30)
-                    
+                    response = http_session.get(url, timeout=30)
+
                     if response.status_code == 200:
                         content_data = response.json()
-                        
+
                         # GitHub API returns base64 encoded content
                         if content_data.get('encoding') == 'base64':
                             import base64
                             content = base64.b64decode(content_data['content']).decode('utf-8')
                             logger.debug(f"Downloaded README for {repo.full_name}")
                             return content, readme_file
-                
+
                 except Exception as e:
                     logger.debug(f"Could not download {readme_file} for {repo.full_name}: {e}")
                     continue
-            
+
             # If API download fails, try raw download
             try:
                 raw_url = f"https://raw.githubusercontent.com/{repo.full_name}/main/README.md"
-                response = self.session.get(raw_url, timeout=30)
+                response = http_session.get(raw_url, timeout=30)
                 if response.status_code == 200:
                     return response.text, "README.md"
-                
+
                 # Try master branch
                 raw_url = f"https://raw.githubusercontent.com/{repo.full_name}/master/README.md"
-                response = self.session.get(raw_url, timeout=30)
+                response = http_session.get(raw_url, timeout=30)
                 if response.status_code == 200:
                     return response.text, "README.md"
-                    
+
             except Exception as e:
                 logger.debug(f"Raw README download failed for {repo.full_name}: {e}")
-            
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error downloading README for {repo.full_name}: {e}")
             return None
-    
+
     async def _generate_repo_summary(self, repo: GitHubRepo) -> Optional[str]:
         """Generate LLM summary for repository"""
         try:
             if not self.llm_interface or not repo.readme_content:
                 return None
-            
+
             # Create prompt for repository summarization
-            prompt_template = config.get('llm.prompts.readme', 
+            prompt_template = config.get('llm.prompts.readme',
                 "Provide a concise 2-3 sentence summary of this GitHub repository, focusing on what the project does and its key features.")
-            
+
             context = f"""
 Repository: {repo.full_name}
 Description: {repo.description}
@@ -396,17 +439,17 @@ Topics: {', '.join(repo.topics) if repo.topics else 'None'}
 README Content:
 {repo.readme_content[:3000]}...  # Limit content to prevent token overflow
 """
-            
+
             summary = await self.llm_interface.summarize_content(context, "readme")
             if summary and not summary.startswith("Summary unavailable"):
                 return summary.strip()
             logger.warning(f"LLM summary generation failed for {repo.full_name}")
             return None
-                
+
         except Exception as e:
             logger.error(f"Error generating summary for {repo.full_name}: {e}")
             return None
-    
+
     async def _create_summary_file(self, repo: GitHubRepo, summary_file: Path):
         """Create summary markdown file"""
         try:
@@ -453,43 +496,43 @@ processed_at: {datetime.now().isoformat()}
             # Add tags
             tags = [f"#{tag.replace('-', '_').replace(' ', '_').lower()}" for tag in repo.topics[:5]]
             tags.extend([f"#github", f"#starred", f"#{repo.language.lower()}" if repo.language else "#unknown"])
-            
+
             if repo.stargazers_count >= 10000:
                 tags.append("#popular")
             elif repo.stargazers_count >= 1000:
                 tags.append("#trending")
-            
+
             content += ' '.join(tags)
-            
+
             # Write summary file
             with open(summary_file, 'w', encoding='utf-8') as f:
                 f.write(content)
-            
+
             logger.debug(f"Created summary file: {summary_file}")
-            
+
         except Exception as e:
             logger.error(f"Error creating summary file for {repo.full_name}: {e}")
             raise
-    
+
     async def _save_repos_index(self, repos: List[GitHubRepo]):
         """Save repository index for reference"""
         try:
             index_file = self.stars_dir / "starred_repos_index.json"
-            
+
             index_data = {
                 "generated_at": datetime.now().isoformat(),
                 "total_repos": len(repos),
                 "repositories": [repo.to_dict() for repo in repos]
             }
-            
+
             with open(index_file, 'w', encoding='utf-8') as f:
                 json.dump(index_data, f, indent=2, default=str)
-            
+
             logger.info(f"💾 Saved repository index: {index_file}")
-            
+
         except Exception as e:
             logger.error(f"Error saving repository index: {e}")
-    
+
     def get_stats_summary(self, stats: ProcessingStats) -> str:
         """Generate formatted stats summary"""
         return (f"GitHub Stars processing: {stats.updated} processed, "
