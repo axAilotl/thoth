@@ -1,14 +1,9 @@
-# Uplift Diff
+# Pass 2 Uplift Diff
 
-This is the first in-tree pass, so there is no prior committed scorecard to diff against.
+| Surface | Before | After | Uplift |
+| --- | ---: | ---: | ---: |
+| `verb__web-clipper__plan` | 420 | 875 | +455 |
+| `verb__ingest-queue__plan` | 430 | 865 | +435 |
+| `verb__x-api-sync__plan` | 410 | 870 | +460 |
 
-Practical uplift from the live baseline observed during Phase 0:
-
-- `capabilities --json`: missing -> present, parseable JSON stdout.
-- `--robot-triage`: missing -> present, one-call quick-ref and health payload.
-- `robot-docs guide`: missing -> present, in-tool agent handbook.
-- `stats --json` and `db stats --json`: missing -> present.
-- `wiki-query --json`, `wiki-lint --json`, `archivist --benchmark --json`: missing -> present.
-- `stats --jsno`: argparse failure -> inferred `--json` with stderr hint.
-- `stat --json`: generic invalid-choice error -> nearest-command hint.
-- `delete <id>`: immediate destructive operation -> exit 2 safety block with `--dry-run` and `--yes` commands.
+The main uplift is safety with recovery and output parseability: an agent can now preview ingestion mutation surfaces without changing queue rows, staging assets, contacting X, or writing checkpoints.

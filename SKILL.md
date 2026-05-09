@@ -57,6 +57,7 @@ Single-pass processing:
 Bookmark backfill:
 
 ```bash
+.venv/bin/python thoth.py x-api-sync --plan --json --max-pages 1
 .venv/bin/python thoth.py x-api-sync --max-pages 3 --max-results 100
 ```
 
@@ -74,7 +75,9 @@ Discovery and source sync:
 ```bash
 .venv/bin/python thoth.py arxiv --discover --topics "agent systems,multimodal reasoning"
 .venv/bin/python thoth.py social --sync --github-user <user> --hf-user <user>
+.venv/bin/python thoth.py web-clipper --plan --json
 .venv/bin/python thoth.py web-clipper
+.venv/bin/python thoth.py ingest-queue --plan --json --limit 25
 .venv/bin/python thoth.py ingest-queue --limit 25
 ```
 

@@ -1,27 +1,28 @@
-# Agent Ergonomics Pass 1 Handoff
+# Agent Ergonomics Pass 2 Handoff
 
-Pass 1 applied the highest-leverage robot and structured-read surfaces to the Thoth CLI.
+Pass 2 focused on truthful plan surfaces for mutating ingestion commands.
 
 Implemented:
 
-- `core/cli_agent.py`: capabilities contract, robot triage payload, robot docs, typo normalization, teaching argparse errors, JSON-safe conversion helper.
-- `core/cli_agent_stats.py`: structured stats collection and human rendering.
-- `thoth.py`: wired robot commands, `--json` read-side outputs, delete confirmation gating, and parser typo handling.
-- `tests/test_cli_commands.py`: regression coverage for robot contracts, JSON surfaces, typo hints, and delete safety.
-- `README.md` and `SKILL.md`: operator-visible behavior updates.
+- `web-clipper --plan --json`: read-only source scan with readiness/issues, counts, record summaries, and explicit mutation=false fields. Disabled or misconfigured Web Clipper now returns a machine-readable plan instead of forcing a source-code read.
+- `ingest-queue --plan --json`: due queue preview with entry summaries, counts, and no queue status mutation or dispatch.
+- `x-api-sync --plan --json`: no-network sync readiness probe with parameters, scopes, token/checkpoint presence, and no secret material.
+- `web-clipper --json`, `ingest-queue --json`, and `x-api-sync --json`: structured run summaries for actual execution.
+- `core/cli_plan_surfaces.py`: focused payload/rendering helpers for plan and JSON run summaries.
+- `core/cli_agent.py`, `README.md`, and `SKILL.md`: capabilities and operator docs list the new plan probes.
+- Regression coverage for all three plan surfaces plus collector-level proof that Web Clipper planning does not write file metadata or queue rows.
 
-Validation:
+Validation to rerun:
 
-- `validate_scorecard.sh agent_ergonomics_audit/audit/agent_surfaces.jsonl`
-- `for test in agent_ergonomics_audit/audit/regression_tests/R-*.sh; do bash "$test"; done`
-- `.venv/bin/python -m pytest tests/test_cli_commands.py`
-- `verify-stdout-stderr-split.sh ./thoth.py stats`
-- `verify-stdout-stderr-split.sh ./thoth.py capabilities`
-- `verify-determinism.sh ./thoth.py capabilities`
-- `verify-non-tty-discipline.sh ./thoth.py stats`
+- `.venv/bin/python -m pytest tests/test_cli_commands.py tests/test_web_clipper_collector.py tests/test_ingestion_runtime.py`
+- `for test in agent_ergonomics_audit/audit/regression_tests/R-*.test.sh; do bash "$test"; done`
+- `tools/validate_scorecard.sh agent_ergonomics_audit/audit/agent_surfaces.jsonl`
+- `scripts/validate_pass.sh /mnt/samesung/ai/thoth/agent_ergonomics_audit`
 
-Deferred to Pass 2:
+Deferred to Pass 3:
 
-- Add truthful `--json --dry-run` or `--plan` surfaces to mutating ingestion commands where preview data can be produced without side effects.
-- Consider `--json` for `ingest-queue` after separating queue inspection from queue mutation.
-- Expand scoring beyond the 11 highest-leverage surfaces to every command and flag in `surface_inventory.jsonl`.
+- Score the full remaining CLI inventory instead of only the highest-risk mutation probes.
+- Add structured previews or guarded JSON summaries to other mutation-heavy commands such as `arxiv --discover`, `social --sync`, media post-processing, and migrations where the command can safely describe intended work.
+- Expand error-teaching for command-specific invalid flag combinations.
+
+Generated: 2026-05-09T21:10:37Z

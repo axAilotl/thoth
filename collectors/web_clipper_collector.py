@@ -58,6 +58,23 @@ class WebClipperFileRecord:
     managed_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class WebClipperPlanRecord:
+    """Read-only preview record for a Web Clipper source file."""
+
+    path: Path
+    root: Path
+    source_id: str
+    file_type: str
+    size_bytes: int
+    sha256: str
+    is_new_or_changed: bool
+    would_queue: bool = False
+    would_stage: bool = False
+    managed_path: Path | None = None
+    action: str = "unchanged"
+
+
 class WebClipperCollector:
     """Index files from the explicit Web Clipper allowlist."""
 
@@ -73,9 +90,15 @@ class WebClipperCollector:
         self.layout = layout or build_path_layout(config)
         self.contract = contract or build_web_clipper_contract(config, layout=self.layout)
         self.db = db or get_metadata_db()
-        self.asset_publisher = StagedAssetPublisher(config, layout=self.layout)
+        self._asset_publisher: StagedAssetPublisher | None = None
 
         self._validate_roots()
+
+    @property
+    def asset_publisher(self) -> StagedAssetPublisher:
+        if self._asset_publisher is None:
+            self._asset_publisher = StagedAssetPublisher(self.config, layout=self.layout)
+        return self._asset_publisher
 
     def collect(self) -> List[WebClipperFileRecord]:
         """Scan the configured allowlist and upsert file metadata."""
@@ -88,6 +111,18 @@ class WebClipperCollector:
             discovered.extend(self._scan_root(root, expected_type="attachment"))
 
         return discovered
+
+    def plan(self) -> List[WebClipperPlanRecord]:
+        """Scan the allowlist without writing metadata, queue, or assets."""
+        planned: List[WebClipperPlanRecord] = []
+
+        for root in self.contract.note_dirs:
+            planned.extend(self._plan_root(root, expected_type="note"))
+
+        for root in self.contract.attachment_dirs:
+            planned.extend(self._plan_root(root, expected_type="attachment"))
+
+        return planned
 
     def _validate_roots(self) -> None:
         missing = [root for root in self.contract.watch_dirs if not root.exists()]
@@ -117,6 +152,87 @@ class WebClipperCollector:
                 logger.debug("Skipping unsupported Web Clipper file: %s", path)
 
         return discovered
+
+    def _plan_root(self, root: Path, *, expected_type: str) -> List[WebClipperPlanRecord]:
+        planned: List[WebClipperPlanRecord] = []
+        for path in sorted(root.rglob("*"), key=lambda value: str(value)):
+            if not path.is_file():
+                continue
+
+            file_type = self.contract.classify_path(path)
+            if file_type != expected_type:
+                logger.debug("Skipping unsupported Web Clipper file: %s", path)
+                continue
+
+            planned.append(self._plan_file(path, root=root, file_type=file_type))
+
+        return planned
+
+    def _plan_file(self, path: Path, *, root: Path, file_type: str) -> WebClipperPlanRecord:
+        self._ensure_safe_source_path(path)
+        if file_type == "note":
+            try:
+                source_text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError as exc:
+                raise WebClipperMarkdownError(
+                    f"Failed to decode Web Clipper note {path}: {exc}"
+                ) from exc
+            self._parse_note(path, source_text)
+
+        stat = path.stat()
+        size_bytes = stat.st_size
+        sha256 = self._sha256_file(path)
+        source_id = str(path.relative_to(self.layout.vault_root))
+        existing = self.db.get_file_entry(str(path))
+        is_new_or_changed = (
+            existing is None
+            or existing.file_type != file_type
+            or existing.size_bytes != size_bytes
+            or existing.hash != sha256
+            or existing.source_id != source_id
+        )
+
+        if file_type == "note":
+            return WebClipperPlanRecord(
+                path=path,
+                root=root,
+                source_id=source_id,
+                file_type=file_type,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                is_new_or_changed=is_new_or_changed,
+                would_queue=is_new_or_changed,
+                action="queue_note" if is_new_or_changed else "unchanged",
+            )
+
+        managed_path = self._managed_attachment_path(source_id)
+        attachment_asset_type = self._attachment_asset_type(path)
+        same_path = managed_path.resolve() == path.resolve()
+        would_stage = (
+            not same_path
+            and (
+                is_new_or_changed
+                or not managed_path.exists()
+                or not validate_existing_asset(
+                    managed_path, asset_type=attachment_asset_type
+                )
+            )
+        )
+        action = "stage_attachment" if would_stage else "unchanged"
+        if is_new_or_changed and not would_stage:
+            action = "index_attachment_metadata"
+        return WebClipperPlanRecord(
+            path=path,
+            root=root,
+            source_id=source_id,
+            file_type=file_type,
+            size_bytes=size_bytes,
+            sha256=sha256,
+            is_new_or_changed=is_new_or_changed,
+            would_stage=would_stage,
+            managed_path=managed_path,
+            action=action,
+        )
 
     def _index_note_file(self, path: Path, *, root: Path) -> WebClipperFileRecord:
         self._ensure_safe_source_path(path)

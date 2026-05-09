@@ -1,5 +1,10 @@
 # Regression Alerts
 
-No score regressions were detected in Pass 1. This was the first measured pass.
+No regressions detected in Pass 2 targeted validation.
 
-Operational caveat: `wiki-lint --json` correctly exits 1 when the live wiki contains lint errors, but still writes the machine-readable report to stdout before exiting.
+Watch for future changes that:
+
+- print human status lines to stdout during `--json` plan runs
+- make `x-api-sync --plan` import or call network-bound sync code
+- make `web-clipper --plan` write file metadata, queue rows, or staged assets
+- make `ingest-queue --plan` mark rows processing or update wiki pages

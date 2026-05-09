@@ -48,6 +48,14 @@ def test_capabilities_json_is_data_only_stdout():
     payload = json.loads(result.stdout)
     assert payload["tool"] == "thoth"
     assert payload["agent_surfaces"]["robot_triage"] == "python thoth.py --robot-triage"
+    assert (
+        payload["agent_surfaces"]["web_clipper_plan_json"]
+        == "python thoth.py web-clipper --plan --json"
+    )
+    assert (
+        payload["agent_surfaces"]["ingest_queue_plan_json"]
+        == "python thoth.py ingest-queue --plan --json"
+    )
     assert "Configuration validation failed" not in result.stdout
 
 
@@ -156,3 +164,59 @@ def test_archivist_benchmark_json_allows_empty_scope():
     payload = json.loads(result.stdout)
     assert payload["surface"] == "archivist benchmark"
     assert payload["topics"] == []
+
+
+def test_mutating_ingestion_commands_have_plan_json_surfaces():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    web_clipper = subprocess.run(
+        [sys.executable, "thoth.py", "web-clipper", "--plan", "--json"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    assert web_clipper.returncode == 0
+    web_payload = json.loads(web_clipper.stdout)
+    assert web_payload["surface"] == "web-clipper plan"
+    assert "ready" in web_payload
+    assert isinstance(web_payload["records"], list)
+    assert web_payload["mutation"]["will_index_files"] is False
+    assert "Configuration validation failed" not in web_clipper.stdout
+
+    ingest_queue = subprocess.run(
+        [sys.executable, "thoth.py", "ingest-queue", "--plan", "--json", "--limit", "1"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    assert ingest_queue.returncode == 0
+    ingest_payload = json.loads(ingest_queue.stdout)
+    assert ingest_payload["surface"] == "ingest-queue plan"
+    assert ingest_payload["limit"] == 1
+    assert isinstance(ingest_payload["entries"], list)
+    assert ingest_payload["mutation"]["will_dispatch_artifacts"] is False
+    assert "Configuration validation failed" not in ingest_queue.stdout
+
+    x_api_sync = subprocess.run(
+        [
+            sys.executable,
+            "thoth.py",
+            "x-api-sync",
+            "--plan",
+            "--json",
+            "--max-pages",
+            "1",
+            "--max-results",
+            "10",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    assert x_api_sync.returncode == 0
+    x_payload = json.loads(x_api_sync.stdout)
+    assert x_payload["surface"] == "x-api-sync plan"
+    assert x_payload["parameters"]["max_pages"] == 1
+    assert x_payload["parameters"]["max_results"] == 10
+    assert x_payload["mutation"]["will_contact_x_api"] is False
+    assert "Configuration validation failed" not in x_api_sync.stdout

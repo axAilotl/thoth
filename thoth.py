@@ -46,6 +46,16 @@ from core.cli_agent import (
     to_jsonable,
 )
 from core.cli_agent_stats import collect_runtime_stats, render_runtime_stats
+from core.cli_plan_surfaces import (
+    build_ingest_queue_plan_payload,
+    build_web_clipper_plan_payload,
+    build_x_api_sync_plan_payload,
+    counts_by,
+    render_ingest_queue_plan,
+    render_web_clipper_plan,
+    render_x_api_sync_plan,
+    web_clipper_record_payload,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -1526,26 +1536,72 @@ async def cmd_web_clipper(args):
     """Index explicit Web Clipper source directories."""
     from collectors.web_clipper_collector import WebClipperCollector
     from core.ingestion_runtime import get_knowledge_artifact_runtime
-    from core.metadata_db import get_metadata_db
 
     if config.get("sources.web_clipper.enabled", True) is False:
-        print("❌ Web Clipper collection is disabled in config")
+        message = "Web Clipper collection is disabled in config"
+        if getattr(args, "plan", False):
+            payload = build_web_clipper_plan_payload(
+                collector=None,
+                records=[],
+                ready=False,
+                issues=[message],
+            )
+            if getattr(args, "json", False):
+                emit_json(payload)
+            else:
+                render_web_clipper_plan(payload)
+            return
+        print(f"❌ {message}")
         return
 
     layout = build_path_layout(config)
-    db = get_metadata_db()
-    collector = WebClipperCollector(
-        config,
-        layout=layout,
-        db=db,
-    )
+    try:
+        collector = WebClipperCollector(config, layout=layout)
+    except Exception as exc:
+        if getattr(args, "plan", False):
+            payload = build_web_clipper_plan_payload(
+                collector=None,
+                records=[],
+                ready=False,
+                issues=[str(exc)],
+            )
+            if getattr(args, "json", False):
+                emit_json(payload)
+            else:
+                render_web_clipper_plan(payload)
+            return
+        raise
+
+    if getattr(args, "plan", False):
+        try:
+            records = collector.plan()
+            payload = build_web_clipper_plan_payload(
+                collector=collector,
+                records=records,
+                ready=True,
+            )
+        except Exception as exc:
+            payload = build_web_clipper_plan_payload(
+                collector=collector,
+                records=[],
+                ready=False,
+                issues=[str(exc)],
+            )
+        if getattr(args, "json", False):
+            emit_json(payload)
+        else:
+            render_web_clipper_plan(payload)
+        return
+
+    db = collector.db
     runtime = get_knowledge_artifact_runtime(
         config,
         layout=layout,
         db=db,
     )
 
-    print("📎 Indexing configured Web Clipper source directories...")
+    if not getattr(args, "json", False):
+        print("📎 Indexing configured Web Clipper source directories...")
     discovered = collector.collect()
     changed = sum(1 for record in discovered if record.is_new_or_changed)
     queued = sum(
@@ -1559,10 +1615,6 @@ async def cmd_web_clipper(args):
         if record.file_type == "attachment" and record.is_new_or_changed
     )
 
-    print(f"✅ Scanned {len(discovered)} files from {len(collector.contract.watch_dirs)} source directories.")
-    print(f"   New or changed files: {changed}")
-    print(f"   Notes queued for shared ingestion: {queued}")
-    print(f"   Attachments staged: {staged}")
     translated = 0
     for record in discovered:
         if record.artifact is None or record.file_type != "note":
@@ -1571,12 +1623,33 @@ async def cmd_web_clipper(args):
         if result.status in {"created", "updated"}:
             translated += 1
 
+    if getattr(args, "json", False):
+        emit_json(
+            {
+                "schema_version": "1.0",
+                "tool": "thoth",
+                "surface": "web-clipper",
+                "counts": {
+                    "source_directories": len(collector.contract.watch_dirs),
+                    "files": len(discovered),
+                    "new_or_changed": changed,
+                    "notes_queued": queued,
+                    "attachments_staged": staged,
+                    "english_companions": translated,
+                    "by_file_type": counts_by(discovered, "file_type"),
+                },
+                "records": [
+                    web_clipper_record_payload(record) for record in discovered
+                ],
+            }
+        )
+        return
+
     print(f"✅ Scanned {len(discovered)} files from {len(collector.contract.watch_dirs)} source directories.")
     print(f"   New or changed files: {changed}")
     print(f"   English companions: {translated}")
     print(f"   Notes queued for shared ingestion: {queued}")
     print(f"   Attachments staged: {staged}")
-    print(f"   English companions: {translated}")
 
 
 async def cmd_ingest_queue(args):
@@ -1585,11 +1658,43 @@ async def cmd_ingest_queue(args):
     from core.metadata_db import get_metadata_db
 
     layout = build_path_layout(config)
-    runtime = get_knowledge_artifact_runtime(config, layout=layout, db=get_metadata_db())
-
+    db = get_metadata_db()
     limit = getattr(args, "limit", None)
-    print("📥 Processing ingestion queue...")
+
+    if getattr(args, "plan", False):
+        entries = db.get_pending_ingestions(limit=limit)
+        payload = build_ingest_queue_plan_payload(entries=entries, limit=limit)
+        if getattr(args, "json", False):
+            emit_json(payload)
+        else:
+            render_ingest_queue_plan(payload)
+        return
+
+    runtime = get_knowledge_artifact_runtime(config, layout=layout, db=db)
+    if not getattr(args, "json", False):
+        print("📥 Processing ingestion queue...")
     results = await runtime.process_pending_ingestions_once(limit=limit)
+
+    if getattr(args, "json", False):
+        emit_json(
+            {
+                "schema_version": "1.0",
+                "tool": "thoth",
+                "surface": "ingest-queue",
+                "limit": limit,
+                "counts": {
+                    "results": len(results),
+                    "processed": sum(
+                        1 for result in results if result.status == "processed"
+                    ),
+                    "skipped": sum(
+                        1 for result in results if result.status == "skipped"
+                    ),
+                },
+                "results": to_jsonable(results),
+            }
+        )
+        return
 
     if not results:
         print("✅ No pending ingestion entries found")
@@ -1790,15 +1895,35 @@ async def cmd_wiki_lint(args):
 
 async def cmd_x_api_sync(args):
     """Backfill bookmarks from the X API and process them immediately."""
+    if getattr(args, "plan", False):
+        payload = build_x_api_sync_plan_payload(config, args)
+        if getattr(args, "json", False):
+            emit_json(payload)
+        else:
+            render_x_api_sync_plan(payload)
+        return
+
     from thoth_api import run_x_api_bookmark_sync
 
-    print("🔁 Backfilling bookmarks from X API...")
+    if not getattr(args, "json", False):
+        print("🔁 Backfilling bookmarks from X API...")
     result = await run_x_api_bookmark_sync(
         max_results=args.max_results,
         max_pages=args.max_pages,
         resume_from_checkpoint=not args.no_resume,
         process_immediately=True,
     )
+
+    if getattr(args, "json", False):
+        emit_json(
+            {
+                "schema_version": "1.0",
+                "tool": "thoth",
+                "surface": "x-api-sync",
+                "result": to_jsonable(result),
+            }
+        )
+        return
 
     print(f"✅ User: {result['user_id']}")
     print(f"   Pages fetched: {result['pages_fetched']}")
@@ -2274,11 +2399,31 @@ Examples:
         action="store_true",
         help="Ignore the stored sync checkpoint and restart from the newest page",
     )
+    x_api_parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Preview sync parameters and auth readiness without calling the X API",
+    )
+    x_api_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit sync plan or run result as JSON",
+    )
 
     # Web Clipper command
     web_clipper_parser = subparsers.add_parser(
         "web-clipper",
         help="Index files from the configured Web Clipper source directories",
+    )
+    web_clipper_parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Preview discovered files without indexing, queueing, or staging assets",
+    )
+    web_clipper_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit Web Clipper plan or run result as JSON",
     )
 
     archivist_parser = subparsers.add_parser(
@@ -2390,6 +2535,16 @@ Examples:
         default=None,
         help="Maximum number of queue entries to process",
     )
+    ingest_queue_parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Preview due queue entries without processing them",
+    )
+    ingest_queue_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit queue plan or processing result as JSON",
+    )
 
     capabilities_parser = subparsers.add_parser(
         "capabilities",
@@ -2497,7 +2652,12 @@ Examples:
         render_robot_docs()
         return
 
-    ensure_wiki_scaffold(config)
+    plan_only_command = (
+        args.command in {"web-clipper", "ingest-queue", "x-api-sync"}
+        and getattr(args, "plan", False)
+    )
+    if not plan_only_command:
+        ensure_wiki_scaffold(config)
 
     # Default to stats if no command given
     if not args.command:
@@ -2550,14 +2710,14 @@ Examples:
         elif args.command == "ingest-queue":
             asyncio.run(cmd_ingest_queue(args))
     except KeyboardInterrupt:
-        print("\n❌ Interrupted by user")
+        print("\n❌ Interrupted by user", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error: {e}", file=sys.stderr)
         if args.verbose:
             import traceback
 
-            traceback.print_exc()
+            traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 

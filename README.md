@@ -101,19 +101,19 @@ Use `python thoth.py --help` for the full command list and `python thoth.py <com
 | --- | --- | --- |
 | `process` | Process tweet/bookmark material into markdown. | `--limit`, `--use-cache`, `--no-resume` |
 | `pipeline` | Run the single-pass enrichment pipeline. | `--use-cache`, `--batch-size`, `--rerun-llm` |
-| `x-api-sync` | Backfill bookmarks from the X API and process them. | `--max-pages`, `--max-results`, `--no-resume` |
+| `x-api-sync` | Backfill bookmarks from the X API and process them. | `--plan`, `--json`, `--max-pages`, `--max-results`, `--no-resume` |
 | `arxiv` | Discover research papers from ArXiv. | `--discover`, `--source`, `--topics`, `--categories`, `--limit` |
 | `social` | Sync GitHub stars and Hugging Face likes. | `--sync`, `--github-user`, `--hf-user`, `--limit` |
 | `github-stars` | Pull GitHub stars directly. | `--limit`, `--no-resume` |
 | `huggingface-likes` | Pull Hugging Face likes directly. | `--limit`, `--no-resume`, `--no-models` |
-| `web-clipper` | Index configured vault source directories for imported markdown and attachments. | none |
+| `web-clipper` | Index configured vault source directories for imported markdown and attachments. | `--plan`, `--json` |
 | `archivist` | Compile archivist topic pages or benchmark retrieval for selected topics. | `--topics`, `--force`, `--dry-run`, `--benchmark`, `--limit`, `--json` |
 | `youtube` | Post-process existing tweets for YouTube metadata and transcripts. | `--limit`, `--no-resume`, `--no-transcripts` |
 | `update-videos` | Refresh existing tweet/thread outputs with video data. | none |
 | `twitter-transcripts` | Run local Whisper over Twitter video media. | `--limit`, `--no-resume`, `--verbose` |
 | `wiki-query` | Search the compiled wiki and optionally write back a curated page. | `--limit`, `--write-back`, `--selected-slugs`, `--title`, `--json` |
 | `wiki-lint` | Check wiki health. | `--stale-after-days`, `--json` |
-| `ingest-queue` | Drain the generalized ingestion queue. | `--limit` |
+| `ingest-queue` | Drain the generalized ingestion queue. | `--plan`, `--json`, `--limit` |
 | `digest` | Generate Obsidian-facing discovery notes. | `weekly`, `inbox`, `dashboard`, `all`, `--notify` |
 | `stats` | Show current artifact and queue stats. | `--json`, `--verbose` |
 | `db` | Database maintenance commands. | `stats`, `vacuum`, `export` |
@@ -149,6 +149,7 @@ Process cached data:
 Backfill X bookmarks:
 
 ```bash
+.venv/bin/python thoth.py x-api-sync --plan --json --max-pages 1
 .venv/bin/python thoth.py x-api-sync --max-pages 3 --max-results 100
 ```
 
@@ -157,7 +158,9 @@ Run discovery:
 ```bash
 .venv/bin/python thoth.py arxiv --discover --topics "agent systems,multimodal reasoning"
 .venv/bin/python thoth.py social --sync --github-user <user> --hf-user <user>
+.venv/bin/python thoth.py web-clipper --plan --json
 .venv/bin/python thoth.py web-clipper
+.venv/bin/python thoth.py ingest-queue --plan --json --limit 25
 ```
 
 Work the wiki:

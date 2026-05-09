@@ -145,8 +145,13 @@ def collect_parser_capabilities(parser: argparse.ArgumentParser) -> dict[str, An
             "stats_json": "python thoth.py stats --json",
             "db_stats_json": "python thoth.py db stats --json",
             "delete_dry_run": "python thoth.py delete <tweet_id> --dry-run",
+            "ingest_queue_plan_json": "python thoth.py ingest-queue --plan --json",
             "wiki_lint_json": "python thoth.py wiki-lint --json",
             "wiki_query_json": "python thoth.py wiki-query <query> --json",
+            "web_clipper_plan_json": "python thoth.py web-clipper --plan --json",
+            "x_api_sync_plan_json": (
+                "python thoth.py x-api-sync --plan --max-pages 1 --json"
+            ),
         },
         "stdout_stderr_contract": {
             "stdout": "requested data only, including JSON payloads",
@@ -192,6 +197,9 @@ def build_robot_triage_payload(
             "python thoth.py db stats --json",
             "python thoth.py archivist --benchmark --limit 0 --json",
             "python thoth.py wiki-lint --stale-after-days 30 --json",
+            "python thoth.py web-clipper --plan --json",
+            "python thoth.py ingest-queue --plan --json",
+            "python thoth.py x-api-sync --plan --max-pages 1 --json",
             "python thoth.py delete <tweet_id> --dry-run",
         ],
         "recommended_next_commands": [
@@ -227,9 +235,12 @@ def render_robot_docs(stream: Any = sys.stdout) -> None:
     print("  python thoth.py wiki-query <query> --json", file=stream)
     print("  python thoth.py wiki-lint --json", file=stream)
     print("  python thoth.py archivist --benchmark --limit 0 --json", file=stream)
+    print("  python thoth.py web-clipper --plan --json", file=stream)
+    print("  python thoth.py ingest-queue --plan --json", file=stream)
+    print("  python thoth.py x-api-sync --plan --max-pages 1 --json", file=stream)
     print("", file=stream)
     print("Safe mutation pattern:", file=stream)
-    print("  Prefer --dry-run when available before running mutating commands.", file=stream)
+    print("  Prefer --plan or --dry-run when available before running mutating commands.", file=stream)
     print("  For deletion, start with: python thoth.py delete <tweet_id> --dry-run", file=stream)
     print("", file=stream)
     print("Output contract:", file=stream)

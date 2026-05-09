@@ -91,6 +91,33 @@ def test_web_clipper_collector_indexes_allowlisted_roots_only(tmp_path: Path):
     assert collector.db.get_file_entry(str(ignored_attachment_file)) is None
 
 
+def test_web_clipper_plan_scans_without_writing_metadata_or_queue(tmp_path: Path):
+    collector, vault_root = make_collector(tmp_path)
+
+    note_file = vault_root / "Clippings" / "capture.md"
+    attachment_file = vault_root / "clipper-assets" / "capture_attachment.pdf"
+    _copy_fixture("capture_note.md", note_file)
+    _copy_fixture("capture_attachment.pdf", attachment_file)
+
+    planned = collector.plan()
+
+    assert {record.path for record in planned} == {note_file, attachment_file}
+    note_record = next(record for record in planned if record.path == note_file)
+    assert note_record.action == "queue_note"
+    assert note_record.would_queue is True
+    assert note_record.is_new_or_changed is True
+
+    attachment_record = next(record for record in planned if record.path == attachment_file)
+    assert attachment_record.file_type == "attachment"
+    assert attachment_record.would_queue is False
+    assert attachment_record.is_new_or_changed is True
+    assert attachment_record.action in {"index_attachment_metadata", "stage_attachment"}
+
+    assert collector.db.get_file_entry(str(note_file)) is None
+    assert collector.db.get_file_entry(str(attachment_file)) is None
+    assert collector.db.get_ingestion_entry("webclip:Clippings/capture.md") is None
+
+
 def test_web_clipper_collector_reindexes_changed_files(tmp_path: Path):
     collector, vault_root = make_collector(tmp_path)
 
