@@ -107,17 +107,20 @@ Use `python thoth.py --help` for the full command list and `python thoth.py <com
 | `github-stars` | Pull GitHub stars directly. | `--limit`, `--no-resume` |
 | `huggingface-likes` | Pull Hugging Face likes directly. | `--limit`, `--no-resume`, `--no-models` |
 | `web-clipper` | Index configured vault source directories for imported markdown and attachments. | none |
-| `archivist` | Compile archivist topic pages or benchmark retrieval for selected topics. | `--topics`, `--force`, `--dry-run`, `--benchmark`, `--limit` |
+| `archivist` | Compile archivist topic pages or benchmark retrieval for selected topics. | `--topics`, `--force`, `--dry-run`, `--benchmark`, `--limit`, `--json` |
 | `youtube` | Post-process existing tweets for YouTube metadata and transcripts. | `--limit`, `--no-resume`, `--no-transcripts` |
 | `update-videos` | Refresh existing tweet/thread outputs with video data. | none |
 | `twitter-transcripts` | Run local Whisper over Twitter video media. | `--limit`, `--no-resume`, `--verbose` |
-| `wiki-query` | Search the compiled wiki and optionally write back a curated page. | `--limit`, `--write-back`, `--selected-slugs`, `--title` |
-| `wiki-lint` | Check wiki health. | `--stale-after-days` |
+| `wiki-query` | Search the compiled wiki and optionally write back a curated page. | `--limit`, `--write-back`, `--selected-slugs`, `--title`, `--json` |
+| `wiki-lint` | Check wiki health. | `--stale-after-days`, `--json` |
 | `ingest-queue` | Drain the generalized ingestion queue. | `--limit` |
 | `digest` | Generate Obsidian-facing discovery notes. | `weekly`, `inbox`, `dashboard`, `all`, `--notify` |
-| `stats` | Show current artifact and queue stats. | `--verbose` |
+| `stats` | Show current artifact and queue stats. | `--json`, `--verbose` |
 | `db` | Database maintenance commands. | `stats`, `vacuum`, `export` |
-| `delete` | Delete a tweet and its artifacts. | `--dry-run` |
+| `capabilities` | Print the agent-readable CLI contract. | `--json` |
+| `robot-docs` | Print the in-tool agent operating guide. | `guide` |
+| `triage` / `--robot-triage` | Print agent quick-ref, health, commands, and exit-code contract as JSON. | `--json` |
+| `delete` | Delete a tweet and its artifacts. | `--dry-run`, `--yes` |
 | `migrate-filenames` | Normalize legacy filenames. | `--dry-run`, `--analyze` |
 | `migrate-frontmatter` | Upgrade legacy frontmatter. | `--dry-run` |
 
@@ -127,8 +130,13 @@ Check state:
 
 ```bash
 .venv/bin/python thoth.py stats
+.venv/bin/python thoth.py stats --json
 .venv/bin/python thoth.py stats --verbose
 .venv/bin/python thoth.py db stats
+.venv/bin/python thoth.py db stats --json
+.venv/bin/python thoth.py --robot-triage
+.venv/bin/python thoth.py capabilities --json
+.venv/bin/python thoth.py robot-docs guide
 ```
 
 Process cached data:
@@ -156,8 +164,17 @@ Work the wiki:
 
 ```bash
 .venv/bin/python thoth.py wiki-query "companion ai"
+.venv/bin/python thoth.py wiki-query "companion ai" --json
 .venv/bin/python thoth.py wiki-query "companion ai" --write-back --title "Companion AI Notes"
 .venv/bin/python thoth.py wiki-lint --stale-after-days 30
+.venv/bin/python thoth.py wiki-lint --stale-after-days 30 --json
+```
+
+Deletion is confirmation-gated. Preview first, then add `--yes` only after reviewing the plan:
+
+```bash
+.venv/bin/python thoth.py delete <tweet_id> --dry-run
+.venv/bin/python thoth.py delete <tweet_id> --yes
 ```
 
 ## Archivist
@@ -191,7 +208,7 @@ Current archivist workflow:
 2. Adjust the archivist prompt files in `prompts/` if you want to change source-type briefing, repository framing, or final synthesis style.
 3. Configure the `archivist` task route, and configure `embedding` too if any topic uses semantic or hybrid retrieval.
 4. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
-5. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages, including corpus, eligible, candidate, and newly indexed counts.
+5. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages, including corpus, eligible, candidate, and newly indexed counts. Add `--json` for a machine-readable benchmark payload.
 6. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
 7. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
 8. Tune `max_age_days`, `source_type_max_age_days`, `retrieval.source_type_limits`, and `carryover_limit_per_type` in `archivist_topics.yaml` when a topic needs stricter staged caps by source type or recency.

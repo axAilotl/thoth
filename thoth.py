@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import sys
 from pathlib import Path
 from typing import Dict, List, Any
@@ -27,7 +28,6 @@ from core import (
 )
 from core.archivist_benchmark import benchmark_archivist_topics
 from core.graphql_cache import maybe_cleanup_graphql_cache
-from core.path_layout import resolve_vault_relative_path, resolve_vault_root
 from processors import URLProcessor, CacheLoader, VideoUpdater
 from processors.pipeline_processor import PipelineProcessor
 from processors.async_llm_processor import AsyncLLMProcessor, AsyncProcessingConfig
@@ -35,7 +35,17 @@ from processors.github_stars_processor import GitHubStarsProcessor
 from processors.huggingface_likes_processor import HuggingFaceLikesProcessor
 from processors.youtube_processor import YouTubeProcessor
 from processors.transcription_processor import TranscriptionProcessor
-from core.download_tracker import get_download_tracker
+from core.cli_agent import (
+    AgentFriendlyArgumentParser,
+    build_robot_triage_payload,
+    collect_parser_capabilities,
+    emit_json,
+    normalize_agent_argv,
+    render_capabilities,
+    render_robot_docs,
+    to_jsonable,
+)
+from core.cli_agent_stats import collect_runtime_stats, render_runtime_stats
 
 
 logger = logging.getLogger(__name__)
@@ -955,6 +965,16 @@ async def cmd_delete(args):
     """Delete a tweet and all its associated artifacts"""
     tweet_id = args.tweet_id
     dry_run = args.dry_run
+
+    if not dry_run and not getattr(args, "yes", False):
+        quoted_id = shlex.quote(str(tweet_id))
+        print(
+            "Refusing to delete artifacts without explicit confirmation. "
+            f"Suggested safe command: `python thoth.py delete {quoted_id} --dry-run`; "
+            f"to actually delete after review, run `python thoth.py delete {quoted_id} --yes`.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     
     print(f"🗑️ {'DRY RUN: ' if dry_run else ''}Deleting tweet {tweet_id}")
     
@@ -1011,149 +1031,16 @@ async def cmd_delete(args):
             print(f"   ... and {len(stats['errors']) - 5} more errors")
     
     if dry_run:
-        print("\n💡 Run without --dry-run to actually delete these files")
+        print("\n💡 Add --yes without --dry-run to actually delete these files")
 
 
 def cmd_stats(args):
     """Show statistics about cached data and processed files"""
-    print("📊 Thoth Statistics")
-
-    db = None
-    if config.get("database.enabled", False):
-        try:
-            from core.metadata_db import get_metadata_db
-
-            db = get_metadata_db()
-        except Exception as exc:
-            db = None
-            print(f"⚠️  Metadata DB unavailable: {exc}")
-
-    # GraphQL cache stats
-    cache_dir = build_path_layout(config).cache_root
-    if cache_dir.exists():
-        cache_files = len(list(cache_dir.glob("tweet_*.json")))
-        print(f"📡 GraphQL Cache: {cache_files} responses cached")
-
-    # Knowledge vault & media stats (filesystem + DB when available)
-    vault_dir = build_path_layout(config).vault_root
-    if vault_dir.exists():
-        tweets_dir = vault_dir / "tweets"
-        threads_dir = vault_dir / "threads"
-        tweet_files = len(list(tweets_dir.glob("*.md"))) if tweets_dir.exists() else 0
-        thread_files = (
-            len(list(threads_dir.glob("*.md"))) if threads_dir.exists() else 0
-        )
-        print(f"📚 Knowledge Vault (filesystem):")
-        print(f"   📄 Tweet files: {tweet_files}")
-        print(f"   🧵 Thread files: {thread_files}")
-
-    if db:
-        file_stats = db.get_file_stats()
-        if file_stats:
-            print(f"📚 Knowledge Vault (DB index):")
-            print(f"   Total indexed files: {file_stats.get('total_files', 0):,}")
-            print(f"   Total size: {file_stats.get('total_size_mb', 0)} MB")
-            by_type = file_stats.get("by_type", {})
-            if by_type:
-                print("   By type:")
-                for file_type, stats in by_type.items():
-                    size_mb = round(
-                        (stats.get("total_size_bytes", 0)) / (1024 * 1024), 2
-                    )
-                    print(
-                        f"     {file_type:12} {stats.get('count', 0):,} files ({size_mb} MB)"
-                    )
-
-    vault_dir = resolve_vault_root(config)
-    images_dir = resolve_vault_relative_path(config, "paths.images_dir")
-    videos_dir = resolve_vault_relative_path(config, "paths.videos_dir")
-    legacy_media_dir = resolve_vault_relative_path(config, "paths.media_dir")
-    
-    image_files = len(list(images_dir.glob("*"))) if images_dir.exists() else 0
-    video_files = len(list(videos_dir.glob("*"))) if videos_dir.exists() else 0
-    legacy_media_files = len(list(legacy_media_dir.glob("*"))) if legacy_media_dir.exists() else 0
-    
-    total_media_files = image_files + video_files + legacy_media_files
-    print(f"🖼️ Media Files: {total_media_files} total")
-    if image_files > 0:
-        print(f"   📸 Images: {image_files}")
-    if video_files > 0:
-        print(f"   🎬 Videos: {video_files}")
-    if legacy_media_files > 0:
-        print(f"   📁 Legacy media: {legacy_media_files}")
-
-    if db:
-        download_summary = db.get_download_summary()
-        if download_summary and download_summary.get("total_entries"):
-            print(f"📥 Downloads (DB):")
-            print(
-                f"   Total entries: {download_summary['total_entries']:,} ({download_summary['total_mb']} MB)"
-            )
-            for status, stats in download_summary.get("by_status", {}).items():
-                print(f"   {status:>10}: {stats['count']:,} ({stats['total_mb']} MB)")
-    else:
-        download_tracker = get_download_tracker()
-        download_stats = download_tracker.get_stats()
-        if download_stats["total_tracked"] > 0:
-            print(f"📥 Download Tracking:")
-            print(f"   ✅ Successful: {download_stats['successful']}")
-            print(f"   🚫 404 errors: {download_stats['404_errors']}")
-            print(f"   ❌ Other errors: {download_stats['other_errors']}")
-            print(f"   ⏳ Pending: {download_stats['pending']}")
-            print(f"   📊 Total tracked: {download_stats['total_tracked']}")
-
-    # Bookmarks file stats
-    bookmarks_file = Path(args.bookmarks)
-    if bookmarks_file.exists():
-        try:
-            with open(bookmarks_file, "r") as f:
-                bookmarks = json.load(f)
-            print(f"📊 Source Data: {len(bookmarks)} bookmarks in {args.bookmarks}")
-        except:
-            print(f"❌ Could not read {args.bookmarks}")
-
-    if db:
-        queue_counts = db.get_bookmark_queue_counts()
-        if queue_counts:
-            print(f"🗂️  Bookmark Queue:")
-            print(f"   Pending: {queue_counts.get('pending', 0)}")
-            print(f"   Processing: {queue_counts.get('processing', 0)}")
-            print(f"   Processed: {queue_counts.get('processed', 0)}")
-            print(f"   Failed: {queue_counts.get('failed', 0)}")
-
-        llm_summary = db.get_llm_cache_stats()
-        if llm_summary and llm_summary.get("total_entries"):
-            print(f"🤖 LLM Cache:")
-            print(f"   Total entries: {llm_summary['total_entries']:,}")
-            if llm_summary.get("by_task"):
-                print(f"   By task:")
-                for task, count in llm_summary["by_task"].items():
-                    print(f"     {task:15} {count:,}")
-            if llm_summary.get("by_provider"):
-                print(f"   By provider:")
-                for provider, count in llm_summary["by_provider"].items():
-                    print(f"     {provider:20} {count:,}")
-
-        chunk_stats = db.get_transcript_chunk_stats()
-        if chunk_stats and chunk_stats.get("total_contexts"):
-            print(f"🎬 Transcript Chunk Cache:")
-            print(f"   Contexts tracked: {chunk_stats['total_contexts']:,}")
-            print(
-                f"   Contexts with failures: {chunk_stats['contexts_with_failures']:,}"
-            )
-            print(
-                f"   Contexts with fallback: {chunk_stats['contexts_with_fallback']:,}"
-            )
-            print(f"   Failed chunks: {chunk_stats['total_failed_chunks']:,}")
-            details = chunk_stats.get("context_details", [])
-            if details:
-                print(f"   Recent failures:")
-                for detail in details[:5]:
-                    print(
-                        f"     {detail['context_id']} -> processed {detail['chunks_processed']}/"
-                        f"{detail['chunks_total']} chunks, failures: {detail['failed_count']}"
-                        f" (fallback: {'Yes' if detail['fallback'] else 'No'})"
-                    )
+    stats = collect_runtime_stats(args)
+    if getattr(args, "json", False):
+        emit_json(stats)
+        return
+    render_runtime_stats(stats)
 
 
 async def cmd_database(args):
@@ -1165,10 +1052,22 @@ async def cmd_database(args):
     db = get_metadata_db()
 
     if args.db_action == "stats":
+        stats = db.get_db_stats()
+        file_stats = db.get_file_stats()
+        if getattr(args, "json", False):
+            emit_json(
+                {
+                    "schema_version": "1.0",
+                    "tool": "thoth",
+                    "surface": "db stats",
+                    "database": stats,
+                    "file_index": file_stats,
+                }
+            )
+            return
+
         print("📊 Database Statistics")
         print("=" * 50)
-
-        stats = db.get_db_stats()
         print(f"Database: {stats['db_path']}")
         print(f"Size: {stats['db_size_mb']} MB ({stats['db_size_bytes']:,} bytes)")
         print(f"Total Records: {stats['total_records']:,}")
@@ -1178,7 +1077,6 @@ async def cmd_database(args):
             print(f"   {table:20} {count:,}")
 
         # File statistics
-        file_stats = db.get_file_stats()
         if file_stats:
             print(f"\nFile Index Statistics:")
             print(f"   Total Files: {file_stats['total_files']:,}")
@@ -1715,13 +1613,24 @@ async def cmd_archivist(args):
         ]
 
     if bool(getattr(args, "benchmark", False)):
-        print("🔎 Benchmarking archivist retrieval...")
+        if not getattr(args, "json", False):
+            print("🔎 Benchmarking archivist retrieval...")
         results = await benchmark_archivist_topics(
             config,
             project_root=Path.cwd(),
             topic_ids=topic_ids,
             limit=getattr(args, "limit", None),
         )
+        if getattr(args, "json", False):
+            emit_json(
+                {
+                    "schema_version": "1.0",
+                    "tool": "thoth",
+                    "surface": "archivist benchmark",
+                    "topics": to_jsonable(results),
+                }
+            )
+            return
         if not results:
             print("✅ No archivist topics matched the requested scope")
             return
@@ -1750,13 +1659,24 @@ async def cmd_archivist(args):
 
     compiler = ArchivistCompiler(config, project_root=Path.cwd())
 
-    print("📚 Running archivist topic compiler...")
+    if not getattr(args, "json", False):
+        print("📚 Running archivist topic compiler...")
     results = await compiler.run(
         topic_ids=topic_ids,
         force=bool(getattr(args, "force", False)),
         dry_run=bool(getattr(args, "dry_run", False)),
         limit=getattr(args, "limit", None),
     )
+    if getattr(args, "json", False):
+        emit_json(
+            {
+                "schema_version": "1.0",
+                "tool": "thoth",
+                "surface": "archivist",
+                "topics": to_jsonable(results),
+            }
+        )
+        return
     if not results:
         print("✅ No archivist topics matched the requested scope")
         return
@@ -1782,6 +1702,35 @@ async def cmd_wiki_query(args):
     runner = WikiQueryRunner(config, layout=layout)
     limit = max(1, int(getattr(args, "limit", 10) or 10))
     result = runner.search(args.query, limit=limit)
+
+    if getattr(args, "json", False):
+        payload = {
+            "schema_version": "1.0",
+            "tool": "thoth",
+            "surface": "wiki-query",
+            "query": result.query,
+            "queried_at": result.queried_at,
+            "hits": to_jsonable(result.hits),
+        }
+        if getattr(args, "write_back", False):
+            selected_slugs = None
+            if getattr(args, "selected_slugs", None):
+                selected_slugs = [
+                    slug.strip()
+                    for slug in args.selected_slugs.split(",")
+                    if slug.strip()
+                ]
+            payload["write_back"] = to_jsonable(
+                runner.curated_write_back(
+                    args.query,
+                    limit=limit,
+                    selected_slugs=selected_slugs,
+                    curated_notes=getattr(args, "curated_notes", None),
+                    curated_title=getattr(args, "title", None),
+                )
+            )
+        emit_json(payload)
+        return
 
     print(f"🔎 Wiki query: {args.query}")
     print(f"✅ Matches: {len(result.hits)}")
@@ -1814,6 +1763,19 @@ async def cmd_wiki_lint(args):
     runner = WikiLintRunner(config, layout=layout)
     stale_after_days = int(getattr(args, "stale_after_days", 30) or 30)
     report = runner.lint(stale_after_days=stale_after_days)
+
+    if getattr(args, "json", False):
+        emit_json(
+            {
+                "schema_version": "1.0",
+                "tool": "thoth",
+                "surface": "wiki-lint",
+                "report": to_jsonable(report),
+            }
+        )
+        if report.has_errors:
+            raise SystemExit(1)
+        return
 
     print("🧪 Wiki lint report")
     print(f"   Pages checked: {report.pages_checked}")
@@ -1908,7 +1870,7 @@ async def cmd_migrate_filenames(args):
 
 def main():
     """Main CLI entry point"""
-    parser = argparse.ArgumentParser(
+    parser = AgentFriendlyArgumentParser(
         description="Thoth - Twitter Bookmark Knowledge Management",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -1918,18 +1880,34 @@ Examples:
   %(prog)s update-videos               # Update existing content with video links
   %(prog)s web-clipper                 # Index configured Web Clipper source dirs
   %(prog)s stats                       # Show current statistics
+  %(prog)s --robot-triage              # Agent quick-ref + health + command contract
+  %(prog)s capabilities --json         # Machine-readable CLI contract
         """,
     )
 
     # Global options
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON when the selected command supports structured output",
+    )
+    parser.add_argument(
+        "--robot-triage",
+        action="store_true",
+        help="Emit agent quick-ref, health, commands, and exit-code contract as JSON",
+    )
+    parser.add_argument(
         "--bookmarks",
         default=config.get("paths.bookmarks_file"),
         help="Bookmarks JSON file (default: %(default)s)",
     )
     # Subcommands
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    subparsers = parser.add_subparsers(
+        dest="command",
+        help="Available commands",
+        parser_class=AgentFriendlyArgumentParser,
+    )
 
     # Process command
     process_parser = subparsers.add_parser("process", help="Process tweets to markdown")
@@ -2140,6 +2118,11 @@ Examples:
 
     # Stats command
     stats_parser = subparsers.add_parser("stats", help="Show statistics")
+    stats_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit current artifact, queue, cache, and media stats as JSON",
+    )
 
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a tweet and all its artifacts")
@@ -2149,13 +2132,27 @@ Examples:
         action="store_true",
         help="Show what would be deleted without actually deleting",
     )
+    delete_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm deletion after reviewing --dry-run output",
+    )
 
     # Database management command
     db_parser = subparsers.add_parser("db", help="Database management operations")
-    db_subparsers = db_parser.add_subparsers(dest="db_action", help="Database actions")
+    db_subparsers = db_parser.add_subparsers(
+        dest="db_action",
+        help="Database actions",
+        parser_class=AgentFriendlyArgumentParser,
+    )
 
     # Database stats
     db_stats_parser = db_subparsers.add_parser("stats", help="Show database statistics")
+    db_stats_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit database and file-index stats as JSON",
+    )
 
     # Database vacuum
     db_vacuum_parser = db_subparsers.add_parser(
@@ -2321,6 +2318,11 @@ Examples:
         default=10,
         help="Number of top candidate paths to print per topic during --benchmark",
     )
+    archivist_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit archivist run or benchmark results as JSON",
+    )
 
     wiki_query_parser = subparsers.add_parser(
         "wiki-query",
@@ -2356,6 +2358,11 @@ Examples:
         default=None,
         help="Optional custom title for the curated write-back page",
     )
+    wiki_query_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit wiki query hits and optional write-back result as JSON",
+    )
 
     wiki_lint_parser = subparsers.add_parser(
         "wiki-lint",
@@ -2366,6 +2373,11 @@ Examples:
         type=int,
         default=30,
         help="Warn when wiki pages have not been updated within this many days",
+    )
+    wiki_lint_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit wiki lint report as JSON",
     )
 
     ingest_queue_parser = subparsers.add_parser(
@@ -2379,16 +2391,56 @@ Examples:
         help="Maximum number of queue entries to process",
     )
 
-    args = parser.parse_args()
+    capabilities_parser = subparsers.add_parser(
+        "capabilities",
+        help="Show machine-readable CLI contract and agent surfaces",
+    )
+    capabilities_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the full capabilities contract as JSON",
+    )
+
+    robot_docs_parser = subparsers.add_parser(
+        "robot-docs",
+        help="Show an agent-targeted operating guide",
+    )
+    robot_docs_subparsers = robot_docs_parser.add_subparsers(
+        dest="robot_docs_action",
+        parser_class=AgentFriendlyArgumentParser,
+    )
+    robot_docs_subparsers.add_parser("guide", help="Print the robot operating guide")
+
+    triage_parser = subparsers.add_parser(
+        "triage",
+        help="Alias for --robot-triage; emits agent quick-ref JSON",
+    )
+    triage_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=True,
+        help="Emit triage payload as JSON (default)",
+    )
+
+    normalized_argv = normalize_agent_argv(sys.argv[1:])
+    args = parser.parse_args(normalized_argv.argv)
 
     # Setup logging
     setup_logging(args.verbose)
+    for warning in normalized_argv.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
 
     # Validate configuration (allow offline-safe commands even if invalid)
-    if not config.validate_and_warn():
-        print("⚠️ Configuration validation failed. Check logs for details.")
+    config_issues = config.validate()
+    config_valid = not config_issues
+    if config_issues:
+        logger.warning("Configuration validation found %s issues:", len(config_issues))
+        for issue in config_issues:
+            logger.warning("  - %s", issue)
+        print("Configuration validation failed. Check logs for details.", file=sys.stderr)
         offline_safe = {
             "stats",
+            "delete",
             "process",
             "pipeline",
             "update-videos",
@@ -2405,10 +2457,45 @@ Examples:
             "ingest-queue",
             "db",
             "archivist",
+            "capabilities",
+            "robot-docs",
+            "triage",
+            None,
         }
         if args.command not in offline_safe:  # Block only network-heavy commands
-            print("❌ Cannot proceed with invalid configuration for this command")
+            print(
+                "Cannot proceed with invalid configuration for this command. "
+                "Suggested command: `python thoth.py capabilities --json` "
+                "to inspect offline-safe surfaces.",
+                file=sys.stderr,
+            )
             sys.exit(1)
+
+    capabilities = collect_parser_capabilities(parser)
+    if args.robot_triage or args.command == "triage":
+        emit_json(
+            build_robot_triage_payload(
+                capabilities,
+                config_valid=config_valid,
+                config_issues=config_issues,
+            )
+        )
+        return
+
+    if args.command == "capabilities":
+        render_capabilities(capabilities, as_json=getattr(args, "json", False))
+        return
+
+    if args.command == "robot-docs":
+        if getattr(args, "robot_docs_action", None) != "guide":
+            print(
+                "Missing robot-docs action. Suggested command: "
+                "`python thoth.py robot-docs guide`",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        render_robot_docs()
+        return
 
     ensure_wiki_scaffold(config)
 

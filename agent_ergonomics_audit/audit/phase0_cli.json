@@ -1,0 +1,13 @@
+{
+  "target_path": "/mnt/samesung/ai/thoth",
+  "discovered_at": "2026-05-09T20:34:28Z",
+  "languages": [],
+  "binaries": [],
+  "env_var_prefix": "",
+  "existing_surfaces": {
+    "robot_mode": false,
+    "capabilities": false,
+    "robot_docs": false
+  },
+  "recommended_mode": "full"
+}

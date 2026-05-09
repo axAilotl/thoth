@@ -1,0 +1,50 @@
+{
+  "audit_workspace": "/mnt/samesung/ai/thoth/agent_ergonomics_audit",
+  "current_pass": 1,
+  "next_pass_focus": "Expand truthful --json/--dry-run plan surfaces for mutating ingestion commands and score the remaining command inventory.",
+  "pass_N+1_ready": true,
+  "passes": [
+    {
+      "artifacts": {
+        "agent_surfaces": "audit/agent_surfaces.jsonl",
+        "ambition_bar_check": "audit/ambition_bar_check.md",
+        "applied_changes": "audit/applied_changes.jsonl",
+        "handoff": "audit/HANDOFF.md",
+        "heatmap": "audit/heatmap.svg",
+        "intent_corpus": "audit/intent_inference_corpus.jsonl",
+        "playbook": "audit/playbook.md",
+        "recommendations": "audit/recommendations.jsonl",
+        "regression_alerts": "audit/regression_alerts.md",
+        "scorecard": "audit/scorecard.md",
+        "simulations_post": "audit/agent_simulations/post_pass_N/",
+        "simulations_pre": "audit/agent_simulations/pre_pass_N/",
+        "surface_inventory": "audit/surface_inventory.jsonl",
+        "uplift_diff": "audit/uplift_diff.md"
+      },
+      "completed_at": "2026-05-09T20:49:30Z",
+      "feature_branch": null,
+      "mode": "full",
+      "pass": 1,
+      "started_at": "2026-05-09T20:34:23Z",
+      "summary": {
+        "ambition_bar_met": false,
+        "ambition_bar_self_prompt_run": true,
+        "dimensions_touched": 8,
+        "fresh_eyes_rounds": 2,
+        "median_uplift_pts": 350,
+        "recommendations_applied": 9,
+        "recommendations_total": 9,
+        "regressions_count": 0,
+        "substantive_commits": 9,
+        "surfaces_inventoried": 103,
+        "surfaces_scored": 11
+      },
+      "target_branch": "integration/universal-loop",
+      "target_sha": "caceed46d96fb9d5ef3ad9556b10af7771317e05"
+    }
+  ],
+  "rubric_version": "<git SHA of references/rubric/SCORING-RUBRIC.md when scoring ran>",
+  "schema_version": "1.1.0",
+  "tool_name": "thoth",
+  "tool_repo": "/mnt/samesung/ai/thoth"
+}

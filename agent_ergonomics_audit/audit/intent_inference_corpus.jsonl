@@ -1,0 +1,5 @@
+{"corpus_id": "I-001", "evidence": "stdout parses as JSON; stderr teaches --json spelling", "expected_intent": "stats as JSON despite common typo", "invocation": "python thoth.py stats --jsno", "outcome": "inferred-and-acted"}
+{"corpus_id": "I-002", "evidence": "stderr suggests `thoth.py stats --help`", "expected_intent": "stats command", "invocation": "python thoth.py stat --json", "outcome": "useful-hint"}
+{"corpus_id": "I-003", "evidence": "exit 2 with exact --dry-run and --yes commands", "expected_intent": "delete tweet artifacts", "invocation": "python thoth.py delete 1234567890", "outcome": "safety-block"}
+{"corpus_id": "I-004", "evidence": "capabilities JSON includes agent_surfaces and exit_codes", "expected_intent": "discover CLI contract", "invocation": "python thoth.py capabilities --json", "outcome": "inferred-and-acted"}
+{"corpus_id": "I-005", "evidence": "JSON report emitted before non-zero exit when lint errors exist", "expected_intent": "machine-readable wiki diagnostics", "invocation": "python thoth.py wiki-lint --json", "outcome": "inferred-and-acted"}

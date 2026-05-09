@@ -30,14 +30,19 @@ Show the current CLI surface:
 ```bash
 .venv/bin/python thoth.py --help
 .venv/bin/python thoth.py <command> --help
+.venv/bin/python thoth.py capabilities --json
+.venv/bin/python thoth.py robot-docs guide
+.venv/bin/python thoth.py --robot-triage
 ```
 
 Check current state:
 
 ```bash
 .venv/bin/python thoth.py stats
+.venv/bin/python thoth.py stats --json
 .venv/bin/python thoth.py stats --verbose
 .venv/bin/python thoth.py db stats
+.venv/bin/python thoth.py db stats --json
 ```
 
 ## Core CLI Workflows
@@ -61,6 +66,7 @@ Archivist compilation:
 .venv/bin/python thoth.py archivist
 .venv/bin/python thoth.py archivist --topics companion-ai-research --force
 .venv/bin/python thoth.py archivist --dry-run
+.venv/bin/python thoth.py archivist --benchmark --limit 0 --json
 ```
 
 Discovery and source sync:
@@ -84,14 +90,17 @@ Wiki operations:
 
 ```bash
 .venv/bin/python thoth.py wiki-query "companion ai"
+.venv/bin/python thoth.py wiki-query "companion ai" --json
 .venv/bin/python thoth.py wiki-query "companion ai" --write-back --title "Companion AI Notes"
 .venv/bin/python thoth.py wiki-lint --stale-after-days 30
+.venv/bin/python thoth.py wiki-lint --stale-after-days 30 --json
 ```
 
 Maintenance:
 
 ```bash
 .venv/bin/python thoth.py delete <tweet_id> --dry-run
+.venv/bin/python thoth.py delete <tweet_id> --yes
 .venv/bin/python thoth.py migrate-filenames --dry-run
 .venv/bin/python thoth.py migrate-frontmatter --dry-run
 .venv/bin/python thoth.py db vacuum
