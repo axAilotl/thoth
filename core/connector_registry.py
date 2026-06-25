@@ -323,6 +323,35 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "config_namespace": "sources.omi",
         "default_enabled": True,
     },
+    {
+        "name": "skill_outputs",
+        "source_name": "skill_outputs",
+        "source_aliases": ["external_skill", "last30days-skill"],
+        "display_name": "External Skill Outputs",
+        "description": "Ingest JSON/JSONL output envelopes from external skills through the artifact queue.",
+        "artifact_types": [
+            "paper",
+            "repository",
+            "transcript",
+            "tweet",
+            "video",
+            "web_clipper",
+        ],
+        "capabilities": ["skills", "envelopes", "queue", "raw_preservation"],
+        "config_keys": [
+            "sources.skill_outputs.enabled",
+            "sources.skill_outputs.output_paths",
+            "sources.skill_outputs.output_dirs",
+            "sources.skill_outputs.file_patterns",
+            "sources.skill_outputs.source_name",
+        ],
+        "auth": [],
+        "queue_capability": True,
+        "entrypoint": "collectors.skill_output_connector:SkillOutputConnector",
+        "cli_command": "connectors run skill_outputs",
+        "config_namespace": "sources.skill_outputs",
+        "default_enabled": True,
+    },
 )
 
 

@@ -84,7 +84,7 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert payload["runtime"]["groups"]["connectors"]["total"] == 7
+    assert payload["runtime"]["groups"]["connectors"]["total"] == 8
     assert payload["runtime"]["groups"]["storage"]["raw_root"] == (
         str(tmp_path / "vault" / "raw")
     )

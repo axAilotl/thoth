@@ -166,6 +166,9 @@ class AgentSurfaceService:
             "youtube": self._run_youtube_connector,
             "omi": self._run_omi_connector,
             "personal_transcripts": self._run_omi_connector,
+            "skill_outputs": self._run_skill_outputs_connector,
+            "external_skill": self._run_skill_outputs_connector,
+            "last30days-skill": self._run_skill_outputs_connector,
         }
         handler = handlers.get(connector_name)
         if handler is None:
@@ -415,6 +418,41 @@ class AgentSurfaceService:
                 speaker=options.get("speaker") or configured.get("speaker"),
                 session_id=options.get("session_id") or configured.get("session_id"),
                 language=options.get("language") or configured.get("language"),
+                limit=_optional_int(options.get("limit")),
+            )
+        )
+        return result.to_dict()
+
+    def _run_skill_outputs_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        from collectors.skill_output_connector import SkillOutputConnector
+
+        connector = SkillOutputConnector(self.config, layout=self.layout, db=self.db)
+        configured = self.config.get("sources.skill_outputs", {}) or {}
+        output_paths = _string_list(
+            options.get("output_paths")
+            or options.get("output_path")
+            or options.get("export_paths")
+            or options.get("export_path")
+        ) or _string_list(configured.get("output_paths") or configured.get("output_path"))
+        output_dirs = _string_list(
+            options.get("output_dirs")
+            or options.get("output_dir")
+            or options.get("export_dirs")
+            or options.get("export_dir")
+        ) or _string_list(configured.get("output_dirs") or configured.get("output_dir"))
+        if not output_paths and not output_dirs:
+            raise AgentSurfaceError(
+                "skill_outputs connector requires output_paths or output_dirs"
+            )
+        result = _run_async(
+            connector.collect(
+                output_paths=output_paths,
+                output_dirs=output_dirs,
+                file_patterns=_string_list(
+                    options.get("file_patterns") or options.get("file_pattern")
+                )
+                or _string_list(configured.get("file_patterns")),
+                source_name=options.get("source_name") or configured.get("source_name"),
                 limit=_optional_int(options.get("limit")),
             )
         )

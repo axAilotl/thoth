@@ -84,7 +84,7 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert summary["connectors"]["total"] == 7
+    assert summary["connectors"]["total"] == 8
     assert [item["name"] for item in summary["connectors"]["connectors"]] == [
         "x_api",
         "arxiv",
@@ -93,6 +93,7 @@ topics:
         "web_clipper",
         "youtube",
         "omi",
+        "skill_outputs",
     ]
     web_clipper_connector = next(
         item
@@ -106,7 +107,7 @@ topics:
         "enabled": True,
         "fallback_providers": ["openai"],
     }
-    assert summary["groups"]["connectors"]["total"] == 7
+    assert summary["groups"]["connectors"]["total"] == 8
     assert "web_clipper" in summary["groups"]["connectors"]["enabled"]
     x_api_connector = next(
         item

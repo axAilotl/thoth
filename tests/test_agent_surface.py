@@ -105,7 +105,7 @@ def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):
 
     response = server.call_tool("list_connectors", {})
     payload = json.loads(response["content"][0]["text"])
-    assert payload["total"] == 7
+    assert payload["total"] == 8
 
     response = server.call_tool(
         "run_connector",

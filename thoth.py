@@ -1706,6 +1706,8 @@ def cmd_connectors(args):
             "playlist_urls": getattr(args, "playlist_url", None),
             "export_paths": getattr(args, "export_path", None),
             "export_dirs": getattr(args, "export_dir", None),
+            "output_paths": getattr(args, "output_path", None),
+            "output_dirs": getattr(args, "output_dir", None),
             "file_patterns": getattr(args, "file_pattern", None),
             "source_name": getattr(args, "source_name", None),
             "device_id": getattr(args, "device_id", None),
@@ -2669,6 +2671,18 @@ Examples:
         action="append",
         default=None,
         help="Local export directory; repeat for multiple directories",
+    )
+    connectors_run_parser.add_argument(
+        "--output-path",
+        action="append",
+        default=None,
+        help="External skill output file; repeat for multiple files",
+    )
+    connectors_run_parser.add_argument(
+        "--output-dir",
+        action="append",
+        default=None,
+        help="External skill output directory; repeat for multiple directories",
     )
     connectors_run_parser.add_argument(
         "--file-pattern",
