@@ -163,6 +163,7 @@ class AgentSurfaceService:
             "huggingface": self._run_huggingface_connector,
             "web_clipper": self._run_web_clipper_connector,
             "x_api": self._run_x_api_connector,
+            "youtube": self._run_youtube_connector,
         }
         handler = handlers.get(connector_name)
         if handler is None:
@@ -349,6 +350,40 @@ class AgentSurfaceService:
                 ),
             )
         )
+
+    def _run_youtube_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        from collectors.youtube_connector import YouTubeConnector
+
+        connector = YouTubeConnector(self.config, layout=self.layout, db=self.db)
+        configured = self.config.get("sources.youtube", {}) or {}
+        urls = _string_list(options.get("urls") or options.get("url")) or _string_list(
+            configured.get("urls")
+        )
+        playlist_urls = _string_list(
+            options.get("playlist_urls") or options.get("playlist_url")
+        ) or _string_list(configured.get("playlist_urls"))
+        export_paths = _string_list(
+            options.get("export_paths") or options.get("export_path")
+        ) or _string_list(configured.get("export_paths"))
+        if not urls and not playlist_urls and not export_paths:
+            raise AgentSurfaceError(
+                "youtube connector requires urls, playlist_urls, or export_paths"
+            )
+        result = _run_async(
+            connector.collect(
+                urls=urls,
+                playlist_urls=playlist_urls,
+                export_paths=export_paths,
+                limit=_optional_int(options.get("limit")),
+                archive_video=(
+                    bool(options["archive_video"])
+                    if "archive_video" in options
+                    else None
+                ),
+                resume=not bool(options.get("no_resume", False)),
+            )
+        )
+        return result.to_dict()
 
 
 def serialize_agent_payload(value: Any) -> Any:

@@ -1702,6 +1702,10 @@ def cmd_connectors(args):
             "username": getattr(args, "username", None),
             "max_results": getattr(args, "max_results", None),
             "max_pages": getattr(args, "max_pages", None),
+            "urls": getattr(args, "url", None),
+            "playlist_urls": getattr(args, "playlist_url", None),
+            "export_paths": getattr(args, "export_path", None),
+            "archive_video": getattr(args, "archive_video", None),
             "no_resume": getattr(args, "no_resume", False),
         }
         service = AgentSurfaceService(
@@ -2635,6 +2639,30 @@ Examples:
     connectors_run_parser.add_argument("--username", type=str, default=None)
     connectors_run_parser.add_argument("--max-results", type=int, default=None)
     connectors_run_parser.add_argument("--max-pages", type=int, default=None)
+    connectors_run_parser.add_argument(
+        "--url",
+        action="append",
+        default=None,
+        help="YouTube video URL; repeat for multiple URLs",
+    )
+    connectors_run_parser.add_argument(
+        "--playlist-url",
+        action="append",
+        default=None,
+        help="YouTube playlist URL; repeat for multiple playlists",
+    )
+    connectors_run_parser.add_argument(
+        "--export-path",
+        action="append",
+        default=None,
+        help="Local YouTube watch-later/history export file; repeat for multiple files",
+    )
+    connectors_run_parser.add_argument(
+        "--archive-video",
+        action="store_true",
+        default=None,
+        help="Archive video files when the connector supports archival",
+    )
     connectors_run_parser.add_argument(
         "--no-resume",
         action="store_true",

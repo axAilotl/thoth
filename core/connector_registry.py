@@ -264,6 +264,30 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "config_namespace": "sources.web_clipper",
         "default_enabled": True,
     },
+    {
+        "name": "youtube",
+        "source_name": "youtube",
+        "display_name": "YouTube",
+        "description": "Collect YouTube video metadata and transcripts from URLs, playlists, and local exports.",
+        "artifact_types": ["video", "transcript"],
+        "capabilities": ["video", "transcripts", "playlists", "exports", "queue", "archive"],
+        "config_keys": [
+            "sources.youtube.enabled",
+            "sources.youtube.urls",
+            "sources.youtube.playlist_urls",
+            "sources.youtube.export_paths",
+            "sources.youtube.archive_video",
+            "sources.youtube.api_key",
+            "youtube.enable_transcripts",
+            "youtube.enable_llm_transcript_processing",
+        ],
+        "auth": ["sources.youtube.api_key", "YOUTUBE_API_KEY"],
+        "queue_capability": True,
+        "entrypoint": "collectors.youtube_connector:YouTubeConnector",
+        "cli_command": "connectors run youtube",
+        "config_namespace": "sources.youtube",
+        "default_enabled": True,
+    },
 )
 
 

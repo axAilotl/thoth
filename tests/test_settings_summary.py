@@ -68,13 +68,14 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert summary["connectors"]["total"] == 5
+    assert summary["connectors"]["total"] == 6
     assert [item["name"] for item in summary["connectors"]["connectors"]] == [
         "x_api",
         "arxiv",
         "github",
         "huggingface",
         "web_clipper",
+        "youtube",
     ]
     web_clipper_connector = next(
         item

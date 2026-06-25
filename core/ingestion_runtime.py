@@ -18,7 +18,9 @@ from .artifacts import (
     KnowledgeArtifact,
     PaperArtifact,
     RepositoryArtifact,
+    TranscriptArtifact,
     TweetArtifact,
+    VideoArtifact,
     WebClipperArtifact,
 )
 from .bookmark_contract import normalize_bookmark_payload, validate_tweet_id
@@ -147,6 +149,10 @@ class KnowledgeArtifactRuntime:
             artifact = RepositoryArtifact.from_queue_payload(payload)
         elif artifact_type == "web_clipper":
             artifact = WebClipperArtifact.from_queue_payload(payload)
+        elif artifact_type == "video":
+            artifact = VideoArtifact.from_queue_payload(payload)
+        elif artifact_type == "transcript":
+            artifact = TranscriptArtifact.from_queue_payload(payload)
         else:
             raise UnsupportedArtifactTypeError(
                 f"Unsupported ingestion artifact type: {entry.artifact_type}"
@@ -249,6 +255,10 @@ class KnowledgeArtifactRuntime:
             return await self._process_repository_artifact(artifact)
         if isinstance(artifact, WebClipperArtifact):
             return await self._process_web_clipper_artifact(artifact)
+        if isinstance(artifact, VideoArtifact):
+            return await self._process_video_artifact(artifact)
+        if isinstance(artifact, TranscriptArtifact):
+            return await self._process_transcript_artifact(artifact)
 
         raise UnsupportedArtifactTypeError(
             f"Unsupported artifact class: {artifact.__class__.__name__}"
@@ -550,6 +560,45 @@ class KnowledgeArtifactRuntime:
                 "source_url": artifact.source_url,
                 "source_language": artifact.source_language,
                 "file_type": artifact.file_type,
+            },
+        )
+
+    async def _process_video_artifact(
+        self, artifact: VideoArtifact
+    ) -> IngestionDispatchResult:
+        """Process a video artifact already collected by a connector."""
+        return IngestionDispatchResult(
+            artifact_id=artifact.id,
+            artifact_type="video",
+            source=artifact.source_type,
+            status="processed",
+            processed_at=_now_iso(),
+            details={
+                "video_id": artifact.video_id,
+                "title": artifact.title,
+                "source_url": artifact.source_url,
+                "archive_path": artifact.archive_path,
+                "transcript_artifact_id": artifact.transcript_artifact_id,
+            },
+        )
+
+    async def _process_transcript_artifact(
+        self, artifact: TranscriptArtifact
+    ) -> IngestionDispatchResult:
+        """Process a transcript artifact already normalized by a connector."""
+        return IngestionDispatchResult(
+            artifact_id=artifact.id,
+            artifact_type="transcript",
+            source=artifact.source_type,
+            status="processed",
+            processed_at=_now_iso(),
+            details={
+                "transcript_id": artifact.transcript_id,
+                "video_id": artifact.video_id,
+                "title": artifact.title,
+                "transcript_path": artifact.transcript_path,
+                "has_raw_transcript": bool(artifact.raw_transcript),
+                "has_processed_transcript": bool(artifact.processed_transcript),
             },
         )
 

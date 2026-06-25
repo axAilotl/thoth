@@ -15,6 +15,7 @@ from .paper import PaperArtifact
 from .repository import RepositoryArtifact
 from .conversation import ConversationArtifact
 from .web_clipper import WebClipperArtifact
+from .media import TranscriptArtifact, VideoArtifact
 
 __all__ = [
     "ArtifactProvenance",
@@ -28,4 +29,6 @@ __all__ = [
     "RepositoryArtifact",
     "ConversationArtifact",
     "WebClipperArtifact",
+    "TranscriptArtifact",
+    "VideoArtifact",
 ]

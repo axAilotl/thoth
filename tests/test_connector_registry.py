@@ -19,7 +19,14 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
     registry = load_connector_registry(config, project_root=tmp_path)
     names = [manifest.name for manifest in registry.list()]
 
-    assert names[:5] == ["x_api", "arxiv", "github", "huggingface", "web_clipper"]
+    assert names[:6] == [
+        "x_api",
+        "arxiv",
+        "github",
+        "huggingface",
+        "web_clipper",
+        "youtube",
+    ]
     assert registry.get("arxiv").artifact_types == ("paper",)
     assert registry.get("github").queue_capability is True
     assert registry.get("x_api").is_enabled(config) is True

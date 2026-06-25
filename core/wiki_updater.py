@@ -14,7 +14,9 @@ from .artifacts import (
     KnowledgeArtifact,
     PaperArtifact,
     RepositoryArtifact,
+    TranscriptArtifact,
     TweetArtifact,
+    VideoArtifact,
     WebClipperArtifact,
 )
 from .config import Config
@@ -280,6 +282,29 @@ class CompiledWikiUpdater:
                 _truncate_summary(artifact.body or artifact.raw_content),
                 tuple(alias for alias in (artifact.source_url,) if alias),
             )
+        if isinstance(artifact, VideoArtifact):
+            title = artifact.title or artifact.video_id or artifact.id
+            return (
+                title,
+                f"video-{normalize_wiki_slug(artifact.video_id or artifact.id)}",
+                "entity",
+                _truncate_summary(artifact.description),
+                tuple(alias for alias in (artifact.video_id, artifact.source_url) if alias),
+            )
+        if isinstance(artifact, TranscriptArtifact):
+            title = artifact.title or artifact.transcript_id or artifact.id
+            return (
+                title,
+                f"transcript-{normalize_wiki_slug(artifact.transcript_id or artifact.id)}",
+                "concept",
+                _truncate_summary(
+                    artifact.summary
+                    or artifact.processed_transcript
+                    or artifact.raw_transcript
+                    or artifact.raw_content
+                ),
+                tuple(alias for alias in (artifact.video_id, artifact.source_url) if alias),
+            )
         return (
             artifact.id,
             normalize_wiki_slug(artifact.id),
@@ -291,6 +316,8 @@ class CompiledWikiUpdater:
     def _language_for_artifact(self, artifact: KnowledgeArtifact) -> str:
         if isinstance(artifact, WebClipperArtifact):
             return artifact.source_language or "und"
+        if isinstance(artifact, TranscriptArtifact):
+            return artifact.language or "en"
         return "en"
 
     def _source_paths_for_artifact(self, artifact: KnowledgeArtifact) -> tuple[str, ...]:
@@ -312,6 +339,26 @@ class CompiledWikiUpdater:
             for managed_path in artifact.output_paths.values():
                 if managed_path:
                     candidates.append(Path(managed_path))
+        elif isinstance(artifact, VideoArtifact):
+            if artifact.archive_path:
+                archive_path = Path(artifact.archive_path)
+                candidates.append(
+                    archive_path if archive_path.is_absolute() else self.layout.vault_root / archive_path
+                )
+            for managed_path in artifact.output_paths.values():
+                if managed_path:
+                    path = Path(managed_path)
+                    candidates.append(path if path.is_absolute() else self.layout.vault_root / path)
+        elif isinstance(artifact, TranscriptArtifact):
+            if artifact.transcript_path:
+                transcript_path = Path(artifact.transcript_path)
+                candidates.append(
+                    transcript_path if transcript_path.is_absolute() else self.layout.vault_root / transcript_path
+                )
+            for managed_path in artifact.output_paths.values():
+                if managed_path:
+                    path = Path(managed_path)
+                    candidates.append(path if path.is_absolute() else self.layout.vault_root / path)
 
         normalized: list[str] = []
         for candidate in candidates:
@@ -338,6 +385,14 @@ class CompiledWikiUpdater:
             return f"https://github.com/{repo_name}"
         if isinstance(artifact, WebClipperArtifact):
             return artifact.source_url or None
+        if isinstance(artifact, VideoArtifact):
+            return artifact.source_url or (
+                f"https://youtu.be/{artifact.video_id}" if artifact.video_id else None
+            )
+        if isinstance(artifact, TranscriptArtifact):
+            return artifact.source_url or (
+                f"https://youtu.be/{artifact.video_id}" if artifact.video_id else None
+            )
         return None
 
     def _render_page(
@@ -455,6 +510,43 @@ class CompiledWikiUpdater:
                 lines.append(f"- Source Language: `{artifact.source_language}`")
             if artifact.body:
                 lines.append(f"- Body: {_truncate_summary(artifact.body)}")
+            return lines
+
+        if isinstance(artifact, VideoArtifact):
+            lines = []
+            if artifact.title:
+                lines.append(f"- Title: {artifact.title}")
+            if artifact.channel_title:
+                lines.append(f"- Channel: {artifact.channel_title}")
+            if artifact.published_at:
+                lines.append(f"- Published At: `{artifact.published_at}`")
+            if artifact.duration:
+                lines.append(f"- Duration: `{artifact.duration}`")
+            if artifact.source_url:
+                lines.append(f"- Source URL: `{artifact.source_url}`")
+            if artifact.archive_path:
+                lines.append(f"- Archive Path: `{artifact.archive_path}`")
+            if artifact.description:
+                lines.append(f"- Description: {_truncate_summary(artifact.description)}")
+            return lines
+
+        if isinstance(artifact, TranscriptArtifact):
+            lines = []
+            if artifact.title:
+                lines.append(f"- Title: {artifact.title}")
+            if artifact.video_id:
+                lines.append(f"- Video ID: `{artifact.video_id}`")
+            if artifact.source_url:
+                lines.append(f"- Source URL: `{artifact.source_url}`")
+            if artifact.transcript_path:
+                lines.append(f"- Transcript Path: `{artifact.transcript_path}`")
+            if artifact.summary:
+                lines.append(f"- Summary: {artifact.summary}")
+            if artifact.tags:
+                lines.append(f"- Tags: {', '.join(f'`{tag}`' for tag in artifact.tags)}")
+            transcript = artifact.processed_transcript or artifact.raw_transcript
+            if transcript:
+                lines.append(f"- Transcript: {_truncate_summary(transcript)}")
             return lines
 
         return []
