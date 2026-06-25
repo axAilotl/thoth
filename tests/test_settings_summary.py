@@ -68,6 +68,20 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
+    assert summary["connectors"]["total"] == 5
+    assert [item["name"] for item in summary["connectors"]["connectors"]] == [
+        "x_api",
+        "arxiv",
+        "github",
+        "huggingface",
+        "web_clipper",
+    ]
+    web_clipper_connector = next(
+        item
+        for item in summary["connectors"]["connectors"]
+        if item["name"] == "web_clipper"
+    )
+    assert web_clipper_connector["enabled"] is True
 
 
 def test_settings_summary_surfaces_archivist_and_web_clipper_errors(tmp_path: Path):
@@ -92,3 +106,9 @@ def test_settings_summary_hides_web_clipper_watch_dirs_when_disabled(tmp_path: P
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
+    web_clipper_connector = next(
+        item
+        for item in summary["connectors"]["connectors"]
+        if item["name"] == "web_clipper"
+    )
+    assert web_clipper_connector["enabled"] is False

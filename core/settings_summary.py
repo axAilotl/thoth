@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from .archivist_topics import load_archivist_topic_registry, resolve_archivist_topics_path
 from .config import Config
+from .connector_registry import load_connector_registry
 from .metadata_db import MetadataDB
 from .path_layout import build_path_layout
 
@@ -123,6 +124,14 @@ def _summarize_web_clipper(config: ConfigLike, *, project_root: Path) -> dict[st
     return summary
 
 
+def _summarize_connectors(config: ConfigLike, *, project_root: Path) -> dict[str, Any]:
+    try:
+        registry = load_connector_registry(config, project_root=project_root)
+    except Exception as exc:
+        return {"error": str(exc), "connectors": [], "total": 0}
+    return registry.to_dict(config=config)
+
+
 def build_settings_runtime_summary(
     config_data: dict[str, Any],
     *,
@@ -134,4 +143,5 @@ def build_settings_runtime_summary(
         "layout": _summarize_layout(config, project_root=project_root),
         "archivist": _summarize_archivist(config, project_root=project_root),
         "web_clipper": _summarize_web_clipper(config, project_root=project_root),
+        "connectors": _summarize_connectors(config, project_root=project_root),
     }

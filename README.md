@@ -95,6 +95,7 @@ Use `python thoth.py --help` for the full command list and `python thoth.py <com
 | `github-stars` | Pull GitHub stars directly. | `--limit`, `--no-resume` |
 | `huggingface-likes` | Pull Hugging Face likes directly. | `--limit`, `--no-resume`, `--no-models` |
 | `web-clipper` | Index configured vault source directories for imported markdown and attachments. | none |
+| `connectors` | Inspect built-in and plugin connector manifests. | `list`, `--json` |
 | `archivist` | Compile archivist topic pages or benchmark retrieval for selected topics. | `--topics`, `--force`, `--dry-run`, `--benchmark`, `--limit` |
 | `youtube` | Post-process existing tweets for YouTube metadata and transcripts. | `--limit`, `--no-resume`, `--no-transcripts` |
 | `update-videos` | Refresh existing tweet/thread outputs with video data. | none |

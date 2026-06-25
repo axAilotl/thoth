@@ -22,6 +22,7 @@ from core import (
     config,
     build_path_layout,
     ensure_wiki_scaffold,
+    load_connector_registry,
     OKFLintRunner,
     WikiLintRunner,
     WikiQueryRunner,
@@ -1682,6 +1683,27 @@ async def cmd_web_clipper(args):
     print(f"   English companions: {translated}")
 
 
+def cmd_connectors(args):
+    """List connector manifests discovered by the registry."""
+    registry = load_connector_registry(config, project_root=Path(__file__).parent)
+    if getattr(args, "json", False):
+        print(json.dumps(registry.to_dict(config=config), indent=2, sort_keys=True))
+        return
+
+    print("Connectors")
+    for manifest in registry.list():
+        status = "enabled" if manifest.is_enabled(config) else "disabled"
+        artifacts = ", ".join(manifest.artifact_types)
+        sources = ", ".join(manifest.source_names)
+        queue = "queue" if manifest.queue_capability else "direct"
+        command = manifest.cli_command or "-"
+        print(
+            f"- {manifest.name} [{status}, {queue}] "
+            f"sources={sources}; artifacts={artifacts}; cli={command}; "
+            f"entrypoint={manifest.entrypoint}"
+        )
+
+
 async def cmd_ingest_queue(args):
     """Process pending generalized ingestion queue entries."""
     from core.ingestion_runtime import get_knowledge_artifact_runtime
@@ -2306,6 +2328,26 @@ Examples:
         help="Index files from the configured Web Clipper source directories",
     )
 
+    connectors_parser = subparsers.add_parser(
+        "connectors",
+        help="Inspect connector registry metadata",
+    )
+    connectors_subparsers = connectors_parser.add_subparsers(
+        dest="connectors_action",
+        help="Connector actions",
+    )
+    connectors_subparsers.required = True
+    connectors_list_parser = connectors_subparsers.add_parser(
+        "list",
+        help="List discovered connector manifests",
+        description="List discovered connector manifests",
+    )
+    connectors_list_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit connector metadata as JSON",
+    )
+
     archivist_parser = subparsers.add_parser(
         "archivist",
         help="Compile archivist topic pages from configured source material",
@@ -2421,8 +2463,10 @@ Examples:
     # Setup logging
     setup_logging(args.verbose)
 
+    validation_exempt = {"connectors"}
+
     # Validate configuration (allow offline-safe commands even if invalid)
-    if not config.validate_and_warn():
+    if args.command not in validation_exempt and not config.validate_and_warn():
         print("⚠️ Configuration validation failed. Check logs for details.")
         offline_safe = {
             "stats",
@@ -2437,6 +2481,7 @@ Examples:
             "social",
             "x-api-sync",
             "web-clipper",
+            "connectors",
             "wiki-query",
             "wiki-lint",
             "okf",
@@ -2447,11 +2492,13 @@ Examples:
             print("❌ Cannot proceed with invalid configuration for this command")
             sys.exit(1)
 
-    ensure_wiki_scaffold(config)
-
     # Default to stats if no command given
     if not args.command:
         args.command = "stats"
+
+    scaffold_exempt = {"connectors"}
+    if args.command not in scaffold_exempt:
+        ensure_wiki_scaffold(config)
 
     # Run command
     try:
@@ -2491,6 +2538,8 @@ Examples:
             asyncio.run(cmd_x_api_sync(args))
         elif args.command == "web-clipper":
             asyncio.run(cmd_web_clipper(args))
+        elif args.command == "connectors":
+            cmd_connectors(args)
         elif args.command == "archivist":
             asyncio.run(cmd_archivist(args))
         elif args.command == "wiki-query":

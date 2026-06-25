@@ -107,6 +107,12 @@ from .wiki_contract import (
 from .wiki_io import WikiDocument, atomic_write_text, read_document, read_frontmatter, render_frontmatter, truncate_summary
 from .wiki_lint import WikiLintIssue, WikiLintReport, WikiLintRunner
 from .okf import OKFLintIssue, OKFLintReport, OKFLintRunner
+from .connector_registry import (
+    ConnectorManifest,
+    ConnectorManifestError,
+    ConnectorRegistry,
+    load_connector_registry,
+)
 from .wiki_query import WikiQueryHit, WikiQueryResult, WikiQueryRunner, WikiQueryWriteBackResult
 from .wiki_scaffold import (
     WikiScaffold,
@@ -225,6 +231,10 @@ __all__ = [
     'OKFLintIssue',
     'OKFLintReport',
     'OKFLintRunner',
+    'ConnectorManifest',
+    'ConnectorManifestError',
+    'ConnectorRegistry',
+    'load_connector_registry',
     'WikiQueryHit',
     'WikiQueryResult',
     'WikiQueryRunner',
