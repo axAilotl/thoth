@@ -490,6 +490,41 @@
         "users.read",
         "offline.access"
       ]
+    },
+    "youtube": {
+      "enabled": true,
+      "urls": [],
+      "playlist_urls": [],
+      "export_paths": [],
+      "archive_video": false,
+      "api_key": ""
+    },
+    "omi": {
+      "enabled": true,
+      "export_paths": [],
+      "export_dirs": [],
+      "file_patterns": [
+        "*.json",
+        "*.jsonl",
+        "*.csv",
+        "*.txt",
+        "*.md",
+        "*.markdown"
+      ],
+      "source_name": "omi",
+      "device_id": "",
+      "speaker": "",
+      "language": "en"
+    },
+    "skill_outputs": {
+      "enabled": true,
+      "output_paths": [],
+      "output_dirs": [],
+      "file_patterns": [
+        "*.json",
+        "*.jsonl"
+      ],
+      "source_name": "external_skill"
     }
   },
   "automation": {

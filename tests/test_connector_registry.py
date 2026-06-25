@@ -89,3 +89,17 @@ def test_invalid_plugin_connector_manifest_fails_closed(tmp_path: Path):
 
     with pytest.raises(ConnectorManifestError, match="queue_capability"):
         load_connector_registry(config, project_root=tmp_path)
+
+
+def test_config_example_exposes_all_builtin_connector_names():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_data = json.loads((repo_root / "config.example.json").read_text(encoding="utf-8"))
+    source_config = config_data["sources"]
+    registry = load_connector_registry(project_root=repo_root)
+
+    for manifest in registry.list():
+        namespace = manifest.config_namespace
+        if not namespace or not namespace.startswith("sources."):
+            continue
+        source_key = namespace.split(".", 1)[1]
+        assert source_key in source_config
