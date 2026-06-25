@@ -647,8 +647,8 @@
         <div class="tabs">
             <button class="tab active" data-tab="providers">LLM Providers</button>
             <button class="tab" data-tab="tasks">Task Routing</button>
-            <button class="tab" data-tab="pipeline">Pipeline</button>
-            <button class="tab" data-tab="paths">Paths</button>
+            <button class="tab" data-tab="pipeline">Connectors</button>
+            <button class="tab" data-tab="paths">Storage / Wiki</button>
             <button class="tab" data-tab="archivist">Archivist</button>
             <button class="tab" data-tab="stats">Stats</button>
         </div>
@@ -1304,6 +1304,14 @@
                     <label>Configured Vault Source Roots</label>
                     <textarea id="runtime-web-clipper-watch-dirs" rows="4" readonly></textarea>
                 </div>
+                <div class="form-group">
+                    <label>Connector Metadata <span class="hint">Read from connector manifests.</span></label>
+                    <textarea id="runtime-connectors-summary" rows="6" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Grouped Runtime Config</label>
+                    <textarea id="runtime-config-groups" rows="6" readonly></textarea>
+                </div>
             </div>
         </div>
 
@@ -1949,6 +1957,51 @@
             const element = document.getElementById(id);
             if (!element) return;
             element.value = value || '';
+        }
+
+        function formatConnectorRuntimeSummary(group) {
+            const connectors = group?.items || group?.connectors || [];
+            if (!Array.isArray(connectors) || connectors.length === 0) {
+                return group?.error ? `ERROR: ${group.error}` : 'No connector metadata loaded';
+            }
+            return connectors.map(connector => {
+                const artifacts = (connector.artifact_types || []).join(', ') || 'none';
+                const capabilities = (connector.capabilities || []).join(', ') || 'none';
+                const configuredKeys = connector.configured_keys || [];
+                const configKeys = connector.config_keys || [];
+                const authStatus = connector.auth_status || {};
+                const authText = authStatus.keys?.length
+                    ? `${authStatus.configured?.length || 0}/${authStatus.keys.length} auth keys configured`
+                    : 'no auth required';
+                return [
+                    `${connector.name}: ${connector.enabled ? 'enabled' : 'disabled'}`,
+                    `  artifacts: ${artifacts}`,
+                    `  capabilities: ${capabilities}`,
+                    `  config: ${configuredKeys.length}/${configKeys.length} keys configured`,
+                    `  auth: ${authText}`
+                ].join('\n');
+            }).join('\n\n');
+        }
+
+        function formatGroupedRuntimeSummary(groups) {
+            if (!groups || typeof groups !== 'object') {
+                return 'Grouped runtime summary unavailable';
+            }
+            const providers = groups.providers || {};
+            const connectors = groups.connectors || {};
+            const storage = groups.storage || {};
+            const wiki = groups.wiki || {};
+            const automation = groups.automation || {};
+            return [
+                `providers: ${(providers.enabled || []).length}/${providers.total || 0} enabled`,
+                `connectors: ${(connectors.enabled || []).length}/${connectors.total || 0} enabled`,
+                `storage.vault: ${storage.vault_root || storage.error || ''}`,
+                `storage.raw: ${storage.raw_root || ''}`,
+                `storage.system: ${storage.system_root || ''}`,
+                `wiki.root: ${wiki.wiki_root || wiki.error || ''}`,
+                `wiki.okf: ${wiki.okf_target || ''}`,
+                `automation: ${joinList(automation.enabled || [])}`
+            ].join('\n');
         }
 
         function formatOptionalDate(value) {
@@ -2607,6 +2660,16 @@
                         : runtimeWebClipper.configured
                             ? multilineFromValue(runtimeWebClipper.watch_dirs || [])
                             : 'Not configured'
+                );
+
+                const runtimeGroups = runtime.groups || {};
+                setFieldValue(
+                    'runtime-connectors-summary',
+                    formatConnectorRuntimeSummary(runtimeGroups.connectors || runtime.connectors || {})
+                );
+                setFieldValue(
+                    'runtime-config-groups',
+                    formatGroupedRuntimeSummary(runtimeGroups)
                 );
 
                 await refreshXApiStatus();

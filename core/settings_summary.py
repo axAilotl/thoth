@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -31,6 +32,8 @@ def _summarize_layout(config: ConfigLike, *, project_root: Path) -> dict[str, An
 
     return {
         "vault_root": str(layout.vault_root),
+        "raw_root": str(layout.raw_root),
+        "library_root": str(layout.library_root),
         "wiki_root": str(layout.wiki_root),
         "system_root": str(layout.system_root),
         "cache_root": str(layout.cache_root),
@@ -129,7 +132,172 @@ def _summarize_connectors(config: ConfigLike, *, project_root: Path) -> dict[str
         registry = load_connector_registry(config, project_root=project_root)
     except Exception as exc:
         return {"error": str(exc), "connectors": [], "total": 0}
-    return registry.to_dict(config=config)
+    summary = registry.to_dict(config=config)
+    for connector in summary["connectors"]:
+        config_keys = list(connector.get("config_keys") or [])
+        auth_keys = list(connector.get("auth") or [])
+        connector["configured_keys"] = [
+            key for key in config_keys if _config_or_env_present(config, key)
+        ]
+        connector["auth_status"] = {
+            "keys": auth_keys,
+            "configured": [
+                key for key in auth_keys if _config_or_env_present(config, key)
+            ],
+            "missing": [
+                key for key in auth_keys if not _config_or_env_present(config, key)
+            ],
+            "has_any": not auth_keys
+            or any(_config_or_env_present(config, key) for key in auth_keys),
+        }
+    return summary
+
+
+def _summarize_providers(config: ConfigLike) -> dict[str, Any]:
+    providers = config.get("llm.providers", {}) or {}
+    tasks = config.get("llm.tasks", {}) or {}
+    if not isinstance(providers, dict):
+        providers = {}
+    if not isinstance(tasks, dict):
+        tasks = {}
+
+    provider_items = []
+    for name, provider_config in sorted(providers.items()):
+        if not isinstance(provider_config, dict):
+            provider_config = {}
+        models = provider_config.get("models")
+        provider_items.append(
+            {
+                "name": name,
+                "enabled": bool(provider_config.get("enabled", False)),
+                "has_vision": bool(provider_config.get("has_vision", False)),
+                "model_aliases": sorted(models.keys()) if isinstance(models, dict) else [],
+                "has_base_url": bool(str(provider_config.get("base_url") or "").strip()),
+                "has_api_key_env": bool(
+                    str(provider_config.get("api_key_env") or "").strip()
+                ),
+            }
+        )
+
+    task_items = {}
+    for task_name, task_config in sorted(tasks.items()):
+        if not isinstance(task_config, dict):
+            continue
+        fallback = task_config.get("fallback")
+        fallback_providers = []
+        if isinstance(fallback, list):
+            fallback_providers = [
+                str(item.get("provider"))
+                for item in fallback
+                if isinstance(item, dict) and item.get("provider")
+            ]
+        task_items[task_name] = {
+            "enabled": bool(task_config.get("enabled", False)),
+            "fallback_providers": fallback_providers,
+        }
+
+    return {
+        "total": len(provider_items),
+        "enabled": [item["name"] for item in provider_items if item["enabled"]],
+        "providers": provider_items,
+        "tasks": task_items,
+    }
+
+
+def _summarize_storage(layout_summary: dict[str, Any]) -> dict[str, Any]:
+    if "error" in layout_summary:
+        return {"error": layout_summary["error"]}
+    return {
+        "vault_root": layout_summary.get("vault_root"),
+        "system_root": layout_summary.get("system_root"),
+        "raw_root": layout_summary.get("raw_root"),
+        "cache_root": layout_summary.get("cache_root"),
+        "digests_root": layout_summary.get("digests_root"),
+        "database_path": layout_summary.get("database_path"),
+    }
+
+
+def _summarize_wiki_group(
+    layout_summary: dict[str, Any],
+    archivist_summary: dict[str, Any],
+) -> dict[str, Any]:
+    if "error" in layout_summary:
+        return {"error": layout_summary["error"]}
+    return {
+        "wiki_root": layout_summary.get("wiki_root"),
+        "okf_target": "v0.1",
+        "archivist_registry_path": archivist_summary.get("registry_path"),
+        "archivist_topic_count": archivist_summary.get("topic_count", 0),
+        "archivist_topics": list(archivist_summary.get("topics") or []),
+    }
+
+
+def _summarize_automation(config: ConfigLike) -> dict[str, Any]:
+    jobs = {}
+    for key, default_interval in (
+        ("archivist", 12),
+        ("social_sync", 8),
+        ("x_api_sync", 8),
+    ):
+        value = config.get(f"automation.{key}", {}) or {}
+        if not isinstance(value, dict):
+            jobs[key] = {"error": f"automation.{key} must be an object"}
+            continue
+        jobs[key] = {
+            "enabled": bool(value.get("enabled", False)),
+            "run_on_startup": bool(value.get("run_on_startup", False)),
+            "interval_hours": value.get("interval_hours", default_interval),
+        }
+        if key == "x_api_sync":
+            jobs[key]["max_results"] = value.get("max_results", 100)
+            jobs[key]["max_pages"] = value.get("max_pages")
+            jobs[key]["resume_from_checkpoint"] = bool(
+                value.get("resume_from_checkpoint", True)
+            )
+    return {
+        "jobs": jobs,
+        "enabled": [key for key, value in jobs.items() if value.get("enabled")],
+    }
+
+
+def _summarize_grouped_config(
+    config: ConfigLike,
+    *,
+    layout_summary: dict[str, Any],
+    archivist_summary: dict[str, Any],
+    connectors_summary: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "providers": _summarize_providers(config),
+        "connectors": {
+            "total": connectors_summary.get("total", 0),
+            "enabled": [
+                item["name"]
+                for item in connectors_summary.get("connectors", [])
+                if item.get("enabled")
+            ],
+            "items": connectors_summary.get("connectors", []),
+            "error": connectors_summary.get("error"),
+        },
+        "storage": _summarize_storage(layout_summary),
+        "wiki": _summarize_wiki_group(layout_summary, archivist_summary),
+        "automation": _summarize_automation(config),
+    }
+
+
+def _config_or_env_present(config: ConfigLike, key: str) -> bool:
+    if not key:
+        return False
+    if key.isupper() and "." not in key:
+        return bool(os.getenv(key, "").strip())
+    value = config.get(key)
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
 
 
 def build_settings_runtime_summary(
@@ -139,9 +307,19 @@ def build_settings_runtime_summary(
 ) -> dict[str, Any]:
     """Return resolved, non-secret runtime state for the settings page."""
     config = _as_config(config_data)
+    layout_summary = _summarize_layout(config, project_root=project_root)
+    archivist_summary = _summarize_archivist(config, project_root=project_root)
+    web_clipper_summary = _summarize_web_clipper(config, project_root=project_root)
+    connectors_summary = _summarize_connectors(config, project_root=project_root)
     return {
-        "layout": _summarize_layout(config, project_root=project_root),
-        "archivist": _summarize_archivist(config, project_root=project_root),
-        "web_clipper": _summarize_web_clipper(config, project_root=project_root),
-        "connectors": _summarize_connectors(config, project_root=project_root),
+        "layout": layout_summary,
+        "archivist": archivist_summary,
+        "web_clipper": web_clipper_summary,
+        "connectors": connectors_summary,
+        "groups": _summarize_grouped_config(
+            config,
+            layout_summary=layout_summary,
+            archivist_summary=archivist_summary,
+            connectors_summary=connectors_summary,
+        ),
     }

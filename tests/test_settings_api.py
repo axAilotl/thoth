@@ -84,6 +84,11 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
+    assert payload["runtime"]["groups"]["connectors"]["total"] == 7
+    assert payload["runtime"]["groups"]["storage"]["raw_root"] == (
+        str(tmp_path / "vault" / "raw")
+    )
+    assert payload["runtime"]["groups"]["wiki"]["okf_target"] == "v0.1"
     assert payload["config_files"] == {
         "base": str(tmp_path / "config.example.json"),
         "local": str(tmp_path / "config.json"),

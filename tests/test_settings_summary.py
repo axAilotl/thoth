@@ -18,6 +18,21 @@ def make_config_data(tmp_path: Path) -> dict:
         "database": {
             "path": "meta.db",
         },
+        "llm": {
+            "providers": {
+                "openai": {
+                    "enabled": True,
+                    "models": {"default": {"id": "gpt-4.1-mini"}},
+                    "api_key_env": "OPENAI_API_KEY",
+                }
+            },
+            "tasks": {
+                "summary": {
+                    "enabled": True,
+                    "fallback": [{"provider": "openai", "model": "default"}],
+                }
+            },
+        },
         "sources": {
             "web_clipper": {
                 "enabled": True,
@@ -30,7 +45,8 @@ def make_config_data(tmp_path: Path) -> dict:
     }
 
 
-def test_settings_summary_reports_resolved_layout_and_archivist_topics(tmp_path: Path):
+def test_settings_summary_reports_resolved_layout_and_archivist_topics(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CLIENT_ID", "not-the-x-api-client-id")
     config_data = make_config_data(tmp_path)
     (tmp_path / "archivist_topics.yaml").write_text(
         """
@@ -84,6 +100,30 @@ topics:
         if item["name"] == "web_clipper"
     )
     assert web_clipper_connector["enabled"] is True
+
+    assert summary["groups"]["providers"]["enabled"] == ["openai"]
+    assert summary["groups"]["providers"]["tasks"]["summary"] == {
+        "enabled": True,
+        "fallback_providers": ["openai"],
+    }
+    assert summary["groups"]["connectors"]["total"] == 7
+    assert "web_clipper" in summary["groups"]["connectors"]["enabled"]
+    x_api_connector = next(
+        item
+        for item in summary["groups"]["connectors"]["items"]
+        if item["name"] == "x_api"
+    )
+    assert "sources.x_api.client_id" in x_api_connector["config_keys"]
+    assert x_api_connector["auth_status"]["keys"] == [
+        "sources.x_api.client_id",
+        "sources.x_api.redirect_uri",
+        "x_api_token_bundle",
+    ]
+    assert "sources.x_api.client_id" in x_api_connector["auth_status"]["missing"]
+    assert summary["groups"]["storage"]["raw_root"] == str(tmp_path / "vault" / "raw")
+    assert summary["groups"]["wiki"]["wiki_root"] == str(tmp_path / "wiki")
+    assert summary["groups"]["wiki"]["okf_target"] == "v0.1"
+    assert summary["groups"]["automation"]["jobs"]["social_sync"]["interval_hours"] == 8
 
 
 def test_settings_summary_surfaces_archivist_and_web_clipper_errors(tmp_path: Path):
