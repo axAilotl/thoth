@@ -17,6 +17,8 @@ from typing import Dict, List, Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core import (
+    AgentSurfaceError,
+    AgentSurfaceService,
     ArchivistCompiler,
     Tweet,
     config,
@@ -1685,7 +1687,52 @@ async def cmd_web_clipper(args):
 
 
 def cmd_connectors(args):
-    """List connector manifests discovered by the registry."""
+    """List or run connector manifests discovered by the registry."""
+    if args.connectors_action == "run":
+        from core.metadata_db import get_metadata_db
+
+        options = {
+            "limit": getattr(args, "limit", None),
+            "topics": getattr(args, "topics", None),
+            "categories": getattr(args, "categories", None),
+            "source": getattr(args, "source", None),
+            "feed_format": getattr(args, "feed_format", None),
+            "github_user": getattr(args, "github_user", None),
+            "hf_user": getattr(args, "hf_user", None),
+            "username": getattr(args, "username", None),
+            "max_results": getattr(args, "max_results", None),
+            "max_pages": getattr(args, "max_pages", None),
+            "no_resume": getattr(args, "no_resume", False),
+        }
+        service = AgentSurfaceService(
+            config,
+            layout=build_path_layout(config),
+            db=get_metadata_db(),
+        )
+        try:
+            payload = service.run_connector(
+                args.connector_name,
+                execute=bool(getattr(args, "execute", False)),
+                options=options,
+            )
+        except (AgentSurfaceError, KeyError) as exc:
+            raise SystemExit(str(exc)) from exc
+        if getattr(args, "json", False):
+            _print_json(payload)
+            return
+
+        connector = payload["connector"]
+        print(
+            f"Connector {connector['name']}: {payload['status']} "
+            f"(execute={payload['execute']})"
+        )
+        if payload.get("result"):
+            result = payload["result"]
+            for key in ("queued_count", "scanned_count", "changed_count", "staged_count"):
+                if key in result:
+                    print(f"   {key}: {result[key]}")
+        return
+
     registry = load_connector_registry(config, project_root=Path(__file__).parent)
     if getattr(args, "json", False):
         print(json.dumps(registry.to_dict(config=config), indent=2, sort_keys=True))
@@ -1703,6 +1750,91 @@ def cmd_connectors(args):
             f"sources={sources}; artifacts={artifacts}; cli={command}; "
             f"entrypoint={manifest.entrypoint}"
         )
+
+
+def _print_json(payload: Any) -> None:
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def cmd_artifacts(args):
+    """Inspect artifact queue records and provenance."""
+    from core.metadata_db import get_metadata_db
+
+    service = AgentSurfaceService(config, layout=build_path_layout(config), db=get_metadata_db())
+    try:
+        if args.artifacts_action == "list":
+            payload = service.list_artifacts(
+                artifact_type=getattr(args, "artifact_type", None),
+                status=getattr(args, "status", None),
+                source=getattr(args, "source", None),
+                limit=max(1, int(getattr(args, "limit", 50) or 50)),
+            )
+        elif args.artifacts_action == "get":
+            payload = service.get_artifact(args.artifact_id)
+        elif args.artifacts_action == "provenance":
+            payload = service.get_artifact_provenance(args.artifact_id)
+        else:
+            raise ValueError("Unknown artifacts action")
+    except AgentSurfaceError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if getattr(args, "json", False) or args.artifacts_action in {"get", "provenance"}:
+        _print_json(payload)
+        return
+
+    print(f"Artifacts: {payload['total']}")
+    for artifact in payload["artifacts"]:
+        print(
+            f"- {artifact['artifact_type']}:{artifact['artifact_id']} "
+            f"source={artifact['source']} status={artifact['status']}"
+        )
+
+
+async def cmd_ingest(args):
+    """Stable ingest command group."""
+    if args.ingest_action != "queue":
+        raise ValueError("Unknown ingest action")
+    await cmd_ingest_queue(args)
+
+
+def cmd_query(args):
+    """Stable query command group."""
+    if args.query_action != "wiki":
+        raise ValueError("Unknown query action")
+    from core.metadata_db import get_metadata_db
+
+    service = AgentSurfaceService(config, layout=build_path_layout(config), db=get_metadata_db())
+    payload = service.query_wiki(args.query, limit=max(1, int(args.limit or 10)))
+    if getattr(args, "json", False):
+        _print_json(payload)
+        return
+
+    print(f"Wiki query: {payload['query']}")
+    print(f"Matches: {len(payload['hits'])}")
+    for hit in payload["hits"]:
+        provenance = hit.get("provenance") or {}
+        artifact = provenance.get("artifact_id") or "-"
+        print(f"- {hit['title']} [{hit['slug']}] score={hit['score']} artifact={artifact}")
+
+
+async def cmd_wiki(args):
+    """Stable wiki command group."""
+    if args.wiki_action == "query":
+        query_args = argparse.Namespace(
+            query=args.query,
+            limit=args.limit,
+            write_back=False,
+            selected_slugs=None,
+            curated_notes=None,
+            title=None,
+        )
+        await cmd_wiki_query(query_args)
+        return
+    if args.wiki_action == "lint":
+        lint_args = argparse.Namespace(stale_after_days=args.stale_after_days)
+        await cmd_wiki_lint(lint_args)
+        return
+    raise ValueError("Unknown wiki action")
 
 
 async def cmd_ingest_queue(args):
@@ -2236,6 +2368,90 @@ Examples:
     # Stats command
     stats_parser = subparsers.add_parser("stats", help="Show statistics")
 
+    artifacts_parser = subparsers.add_parser(
+        "artifacts",
+        help="Inspect artifacts and provenance",
+    )
+    artifacts_subparsers = artifacts_parser.add_subparsers(
+        dest="artifacts_action",
+        help="Artifact actions",
+    )
+    artifacts_subparsers.required = True
+    artifacts_list_parser = artifacts_subparsers.add_parser(
+        "list",
+        help="List queued and processed artifacts",
+    )
+    artifacts_list_parser.add_argument("--artifact-type", type=str, default=None)
+    artifacts_list_parser.add_argument("--status", type=str, default=None)
+    artifacts_list_parser.add_argument("--source", type=str, default=None)
+    artifacts_list_parser.add_argument("--limit", type=int, default=50)
+    artifacts_list_parser.add_argument("--json", action="store_true")
+    artifacts_get_parser = artifacts_subparsers.add_parser(
+        "get",
+        help="Get a canonical artifact record",
+    )
+    artifacts_get_parser.add_argument("artifact_id")
+    artifacts_get_parser.add_argument("--json", action="store_true")
+    artifacts_provenance_parser = artifacts_subparsers.add_parser(
+        "provenance",
+        help="Get artifact provenance",
+    )
+    artifacts_provenance_parser.add_argument("artifact_id")
+    artifacts_provenance_parser.add_argument("--json", action="store_true")
+
+    ingest_parser = subparsers.add_parser(
+        "ingest",
+        help="Stable ingestion command group",
+    )
+    ingest_subparsers = ingest_parser.add_subparsers(
+        dest="ingest_action",
+        help="Ingest actions",
+    )
+    ingest_subparsers.required = True
+    ingest_queue_group = ingest_subparsers.add_parser(
+        "queue",
+        help="Process pending generalized ingestion queue entries",
+    )
+    ingest_queue_group.add_argument("--limit", type=int, default=None)
+
+    query_parser = subparsers.add_parser(
+        "query",
+        help="Stable query command group",
+    )
+    query_subparsers = query_parser.add_subparsers(
+        dest="query_action",
+        help="Query actions",
+    )
+    query_subparsers.required = True
+    query_wiki_parser = query_subparsers.add_parser(
+        "wiki",
+        help="Search the compiled wiki with provenance",
+    )
+    query_wiki_parser.add_argument("query", help="Wiki search query")
+    query_wiki_parser.add_argument("--limit", type=int, default=10)
+    query_wiki_parser.add_argument("--json", action="store_true")
+
+    wiki_parser = subparsers.add_parser(
+        "wiki",
+        help="Stable wiki command group",
+    )
+    wiki_subparsers = wiki_parser.add_subparsers(
+        dest="wiki_action",
+        help="Wiki actions",
+    )
+    wiki_subparsers.required = True
+    wiki_query_group = wiki_subparsers.add_parser(
+        "query",
+        help="Search the compiled wiki",
+    )
+    wiki_query_group.add_argument("query", help="Wiki search query")
+    wiki_query_group.add_argument("--limit", type=int, default=10)
+    wiki_lint_group = wiki_subparsers.add_parser(
+        "lint",
+        help="Run wiki health checks",
+    )
+    wiki_lint_group.add_argument("--stale-after-days", type=int, default=30)
+
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a tweet and all its artifacts")
     delete_parser.add_argument("tweet_id", help="Tweet ID to delete")
@@ -2398,6 +2614,37 @@ Examples:
         action="store_true",
         help="Emit connector metadata as JSON",
     )
+    connectors_run_parser = connectors_subparsers.add_parser(
+        "run",
+        help="Plan or execute a connector",
+        description="Plan or execute a connector through the shared service layer",
+    )
+    connectors_run_parser.add_argument("connector_name", help="Connector registry name")
+    connectors_run_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually run the connector; omitted means dry-run planning only",
+    )
+    connectors_run_parser.add_argument("--limit", type=int, default=None)
+    connectors_run_parser.add_argument("--topics", type=str, default=None)
+    connectors_run_parser.add_argument("--categories", type=str, default=None)
+    connectors_run_parser.add_argument("--source", type=str, default=None)
+    connectors_run_parser.add_argument("--feed-format", type=str, default=None)
+    connectors_run_parser.add_argument("--github-user", type=str, default=None)
+    connectors_run_parser.add_argument("--hf-user", type=str, default=None)
+    connectors_run_parser.add_argument("--username", type=str, default=None)
+    connectors_run_parser.add_argument("--max-results", type=int, default=None)
+    connectors_run_parser.add_argument("--max-pages", type=int, default=None)
+    connectors_run_parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Ignore connector checkpoint state when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the run plan/result as JSON",
+    )
 
     archivist_parser = subparsers.add_parser(
         "archivist",
@@ -2551,13 +2798,17 @@ Examples:
     # Setup logging
     setup_logging(args.verbose)
 
-    validation_exempt = {"connectors", "research"}
+    validation_exempt = {"artifacts", "connectors", "query", "research"}
 
     # Validate configuration (allow offline-safe commands even if invalid)
     if args.command not in validation_exempt and not config.validate_and_warn():
         print("⚠️ Configuration validation failed. Check logs for details.")
         offline_safe = {
             "stats",
+            "artifacts",
+            "ingest",
+            "query",
+            "wiki",
             "process",
             "pipeline",
             "update-videos",
@@ -2585,7 +2836,7 @@ Examples:
     if not args.command:
         args.command = "stats"
 
-    scaffold_exempt = {"connectors", "research"}
+    scaffold_exempt = {"artifacts", "connectors", "research"}
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
 
@@ -2609,6 +2860,14 @@ Examples:
             asyncio.run(cmd_twitter_transcripts(args))
         elif args.command == "stats":
             cmd_stats(args)
+        elif args.command == "artifacts":
+            cmd_artifacts(args)
+        elif args.command == "ingest":
+            asyncio.run(cmd_ingest(args))
+        elif args.command == "query":
+            cmd_query(args)
+        elif args.command == "wiki":
+            asyncio.run(cmd_wiki(args))
         elif args.command == "delete":
             asyncio.run(cmd_delete(args))
         elif args.command == "db":

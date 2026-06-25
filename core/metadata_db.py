@@ -1919,6 +1919,57 @@ class MetadataDB:
         except Exception as e:
             logger.error(f"Failed to list pending ingestions: {e}")
             return []
+
+    def list_ingestion_entries(
+        self,
+        *,
+        artifact_type: Optional[str] = None,
+        status: Optional[str] = None,
+        source: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[IngestionQueueEntry]:
+        """List ingestion queue entries for artifact lookup surfaces."""
+        where: list[str] = []
+        params: list[Any] = []
+        if artifact_type:
+            where.append("artifact_type = ?")
+            params.append(artifact_type)
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if source:
+            where.append("source = ?")
+            params.append(source)
+
+        query = "SELECT * FROM ingestion_queue"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " ORDER BY created_at DESC, priority DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(query, tuple(params)).fetchall()
+                return [
+                    IngestionQueueEntry(
+                        artifact_id=row['artifact_id'],
+                        artifact_type=row['artifact_type'],
+                        source=row['source'],
+                        payload_json=row['payload_json'],
+                        priority=row['priority'],
+                        status=row['status'],
+                        attempts=row['attempts'],
+                        last_error=row['last_error'],
+                        next_attempt_at=row['next_attempt_at'],
+                        created_at=row['created_at'],
+                        processed_at=row['processed_at'],
+                        capabilities_json=row['capabilities_json']
+                    )
+                    for row in rows
+                ]
+        except Exception as e:
+            logger.error(f"Failed to list ingestion entries: {e}")
+            return []
     
     def delete_tweet(self, tweet_id: str) -> bool:
         """Delete tweet metadata."""

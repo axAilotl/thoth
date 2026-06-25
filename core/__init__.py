@@ -57,6 +57,8 @@ from .archivist_compiler import (
     ArchivistCompiler,
     ArchivistCompilerError,
 )
+from .agent_surface import AgentSurfaceError, AgentSurfaceService
+from .mcp_server import ThothMCPServer
 from .archivist_runtime import (
     ARCHIVIST_JOB_NAME,
     ArchivistRuntimeError,
@@ -180,6 +182,9 @@ __all__ = [
     'ArchivistCompileResult',
     'ArchivistCompiler',
     'ArchivistCompilerError',
+    'AgentSurfaceError',
+    'AgentSurfaceService',
+    'ThothMCPServer',
     'ARCHIVIST_JOB_NAME',
     'ArchivistRuntimeError',
     'resolve_archivist_sync_config',

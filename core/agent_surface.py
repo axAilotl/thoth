@@ -1,0 +1,430 @@
+"""Shared service layer for CLI and MCP agent-facing surfaces."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from dataclasses import asdict, is_dataclass
+from pathlib import Path
+from typing import Any, Mapping
+
+from .config import Config, config
+from .connector_registry import load_connector_registry
+from .ingestion_runtime import KnowledgeArtifactRuntime
+from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
+from .path_layout import PathLayout, build_path_layout
+from .research_graph import ResearchGraphService
+from .wiki_io import read_document
+from .wiki_query import WikiQueryRunner
+
+
+class AgentSurfaceError(RuntimeError):
+    """Raised when an agent-facing request cannot be fulfilled safely."""
+
+
+class AgentSurfaceService:
+    """Stable service API for agent-facing CLI and MCP tools."""
+
+    def __init__(
+        self,
+        runtime_config: Config | None = None,
+        *,
+        layout: PathLayout | None = None,
+        db: MetadataDB | None = None,
+    ):
+        self.config = runtime_config or config
+        self.layout = layout or build_path_layout(self.config)
+        self.db = db or get_metadata_db()
+
+    def query_wiki(self, query: str, *, limit: int = 10) -> dict[str, Any]:
+        """Search the compiled wiki and include source provenance for each hit."""
+        runner = WikiQueryRunner(self.config, layout=self.layout)
+        result = runner.search(query, limit=limit)
+        hits = []
+        for hit in result.hits:
+            document = read_document(hit.page_path)
+            frontmatter = document.frontmatter
+            hits.append(
+                {
+                    "slug": hit.slug,
+                    "title": hit.title,
+                    "summary": hit.summary,
+                    "score": hit.score,
+                    "matched_fields": list(hit.matched_fields),
+                    "page_path": str(hit.page_path),
+                    "kind": hit.kind,
+                    "record_type": hit.record_type,
+                    "provenance": {
+                        "artifact_id": frontmatter.get("thoth_artifact_id")
+                        or frontmatter.get("artifact_id"),
+                        "source_type": frontmatter.get("thoth_source_type")
+                        or frontmatter.get("source_type"),
+                        "source_paths": list(hit.source_paths),
+                        "resource": frontmatter.get("resource"),
+                        "related_slugs": list(hit.related_slugs),
+                    },
+                }
+            )
+        return {
+            "query": result.query,
+            "queried_at": result.queried_at,
+            "hits": hits,
+        }
+
+    def list_artifacts(
+        self,
+        *,
+        artifact_type: str | None = None,
+        status: str | None = None,
+        source: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """List queued/processed artifacts with queue provenance."""
+        entries = self.db.list_ingestion_entries(
+            artifact_type=artifact_type,
+            status=status,
+            source=source,
+            limit=limit,
+        )
+        return {
+            "artifacts": [self._serialize_ingestion_entry(entry) for entry in entries],
+            "total": len(entries),
+        }
+
+    def get_artifact(self, artifact_id: str) -> dict[str, Any]:
+        """Return canonical artifact data and queue provenance for one artifact."""
+        entry = self.db.get_ingestion_entry(artifact_id)
+        if not entry:
+            raise AgentSurfaceError(f"Artifact not found: {artifact_id}")
+        runtime = KnowledgeArtifactRuntime(self.config, layout=self.layout, db=self.db)
+        artifact = runtime.materialize_artifact(entry)
+        return {
+            "queue": self._serialize_ingestion_entry(entry),
+            "canonical_record": artifact.canonical_record(),
+            "provenance": artifact.provenance.to_dict() if artifact.provenance else {},
+        }
+
+    def get_artifact_provenance(self, artifact_id: str) -> dict[str, Any]:
+        """Return provenance only for a queued artifact."""
+        artifact = self.get_artifact(artifact_id)
+        return {
+            "artifact_id": artifact_id,
+            "queue": artifact["queue"],
+            "provenance": artifact["provenance"],
+        }
+
+    def list_connectors(self) -> dict[str, Any]:
+        """Return connector registry metadata."""
+        return load_connector_registry(self.config).to_dict(config=self.config)
+
+    def connector_run_plan(
+        self,
+        connector_name: str,
+        *,
+        execute: bool = False,
+        options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Backward-compatible wrapper for connector execution planning."""
+        return self.run_connector(
+            connector_name,
+            execute=execute,
+            options=options,
+        )
+
+    def run_connector(
+        self,
+        connector_name: str,
+        *,
+        execute: bool = False,
+        options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Plan or execute a connector through the shared agent service layer."""
+        registry = load_connector_registry(self.config)
+        manifest = registry.get(connector_name)
+        sanitized_options = {
+            str(key): value
+            for key, value in dict(options or {}).items()
+            if value is not None
+        }
+        plan = {
+            "status": "planned",
+            "execute": False,
+            "connector": manifest.to_dict(config=self.config),
+            "options": sanitized_options,
+        }
+        if not execute:
+            return plan
+        if not manifest.is_enabled(self.config):
+            raise AgentSurfaceError(f"Connector is disabled: {connector_name}")
+
+        handlers = {
+            "arxiv": self._run_arxiv_connector,
+            "github": self._run_github_connector,
+            "huggingface": self._run_huggingface_connector,
+            "web_clipper": self._run_web_clipper_connector,
+            "x_api": self._run_x_api_connector,
+        }
+        handler = handlers.get(connector_name)
+        if handler is None:
+            raise AgentSurfaceError(
+                f"Connector {connector_name!r} has no executable adapter registered"
+            )
+
+        result = handler(sanitized_options)
+        return {
+            **plan,
+            "status": "completed",
+            "execute": True,
+            "result": serialize_agent_payload(result),
+        }
+
+    def missing_papers(
+        self,
+        *,
+        min_references: int = 2,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Return the research graph missing-paper report."""
+        return ResearchGraphService(self.db).missing_papers_report(
+            min_references=min_references,
+            limit=limit,
+        )
+
+    def _serialize_ingestion_entry(self, entry: IngestionQueueEntry) -> dict[str, Any]:
+        return {
+            "artifact_id": entry.artifact_id,
+            "artifact_type": entry.artifact_type,
+            "source": entry.source,
+            "priority": entry.priority,
+            "status": entry.status,
+            "attempts": entry.attempts,
+            "last_error": entry.last_error,
+            "next_attempt_at": entry.next_attempt_at,
+            "created_at": entry.created_at,
+            "processed_at": entry.processed_at,
+            "capabilities": _json_list(entry.capabilities_json),
+        }
+
+    def _run_arxiv_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        from collectors.arxiv_collector import ArXivCollector
+
+        collector = ArXivCollector(db=self.db)
+        source = str(options.get("source") or self.config.get("sources.arxiv.source", "api"))
+        if source not in {"api", "rss"}:
+            raise AgentSurfaceError("arxiv connector source must be 'api' or 'rss'")
+        limit = _positive_int(
+            options.get("limit"),
+            default=int(self.config.get("sources.arxiv.limit", 50) or 50),
+        )
+
+        if source == "rss":
+            categories = _string_list(options.get("categories")) or _string_list(
+                self.config.get("sources.arxiv.categories", [])
+            )
+            if not categories:
+                raise AgentSurfaceError("arxiv RSS execution requires categories")
+            feed_format = str(
+                options.get("feed_format")
+                or self.config.get("sources.arxiv.feed_format", "rss")
+            )
+            artifacts = collector.scan_rss_feeds(
+                categories,
+                max_results=limit,
+                feed_format=feed_format,
+            )
+            return {
+                "source": source,
+                "categories": categories,
+                "feed_format": feed_format,
+                "queued": _artifact_summaries(artifacts),
+                "queued_count": len(artifacts),
+            }
+
+        topics = _string_list(options.get("topics")) or _string_list(
+            self.config.get("sources.arxiv.topics", [])
+        )
+        if not topics:
+            raise AgentSurfaceError("arxiv API execution requires topics")
+        artifacts = collector.discover_papers(topics, max_results=limit)
+        return {
+            "source": source,
+            "topics": topics,
+            "queued": _artifact_summaries(artifacts),
+            "queued_count": len(artifacts),
+        }
+
+    def _run_github_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        token = (
+            self.config.get("sources.github.token")
+            or os.getenv("GITHUB_API")
+            or os.getenv("GITHUB_TOKEN")
+        )
+        if not token:
+            raise AgentSurfaceError(
+                "github connector requires sources.github.token, GITHUB_API, or GITHUB_TOKEN"
+            )
+
+        from collectors.social_collector import SocialCollector
+
+        collector = SocialCollector(db=self.db)
+        limit = _positive_int(
+            options.get("limit"),
+            default=int(self.config.get("sources.github.limit", 50) or 50),
+        )
+        username = _optional_text(options.get("github_user") or options.get("username"))
+        artifacts = collector.discover_github_stars(username=username, limit=limit)
+        return {
+            "username": username or "authenticated account",
+            "queued": _artifact_summaries(artifacts),
+            "queued_count": len(artifacts),
+        }
+
+    def _run_huggingface_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        username = _optional_text(
+            options.get("hf_user")
+            or options.get("username")
+            or self.config.get("sources.huggingface.username")
+            or os.getenv("HF_USER")
+        )
+        if not username:
+            raise AgentSurfaceError(
+                "huggingface connector requires sources.huggingface.username, HF_USER, or username option"
+            )
+
+        from collectors.social_collector import SocialCollector
+
+        collector = SocialCollector(db=self.db)
+        limit = _positive_int(
+            options.get("limit"),
+            default=int(self.config.get("sources.huggingface.limit", 50) or 50),
+        )
+        artifacts = collector.discover_hf_likes(username=username, limit=limit)
+        return {
+            "username": username,
+            "queued": _artifact_summaries(artifacts),
+            "queued_count": len(artifacts),
+        }
+
+    def _run_web_clipper_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        if self.config.get("sources.web_clipper.enabled", True) is False:
+            raise AgentSurfaceError("web_clipper connector is disabled")
+
+        from collectors.web_clipper_collector import WebClipperCollector
+
+        collector = WebClipperCollector(self.config, layout=self.layout, db=self.db)
+        records = collector.collect()
+        changed = [record for record in records if record.is_new_or_changed]
+        queued = [
+            record
+            for record in changed
+            if record.file_type == "note" and record.artifact is not None
+        ]
+        staged = [record for record in changed if record.file_type == "attachment"]
+        return {
+            "scanned_count": len(records),
+            "changed_count": len(changed),
+            "queued_count": len(queued),
+            "staged_count": len(staged),
+            "queued": [
+                {
+                    "artifact_id": record.artifact.id if record.artifact else None,
+                    "path": record.path,
+                    "source_id": record.source_id,
+                }
+                for record in queued
+            ],
+        }
+
+    def _run_x_api_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        from .x_api_bookmark_sync import run_x_api_bookmark_backfill
+
+        return _run_async(
+            run_x_api_bookmark_backfill(
+                self.config,
+                layout=self.layout,
+                max_results=_optional_int(options.get("max_results")),
+                max_pages=_optional_int(options.get("max_pages")),
+                resume_from_checkpoint=(
+                    False if bool(options.get("no_resume", False)) else None
+                ),
+            )
+        )
+
+
+def serialize_agent_payload(value: Any) -> Any:
+    """Convert service objects into JSON-friendly payloads."""
+    if is_dataclass(value):
+        return serialize_agent_payload(asdict(value))
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): serialize_agent_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [serialize_agent_payload(item) for item in value]
+    return value
+
+
+def _json_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    import json
+
+    payload = json.loads(value)
+    if not isinstance(payload, list):
+        raise AgentSurfaceError("Queue capabilities_json must decode to a list")
+    return [str(item) for item in payload]
+
+
+def _run_async(coro: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    if hasattr(coro, "close"):
+        coro.close()
+    raise AgentSurfaceError("Connector execution is not available inside an active event loop")
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
+def _positive_int(value: Any, *, default: int) -> int:
+    resolved = default if value is None or value == "" else int(value)
+    return max(1, resolved)
+
+
+def _artifact_summaries(artifacts: list[Any]) -> list[dict[str, Any]]:
+    summaries = []
+    for artifact in artifacts:
+        summaries.append(
+            {
+                "artifact_id": getattr(artifact, "id", None),
+                "title": (
+                    getattr(artifact, "title", None)
+                    or getattr(artifact, "repo_name", None)
+                    or getattr(artifact, "source_uri", None)
+                ),
+                "source_type": getattr(artifact, "source_type", None),
+            }
+        )
+    return summaries
