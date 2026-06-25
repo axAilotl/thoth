@@ -18,7 +18,9 @@ from .artifacts import (
     WebClipperArtifact,
 )
 from .config import Config
+from .metadata_db import MetadataDB
 from .path_layout import PathLayout, build_path_layout
+from .research_graph import ResearchGraphService
 from .wiki_contract import (
     WikiContract,
     WikiPageSpec,
@@ -94,11 +96,13 @@ class CompiledWikiUpdater:
         *,
         layout: PathLayout | None = None,
         contract: WikiContract | None = None,
+        db: MetadataDB | None = None,
     ):
         self.config = config
         self.layout = layout or build_path_layout(config)
         self.layout.ensure_directories()
         self.contract = contract or WikiContract(root=self.layout.wiki_root)
+        self.db = db or MetadataDB(str(self.layout.database_path))
         self._legacy_pages_pruned = False
         self.scaffold = ensure_wiki_scaffold(
             config,
@@ -372,6 +376,12 @@ class CompiledWikiUpdater:
             lines.extend(detail_lines)
             lines.append("")
 
+        research_context_lines = self._research_context_lines(artifact)
+        if research_context_lines:
+            lines.extend(["## Research Context", ""])
+            lines.extend(research_context_lines)
+            lines.append("")
+
         if dispatch_details:
             lines.extend(["## Processing", ""])
             for key, value in sorted(dispatch_details.items()):
@@ -448,3 +458,50 @@ class CompiledWikiUpdater:
             return lines
 
         return []
+
+    def _research_context_lines(self, artifact: KnowledgeArtifact) -> list[str]:
+        if not isinstance(artifact, PaperArtifact):
+            return []
+
+        context = ResearchGraphService(self.db).paper_context(artifact)
+
+        referenced_by = context.get("referenced_by") or []
+        references = context.get("references") or []
+        co_referenced = context.get("co_referenced") or []
+        lines: list[str] = []
+
+        if referenced_by:
+            lines.append(
+                f"- Why it matters: `{len(referenced_by)}` local paper(s) reference this work."
+            )
+            lines.append("- Local papers referencing this:")
+            for item in referenced_by[:10]:
+                lines.append(
+                    f"  - `{item['paper_id']}` - {item['title']}"
+                )
+        elif references:
+            missing_count = sum(1 for item in references if not item.get("collected"))
+            local_count = len(references) - missing_count
+            lines.append(
+                "- Why it matters: this paper adds local context through "
+                f"`{local_count}` collected reference(s) and `{missing_count}` missing candidate(s)."
+            )
+        else:
+            lines.append(
+                "- Why it matters: this paper is a collected research source with no graph references discovered yet."
+            )
+
+        if references:
+            lines.append("- References discovered from this paper:")
+            for item in references[:15]:
+                status = "local" if item.get("collected") else "missing"
+                lines.append(
+                    f"  - `{item['paper_id']}` ({status}) - {item['title']}"
+                )
+
+        if co_referenced:
+            lines.append("- Co-referenced local papers:")
+            for item in co_referenced[:10]:
+                lines.append(f"  - `{item['paper_id']}` - {item['title']}")
+
+        return lines

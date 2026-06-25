@@ -97,6 +97,7 @@ Use `python thoth.py --help` for the full command list and `python thoth.py <com
 | `web-clipper` | Index configured vault source directories for imported markdown and attachments. | none |
 | `connectors` | Inspect built-in and plugin connector manifests. | `list`, `--json` |
 | `archivist` | Compile archivist topic pages or benchmark retrieval for selected topics. | `--topics`, `--force`, `--dry-run`, `--benchmark`, `--limit` |
+| `research` | Inspect research graph reports. | `missing-papers`, `--queue`, `--json` |
 | `youtube` | Post-process existing tweets for YouTube metadata and transcripts. | `--limit`, `--no-resume`, `--no-transcripts` |
 | `update-videos` | Refresh existing tweet/thread outputs with video data. | none |
 | `twitter-transcripts` | Run local Whisper over Twitter video media. | `--limit`, `--no-resume`, `--verbose` |

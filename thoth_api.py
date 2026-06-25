@@ -57,6 +57,7 @@ from core import (
     resolve_archivist_sync_config as resolve_archivist_runtime_config,
     run_archivist_topics,
     save_archivist_registry_text,
+    ResearchGraphService,
 )
 from core.bookmark_ingest import (
     build_bookmark_queue_payload,
@@ -1545,6 +1546,32 @@ async def bookmark_status(request: BookmarkStatusRequest):
             }
 
     return {"statuses": response}
+
+
+@app.get("/api/research/missing-papers")
+async def get_missing_research_papers(
+    min_references: int = Query(2, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Return missing paper candidates ranked from the research graph."""
+    service = ResearchGraphService(get_metadata_db())
+    return service.missing_papers_report(
+        min_references=min_references,
+        limit=limit,
+    )
+
+
+@app.post("/api/research/missing-papers/queue")
+async def queue_missing_research_papers(
+    min_references: int = Query(2, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Queue high-confidence missing papers that have identifiers."""
+    service = ResearchGraphService(get_metadata_db())
+    return service.queue_high_confidence_missing_papers(
+        min_references=min_references,
+        limit=limit,
+    )
 
 
 @app.post("/api/reprocess/{tweet_id}")

@@ -118,6 +118,7 @@ class KnowledgeArtifactRuntime:
             self._wiki_updater = CompiledWikiUpdater(
                 self.config,
                 layout=self.layout,
+                db=self.db,
             )
         return self._wiki_updater
 
@@ -378,22 +379,69 @@ class KnowledgeArtifactRuntime:
     ) -> IngestionDispatchResult:
         """Process a paper artifact by downloading and indexing the PDF."""
         from processors.arxiv_processor_v2 import ArXivProcessorV2
+        from core.research_graph import ResearchGraphService
 
         if not artifact.pdf_url:
-            raise IngestionRuntimeError(
-                f"Paper artifact {artifact.id} is missing pdf_url"
-            )
+            if artifact.arxiv_id:
+                artifact.pdf_url = f"https://arxiv.org/pdf/{artifact.arxiv_id}.pdf"
+            else:
+                graph_result = ResearchGraphService(self.db).record_paper_artifact(
+                    artifact,
+                    discovery_source=artifact.source_type,
+                )
+                return IngestionDispatchResult(
+                    artifact_id=artifact.id,
+                    artifact_type="paper",
+                    source=artifact.source_type,
+                    status="skipped",
+                    processed_at=_now_iso(),
+                    details={
+                        "reason": "missing_pdf_url",
+                        "research_graph": graph_result,
+                    },
+                )
+
+        graph_result = ResearchGraphService(self.db).record_paper_artifact(
+            artifact,
+            discovery_source=artifact.source_type,
+        )
 
         processor = ArXivProcessorV2(output_dir=str(self.layout.vault_root))
-        document = await asyncio.to_thread(
-            processor.download_document,
-            artifact.pdf_url,
-            artifact.id,
-            True,
-        )
+        try:
+            document = await asyncio.to_thread(
+                processor.download_document,
+                artifact.pdf_url,
+                artifact.id,
+                True,
+            )
+        except Exception as exc:
+            if artifact.source_type == "research_graph":
+                return IngestionDispatchResult(
+                    artifact_id=artifact.id,
+                    artifact_type="paper",
+                    source=artifact.source_type,
+                    status="skipped",
+                    processed_at=_now_iso(),
+                    details={
+                        "reason": f"download_failed: {exc}",
+                        "pdf_url": artifact.pdf_url,
+                        "research_graph": graph_result,
+                    },
+                )
+            raise
+
         if not document:
-            raise IngestionRuntimeError(
-                f"Failed to process paper artifact {artifact.id}"
+            return IngestionDispatchResult(
+                artifact_id=artifact.id,
+                artifact_type="paper",
+                source=artifact.source_type,
+                status="skipped",
+                processed_at=_now_iso(),
+                details={
+                    "reason": "download_skipped",
+                    "pdf_url": artifact.pdf_url,
+                    "research_graph": graph_result,
+                },
             )
 
         return IngestionDispatchResult(
@@ -406,6 +454,7 @@ class KnowledgeArtifactRuntime:
                 "filename": getattr(document, "filename", None),
                 "downloaded": getattr(document, "downloaded", False),
                 "pdf_url": artifact.pdf_url,
+                "research_graph": graph_result,
             },
         )
 

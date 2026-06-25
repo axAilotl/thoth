@@ -101,6 +101,38 @@ class IngestionQueueEntry:
     capabilities_json: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class ResearchPaperRecord:
+    """Normalized paper metadata stored for research graph operations."""
+
+    paper_id: str
+    title: str = ""
+    authors: tuple[str, ...] = ()
+    abstract: str = ""
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    pdf_url: Optional[str] = None
+    venue: Optional[str] = None
+    published_at: Optional[str] = None
+    source_provider: Optional[str] = None
+    collected: bool = False
+    raw_payload: Dict[str, Any] | None = None
+    updated_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ResearchPaperEdge:
+    """Typed paper-to-paper relationship evidence."""
+
+    source_paper_id: str
+    target_paper_id: str
+    edge_type: str
+    source_evidence: str = ""
+    discovery_source: str = ""
+    discovered_at: Optional[str] = None
+    metadata: Dict[str, Any] | None = None
+
+
 class MetadataDB:
     """SQLite metadata database with WAL mode and connection pooling"""
     
@@ -317,6 +349,365 @@ class MetadataDB:
 
         for index_sql in indexes:
             conn.execute(index_sql)
+
+    def ensure_research_graph_tables(self) -> None:
+        """Initialize research paper graph tables on demand."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS research_papers (
+                    paper_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT '',
+                    authors_json TEXT NOT NULL DEFAULT '[]',
+                    abstract TEXT NOT NULL DEFAULT '',
+                    doi TEXT,
+                    arxiv_id TEXT,
+                    pdf_url TEXT,
+                    venue TEXT,
+                    published_at TEXT,
+                    source_provider TEXT,
+                    collected BOOLEAN NOT NULL DEFAULT 0,
+                    raw_payload_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS research_paper_edges (
+                    source_paper_id TEXT NOT NULL,
+                    target_paper_id TEXT NOT NULL,
+                    edge_type TEXT NOT NULL CHECK (
+                        edge_type IN ('references', 'cited_by', 'co_referenced')
+                    ),
+                    source_evidence TEXT NOT NULL DEFAULT '',
+                    discovery_source TEXT NOT NULL DEFAULT '',
+                    discovered_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    PRIMARY KEY (source_paper_id, target_paper_id, edge_type),
+                    FOREIGN KEY (source_paper_id) REFERENCES research_papers (paper_id),
+                    FOREIGN KEY (target_paper_id) REFERENCES research_papers (paper_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_research_papers_collected ON research_papers (collected)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_research_papers_doi ON research_papers (doi)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_research_papers_arxiv ON research_papers (arxiv_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_research_edges_target ON research_paper_edges (target_paper_id, edge_type)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_research_edges_source ON research_paper_edges (source_paper_id, edge_type)"
+            )
+
+    def upsert_research_paper(self, record: ResearchPaperRecord) -> None:
+        """Insert or update normalized paper metadata."""
+        self.ensure_research_graph_tables()
+        now_iso = record.updated_at or datetime.now().isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_papers (
+                    paper_id,
+                    title,
+                    authors_json,
+                    abstract,
+                    doi,
+                    arxiv_id,
+                    pdf_url,
+                    venue,
+                    published_at,
+                    source_provider,
+                    collected,
+                    raw_payload_json,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(paper_id) DO UPDATE SET
+                    title=CASE WHEN excluded.title != '' THEN excluded.title ELSE research_papers.title END,
+                    authors_json=CASE WHEN excluded.authors_json != '[]' THEN excluded.authors_json ELSE research_papers.authors_json END,
+                    abstract=CASE WHEN excluded.abstract != '' THEN excluded.abstract ELSE research_papers.abstract END,
+                    doi=COALESCE(excluded.doi, research_papers.doi),
+                    arxiv_id=COALESCE(excluded.arxiv_id, research_papers.arxiv_id),
+                    pdf_url=COALESCE(excluded.pdf_url, research_papers.pdf_url),
+                    venue=COALESCE(excluded.venue, research_papers.venue),
+                    published_at=COALESCE(excluded.published_at, research_papers.published_at),
+                    source_provider=COALESCE(excluded.source_provider, research_papers.source_provider),
+                    collected=CASE WHEN excluded.collected THEN 1 ELSE research_papers.collected END,
+                    raw_payload_json=CASE WHEN excluded.raw_payload_json != '{}' THEN excluded.raw_payload_json ELSE research_papers.raw_payload_json END,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    record.paper_id,
+                    record.title or "",
+                    json.dumps(list(record.authors), ensure_ascii=False),
+                    record.abstract or "",
+                    record.doi,
+                    record.arxiv_id,
+                    record.pdf_url,
+                    record.venue,
+                    record.published_at,
+                    record.source_provider,
+                    1 if record.collected else 0,
+                    json.dumps(record.raw_payload or {}, ensure_ascii=False, sort_keys=True),
+                    now_iso,
+                ),
+            )
+
+    def get_research_paper(self, paper_id: str) -> Optional[ResearchPaperRecord]:
+        """Fetch a normalized research paper record by ID."""
+        self.ensure_research_graph_tables()
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM research_papers WHERE paper_id = ?",
+                (paper_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return self._research_paper_from_row(row)
+
+    def upsert_research_paper_edge(self, edge: ResearchPaperEdge) -> bool:
+        """Insert or update a typed paper graph edge and return true if new."""
+        self.ensure_research_graph_tables()
+        discovered_at = edge.discovered_at or datetime.now().isoformat()
+        metadata = edge.metadata or {}
+        with self._get_connection() as conn:
+            before = conn.execute(
+                """
+                SELECT 1 FROM research_paper_edges
+                WHERE source_paper_id = ? AND target_paper_id = ? AND edge_type = ?
+                """,
+                (edge.source_paper_id, edge.target_paper_id, edge.edge_type),
+            ).fetchone()
+            conn.execute(
+                """
+                INSERT INTO research_paper_edges (
+                    source_paper_id,
+                    target_paper_id,
+                    edge_type,
+                    source_evidence,
+                    discovery_source,
+                    discovered_at,
+                    metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_paper_id, target_paper_id, edge_type) DO UPDATE SET
+                    source_evidence=excluded.source_evidence,
+                    discovery_source=excluded.discovery_source,
+                    discovered_at=excluded.discovered_at,
+                    metadata_json=excluded.metadata_json
+                """,
+                (
+                    edge.source_paper_id,
+                    edge.target_paper_id,
+                    edge.edge_type,
+                    edge.source_evidence or "",
+                    edge.discovery_source or "",
+                    discovered_at,
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            return before is None
+
+    def list_research_paper_edges(
+        self,
+        *,
+        source_paper_id: Optional[str] = None,
+        target_paper_id: Optional[str] = None,
+        edge_type: Optional[str] = None,
+    ) -> list[ResearchPaperEdge]:
+        """List research paper graph edges with optional filters."""
+        self.ensure_research_graph_tables()
+        where: list[str] = []
+        params: list[Any] = []
+        if source_paper_id:
+            where.append("source_paper_id = ?")
+            params.append(source_paper_id)
+        if target_paper_id:
+            where.append("target_paper_id = ?")
+            params.append(target_paper_id)
+        if edge_type:
+            where.append("edge_type = ?")
+            params.append(edge_type)
+        sql = "SELECT * FROM research_paper_edges"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY discovered_at DESC, source_paper_id, target_paper_id"
+        with self._get_connection() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            return [self._research_edge_from_row(row) for row in rows]
+
+    def list_missing_research_paper_candidates(
+        self,
+        *,
+        min_references: int = 2,
+        limit: int = 50,
+    ) -> list[Dict[str, Any]]:
+        """Rank referenced papers that have not been collected locally."""
+        self.ensure_research_graph_tables()
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    target.paper_id AS paper_id,
+                    target.title AS title,
+                    target.doi AS doi,
+                    target.arxiv_id AS arxiv_id,
+                    target.pdf_url AS pdf_url,
+                    target.venue AS venue,
+                    target.published_at AS published_at,
+                    COUNT(DISTINCT edge.source_paper_id) AS referenced_by_count,
+                    GROUP_CONCAT(DISTINCT edge.source_paper_id) AS source_ids,
+                    MAX(edge.discovered_at) AS last_discovered_at
+                FROM research_paper_edges AS edge
+                JOIN research_papers AS source
+                  ON source.paper_id = edge.source_paper_id AND source.collected = 1
+                LEFT JOIN research_papers AS target
+                  ON target.paper_id = edge.target_paper_id
+                WHERE edge.edge_type = 'references'
+                  AND COALESCE(target.collected, 0) = 0
+                GROUP BY target.paper_id
+                HAVING referenced_by_count >= ?
+                ORDER BY referenced_by_count DESC, last_discovered_at DESC, target.paper_id ASC
+                LIMIT ?
+                """,
+                (max(1, int(min_references)), max(1, int(limit))),
+            ).fetchall()
+            candidates: list[Dict[str, Any]] = []
+            for row in rows:
+                identifiers = {
+                    "doi": row["doi"],
+                    "arxiv_id": row["arxiv_id"],
+                    "pdf_url": row["pdf_url"],
+                }
+                has_identifier = any(value for value in identifiers.values())
+                source_ids = [
+                    item
+                    for item in str(row["source_ids"] or "").split(",")
+                    if item
+                ]
+                candidates.append(
+                    {
+                        "paper_id": row["paper_id"],
+                        "title": row["title"] or row["paper_id"],
+                        "doi": row["doi"],
+                        "arxiv_id": row["arxiv_id"],
+                        "pdf_url": row["pdf_url"],
+                        "venue": row["venue"],
+                        "published_at": row["published_at"],
+                        "referenced_by_count": int(row["referenced_by_count"] or 0),
+                        "referenced_by": source_ids,
+                        "last_discovered_at": row["last_discovered_at"],
+                        "status": "high_confidence" if has_identifier else "ambiguous",
+                        "queueable": bool(has_identifier),
+                    }
+                )
+            return candidates
+
+    def get_research_paper_context(self, paper_id: str) -> Dict[str, Any]:
+        """Return local graph context for a paper wiki page."""
+        self.ensure_research_graph_tables()
+        with self._get_connection() as conn:
+            referenced_by_rows = conn.execute(
+                """
+                SELECT source.paper_id, source.title, edge.source_evidence, edge.discovered_at
+                FROM research_paper_edges AS edge
+                JOIN research_papers AS source
+                  ON source.paper_id = edge.source_paper_id
+                WHERE edge.edge_type = 'references'
+                  AND edge.target_paper_id = ?
+                  AND source.collected = 1
+                ORDER BY edge.discovered_at DESC, source.paper_id
+                """,
+                (paper_id,),
+            ).fetchall()
+            reference_rows = conn.execute(
+                """
+                SELECT target.paper_id, target.title, target.collected, edge.source_evidence, edge.discovered_at
+                FROM research_paper_edges AS edge
+                LEFT JOIN research_papers AS target
+                  ON target.paper_id = edge.target_paper_id
+                WHERE edge.edge_type = 'references'
+                  AND edge.source_paper_id = ?
+                ORDER BY target.collected DESC, target.title, target.paper_id
+                """,
+                (paper_id,),
+            ).fetchall()
+            co_rows = conn.execute(
+                """
+                SELECT target.paper_id, target.title, edge.source_evidence
+                FROM research_paper_edges AS edge
+                LEFT JOIN research_papers AS target
+                  ON target.paper_id = edge.target_paper_id
+                WHERE edge.edge_type = 'co_referenced'
+                  AND edge.source_paper_id = ?
+                ORDER BY target.title, target.paper_id
+                """,
+                (paper_id,),
+            ).fetchall()
+            return {
+                "referenced_by": [
+                    {
+                        "paper_id": row["paper_id"],
+                        "title": row["title"] or row["paper_id"],
+                        "source_evidence": row["source_evidence"],
+                        "discovered_at": row["discovered_at"],
+                    }
+                    for row in referenced_by_rows
+                ],
+                "references": [
+                    {
+                        "paper_id": row["paper_id"],
+                        "title": row["title"] or row["paper_id"],
+                        "collected": bool(row["collected"]),
+                        "source_evidence": row["source_evidence"],
+                        "discovered_at": row["discovered_at"],
+                    }
+                    for row in reference_rows
+                ],
+                "co_referenced": [
+                    {
+                        "paper_id": row["paper_id"],
+                        "title": row["title"] or row["paper_id"],
+                        "source_evidence": row["source_evidence"],
+                    }
+                    for row in co_rows
+                ],
+            }
+
+    def _research_paper_from_row(self, row: sqlite3.Row) -> ResearchPaperRecord:
+        return ResearchPaperRecord(
+            paper_id=row["paper_id"],
+            title=row["title"] or "",
+            authors=tuple(json.loads(row["authors_json"] or "[]")),
+            abstract=row["abstract"] or "",
+            doi=row["doi"],
+            arxiv_id=row["arxiv_id"],
+            pdf_url=row["pdf_url"],
+            venue=row["venue"],
+            published_at=row["published_at"],
+            source_provider=row["source_provider"],
+            collected=bool(row["collected"]),
+            raw_payload=json.loads(row["raw_payload_json"] or "{}"),
+            updated_at=row["updated_at"],
+        )
+
+    def _research_edge_from_row(self, row: sqlite3.Row) -> ResearchPaperEdge:
+        return ResearchPaperEdge(
+            source_paper_id=row["source_paper_id"],
+            target_paper_id=row["target_paper_id"],
+            edge_type=row["edge_type"],
+            source_evidence=row["source_evidence"],
+            discovery_source=row["discovery_source"],
+            discovered_at=row["discovered_at"],
+            metadata=json.loads(row["metadata_json"] or "{}"),
+        )
 
     def _ensure_files_index_types(self, conn: sqlite3.Connection):
         """Expand files_index type constraints when newer file types are introduced."""

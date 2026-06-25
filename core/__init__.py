@@ -113,6 +113,7 @@ from .connector_registry import (
     ConnectorRegistry,
     load_connector_registry,
 )
+from .research_graph import ResearchGraphService
 from .wiki_query import WikiQueryHit, WikiQueryResult, WikiQueryRunner, WikiQueryWriteBackResult
 from .wiki_scaffold import (
     WikiScaffold,
@@ -235,6 +236,7 @@ __all__ = [
     'ConnectorManifestError',
     'ConnectorRegistry',
     'load_connector_registry',
+    'ResearchGraphService',
     'WikiQueryHit',
     'WikiQueryResult',
     'WikiQueryRunner',

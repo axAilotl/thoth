@@ -11,6 +11,16 @@ from typing import Dict, List, Optional, Tuple, Any, Mapping
 from .base import KnowledgeArtifact
 
 
+def _coerce_list(value: Any) -> List[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
 @dataclass
 class PaperArtifact(KnowledgeArtifact):
     """Research paper discovered by Hermes or manual import."""
@@ -30,6 +40,11 @@ class PaperArtifact(KnowledgeArtifact):
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
     pdf_url: Optional[str] = None
+    venue: Optional[str] = None
+    published_at: Optional[str] = None
+    references: List[Any] = field(default_factory=list)
+    citations: List[Any] = field(default_factory=list)
+    source_provider: Optional[str] = None
     citations_count: Optional[int] = None
     relevance_score: Optional[float] = None
 
@@ -37,6 +52,10 @@ class PaperArtifact(KnowledgeArtifact):
         super().__post_init__()
         if self.authors is None:
             self.authors = []
+        if self.references is None:
+            self.references = []
+        if self.citations is None:
+            self.citations = []
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -49,6 +68,11 @@ class PaperArtifact(KnowledgeArtifact):
                 "doi": self.doi,
                 "arxiv_id": self.arxiv_id,
                 "pdf_url": self.pdf_url,
+                "venue": self.venue,
+                "published_at": self.published_at,
+                "references": self.references,
+                "citations": self.citations,
+                "source_provider": self.source_provider,
                 "citations_count": self.citations_count,
                 "relevance_score": self.relevance_score,
             }
@@ -87,6 +111,15 @@ class PaperArtifact(KnowledgeArtifact):
             doi=artifact_payload.get("doi"),
             arxiv_id=artifact_payload.get("arxiv_id") or paper_id,
             pdf_url=artifact_payload.get("pdf_url"),
+            venue=artifact_payload.get("venue"),
+            published_at=artifact_payload.get("published_at")
+            or artifact_payload.get("published")
+            or artifact_payload.get("publication_date"),
+            references=_coerce_list(artifact_payload.get("references")),
+            citations=_coerce_list(artifact_payload.get("citations")),
+            source_provider=artifact_payload.get("source_provider")
+            or artifact_payload.get("source")
+            or artifact_payload.get("source_type"),
             citations_count=artifact_payload.get("citations_count"),
             relevance_score=artifact_payload.get("relevance_score"),
             **cls.base_fields_from_payload(artifact_payload),

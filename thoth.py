@@ -24,6 +24,7 @@ from core import (
     ensure_wiki_scaffold,
     load_connector_registry,
     OKFLintRunner,
+    ResearchGraphService,
     WikiLintRunner,
     WikiQueryRunner,
 )
@@ -1798,6 +1799,56 @@ async def cmd_archivist(args):
     )
 
 
+def cmd_research(args):
+    """Run research graph reports."""
+    if args.research_action != "missing-papers":
+        raise ValueError("Unknown research action")
+
+    from core.metadata_db import get_metadata_db
+
+    service = ResearchGraphService(get_metadata_db())
+    min_references = max(1, int(getattr(args, "min_references", 2) or 2))
+    limit = max(1, int(getattr(args, "limit", 50) or 50))
+    if getattr(args, "queue", False):
+        result = service.queue_high_confidence_missing_papers(
+            min_references=min_references,
+            limit=limit,
+        )
+        payload = {
+            **result["report"],
+            "queued": result["queued"],
+            "skipped": result["skipped"],
+        }
+    else:
+        payload = service.missing_papers_report(
+            min_references=min_references,
+            limit=limit,
+        )
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    print("Research missing papers")
+    print(f"   Minimum local references: {payload['min_references']}")
+    print(f"   High confidence: {len(payload['high_confidence'])}")
+    for candidate in payload["high_confidence"]:
+        print(
+            f"   - {candidate['title']} [{candidate['paper_id']}] "
+            f"referenced_by={candidate['referenced_by_count']} queueable={candidate['queueable']}"
+        )
+    print(f"   Ambiguous: {len(payload['ambiguous'])}")
+    for candidate in payload["ambiguous"]:
+        print(
+            f"   - {candidate['title']} [{candidate['paper_id']}] "
+            f"referenced_by={candidate['referenced_by_count']}"
+        )
+    if "queued" in payload:
+        print(f"   Queued: {len(payload['queued'])}")
+        for queue_id in payload["queued"]:
+            print(f"   - {queue_id}")
+
+
 async def cmd_wiki_query(args):
     """Search the compiled wiki and optionally write back a curated result."""
     layout = build_path_layout(config)
@@ -2386,6 +2437,43 @@ Examples:
         help="Number of top candidate paths to print per topic during --benchmark",
     )
 
+    research_parser = subparsers.add_parser(
+        "research",
+        help="Research graph reports and maintenance",
+    )
+    research_subparsers = research_parser.add_subparsers(
+        dest="research_action",
+        help="Research actions",
+    )
+    research_subparsers.required = True
+    missing_papers_parser = research_subparsers.add_parser(
+        "missing-papers",
+        help="Rank missing papers referenced by collected papers",
+        description="Rank missing papers referenced by collected papers",
+    )
+    missing_papers_parser.add_argument(
+        "--min-references",
+        type=int,
+        default=2,
+        help="Minimum distinct local papers that must reference a missing candidate",
+    )
+    missing_papers_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum candidates to return",
+    )
+    missing_papers_parser.add_argument(
+        "--queue",
+        action="store_true",
+        help="Queue high-confidence candidates that have a usable identifier",
+    )
+    missing_papers_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit report as JSON",
+    )
+
     wiki_query_parser = subparsers.add_parser(
         "wiki-query",
         help="Search the compiled wiki and optionally write a curated result back",
@@ -2463,7 +2551,7 @@ Examples:
     # Setup logging
     setup_logging(args.verbose)
 
-    validation_exempt = {"connectors"}
+    validation_exempt = {"connectors", "research"}
 
     # Validate configuration (allow offline-safe commands even if invalid)
     if args.command not in validation_exempt and not config.validate_and_warn():
@@ -2482,6 +2570,7 @@ Examples:
             "x-api-sync",
             "web-clipper",
             "connectors",
+            "research",
             "wiki-query",
             "wiki-lint",
             "okf",
@@ -2496,7 +2585,7 @@ Examples:
     if not args.command:
         args.command = "stats"
 
-    scaffold_exempt = {"connectors"}
+    scaffold_exempt = {"connectors", "research"}
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
 
@@ -2542,6 +2631,8 @@ Examples:
             cmd_connectors(args)
         elif args.command == "archivist":
             asyncio.run(cmd_archivist(args))
+        elif args.command == "research":
+            cmd_research(args)
         elif args.command == "wiki-query":
             asyncio.run(cmd_wiki_query(args))
         elif args.command == "wiki-lint":
