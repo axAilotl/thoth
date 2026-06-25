@@ -89,4 +89,5 @@ class PaperArtifact(KnowledgeArtifact):
             pdf_url=artifact_payload.get("pdf_url"),
             citations_count=artifact_payload.get("citations_count"),
             relevance_score=artifact_payload.get("relevance_score"),
+            **cls.base_fields_from_payload(artifact_payload),
         )

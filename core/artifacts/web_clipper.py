@@ -94,6 +94,15 @@ class WebClipperArtifact(KnowledgeArtifact):
         if not isinstance(custom_metadata, dict):
             custom_metadata = {}
 
+        base_fields = cls.base_fields_from_payload(artifact_payload)
+        base_fields["tags"] = [str(tag) for tag in tags if str(tag).strip()]
+        base_fields["output_paths"] = {
+            str(key): str(value) for key, value in output_paths.items()
+        }
+        base_fields["custom_metadata"] = {
+            str(key): value for key, value in custom_metadata.items()
+        }
+
         return cls(
             id=artifact_id,
             source_type=str(
@@ -105,9 +114,6 @@ class WebClipperArtifact(KnowledgeArtifact):
             created_at=artifact_payload.get("created_at"),
             ingested_at=artifact_payload.get("ingested_at"),
             processing_status=str(artifact_payload.get("processing_status") or "pending"),
-            tags=[str(tag) for tag in tags if str(tag).strip()],
-            output_paths={str(key): str(value) for key, value in output_paths.items()},
-            custom_metadata={str(key): value for key, value in custom_metadata.items()},
             source_path=str(
                 artifact_payload.get("source_path")
                 or artifact_payload.get("source_file")
@@ -126,4 +132,5 @@ class WebClipperArtifact(KnowledgeArtifact):
             source_size_bytes=artifact_payload.get("source_size_bytes"),
             source_language=artifact_payload.get("source_language"),
             source_url=artifact_payload.get("source_url"),
+            **base_fields,
         )

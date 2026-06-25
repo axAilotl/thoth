@@ -77,6 +77,15 @@ def _json_loads_maybe(value: Any) -> Any:
     return value
 
 
+def _capabilities_from_queue(value: str | None) -> tuple[str, ...] | None:
+    if not value:
+        return None
+    payload = _json_loads_maybe(value)
+    if not isinstance(payload, list):
+        raise IngestionRuntimeError("Queue capabilities_json must decode to a list")
+    return tuple(str(item) for item in payload if str(item).strip())
+
+
 class KnowledgeArtifactRuntime:
     """Shared runtime for bookmark and ingestion queue processing."""
 
@@ -130,16 +139,24 @@ class KnowledgeArtifactRuntime:
 
         artifact_type = str(entry.artifact_type).strip().lower()
         if artifact_type == "tweet":
-            return TweetArtifact.from_queue_payload(payload)
-        if artifact_type == "paper":
-            return PaperArtifact.from_queue_payload(payload)
-        if artifact_type == "repository":
-            return RepositoryArtifact.from_queue_payload(payload)
-        if artifact_type == "web_clipper":
-            return WebClipperArtifact.from_queue_payload(payload)
+            artifact = TweetArtifact.from_queue_payload(payload)
+        elif artifact_type == "paper":
+            artifact = PaperArtifact.from_queue_payload(payload)
+        elif artifact_type == "repository":
+            artifact = RepositoryArtifact.from_queue_payload(payload)
+        elif artifact_type == "web_clipper":
+            artifact = WebClipperArtifact.from_queue_payload(payload)
+        else:
+            raise UnsupportedArtifactTypeError(
+                f"Unsupported ingestion artifact type: {entry.artifact_type}"
+            )
 
-        raise UnsupportedArtifactTypeError(
-            f"Unsupported ingestion artifact type: {entry.artifact_type}"
+        return artifact.apply_queue_context(
+            queue_id=entry.artifact_id,
+            queue_source=entry.source,
+            queue_created_at=entry.created_at,
+            capabilities=_capabilities_from_queue(entry.capabilities_json),
+            payload=payload,
         )
 
     def _sync_wiki_for_artifact(

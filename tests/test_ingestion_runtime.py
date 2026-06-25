@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 from core.artifacts import (
+    ArtifactRelationship,
+    DerivedOutput,
+    KnowledgeArtifact,
     PaperArtifact,
     RepositoryArtifact,
     TweetArtifact,
@@ -113,6 +116,184 @@ def test_materialize_artifact_supports_known_types(
                 created_at="2026-04-04T00:00:00",
             )
         )
+
+
+def test_materialized_artifacts_include_canonical_queue_contract(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    runtime = KnowledgeArtifactRuntime()
+    entry = IngestionQueueEntry(
+        artifact_id="paper-queued",
+        artifact_type="paper",
+        source="arxiv_rss",
+        payload_json=json.dumps(
+            {
+                "id": "2401.12345",
+                "source_type": "arxiv",
+                "title": "Paper",
+                "pdf_url": "https://arxiv.org/pdf/2401.12345.pdf",
+                "raw_payload_path": "raw/arxiv/2401.12345.json",
+                "raw_payload_sha256": "abc123",
+            }
+        ),
+        capabilities_json=json.dumps(["pdf_download", "citation_graph"]),
+        created_at="2026-04-04T00:00:00",
+    )
+
+    artifact = runtime.materialize_artifact(entry)
+    record = artifact.canonical_record()
+
+    assert record["artifact_id"] == "2401.12345"
+    assert record["source_identity"] == {
+        "source_name": "arxiv_rss",
+        "source_type": "arxiv",
+        "native_id": "2401.12345",
+        "uri": "https://arxiv.org/pdf/2401.12345.pdf",
+        "collector": "arxiv_rss",
+    }
+    assert record["raw_payload"]["path"] == "raw/arxiv/2401.12345.json"
+    assert record["raw_payload"]["sha256"] == "abc123"
+    assert record["provenance"]["queue_id"] == "paper-queued"
+    assert record["provenance"]["collector"] == "arxiv_rss"
+    assert record["capabilities"] == ["pdf_download", "citation_graph"]
+    assert record["normalized_metadata"]["queue_id"] == "paper-queued"
+    assert record["normalized_metadata"]["queue_source"] == "arxiv_rss"
+
+
+def test_web_clipper_materialization_preserves_raw_and_derived_locations(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    runtime = KnowledgeArtifactRuntime()
+    artifact = WebClipperArtifact(
+        id="webclip:Clippings/capture.md",
+        source_type="web_clipper",
+        raw_content="# capture\n",
+        ingested_at="2026-04-04T00:00:00",
+        source_path="/tmp/vault/Clippings/capture.md",
+        source_relative_path="Clippings/capture.md",
+        file_type="note",
+        title="capture",
+        source_checksum="def456",
+        source_size_bytes=42,
+        source_url="https://example.com/capture",
+        output_paths={"translation": "translations/Clippings/capture.en.md"},
+    )
+    entry = IngestionQueueEntry(
+        artifact_id=artifact.id,
+        artifact_type="web_clipper",
+        source="web_clipper",
+        payload_json=json.dumps(artifact.to_dict()),
+        created_at="2026-04-04T00:00:00",
+    )
+
+    materialized = runtime.materialize_artifact(entry)
+    record = materialized.canonical_record()
+
+    assert record["raw_payload"]["path"] == "/tmp/vault/Clippings/capture.md"
+    assert record["raw_payload"]["sha256"] == "def456"
+    assert record["raw_payload"]["size_bytes"] == 42
+    assert record["derived_outputs"] == [
+        {
+            "output_type": "translation",
+            "path": "translations/Clippings/capture.en.md",
+        }
+    ]
+    assert record["provenance"]["evidence_paths"] == [
+        "translations/Clippings/capture.en.md"
+    ]
+
+
+def test_serialized_tweet_artifact_materializes_with_canonical_outputs(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    runtime = KnowledgeArtifactRuntime()
+    artifact = TweetArtifact(
+        id="123",
+        source_type="twitter",
+        raw_content='{"id":"123"}',
+        created_at="2026-04-04T00:00:00",
+        screen_name="alice",
+        name="Alice",
+        full_text="hello",
+        engagement={"favorite_count": 3, "retweet_count": 2, "reply_count": 1},
+        custom_metadata={"raw_payload_path": "raw/twitter/123.json"},
+        output_paths={"markdown": "wiki/tweets/123.md"},
+    )
+    entry = IngestionQueueEntry(
+        artifact_id="tweet-queued",
+        artifact_type="tweet",
+        source="x_api",
+        payload_json=json.dumps(artifact.to_dict()),
+        created_at="2026-04-04T00:00:00",
+    )
+
+    materialized = runtime.materialize_artifact(entry)
+    record = materialized.canonical_record()
+
+    assert isinstance(materialized, TweetArtifact)
+    assert materialized.engagement == {
+        "favorite_count": 3,
+        "retweet_count": 2,
+        "reply_count": 1,
+    }
+    assert record["source_identity"] == {
+        "source_name": "x_api",
+        "source_type": "twitter",
+        "native_id": "123",
+        "collector": "x_api",
+    }
+    assert record["raw_payload"]["path"] == "raw/twitter/123.json"
+    assert record["derived_outputs"] == [
+        {"output_type": "markdown", "path": "wiki/tweets/123.md"}
+    ]
+    assert record["provenance"]["evidence_paths"] == ["wiki/tweets/123.md"]
+
+
+def test_knowledge_artifact_canonical_record_serializes_relationships_and_outputs():
+    artifact = KnowledgeArtifact(
+        id="manual-1",
+        source_type="manual",
+        raw_content="raw",
+        created_at="2026-04-04T00:00:00",
+        output_paths={"markdown": "wiki/pages/manual-1.md"},
+        derived_outputs=(
+            DerivedOutput(output_type="summary", path="summaries/manual-1.md"),
+        ),
+        relationships=(
+            ArtifactRelationship(
+                relationship_type="references",
+                target_id="paper-1",
+                target_type="paper",
+                source_evidence="manual note",
+            ),
+        ),
+    )
+
+    record = artifact.canonical_record()
+
+    assert record["source_identity"]["source_name"] == "manual"
+    assert record["raw_payload"]["content_key"] == "raw_content"
+    assert record["derived_outputs"] == [
+        {"output_type": "summary", "path": "summaries/manual-1.md"},
+        {"output_type": "markdown", "path": "wiki/pages/manual-1.md"},
+    ]
+    assert record["relationships"] == [
+        {
+            "relationship_type": "references",
+            "target_id": "paper-1",
+            "target_type": "paper",
+            "source_evidence": "manual note",
+        }
+    ]
 
 
 def test_process_pending_ingestions_marks_processed(

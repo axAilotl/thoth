@@ -80,4 +80,5 @@ class RepositoryArtifact(KnowledgeArtifact):
             stars=int(artifact_payload.get("stars", 0) or 0),
             language=artifact_payload.get("language"),
             topics=list(artifact_payload.get("topics") or []),
+            **cls.base_fields_from_payload(artifact_payload),
         )

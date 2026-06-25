@@ -83,6 +83,14 @@ class TweetArtifact(KnowledgeArtifact):
         elif not isinstance(raw_content, str):
             raw_content = json.dumps(raw_content, ensure_ascii=False)
 
+        base_fields = cls.base_fields_from_payload(bookmark_payload)
+        base_fields["custom_metadata"] = {
+            **base_fields.get("custom_metadata", {}),
+            "tweet_data": tweet_data,
+            "graphql_cache_file": bookmark_payload.get("graphql_cache_file"),
+            "has_graphql_response": bool(bookmark_payload.get("graphql_response")),
+        }
+
         return cls(
             id=tweet_id,
             source_type=str(bookmark_payload.get("source") or "browser_extension"),
@@ -93,11 +101,7 @@ class TweetArtifact(KnowledgeArtifact):
             screen_name=str(tweet_data.get("author") or tweet_data.get("screen_name") or ""),
             name=str(tweet_data.get("author") or tweet_data.get("name") or ""),
             full_text=str(tweet_data.get("text") or tweet_data.get("full_text") or ""),
-            custom_metadata={
-                "tweet_data": tweet_data,
-                "graphql_cache_file": bookmark_payload.get("graphql_cache_file"),
-                "has_graphql_response": bool(bookmark_payload.get("graphql_response")),
-            },
+            **base_fields,
         )
 
     @classmethod
@@ -117,6 +121,36 @@ class TweetArtifact(KnowledgeArtifact):
         elif not isinstance(raw_content, str):
             raw_content = json.dumps(raw_content, ensure_ascii=False)
 
+        engagement_payload = artifact_payload.get("engagement")
+        if not isinstance(engagement_payload, Mapping):
+            engagement_payload = {}
+        favorite_count = int(
+            artifact_payload.get(
+                "favorite_count", engagement_payload.get("favorite_count", 0)
+            )
+            or 0
+        )
+        retweet_count = int(
+            artifact_payload.get(
+                "retweet_count", engagement_payload.get("retweet_count", 0)
+            )
+            or 0
+        )
+        reply_count = int(
+            artifact_payload.get("reply_count", engagement_payload.get("reply_count", 0))
+            or 0
+        )
+        extracted_urls = artifact_payload.get("extracted_urls")
+        if not isinstance(extracted_urls, (list, tuple)):
+            extracted_urls = []
+        base_fields = cls.base_fields_from_payload(artifact_payload)
+        base_fields["custom_metadata"] = {
+            **base_fields.get("custom_metadata", {}),
+            "favorite_count": favorite_count,
+            "retweet_count": retweet_count,
+            "reply_count": reply_count,
+        }
+
         return cls(
             id=tweet_id,
             source_type=str(artifact_payload.get("source_type") or artifact_payload.get("source") or "twitter"),
@@ -127,9 +161,15 @@ class TweetArtifact(KnowledgeArtifact):
             screen_name=str(artifact_payload.get("screen_name") or ""),
             name=str(artifact_payload.get("name") or ""),
             full_text=str(artifact_payload.get("full_text") or ""),
-            favorite_count=int(artifact_payload.get("favorite_count", 0) or 0),
-            retweet_count=int(artifact_payload.get("retweet_count", 0) or 0),
-            reply_count=int(artifact_payload.get("reply_count", 0) or 0),
+            extracted_urls=[str(url) for url in extracted_urls],
+            engagement={
+                "favorite_count": favorite_count,
+                "retweet_count": retweet_count,
+                "reply_count": reply_count,
+            },
+            thread_id=artifact_payload.get("thread_id"),
+            is_self_thread=bool(artifact_payload.get("is_self_thread", False)),
+            **base_fields,
         )
 
     def to_tweet_model(self) -> Tweet:
