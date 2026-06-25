@@ -16,6 +16,15 @@ from typing import Any, Dict, Tuple
 from .config import Config
 from .path_layout import build_path_layout
 
+OKF_VERSION = "0.1"
+OKF_TYPE_BY_WIKI_KIND = {
+    "topic": "Topic",
+    "entity": "Entity",
+    "concept": "Concept",
+}
+OKF_TYPE_BY_RECORD_TYPE = {
+    "wiki_query": "Reference",
+}
 WIKI_INDEX_FILENAME = "index.md"
 WIKI_LOG_FILENAME = "log.md"
 WIKI_PAGES_DIRNAME = "pages"
@@ -52,6 +61,13 @@ def is_legacy_tweet_slug(raw_value: str) -> bool:
     return bool(_WIKI_LEGACY_TWEET_SLUG_RE.fullmatch(value))
 
 
+def okf_type_for_wiki_page(kind: str, record_type: str = "wiki_page") -> str:
+    """Return the OKF concept type for a Thoth wiki page."""
+    if record_type in OKF_TYPE_BY_RECORD_TYPE:
+        return OKF_TYPE_BY_RECORD_TYPE[record_type]
+    return OKF_TYPE_BY_WIKI_KIND.get(kind, "Reference")
+
+
 @dataclass(frozen=True)
 class WikiPageSpec:
     """Declarative schema for a compiled wiki page."""
@@ -60,6 +76,7 @@ class WikiPageSpec:
     slug: str
     kind: str = "topic"
     record_type: str = "wiki_page"
+    okf_type: str | None = None
     summary: str = ""
     aliases: Tuple[str, ...] = field(default_factory=tuple)
     source_paths: Tuple[str, ...] = field(default_factory=tuple)
@@ -72,12 +89,39 @@ class WikiPageSpec:
     result_count: int | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    resource: str | None = None
+    artifact_id: str | None = None
+    source_type: str | None = None
 
     def frontmatter(self) -> Dict[str, Any]:
         """Render a frontmatter dictionary for the compiled wiki page."""
+        okf_type = self.okf_type or okf_type_for_wiki_page(self.kind, self.record_type)
         data = {
+            "type": okf_type,
             "thoth_type": self.record_type,
             "title": self.title,
+            "description": self.summary,
+            "resource": self.resource,
+            "timestamp": self.updated_at,
+            "thoth_okf_version": OKF_VERSION,
+            "thoth_slug": self.slug,
+            "thoth_kind": self.kind,
+            "thoth_summary": self.summary,
+            "thoth_aliases": list(self.aliases),
+            "thoth_source_paths": list(self.source_paths),
+            "thoth_related_slugs": list(self.related_slugs),
+            "thoth_language": self.language,
+            "thoth_translated_from": self.translated_from,
+            "thoth_query": self.query,
+            "thoth_query_terms": list(self.query_terms),
+            "thoth_curated": self.curated,
+            "thoth_result_count": self.result_count,
+            "thoth_created_at": self.created_at,
+            "thoth_updated_at": self.updated_at,
+            "thoth_artifact_id": self.artifact_id,
+            "thoth_source_type": self.source_type,
+            # Legacy aliases retained so existing local readers and hand-authored
+            # pages keep working while new metadata has namespaced equivalents.
             "slug": self.slug,
             "kind": self.kind,
             "summary": self.summary,
@@ -143,6 +187,9 @@ class WikiContract:
             raise ValueError(f"Unsupported wiki record type: {spec.record_type}")
         if spec.kind not in self.supported_kinds:
             raise ValueError(f"Unsupported wiki page kind: {spec.kind}")
+        okf_type = spec.okf_type or okf_type_for_wiki_page(spec.kind, spec.record_type)
+        if not okf_type or not okf_type.strip():
+            raise ValueError("Wiki page OKF type cannot be empty")
         self.validate_slug(spec.slug)
         if spec.language and not spec.language.strip():
             raise ValueError("Wiki page language cannot be empty")

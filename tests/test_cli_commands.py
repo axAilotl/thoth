@@ -21,7 +21,7 @@ def test_removed_playwright_commands_are_rejected():
 def test_web_clipper_commands_are_still_wired():
     repo_root = Path(__file__).resolve().parents[1]
 
-    for command in ("web-clipper", "ingest-queue"):
+    for command in ("web-clipper", "ingest-queue", "okf"):
         result = subprocess.run(
             [sys.executable, "thoth.py", command, "--help"],
             cwd=repo_root,
@@ -31,3 +31,17 @@ def test_web_clipper_commands_are_still_wired():
 
         assert result.returncode == 0
         assert command in result.stdout
+
+
+def test_okf_lint_command_is_wired():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, "thoth.py", "okf", "lint", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Validate the compiled wiki" in result.stdout

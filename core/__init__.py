@@ -106,6 +106,7 @@ from .wiki_contract import (
 )
 from .wiki_io import WikiDocument, atomic_write_text, read_document, read_frontmatter, render_frontmatter, truncate_summary
 from .wiki_lint import WikiLintIssue, WikiLintReport, WikiLintRunner
+from .okf import OKFLintIssue, OKFLintReport, OKFLintRunner
 from .wiki_query import WikiQueryHit, WikiQueryResult, WikiQueryRunner, WikiQueryWriteBackResult
 from .wiki_scaffold import (
     WikiScaffold,
@@ -221,6 +222,9 @@ __all__ = [
     'WikiLintIssue',
     'WikiLintReport',
     'WikiLintRunner',
+    'OKFLintIssue',
+    'OKFLintReport',
+    'OKFLintRunner',
     'WikiQueryHit',
     'WikiQueryResult',
     'WikiQueryRunner',

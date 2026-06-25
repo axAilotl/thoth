@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from core.config import Config
+from core.wiki_io import read_document
 from core.wiki_scaffold import append_wiki_log_entry, ensure_wiki_scaffold
 
 
@@ -30,10 +31,12 @@ def test_ensure_wiki_scaffold_seeds_root_files(tmp_path: Path):
     index = scaffold.index_path.read_text(encoding="utf-8")
     log = scaffold.log_path.read_text(encoding="utf-8")
 
-    assert "thoth_type: wiki_index" in index
+    assert read_document(scaffold.index_path).frontmatter == {}
+    assert read_document(scaffold.log_path).frontmatter == {}
     assert "# Thoth Wiki" in index
-    assert "thoth_type: wiki_log" in log
-    assert "append_only: true" in log
+    assert "## Structure" in index
+    assert "# Wiki Maintenance Log" in log
+    assert "**Initialization**" in log
 
 
 def test_ensure_wiki_scaffold_preserves_existing_files(tmp_path: Path):
@@ -58,7 +61,7 @@ def test_append_wiki_log_entry_appends_to_maintenance_log(tmp_path: Path):
 
     log = scaffold.log_path.read_text(encoding="utf-8")
     assert "Seeded the compiled wiki scaffold" in log
-    assert "2026-04-04T00:00:00Z" in log
+    assert "## 2026-04-04" in log
 
 
 def test_append_wiki_log_entry_rejects_empty_messages(tmp_path: Path):

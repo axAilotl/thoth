@@ -154,6 +154,7 @@ class CompiledWikiUpdater:
             title=spec.title,
             slug=spec.slug,
             kind=spec.kind,
+            okf_type=spec.okf_type,
             summary=spec.summary,
             aliases=spec.aliases,
             source_paths=spec.source_paths,
@@ -162,6 +163,9 @@ class CompiledWikiUpdater:
             translated_from=spec.translated_from,
             created_at=created_at,
             updated_at=_now_iso(),
+            resource=spec.resource,
+            artifact_id=spec.artifact_id,
+            source_type=spec.source_type,
         )
         content = self._render_page(updated_spec, artifact, dispatch_details=dispatch_details)
         action = "updated" if page_path.exists() else "created"
@@ -180,29 +184,29 @@ class CompiledWikiUpdater:
 
     def refresh_index(self) -> Path:
         self.prune_legacy_tweet_pages()
-        created_at = str(_read_frontmatter(self.contract.index_path).get("created_at") or _now_iso())
         entries = []
         for page_path in sorted(self.contract.pages_dir.glob("*.md")):
             frontmatter = _read_frontmatter(page_path)
-            slug = str(frontmatter.get("slug") or page_path.stem)
+            slug = str(
+                frontmatter.get("thoth_slug")
+                or frontmatter.get("slug")
+                or page_path.stem
+            )
             if is_legacy_tweet_slug(slug):
                 continue
             title = str(frontmatter.get("title") or page_path.stem)
-            summary = _truncate_summary(str(frontmatter.get("summary") or ""))
+            summary = _truncate_summary(
+                str(
+                    frontmatter.get("description")
+                    or frontmatter.get("thoth_summary")
+                    or frontmatter.get("summary")
+                    or ""
+                )
+            )
             rel_link = page_path.relative_to(self.contract.root).as_posix()
             entries.append((title, rel_link, summary))
 
         lines = [
-            _render_frontmatter(
-                {
-                    "thoth_type": "wiki_index",
-                    "title": WIKI_INDEX_TITLE,
-                    "root": str(self.contract.root),
-                    "created_at": created_at,
-                    "updated_at": _now_iso(),
-                }
-            ).rstrip(),
-            "",
             f"# {WIKI_INDEX_TITLE}",
             "",
             "This directory stores the compiled wiki layer.",
@@ -215,9 +219,9 @@ class CompiledWikiUpdater:
         else:
             lines.append("")
             for title, rel_link, summary in entries:
-                line = f"- [{title}]({rel_link})"
+                line = f"* [{title}]({rel_link})"
                 if summary:
-                    line += f": {summary}"
+                    line += f" - {summary}"
                 lines.append(line)
 
         _atomic_write_text(self.contract.index_path, "\n".join(lines) + "\n")
@@ -235,6 +239,9 @@ class CompiledWikiUpdater:
             language=self._language_for_artifact(artifact),
             created_at=_now_iso(),
             updated_at=_now_iso(),
+            resource=self._resource_for_artifact(artifact),
+            artifact_id=artifact.id,
+            source_type=artifact.source_type,
         )
 
     def _title_slug_and_summary(
@@ -313,6 +320,22 @@ class CompiledWikiUpdater:
         deduped = dict.fromkeys(normalized)
         return tuple(deduped.keys())
 
+    def _resource_for_artifact(self, artifact: KnowledgeArtifact) -> str | None:
+        if isinstance(artifact, PaperArtifact):
+            if artifact.pdf_url:
+                return artifact.pdf_url
+            if artifact.arxiv_id:
+                return f"https://arxiv.org/abs/{artifact.arxiv_id}"
+            return None
+        if isinstance(artifact, RepositoryArtifact):
+            repo_name = artifact.repo_name or artifact.id
+            if artifact.source_type == "huggingface":
+                return f"https://huggingface.co/{repo_name}"
+            return f"https://github.com/{repo_name}"
+        if isinstance(artifact, WebClipperArtifact):
+            return artifact.source_url or None
+        return None
+
     def _render_page(
         self,
         spec: WikiPageSpec,
@@ -363,7 +386,25 @@ class CompiledWikiUpdater:
                 lines.append(f"- [{source_path}]({relative_link})")
             lines.append("")
 
+        citation_lines = self._citation_lines(spec)
+        if citation_lines:
+            lines.extend(["# Citations", ""])
+            lines.extend(citation_lines)
+            lines.append("")
+
         return "\n".join(lines) + "\n"
+
+    def _citation_lines(self, spec: WikiPageSpec) -> list[str]:
+        citations: list[str] = []
+        if spec.resource:
+            citations.append(
+                f"[{len(citations) + 1}] [Canonical resource]({spec.resource})"
+            )
+        for source_path in spec.source_paths:
+            absolute_source = self.layout.vault_root / source_path
+            relative_link = os.path.relpath(absolute_source, self.contract.pages_dir)
+            citations.append(f"[{len(citations) + 1}] [{source_path}]({relative_link})")
+        return citations
 
     def _artifact_detail_lines(self, artifact: KnowledgeArtifact) -> list[str]:
         if isinstance(artifact, RepositoryArtifact):

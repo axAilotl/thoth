@@ -56,8 +56,15 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
     assert contract.page_path_for(spec) == tmp_path / "wiki" / "pages" / "llm-knowledge-base.md"
 
     frontmatter = contract.frontmatter_for(spec)
+    assert frontmatter["type"] == "Topic"
     assert frontmatter["thoth_type"] == "wiki_page"
     assert frontmatter["title"] == "LLM Knowledge Base"
+    assert frontmatter["description"] == "Compiled notes for the wiki loop."
+    assert frontmatter["timestamp"] == "2026-04-04T00:00:00Z"
+    assert frontmatter["thoth_okf_version"] == "0.1"
+    assert frontmatter["thoth_slug"] == "llm-knowledge-base"
+    assert frontmatter["thoth_kind"] == "topic"
+    assert frontmatter["thoth_source_paths"] == ["raw/bookmarks/item.md"]
     assert frontmatter["slug"] == "llm-knowledge-base"
     assert frontmatter["kind"] == "topic"
     assert frontmatter["aliases"] == ["knowledge-base"]

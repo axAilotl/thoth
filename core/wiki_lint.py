@@ -43,6 +43,21 @@ def _extract_markdown_links(body: str) -> tuple[str, ...]:
     return tuple(targets)
 
 
+def _frontmatter_value(frontmatter: dict, *keys: str):
+    for key in keys:
+        value = frontmatter.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _frontmatter_sequence(frontmatter: dict, *keys: str) -> tuple[str, ...]:
+    value = _frontmatter_value(frontmatter, *keys)
+    if value is None:
+        return tuple()
+    return tuple(str(item) for item in value or ())
+
+
 @dataclass(frozen=True)
 class WikiLintIssue:
     """Single lint finding."""
@@ -213,7 +228,7 @@ class WikiLintRunner:
         for page_path in sorted(self.contract.pages_dir.glob("*.md")):
             document = read_document(page_path)
             frontmatter = document.frontmatter
-            slug = str(frontmatter.get("slug") or page_path.stem)
+            slug = str(_frontmatter_value(frontmatter, "thoth_slug", "slug") or page_path.stem)
             if is_legacy_tweet_slug(slug):
                 continue
             records.append(
@@ -221,11 +236,11 @@ class WikiLintRunner:
                     path=page_path,
                     slug=slug,
                     title=str(frontmatter.get("title") or page_path.stem),
-                    kind=str(frontmatter.get("kind") or "topic"),
+                    kind=str(_frontmatter_value(frontmatter, "thoth_kind", "kind") or "topic"),
                     record_type=str(frontmatter.get("thoth_type") or "wiki_page"),
-                    source_paths=tuple(str(path) for path in frontmatter.get("source_paths") or ()),
-                    related_slugs=tuple(str(path) for path in frontmatter.get("related_slugs") or ()),
-                    updated_at=frontmatter.get("updated_at"),
+                    source_paths=_frontmatter_sequence(frontmatter, "thoth_source_paths", "source_paths"),
+                    related_slugs=_frontmatter_sequence(frontmatter, "thoth_related_slugs", "related_slugs"),
+                    updated_at=_frontmatter_value(frontmatter, "thoth_updated_at", "updated_at", "timestamp"),
                     body_links=_extract_markdown_links(document.body),
                 )
             )

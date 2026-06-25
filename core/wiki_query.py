@@ -35,6 +35,21 @@ def _query_tokens(query: str) -> tuple[str, ...]:
     return tokens
 
 
+def _frontmatter_value(frontmatter: dict, *keys: str):
+    for key in keys:
+        value = frontmatter.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _frontmatter_sequence(frontmatter: dict, *keys: str) -> tuple[str, ...]:
+    value = _frontmatter_value(frontmatter, *keys)
+    if value is None:
+        return tuple()
+    return tuple(str(item) for item in value or ())
+
+
 @dataclass(frozen=True)
 class WikiQueryHit:
     """Single wiki search match."""
@@ -100,15 +115,18 @@ class WikiQueryRunner:
             document = read_document(page_path)
             frontmatter = document.frontmatter
             title = str(frontmatter.get("title") or page_path.stem)
-            slug = str(frontmatter.get("slug") or page_path.stem)
+            slug = str(_frontmatter_value(frontmatter, "thoth_slug", "slug") or page_path.stem)
             if is_legacy_tweet_slug(slug):
                 continue
-            summary = str(frontmatter.get("summary") or "")
+            summary = str(
+                _frontmatter_value(frontmatter, "description", "thoth_summary", "summary")
+                or ""
+            )
             record_type = str(frontmatter.get("thoth_type") or "wiki_page")
-            kind = str(frontmatter.get("kind") or "topic")
-            source_paths = tuple(str(path) for path in frontmatter.get("source_paths") or ())
-            related_slugs = tuple(str(path) for path in frontmatter.get("related_slugs") or ())
-            aliases = tuple(str(alias) for alias in frontmatter.get("aliases") or ())
+            kind = str(_frontmatter_value(frontmatter, "thoth_kind", "kind") or "topic")
+            source_paths = _frontmatter_sequence(frontmatter, "thoth_source_paths", "source_paths")
+            related_slugs = _frontmatter_sequence(frontmatter, "thoth_related_slugs", "related_slugs")
+            aliases = _frontmatter_sequence(frontmatter, "thoth_aliases", "aliases")
 
             haystacks = {
                 "title": title.lower(),

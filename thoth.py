@@ -22,6 +22,7 @@ from core import (
     config,
     build_path_layout,
     ensure_wiki_scaffold,
+    OKFLintRunner,
     WikiLintRunner,
     WikiQueryRunner,
 )
@@ -1825,6 +1826,28 @@ async def cmd_wiki_lint(args):
         raise SystemExit(1)
 
 
+async def cmd_okf(args):
+    """Run OKF bundle commands."""
+    if args.okf_action != "lint":
+        raise ValueError("Unknown OKF action")
+
+    layout = build_path_layout(config)
+    runner = OKFLintRunner(config, layout=layout)
+    report = runner.lint()
+
+    print("🧪 OKF lint report")
+    print(f"   Version: {report.okf_version}")
+    print(f"   Concepts checked: {report.concepts_checked}")
+    print(f"   Reserved files checked: {report.reserved_files_checked}")
+    print(f"   Issues found: {len(report.issues)}")
+    for issue in report.issues:
+        location = f" ({issue.path})" if issue.path else ""
+        print(f"   - {issue.severity.upper()} {issue.code}{location}: {issue.message}")
+
+    if report.has_errors:
+        raise SystemExit(1)
+
+
 async def cmd_x_api_sync(args):
     """Backfill bookmarks from the X API and process them immediately."""
     from thoth_api import run_x_api_bookmark_sync
@@ -2367,6 +2390,21 @@ Examples:
         help="Warn when wiki pages have not been updated within this many days",
     )
 
+    okf_parser = subparsers.add_parser(
+        "okf",
+        help="Open Knowledge Format bundle commands",
+    )
+    okf_subparsers = okf_parser.add_subparsers(
+        dest="okf_action",
+        help="OKF actions",
+    )
+    okf_subparsers.required = True
+    okf_subparsers.add_parser(
+        "lint",
+        help="Validate the compiled wiki as an OKF v0.1 bundle",
+        description="Validate the compiled wiki as an OKF v0.1 bundle",
+    )
+
     ingest_queue_parser = subparsers.add_parser(
         "ingest-queue",
         help="Process pending generalized ingestion queue entries",
@@ -2401,6 +2439,7 @@ Examples:
             "web-clipper",
             "wiki-query",
             "wiki-lint",
+            "okf",
             "ingest-queue",
             "db",
         }
@@ -2458,6 +2497,8 @@ Examples:
             asyncio.run(cmd_wiki_query(args))
         elif args.command == "wiki-lint":
             asyncio.run(cmd_wiki_lint(args))
+        elif args.command == "okf":
+            asyncio.run(cmd_okf(args))
         elif args.command == "ingest-queue":
             asyncio.run(cmd_ingest_queue(args))
     except KeyboardInterrupt:

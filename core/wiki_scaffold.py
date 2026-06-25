@@ -11,12 +11,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import os
+import re
 
 from .config import Config
 from .wiki_contract import WikiContract, build_wiki_contract
 
 WIKI_INDEX_TITLE = "Thoth Wiki"
 WIKI_LOG_TITLE = "Wiki Maintenance Log"
+_FRONTMATTER_END_MARKER = "\n---\n"
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class WikiScaffoldError(RuntimeError):
@@ -25,6 +28,16 @@ class WikiScaffoldError(RuntimeError):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _date_from_timestamp(value: str) -> str:
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized).date().isoformat()
+    except ValueError:
+        if _ISO_DATE_RE.fullmatch(value.strip()):
+            return value.strip()
+        return datetime.now(timezone.utc).date().isoformat()
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -37,35 +50,28 @@ def _atomic_write_text(path: Path, content: str) -> None:
     os.replace(tmp_path, path)
 
 
+def _strip_frontmatter(content: str) -> str:
+    if not content.startswith("---\n"):
+        return content
+    end_marker = content.find(_FRONTMATTER_END_MARKER, 4)
+    if end_marker == -1:
+        return content
+    return content[end_marker + len(_FRONTMATTER_END_MARKER) :]
+
+
 def _render_index_content(contract: WikiContract, created_at: str, updated_at: str) -> str:
     return (
-        "---\n"
-        "thoth_type: wiki_index\n"
-        f"title: {WIKI_INDEX_TITLE}\n"
-        f"root: {contract.root}\n"
-        f"created_at: {created_at}\n"
-        f"updated_at: {updated_at}\n"
-        "---\n\n"
         f"# {WIKI_INDEX_TITLE}\n\n"
         "This directory stores the compiled wiki layer.\n\n"
-        "- `index.md` is the navigation root.\n"
-        "- `log.md` is the append-only maintenance log.\n"
-        "- `pages/` contains compiled wiki pages.\n"
+        "## Structure\n\n"
+        f"* [`index.md`]({contract.index_filename}) - Navigation root.\n"
+        f"* [`log.md`]({contract.log_filename}) - Append-only maintenance log.\n"
+        f"* [`pages/`]({contract.pages_dirname}/) - Compiled wiki pages.\n"
     )
 
 
 def _render_log_content(contract: WikiContract, created_at: str, updated_at: str) -> str:
-    return (
-        "---\n"
-        "thoth_type: wiki_log\n"
-        f"title: {WIKI_LOG_TITLE}\n"
-        f"root: {contract.root}\n"
-        "append_only: true\n"
-        f"created_at: {created_at}\n"
-        f"updated_at: {updated_at}\n"
-        "---\n\n"
-        f"# {WIKI_LOG_TITLE}\n"
-    )
+    return f"# {WIKI_LOG_TITLE}\n\n## {_date_from_timestamp(created_at)}\n\n* **Initialization**: Created wiki scaffold.\n"
 
 
 @dataclass(frozen=True)
@@ -155,9 +161,15 @@ def append_wiki_log_entry(
         )
 
     entry_timestamp = timestamp or _now_iso()
-    entry = f"\n## {entry_timestamp}\n\n- {content}\n"
+    entry_date = _date_from_timestamp(entry_timestamp)
+    entry = f"\n## {entry_date}\n\n* **Update**: {content}\n"
 
     try:
+        if contract.log_path.exists():
+            current = contract.log_path.read_text(encoding="utf-8")
+            stripped = _strip_frontmatter(current)
+            if stripped != current:
+                _atomic_write_text(contract.log_path, stripped)
         with open(contract.log_path, "a", encoding="utf-8") as handle:
             handle.write(entry)
     except Exception as exc:
