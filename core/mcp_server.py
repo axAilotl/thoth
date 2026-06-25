@@ -43,6 +43,14 @@ TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
         ),
     },
     {
+        "name": "get_artifact",
+        "description": "Return a single artifact record and canonical payload.",
+        "inputSchema": _schema(
+            {"artifact_id": {"type": "string"}},
+            ["artifact_id"],
+        ),
+    },
+    {
         "name": "get_artifact_provenance",
         "description": "Return queue and source provenance for one artifact.",
         "inputSchema": _schema(
@@ -99,6 +107,7 @@ class ThothMCPServer:
         self._tool_handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "wiki_query": self._wiki_query,
             "list_artifacts": self._list_artifacts,
+            "get_artifact": self._get_artifact,
             "get_artifact_provenance": self._get_artifact_provenance,
             "list_connectors": self._list_connectors,
             "run_connector": self._run_connector,
@@ -178,6 +187,9 @@ class ThothMCPServer:
             source=arguments.get("source"),
             limit=int(arguments.get("limit") or 50),
         )
+
+    def _get_artifact(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.service.get_artifact(str(arguments.get("artifact_id") or ""))
 
     def _get_artifact_provenance(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.service.get_artifact_provenance(str(arguments.get("artifact_id") or ""))

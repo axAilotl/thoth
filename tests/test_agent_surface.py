@@ -97,11 +97,29 @@ def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):
     assert {tool["name"] for tool in tools} >= {
         "wiki_query",
         "list_artifacts",
+        "get_artifact",
         "get_artifact_provenance",
         "list_connectors",
         "run_connector",
         "research_missing_papers",
     }
+    db.upsert_ingestion_entry(
+        IngestionQueueEntry(
+            artifact_id="mcp-paper",
+            artifact_type="paper",
+            source="arxiv",
+            payload_json=json.dumps(
+                PaperArtifact(
+                    id="2601.00001",
+                    source_type="arxiv",
+                    title="MCP Paper",
+                    raw_content='{"id": "2601.00001"}',
+                    arxiv_id="2601.00001",
+                ).to_dict()
+            ),
+            created_at="2026-04-04T00:00:00",
+        )
+    )
 
     response = server.call_tool("list_connectors", {})
     payload = json.loads(response["content"][0]["text"])
@@ -114,6 +132,11 @@ def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):
     payload = json.loads(response["content"][0]["text"])
     assert payload["status"] == "planned"
     assert payload["connector"]["name"] == "arxiv"
+
+    response = server.call_tool("get_artifact", {"artifact_id": "mcp-paper"})
+    payload = json.loads(response["content"][0]["text"])
+    assert payload["queue"]["artifact_id"] == "mcp-paper"
+    assert payload["canonical_record"]["artifact_id"] == "2601.00001"
 
     rpc_response = server.handle_request(
         {
