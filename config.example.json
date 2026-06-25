@@ -389,6 +389,16 @@
     "wal_mode": true,
     "auto_vacuum": true
   },
+  "research_graph": {
+    "metadata_api": {
+      "enabled": false,
+      "provider": "openalex",
+      "timeout_seconds": 10,
+      "max_references": 20,
+      "mailto": "",
+      "api_key": ""
+    }
+  },
   "youtube": {
     "enable_embeddings": true,
     "enable_transcripts": true,

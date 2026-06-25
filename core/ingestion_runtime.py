@@ -389,13 +389,21 @@ class KnowledgeArtifactRuntime:
     ) -> IngestionDispatchResult:
         """Process a paper artifact by downloading and indexing the PDF."""
         from processors.arxiv_processor_v2 import ArXivProcessorV2
-        from core.research_graph import ResearchGraphService
+        from core.research_graph import (
+            ResearchGraphService,
+            build_research_metadata_provider,
+        )
+
+        research_graph = ResearchGraphService(
+            self.db,
+            metadata_provider=build_research_metadata_provider(self.config),
+        )
 
         if not artifact.pdf_url:
             if artifact.arxiv_id:
                 artifact.pdf_url = f"https://arxiv.org/pdf/{artifact.arxiv_id}.pdf"
             else:
-                graph_result = ResearchGraphService(self.db).record_paper_artifact(
+                graph_result = research_graph.record_paper_artifact(
                     artifact,
                     discovery_source=artifact.source_type,
                 )
@@ -410,12 +418,6 @@ class KnowledgeArtifactRuntime:
                         "research_graph": graph_result,
                     },
                 )
-
-        graph_result = ResearchGraphService(self.db).record_paper_artifact(
-            artifact,
-            discovery_source=artifact.source_type,
-        )
-
         processor = ArXivProcessorV2(output_dir=str(self.layout.vault_root))
         try:
             document = await asyncio.to_thread(
@@ -426,6 +428,10 @@ class KnowledgeArtifactRuntime:
             )
         except Exception as exc:
             if artifact.source_type == "research_graph":
+                graph_result = research_graph.record_paper_artifact(
+                    artifact,
+                    discovery_source=artifact.source_type,
+                )
                 return IngestionDispatchResult(
                     artifact_id=artifact.id,
                     artifact_type="paper",
@@ -439,6 +445,21 @@ class KnowledgeArtifactRuntime:
                     },
                 )
             raise
+
+        pdf_paths = []
+        if document and getattr(document, "filename", None):
+            pdf_path = self.layout.vault_root / "papers" / str(document.filename)
+            if pdf_path.exists():
+                pdf_paths.append(pdf_path)
+                artifact.output_paths["pdf"] = pdf_path.relative_to(
+                    self.layout.vault_root
+                ).as_posix()
+
+        graph_result = research_graph.record_paper_artifact(
+            artifact,
+            discovery_source=artifact.source_type,
+            pdf_paths=pdf_paths,
+        )
 
         if not document:
             return IngestionDispatchResult(

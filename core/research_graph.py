@@ -6,9 +6,12 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote
 
 from .artifacts import PaperArtifact
+from .config import Config
 from .metadata_db import (
     IngestionQueueEntry,
     MetadataDB,
@@ -24,6 +27,7 @@ ARXIV_RE = re.compile(
     r"(?:arxiv:|arxiv\.org/(?:abs|pdf)/)?([0-9]{4}\.[0-9]{4,5})(?:v\d+)?",
     re.IGNORECASE,
 )
+OPENALEX_RE = re.compile(r"(?:https?://openalex\.org/)?(W\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -59,8 +63,14 @@ class PaperReference:
 class ResearchGraphService:
     """Service object for paper graph updates and missing-paper reporting."""
 
-    def __init__(self, db: MetadataDB | None = None):
+    def __init__(
+        self,
+        db: MetadataDB | None = None,
+        *,
+        metadata_provider: "ResearchMetadataProvider | None" = None,
+    ):
         self.db = db or get_metadata_db()
+        self.metadata_provider = metadata_provider
 
     def record_paper_artifact(
         self,
@@ -68,6 +78,7 @@ class ResearchGraphService:
         *,
         discovery_source: str | None = None,
         queue_missing: bool = True,
+        pdf_paths: list[str | Path] | tuple[str | Path, ...] | None = None,
     ) -> dict[str, Any]:
         """Persist a collected paper and relationships extracted from metadata."""
         source_record = paper_record_from_artifact(artifact, collected=True)
@@ -75,7 +86,15 @@ class ResearchGraphService:
 
         discovered_at = datetime.now().isoformat()
         inserted_edges = 0
-        references = extract_references_from_paper(artifact)
+        references = _dedupe_references(
+            [
+                *extract_references_from_paper(artifact),
+                *extract_references_from_pdf_paths(
+                    pdf_paths or discover_pdf_paths_from_artifact(artifact)
+                ),
+                *self._metadata_references_for_artifact(artifact),
+            ]
+        )
         citations = extract_citations_from_paper(artifact)
 
         for reference in references:
@@ -122,6 +141,14 @@ class ResearchGraphService:
             "co_referenced_edges": co_referenced_edges,
             "queued_missing": queued_missing,
         }
+
+    def _metadata_references_for_artifact(
+        self,
+        artifact: PaperArtifact,
+    ) -> list[PaperReference]:
+        if not self.metadata_provider:
+            return []
+        return self.metadata_provider.references_for_artifact(artifact)
 
     def missing_papers_report(
         self,
@@ -336,6 +363,7 @@ def normalized_paper_id(
     artifact_id: str | None = None,
     doi: str | None = None,
     arxiv_id: str | None = None,
+    openalex_id: str | None = None,
     title: str | None = None,
 ) -> str:
     normalized_doi = normalize_doi(doi)
@@ -344,6 +372,9 @@ def normalized_paper_id(
     normalized_arxiv = normalize_arxiv_id(arxiv_id or artifact_id)
     if normalized_arxiv:
         return f"arxiv:{normalized_arxiv}"
+    normalized_openalex = normalize_openalex_id(openalex_id or artifact_id)
+    if normalized_openalex:
+        return f"openalex:{normalized_openalex}"
     title_text = str(title or "").strip()
     if title_text:
         return f"title:{normalize_wiki_slug(title_text)}"
@@ -375,6 +406,16 @@ def normalize_arxiv_id(value: Any) -> str | None:
     return match.group(1)
 
 
+def normalize_openalex_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().rstrip(".,;")
+    match = OPENALEX_RE.search(text)
+    if not match:
+        return None
+    return match.group(1).upper()
+
+
 def _paper_reference_from_payload(payload: Any) -> PaperReference | None:
     raw_payload: dict[str, Any]
     if isinstance(payload, Mapping):
@@ -384,9 +425,14 @@ def _paper_reference_from_payload(payload: Any) -> PaperReference | None:
         arxiv_id = normalize_arxiv_id(
             _first_string(raw_payload, "arxiv_id", "arxiv", "arxivId", "paper_id", "id")
         )
+        openalex_id = normalize_openalex_id(
+            _first_string(raw_payload, "openalex_id", "openalex", "paper_id", "id")
+        )
         pdf_url = _first_string(raw_payload, "pdf_url", "pdfUrl", "url", "href")
         if pdf_url and not arxiv_id:
             arxiv_id = normalize_arxiv_id(pdf_url)
+        if pdf_url and not openalex_id:
+            openalex_id = normalize_openalex_id(pdf_url)
         venue = _first_string(raw_payload, "venue", "journal", "conference")
         published_at = _first_string(raw_payload, "published_at", "published", "year")
         authors = tuple(str(author) for author in _as_sequence(raw_payload.get("authors")))
@@ -400,6 +446,7 @@ def _paper_reference_from_payload(payload: Any) -> PaperReference | None:
         title = text if not DOI_RE.search(text) and not ARXIV_RE.search(text) else ""
         doi = normalize_doi(text)
         arxiv_id = normalize_arxiv_id(text)
+        openalex_id = normalize_openalex_id(text)
         pdf_url = _first_url(text)
         venue = None
         published_at = None
@@ -412,6 +459,7 @@ def _paper_reference_from_payload(payload: Any) -> PaperReference | None:
             artifact_id=identifier,
             doi=doi,
             arxiv_id=arxiv_id,
+            openalex_id=openalex_id,
             title=title,
         )
     except ValueError:
@@ -481,3 +529,276 @@ def _first_string(payload: Mapping[str, Any], *keys: str) -> str | None:
 def _first_url(text: str) -> str | None:
     match = re.search(r"https?://[^\s\"<>]+", text or "")
     return match.group(0).rstrip(".,;") if match else None
+
+
+class ResearchMetadataProvider:
+    """Protocol-like base for optional metadata reference providers."""
+
+    def references_for_artifact(self, artifact: PaperArtifact) -> list[PaperReference]:
+        raise NotImplementedError
+
+
+class OpenAlexMetadataProvider(ResearchMetadataProvider):
+    """Fetch reference metadata from OpenAlex when enabled by config."""
+
+    base_url = "https://api.openalex.org"
+
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 10.0,
+        max_references: int = 20,
+        session: Any = None,
+        mailto: str | None = None,
+        api_key: str | None = None,
+    ):
+        if session is None:
+            import requests
+
+            session = requests.Session()
+        self.session = session
+        self.timeout_seconds = timeout_seconds
+        self.max_references = max(0, int(max_references))
+        self.mailto = mailto
+        self.api_key = api_key
+
+    def references_for_artifact(self, artifact: PaperArtifact) -> list[PaperReference]:
+        work_id = self._work_identifier_for_artifact(artifact)
+        if not work_id:
+            return []
+        work = self._fetch_work(work_id)
+        referenced_work_ids = [
+            str(value)
+            for value in (work.get("referenced_works") or [])
+            if str(value).strip()
+        ][: self.max_references]
+        references: list[PaperReference] = []
+        for referenced_work_id in referenced_work_ids:
+            try:
+                referenced_work = self._fetch_work(referenced_work_id)
+            except Exception:
+                referenced_work = {"id": referenced_work_id}
+            reference = paper_reference_from_openalex_work(
+                referenced_work,
+                source_evidence=f"OpenAlex referenced_works from {work_id}",
+            )
+            if reference:
+                references.append(reference)
+        return _dedupe_references(references)
+
+    def _work_identifier_for_artifact(self, artifact: PaperArtifact) -> str | None:
+        doi = normalize_doi(artifact.doi)
+        if doi:
+            return f"doi:{doi}"
+        metadata = artifact.custom_metadata if isinstance(artifact.custom_metadata, Mapping) else {}
+        openalex_id = normalize_openalex_id(
+            metadata.get("openalex_id") or metadata.get("openalex")
+        )
+        if openalex_id:
+            return openalex_id
+        return None
+
+    def _fetch_work(self, work_id: str) -> Mapping[str, Any]:
+        encoded_id = quote(str(work_id).strip(), safe=":")
+        params = {}
+        if self.mailto:
+            params["mailto"] = self.mailto
+        if self.api_key:
+            params["api_key"] = self.api_key
+        response = self.session.get(
+            f"{self.base_url}/works/{encoded_id}",
+            params=params or None,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, Mapping):
+            raise ValueError("OpenAlex work response must be an object")
+        return payload
+
+
+def build_research_metadata_provider(config: Config) -> ResearchMetadataProvider | None:
+    provider_config = config.get("research_graph.metadata_api", {}) or {}
+    if not isinstance(provider_config, Mapping):
+        return None
+    if not provider_config.get("enabled", False):
+        return None
+    provider_name = str(provider_config.get("provider") or "openalex").strip().lower()
+    if provider_name != "openalex":
+        raise ValueError(f"Unsupported research metadata provider: {provider_name}")
+    return OpenAlexMetadataProvider(
+        timeout_seconds=float(provider_config.get("timeout_seconds", 10.0) or 10.0),
+        max_references=int(provider_config.get("max_references", 20) or 20),
+        mailto=_clean_optional_string(provider_config.get("mailto")),
+        api_key=_clean_optional_string(provider_config.get("api_key")),
+    )
+
+
+def paper_reference_from_openalex_work(
+    work: Mapping[str, Any],
+    *,
+    source_evidence: str,
+) -> PaperReference | None:
+    openalex_id = normalize_openalex_id(work.get("id"))
+    doi = normalize_doi(work.get("doi"))
+    title = str(work.get("display_name") or work.get("title") or "").strip()
+    pdf_url = _openalex_pdf_url(work)
+    authors = tuple(_openalex_author_names(work))
+    venue = _openalex_venue(work)
+    published_at = _clean_optional_string(
+        work.get("publication_date") or work.get("publication_year")
+    )
+    try:
+        paper_id = normalized_paper_id(
+            doi=doi,
+            openalex_id=openalex_id,
+            title=title,
+        )
+    except ValueError:
+        return None
+    return PaperReference(
+        paper_id=paper_id,
+        title=title or paper_id,
+        doi=doi,
+        pdf_url=pdf_url,
+        venue=venue,
+        published_at=published_at,
+        authors=authors,
+        source_evidence=source_evidence,
+        raw_payload=dict(work),
+    )
+
+
+def discover_pdf_paths_from_artifact(artifact: PaperArtifact) -> list[Path]:
+    metadata = artifact.custom_metadata if isinstance(artifact.custom_metadata, Mapping) else {}
+    candidates: list[Path] = []
+    for key in ("pdf_path", "local_pdf_path", "downloaded_pdf_path"):
+        value = metadata.get(key)
+        if value:
+            candidates.append(Path(str(value)))
+    for key, value in (artifact.output_paths or {}).items():
+        if "pdf" in str(key).lower() and value:
+            candidates.append(Path(str(value)))
+    return _dedupe_paths(candidates)
+
+
+def extract_references_from_pdf_paths(paths: Iterable[str | Path]) -> list[PaperReference]:
+    references: dict[str, PaperReference] = {}
+    for path_value in paths:
+        path = Path(path_value)
+        if not path.exists() or not path.is_file():
+            continue
+        text = extract_text_from_pdf(path)
+        for line in _reference_lines_from_text(text):
+            reference = _paper_reference_from_payload(line)
+            if not reference:
+                continue
+            raw_payload = {
+                **reference.raw_payload,
+                "pdf_path": str(path),
+                "source": "pdf_reference_extraction",
+            }
+            references[reference.paper_id] = PaperReference(
+                paper_id=reference.paper_id,
+                title=reference.title,
+                doi=reference.doi,
+                arxiv_id=reference.arxiv_id,
+                pdf_url=reference.pdf_url,
+                venue=reference.venue,
+                published_at=reference.published_at,
+                authors=reference.authors,
+                source_evidence=f"PDF references in {path.name}: {reference.source_evidence}",
+                raw_payload=raw_payload,
+            )
+    return list(references.values())
+
+
+def extract_text_from_pdf(path: Path) -> str:
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(path))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        pass
+
+    try:
+        from PyPDF2 import PdfReader
+
+        reader = PdfReader(str(path))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        pass
+
+    try:
+        from pdfminer.high_level import extract_text
+
+        return extract_text(str(path)) or ""
+    except Exception:
+        pass
+
+    try:
+        return path.read_bytes().decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def _dedupe_references(references: Iterable[PaperReference]) -> list[PaperReference]:
+    deduped: dict[str, PaperReference] = {}
+    for reference in references:
+        deduped[reference.paper_id] = reference
+    return list(deduped.values())
+
+
+def _dedupe_paths(paths: Iterable[Path]) -> list[Path]:
+    deduped: dict[Path, Path] = {}
+    for path in paths:
+        deduped[path] = path
+    return list(deduped.values())
+
+
+def _openalex_pdf_url(work: Mapping[str, Any]) -> str | None:
+    open_access = work.get("open_access")
+    if isinstance(open_access, Mapping):
+        url = _clean_optional_string(open_access.get("oa_url"))
+        if url:
+            return url
+    primary_location = work.get("primary_location")
+    if isinstance(primary_location, Mapping):
+        return _clean_optional_string(
+            primary_location.get("pdf_url") or primary_location.get("landing_page_url")
+        )
+    return None
+
+
+def _openalex_author_names(work: Mapping[str, Any]) -> list[str]:
+    names: list[str] = []
+    authorships = work.get("authorships")
+    if not isinstance(authorships, list):
+        return names
+    for authorship in authorships:
+        if not isinstance(authorship, Mapping):
+            continue
+        author = authorship.get("author")
+        if isinstance(author, Mapping):
+            name = _clean_optional_string(author.get("display_name"))
+            if name:
+                names.append(name)
+    return names
+
+
+def _openalex_venue(work: Mapping[str, Any]) -> str | None:
+    primary_location = work.get("primary_location")
+    if not isinstance(primary_location, Mapping):
+        return None
+    source = primary_location.get("source")
+    if not isinstance(source, Mapping):
+        return None
+    return _clean_optional_string(source.get("display_name"))
+
+
+def _clean_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

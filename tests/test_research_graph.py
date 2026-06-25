@@ -10,7 +10,7 @@ from core.artifacts import PaperArtifact
 from core.config import Config
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
-from core.research_graph import ResearchGraphService
+from core.research_graph import OpenAlexMetadataProvider, ResearchGraphService
 from core.wiki_updater import CompiledWikiUpdater
 
 
@@ -111,6 +111,96 @@ def test_research_graph_reports_ambiguous_candidates_separately(tmp_path: Path):
         "title:a-missing-paper-without-stable-identifier"
     )
     assert report["ambiguous"][0]["queueable"] is False
+
+
+def test_research_graph_extracts_reference_edges_from_local_pdf_text(tmp_path: Path):
+    db = MetadataDB(str(tmp_path / "meta.db"))
+    service = ResearchGraphService(db)
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_text(
+        "Body\n\nReferences\n[1] Example Paper. doi:10.5555/example\n",
+        encoding="utf-8",
+    )
+
+    result = service.record_paper_artifact(
+        _paper("2401.00008", title="PDF Source"),
+        pdf_paths=[pdf_path],
+        queue_missing=False,
+    )
+
+    assert result["references"] == 1
+    edges = db.list_research_paper_edges(edge_type="references")
+    assert edges[0].target_paper_id == "doi:10.5555/example"
+    assert "PDF references" in edges[0].source_evidence
+
+
+class FakeOpenAlexResponse:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class FakeOpenAlexSession:
+    def __init__(self):
+        self.calls = []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append((url, params, timeout))
+        if url.endswith("/works/doi:10.1234%2Fsource"):
+            return FakeOpenAlexResponse(
+                {
+                    "id": "https://openalex.org/Wsource",
+                    "referenced_works": ["https://openalex.org/Wref"],
+                }
+            )
+        if url.endswith("/works/https:%2F%2Fopenalex.org%2FWref"):
+            return FakeOpenAlexResponse(
+                {
+                    "id": "https://openalex.org/Wref",
+                    "display_name": "OpenAlex Referenced Work",
+                    "doi": "https://doi.org/10.5678/reference",
+                    "publication_date": "2024-01-01",
+                    "authorships": [
+                        {"author": {"display_name": "Grace Hopper"}},
+                    ],
+                    "primary_location": {
+                        "source": {"display_name": "Journal of Fixtures"},
+                        "pdf_url": "https://example.test/reference.pdf",
+                    },
+                }
+            )
+        raise AssertionError(f"unexpected OpenAlex URL: {url}")
+
+
+def test_research_graph_uses_openalex_metadata_provider_for_references(tmp_path: Path):
+    db = MetadataDB(str(tmp_path / "meta.db"))
+    session = FakeOpenAlexSession()
+    provider = OpenAlexMetadataProvider(
+        session=session,
+        timeout_seconds=3,
+        max_references=5,
+        mailto="ada@example.test",
+    )
+    service = ResearchGraphService(db, metadata_provider=provider)
+    paper = _paper("paper-with-doi", title="Source With DOI", arxiv_id="2401.00009")
+    paper.doi = "10.1234/source"
+
+    result = service.record_paper_artifact(paper, queue_missing=False)
+
+    assert result["references"] == 1
+    assert session.calls[0][1] == {"mailto": "ada@example.test"}
+    assert session.calls[0][2] == 3
+    context = service.paper_context("doi:10.1234/source")
+    assert context["references"][0]["paper_id"] == "doi:10.5678/reference"
+    assert context["references"][0]["title"] == "OpenAlex Referenced Work"
+    referenced_record = db.get_research_paper("doi:10.5678/reference")
+    assert referenced_record is not None
+    assert referenced_record.venue == "Journal of Fixtures"
 
 
 def test_paper_wiki_page_includes_research_context(tmp_path: Path):
