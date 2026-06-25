@@ -2295,6 +2295,7 @@ async def background_processor():
                 PROCESSING_QUEUE.task_done()
             except ValueError:
                 pass  # task_done called too many times
+            await asyncio.sleep(0.1)
 
     logger.info("Background processor stopped")
 
@@ -2302,8 +2303,9 @@ async def background_processor():
 @app.on_event("startup")
 async def startup_event():
     """Start background processor on startup"""
-    global _shutdown_event, _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task
+    global PROCESSING_QUEUE, _shutdown_event, _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task
     _shutdown_event = asyncio.Event()
+    PROCESSING_QUEUE = asyncio.Queue()
     ensure_wiki_scaffold(config)
     _background_task = asyncio.create_task(background_processor())
     _ingestion_task = asyncio.create_task(ingestion_worker())
