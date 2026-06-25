@@ -127,15 +127,19 @@ class ConnectorRegistry:
     def __init__(self, manifests: Iterable[ConnectorManifest]):
         self._manifests = tuple(manifests)
         self._by_name = {manifest.name: manifest for manifest in self._manifests}
+        self._by_source_name: dict[str, ConnectorManifest] = {}
+        for manifest in self._manifests:
+            for source_name in manifest.source_names:
+                self._by_source_name.setdefault(source_name, manifest)
 
     def list(self) -> list[ConnectorManifest]:
         return list(self._manifests)
 
     def get(self, name: str) -> ConnectorManifest:
-        try:
-            return self._by_name[name]
-        except KeyError as exc:
-            raise KeyError(f"Unknown connector: {name}") from exc
+        manifest = self._by_name.get(name) or self._by_source_name.get(name)
+        if manifest is None:
+            raise KeyError(f"Unknown connector: {name}")
+        return manifest
 
     def to_dict(self, *, config: ConfigLike | None = None) -> dict[str, Any]:
         return {
@@ -286,6 +290,37 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "entrypoint": "collectors.youtube_connector:YouTubeConnector",
         "cli_command": "connectors run youtube",
         "config_namespace": "sources.youtube",
+        "default_enabled": True,
+    },
+    {
+        "name": "omi",
+        "source_name": "omi",
+        "source_aliases": ["personal_transcripts", "personal_transcript"],
+        "display_name": "Omi / Personal Transcripts",
+        "description": "Collect Omi-style transcript exports while preserving raw exports and speaker/session/device metadata.",
+        "artifact_types": ["transcript"],
+        "capabilities": [
+            "transcripts",
+            "personal_data",
+            "speaker_metadata",
+            "session_metadata",
+            "queue",
+        ],
+        "config_keys": [
+            "sources.omi.enabled",
+            "sources.omi.export_paths",
+            "sources.omi.export_dirs",
+            "sources.omi.file_patterns",
+            "sources.omi.source_name",
+            "sources.omi.device_id",
+            "sources.omi.speaker",
+            "sources.omi.language",
+        ],
+        "auth": [],
+        "queue_capability": True,
+        "entrypoint": "collectors.personal_transcript_connector:PersonalTranscriptConnector",
+        "cli_command": "connectors run omi",
+        "config_namespace": "sources.omi",
         "default_enabled": True,
     },
 )

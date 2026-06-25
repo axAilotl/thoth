@@ -19,37 +19,40 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
     registry = load_connector_registry(config, project_root=tmp_path)
     names = [manifest.name for manifest in registry.list()]
 
-    assert names[:6] == [
+    assert names[:7] == [
         "x_api",
         "arxiv",
         "github",
         "huggingface",
         "web_clipper",
         "youtube",
+        "omi",
     ]
     assert registry.get("arxiv").artifact_types == ("paper",)
     assert registry.get("github").queue_capability is True
     assert registry.get("x_api").is_enabled(config) is True
     assert registry.get("web_clipper").is_enabled(config) is False
+    assert registry.get("omi").artifact_types == ("transcript",)
+    assert registry.get("personal_transcripts").name == "omi"
 
 
 def test_plugin_connector_manifest_is_loaded_after_builtins(tmp_path: Path):
-    plugin_dir = tmp_path / "plugins" / "omi"
+    plugin_dir = tmp_path / "plugins" / "meeting_notes"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "connector.json").write_text(
         json.dumps(
             {
-                "name": "omi",
-                "source_name": "omi",
-                "display_name": "Omi Transcript Export",
+                "name": "meeting_notes",
+                "source_name": "meeting_notes",
+                "display_name": "Meeting Notes Export",
                 "artifact_types": ["transcript"],
                 "capabilities": ["transcripts", "queue"],
-                "config_keys": ["sources.omi.export_dir"],
+                "config_keys": ["sources.meeting_notes.export_dir"],
                 "auth": [],
                 "queue_capability": True,
-                "entrypoint": "collectors.personal.omi:OmiConnector",
-                "cli_command": "connectors run omi",
-                "config_namespace": "sources.omi",
+                "entrypoint": "collectors.personal.meeting_notes:MeetingNotesConnector",
+                "cli_command": "connectors run meeting_notes",
+                "config_namespace": "sources.meeting_notes",
             }
         ),
         encoding="utf-8",
@@ -58,10 +61,10 @@ def test_plugin_connector_manifest_is_loaded_after_builtins(tmp_path: Path):
     config.data = {"connectors": {"plugin_dirs": [str(tmp_path / "plugins")]}}
 
     registry = load_connector_registry(config, project_root=tmp_path)
-    manifest = registry.get("omi")
+    manifest = registry.get("meeting_notes")
 
-    assert [item.name for item in registry.list()][-1] == "omi"
-    assert manifest.source_names == ("omi",)
+    assert [item.name for item in registry.list()][-1] == "meeting_notes"
+    assert manifest.source_names == ("meeting_notes",)
     assert manifest.origin == str(plugin_dir / "connector.json")
 
 

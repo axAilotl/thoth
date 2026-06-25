@@ -1705,6 +1705,13 @@ def cmd_connectors(args):
             "urls": getattr(args, "url", None),
             "playlist_urls": getattr(args, "playlist_url", None),
             "export_paths": getattr(args, "export_path", None),
+            "export_dirs": getattr(args, "export_dir", None),
+            "file_patterns": getattr(args, "file_pattern", None),
+            "source_name": getattr(args, "source_name", None),
+            "device_id": getattr(args, "device_id", None),
+            "speaker": getattr(args, "speaker", None),
+            "session_id": getattr(args, "session_id", None),
+            "language": getattr(args, "language", None),
             "archive_video": getattr(args, "archive_video", None),
             "no_resume": getattr(args, "no_resume", False),
         }
@@ -2655,7 +2662,49 @@ Examples:
         "--export-path",
         action="append",
         default=None,
-        help="Local YouTube watch-later/history export file; repeat for multiple files",
+        help="Local export file; repeat for multiple files",
+    )
+    connectors_run_parser.add_argument(
+        "--export-dir",
+        action="append",
+        default=None,
+        help="Local export directory; repeat for multiple directories",
+    )
+    connectors_run_parser.add_argument(
+        "--file-pattern",
+        action="append",
+        default=None,
+        help="File glob for directory imports; repeat for multiple patterns",
+    )
+    connectors_run_parser.add_argument(
+        "--source-name",
+        type=str,
+        default=None,
+        help="Override source name for personal transcript imports",
+    )
+    connectors_run_parser.add_argument(
+        "--device-id",
+        type=str,
+        default=None,
+        help="Default device id for personal transcript imports",
+    )
+    connectors_run_parser.add_argument(
+        "--speaker",
+        type=str,
+        default=None,
+        help="Default speaker for personal transcript imports",
+    )
+    connectors_run_parser.add_argument(
+        "--session-id",
+        type=str,
+        default=None,
+        help="Default session id for single-session transcript imports",
+    )
+    connectors_run_parser.add_argument(
+        "--language",
+        type=str,
+        default=None,
+        help="Default language code for personal transcript imports",
     )
     connectors_run_parser.add_argument(
         "--archive-video",

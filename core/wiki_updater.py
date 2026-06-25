@@ -534,6 +534,12 @@ class CompiledWikiUpdater:
             lines = []
             if artifact.title:
                 lines.append(f"- Title: {artifact.title}")
+            if artifact.session_id:
+                lines.append(f"- Session ID: `{artifact.session_id}`")
+            if artifact.device_id:
+                lines.append(f"- Device ID: `{artifact.device_id}`")
+            if artifact.speaker:
+                lines.append(f"- Speaker: {artifact.speaker}")
             if artifact.video_id:
                 lines.append(f"- Video ID: `{artifact.video_id}`")
             if artifact.source_url:

@@ -164,6 +164,8 @@ class AgentSurfaceService:
             "web_clipper": self._run_web_clipper_connector,
             "x_api": self._run_x_api_connector,
             "youtube": self._run_youtube_connector,
+            "omi": self._run_omi_connector,
+            "personal_transcripts": self._run_omi_connector,
         }
         handler = handlers.get(connector_name)
         if handler is None:
@@ -381,6 +383,39 @@ class AgentSurfaceService:
                     else None
                 ),
                 resume=not bool(options.get("no_resume", False)),
+            )
+        )
+        return result.to_dict()
+
+    def _run_omi_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        from collectors.personal_transcript_connector import PersonalTranscriptConnector
+
+        connector = PersonalTranscriptConnector(self.config, layout=self.layout, db=self.db)
+        configured = self.config.get("sources.omi", {}) or {}
+        export_paths = _string_list(
+            options.get("export_paths") or options.get("export_path")
+        ) or _string_list(configured.get("export_paths") or configured.get("export_path"))
+        export_dirs = _string_list(
+            options.get("export_dirs") or options.get("export_dir")
+        ) or _string_list(configured.get("export_dirs") or configured.get("export_dir"))
+        if not export_paths and not export_dirs:
+            raise AgentSurfaceError(
+                "omi connector requires export_paths or export_dirs"
+            )
+        result = _run_async(
+            connector.collect(
+                export_paths=export_paths,
+                export_dirs=export_dirs,
+                file_patterns=_string_list(
+                    options.get("file_patterns") or options.get("file_pattern")
+                )
+                or _string_list(configured.get("file_patterns")),
+                source_name=options.get("source_name") or configured.get("source_name"),
+                device_id=options.get("device_id") or configured.get("device_id"),
+                speaker=options.get("speaker") or configured.get("speaker"),
+                session_id=options.get("session_id") or configured.get("session_id"),
+                language=options.get("language") or configured.get("language"),
+                limit=_optional_int(options.get("limit")),
             )
         )
         return result.to_dict()
