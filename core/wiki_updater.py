@@ -33,6 +33,10 @@ from .prompt_security import (
     prompt_security_requires_review,
 )
 from .research_graph import ResearchGraphService
+from .research_wiki_context import (
+    research_citation_lines,
+    research_context_lines,
+)
 from .semantic_memory import SemanticMemoryStore
 from .semantic_wiki_compiler import SemanticMemoryWikiCompiler
 from .wiki_change_provenance import (
@@ -835,6 +839,7 @@ class CompiledWikiUpdater:
         *,
         dispatch_details: dict[str, Any] | None,
     ) -> str:
+        research_context = self._research_context_for_artifact(artifact)
         frontmatter = self.contract.frontmatter_for(spec)
         lines = [
             _render_frontmatter(frontmatter).rstrip(),
@@ -871,7 +876,10 @@ class CompiledWikiUpdater:
             lines.extend(detail_lines)
             lines.append("")
 
-        research_context_lines = self._research_context_lines(artifact)
+        research_context_lines = self._research_context_lines(
+            artifact,
+            research_context=research_context,
+        )
         if research_context_lines:
             lines.extend(["## Research Context", ""])
             lines.extend(research_context_lines)
@@ -891,7 +899,10 @@ class CompiledWikiUpdater:
                 lines.append(f"- [{source_path}]({relative_link})")
             lines.append("")
 
-        citation_lines = self._citation_lines(spec)
+        citation_lines = self._citation_lines(
+            spec,
+            research_context=research_context,
+        )
         if citation_lines:
             lines.extend(["# Citations", ""])
             lines.extend(citation_lines)
@@ -899,7 +910,12 @@ class CompiledWikiUpdater:
 
         return "\n".join(lines) + "\n"
 
-    def _citation_lines(self, spec: WikiPageSpec) -> list[str]:
+    def _citation_lines(
+        self,
+        spec: WikiPageSpec,
+        *,
+        research_context: Mapping[str, Any] | None = None,
+    ) -> list[str]:
         citations: list[str] = []
         if spec.resource:
             citations.append(
@@ -909,6 +925,12 @@ class CompiledWikiUpdater:
             absolute_source = self.layout.vault_root / source_path
             relative_link = os.path.relpath(absolute_source, self.contract.pages_dir)
             citations.append(f"[{len(citations) + 1}] [{source_path}]({relative_link})")
+        citations.extend(
+            research_citation_lines(
+                research_context,
+                start_index=len(citations) + 1,
+            )
+        )
         return citations
 
     def _artifact_detail_lines(self, artifact: KnowledgeArtifact) -> list[str]:
@@ -1003,49 +1025,24 @@ class CompiledWikiUpdater:
 
         return []
 
-    def _research_context_lines(self, artifact: KnowledgeArtifact) -> list[str]:
+    def _research_context_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+    ) -> dict[str, Any] | None:
+        if not isinstance(artifact, PaperArtifact):
+            return None
+        return ResearchGraphService(
+            self.db,
+            config=self.config,
+            layout=self.layout,
+        ).paper_context(artifact)
+
+    def _research_context_lines(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        research_context: Mapping[str, Any] | None = None,
+    ) -> list[str]:
         if not isinstance(artifact, PaperArtifact):
             return []
-
-        context = ResearchGraphService(self.db).paper_context(artifact)
-
-        referenced_by = context.get("referenced_by") or []
-        references = context.get("references") or []
-        co_referenced = context.get("co_referenced") or []
-        lines: list[str] = []
-
-        if referenced_by:
-            lines.append(
-                f"- Why it matters: `{len(referenced_by)}` local paper(s) reference this work."
-            )
-            lines.append("- Local papers referencing this:")
-            for item in referenced_by[:10]:
-                lines.append(
-                    f"  - `{item['paper_id']}` - {item['title']}"
-                )
-        elif references:
-            missing_count = sum(1 for item in references if not item.get("collected"))
-            local_count = len(references) - missing_count
-            lines.append(
-                "- Why it matters: this paper adds local context through "
-                f"`{local_count}` collected reference(s) and `{missing_count}` missing candidate(s)."
-            )
-        else:
-            lines.append(
-                "- Why it matters: this paper is a collected research source with no graph references discovered yet."
-            )
-
-        if references:
-            lines.append("- References discovered from this paper:")
-            for item in references[:15]:
-                status = "local" if item.get("collected") else "missing"
-                lines.append(
-                    f"  - `{item['paper_id']}` ({status}) - {item['title']}"
-                )
-
-        if co_referenced:
-            lines.append("- Co-referenced local papers:")
-            for item in co_referenced[:10]:
-                lines.append(f"  - `{item['paper_id']}` - {item['title']}")
-
-        return lines
+        return research_context_lines(research_context or {})

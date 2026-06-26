@@ -34,20 +34,27 @@ def _paper(
     title: str,
     references=None,
     arxiv_id: str | None = None,
+    custom_metadata: dict | None = None,
+    normalized_metadata: dict | None = None,
 ) -> PaperArtifact:
-    return PaperArtifact(
-        id=paper_id,
-        source_type="arxiv",
-        raw_content=json.dumps({"id": paper_id, "references": references or []}),
-        title=title,
-        authors=["Ada Lovelace"],
-        abstract=f"Abstract for {title}",
-        arxiv_id=arxiv_id or paper_id,
-        pdf_url=f"https://arxiv.org/pdf/{arxiv_id or paper_id}.pdf",
-        references=references or [],
-        source_provider="arxiv",
-        ingested_at="2026-04-04T00:00:00",
-    )
+    payload = {
+        "id": paper_id,
+        "source_type": "arxiv",
+        "raw_content": json.dumps({"id": paper_id, "references": references or []}),
+        "title": title,
+        "authors": ["Ada Lovelace"],
+        "abstract": f"Abstract for {title}",
+        "arxiv_id": arxiv_id or paper_id,
+        "pdf_url": f"https://arxiv.org/pdf/{arxiv_id or paper_id}.pdf",
+        "references": references or [],
+        "source_provider": "arxiv",
+        "ingested_at": "2026-04-04T00:00:00",
+    }
+    if custom_metadata is not None:
+        payload["custom_metadata"] = custom_metadata
+    if normalized_metadata is not None:
+        payload["normalized_metadata"] = normalized_metadata
+    return PaperArtifact(**payload)
 
 
 def test_research_graph_dedupes_edges_and_ranks_missing_candidates(tmp_path: Path):
@@ -203,6 +210,33 @@ def test_research_graph_uses_openalex_metadata_provider_for_references(tmp_path:
     assert referenced_record.venue == "Journal of Fixtures"
 
 
+def test_research_graph_context_includes_local_events_and_projects(tmp_path: Path):
+    db = MetadataDB(str(tmp_path / "meta.db"))
+    service = ResearchGraphService(db)
+    paper = _paper(
+        "2401.00010",
+        title="Project Linked Paper",
+        custom_metadata={"projects": [{"id": "thoth", "name": "Thoth"}]},
+        normalized_metadata={"capture_event_id": "event-research-project"},
+    )
+
+    service.record_paper_artifact(paper, queue_missing=False)
+
+    context = service.paper_context("arxiv:2401.00010")
+
+    assert context["paper"]["title"] == "Project Linked Paper"
+    assert context["local"]["events"] == [
+        {
+            "event_id": "event-research-project",
+            "source": "arxiv",
+            "timestamp": "2026-04-04T00:00:00",
+        }
+    ]
+    assert context["local"]["projects"] == [
+        {"id": "thoth", "label": "Thoth", "slug": "thoth"}
+    ]
+
+
 def test_paper_wiki_page_includes_research_context(tmp_path: Path):
     config = _config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)
@@ -210,7 +244,12 @@ def test_paper_wiki_page_includes_research_context(tmp_path: Path):
     db = MetadataDB(str(layout.database_path))
     service = ResearchGraphService(db)
 
-    target = _paper("2501.12345", title="Shared Missing Paper")
+    target = _paper(
+        "2501.12345",
+        title="Shared Missing Paper",
+        custom_metadata={"projects": [{"id": "thoth", "name": "Thoth"}]},
+        normalized_metadata={"capture_event_id": "event-research-shared"},
+    )
     source = _paper(
         "2401.00005",
         title="Local Paper",
@@ -230,8 +269,15 @@ def test_paper_wiki_page_includes_research_context(tmp_path: Path):
     content = result.page_path.read_text(encoding="utf-8")
 
     assert "## Research Context" in content
-    assert "`1` local paper(s) reference this work" in content
+    assert "`1` collected local paper(s) reference this work" in content
+    assert "active local research thread instead of only restating the abstract" in content
+    assert "Relationship to current projects" in content
+    assert "[Thoth](project-thoth.md)" in content
+    assert "Local capture events" in content
+    assert "`event-research-shared`" in content
     assert "Local Paper" in content
+    assert "[Local paper: Local Paper](paper-2401-00005.md)" in content
+    assert "[Capture event event-research-shared](#capture-event-event-research-shared)" in content
 
 
 def test_research_missing_papers_cli_smoke_returns_json():
