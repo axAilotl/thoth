@@ -8,6 +8,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from ..prompt_security import (
+    THOTH_REDACTION_METADATA_KEY,
+    THOTH_SECURITY_FINDINGS_KEY,
+    THOTH_SECURITY_SCANNED_LENGTH_KEY,
+    merge_prompt_security_metadata,
+    prompt_security_metadata_for_text,
+)
+
 
 def _clean_optional_string(value: Any) -> str | None:
     if value is None:
@@ -269,6 +277,16 @@ def _sequence_or_empty(value: Any) -> tuple[Any, ...]:
     return tuple(value) if isinstance(value, (list, tuple)) else ()
 
 
+def _has_security_metadata(value: Mapping[str, Any] | None) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and (
+            value.get(THOTH_SECURITY_FINDINGS_KEY)
+            or value.get(THOTH_SECURITY_SCANNED_LENGTH_KEY) is not None
+        )
+    )
+
+
 @dataclass
 class KnowledgeArtifact:
     """Base class for all ingestible knowledge entities."""
@@ -342,6 +360,7 @@ class KnowledgeArtifact:
         self.relationships = _coerce_relationships(self.relationships)
         if not self.normalized_metadata:
             self.normalized_metadata = self._default_normalized_metadata()
+        self._ensure_prompt_security_metadata()
 
         if self.provenance is None:
             self.provenance = ArtifactProvenance(
@@ -402,6 +421,21 @@ class KnowledgeArtifact:
         if self.importance_score is not None:
             data["importance_score"] = self.importance_score
         return data
+
+    def _ensure_prompt_security_metadata(self) -> None:
+        if _has_security_metadata(self.normalized_metadata):
+            return
+        source_label = f"{self.source_type}:{self.id}" if self.id else self.source_type
+        security_metadata = prompt_security_metadata_for_text(
+            self.raw_content,
+            source_label=source_label or "artifact",
+            scope="context",
+        )
+        if security_metadata:
+            self.normalized_metadata = merge_prompt_security_metadata(
+                self.normalized_metadata,
+                security_metadata,
+            )
 
     def apply_queue_context(
         self,
@@ -525,6 +559,9 @@ class KnowledgeArtifact:
             "derived_outputs": _sequence_or_empty(payload.get("derived_outputs")),
             "relationships": _sequence_or_empty(payload.get("relationships")),
         }
+        for key in (THOTH_SECURITY_FINDINGS_KEY, THOTH_REDACTION_METADATA_KEY):
+            if key in payload and key not in data["normalized_metadata"]:
+                data["normalized_metadata"][key] = payload[key]
 
         if "importance_score" in payload:
             data["importance_score"] = payload.get("importance_score")

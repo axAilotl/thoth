@@ -14,6 +14,13 @@ from dataclasses import dataclass
 
 from .config import config
 from .path_layout import build_path_layout
+from .prompt_security import (
+    THOTH_REDACTION_METADATA_KEY,
+    THOTH_SECURITY_FINDINGS_KEY,
+    THOTH_SECURITY_SCANNED_LENGTH_KEY,
+    merge_prompt_security_metadata,
+    prompt_security_metadata_for_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +38,65 @@ FILES_INDEX_ALLOWED_TYPES = (
     'translation',
 )
 FILES_INDEX_TYPE_CHECK = "', '".join(FILES_INDEX_ALLOWED_TYPES)
+
+
+def _payload_security_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_metadata = payload.get("normalized_metadata")
+    if not isinstance(normalized_metadata, dict):
+        return {}
+    return {
+        key: normalized_metadata[key]
+        for key in (THOTH_SECURITY_FINDINGS_KEY, THOTH_REDACTION_METADATA_KEY)
+        if normalized_metadata.get(key)
+    }
+
+
+def _payload_has_prompt_security_scan(payload: dict[str, Any]) -> bool:
+    normalized_metadata = payload.get("normalized_metadata")
+    return bool(
+        isinstance(normalized_metadata, dict)
+        and (
+            normalized_metadata.get(THOTH_SECURITY_FINDINGS_KEY)
+            or normalized_metadata.get(THOTH_SECURITY_SCANNED_LENGTH_KEY) is not None
+        )
+    )
+
+
+def _ingestion_payload_with_security_metadata(entry: "IngestionQueueEntry") -> str:
+    """Attach reviewable prompt-security metadata inside persisted queue JSON."""
+    try:
+        payload = json.loads(entry.payload_json)
+    except Exception:
+        logger.warning(
+            "Skipping prompt-security metadata for invalid ingestion payload %s",
+            entry.artifact_id,
+        )
+        return entry.payload_json
+    if not isinstance(payload, dict):
+        return entry.payload_json
+    if _payload_has_prompt_security_scan(payload):
+        return entry.payload_json
+
+    content = payload.get("raw_content")
+    if not isinstance(content, str):
+        content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    source_label = f"{entry.artifact_type}:{entry.source}:{entry.artifact_id}"
+    security_metadata = prompt_security_metadata_for_text(
+        content,
+        source_label=source_label,
+        scope="context",
+    )
+    if not security_metadata:
+        return entry.payload_json
+
+    normalized_metadata = payload.get("normalized_metadata")
+    if not isinstance(normalized_metadata, dict):
+        normalized_metadata = {}
+    payload["normalized_metadata"] = merge_prompt_security_metadata(
+        normalized_metadata,
+        security_metadata,
+    )
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
 @dataclass
@@ -1745,6 +1811,7 @@ class MetadataDB:
     def upsert_ingestion_entry(self, entry: IngestionQueueEntry) -> bool:
         """Insert or update an ingestion queue entry."""
         try:
+            payload_json = _ingestion_payload_with_security_metadata(entry)
             with self._get_connection() as conn:
                 conn.execute(
                     """
@@ -1772,7 +1839,7 @@ class MetadataDB:
                         entry.source,
                         entry.priority,
                         entry.status,
-                        entry.payload_json,
+                        payload_json,
                         entry.capabilities_json,
                         entry.attempts,
                         entry.last_error,
