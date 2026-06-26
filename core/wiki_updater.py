@@ -31,6 +31,8 @@ from .prompt_security import (
     prompt_security_requires_review,
 )
 from .research_graph import ResearchGraphService
+from .semantic_memory import SemanticMemoryStore
+from .semantic_wiki_compiler import SemanticMemoryWikiCompiler
 from .wiki_change_provenance import (
     change_provenance,
     influence_with_input_hashes,
@@ -376,6 +378,37 @@ class CompiledWikiUpdater:
                 self.scaffold,
                 "Compiled capture event wiki pages: "
                 + ", ".join(f"`{result.slug}`" for result in results)
+                + ".",
+            )
+        return results
+
+    def update_from_semantic_memory(
+        self,
+        store: SemanticMemoryStore | None = None,
+    ) -> tuple[WikiUpdateResult, ...]:
+        """Compile confirmed/promoted semantic memory facts into wiki pages."""
+        memory_store = store or SemanticMemoryStore(self.db)
+        compiled = SemanticMemoryWikiCompiler(
+            layout=self.layout,
+            contract=self.contract,
+        ).compile(memory_store)
+        results = tuple(
+            WikiUpdateResult(
+                slug=result.slug,
+                page_path=result.page_path,
+                source_paths=result.source_paths,
+                action=result.action,
+            )
+            for result in compiled
+        )
+        self.refresh_index()
+        if results:
+            append_wiki_log_entry(
+                self.scaffold,
+                "Compiled semantic memory wiki pages: "
+                + ", ".join(
+                    f"`{result.slug}` ({result.action})" for result in results
+                )
                 + ".",
             )
         return results

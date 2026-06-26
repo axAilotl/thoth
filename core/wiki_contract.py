@@ -153,6 +153,9 @@ class WikiPageSpec:
     capture_page_key: str | None = None
     capture_event_count: int | None = None
     capture_audit: Mapping[str, Any] | None = None
+    semantic_page_type: str | None = None
+    semantic_candidate_ids: Tuple[str, ...] = field(default_factory=tuple)
+    semantic_evidence_ids: Tuple[str, ...] = field(default_factory=tuple)
     security_findings: Tuple[Any, ...] = field(default_factory=tuple)
     security_policy: Mapping[str, Any] | None = None
     input_hash: str | None = None
@@ -172,6 +175,16 @@ class WikiPageSpec:
         object.__setattr__(self, "event_ids", _stable_unique_strings(self.event_ids))
         object.__setattr__(self, "source_ids", _stable_unique_strings(self.source_ids))
         object.__setattr__(self, "session_ids", _stable_unique_strings(self.session_ids))
+        object.__setattr__(
+            self,
+            "semantic_candidate_ids",
+            _stable_unique_strings(self.semantic_candidate_ids),
+        )
+        object.__setattr__(
+            self,
+            "semantic_evidence_ids",
+            _stable_unique_strings(self.semantic_evidence_ids),
+        )
         object.__setattr__(
             self,
             "security_findings",
@@ -222,6 +235,10 @@ class WikiPageSpec:
             "thoth_capture_audit": _stable_metadata_value(self.capture_audit)
             if self.capture_audit
             else None,
+            "thoth_semantic_memory_page": True if self.semantic_page_type else None,
+            "thoth_semantic_page_type": self.semantic_page_type,
+            "thoth_semantic_candidate_ids": list(self.semantic_candidate_ids) or None,
+            "thoth_semantic_evidence_ids": list(self.semantic_evidence_ids) or None,
             "thoth_security_findings": list(self.security_findings) or None,
             "thoth_security_policy": _stable_metadata_value(self.security_policy)
             if self.security_policy

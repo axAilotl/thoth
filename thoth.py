@@ -2230,6 +2230,29 @@ async def cmd_wiki(args):
         lint_args = argparse.Namespace(stale_after_days=args.stale_after_days)
         await cmd_wiki_lint(lint_args)
         return
+    if args.wiki_action == "compile-semantic":
+        layout = build_path_layout(config)
+        updater = CompiledWikiUpdater(config, layout=layout)
+        results = updater.update_from_semantic_memory()
+        payload = {
+            "pages": [
+                {
+                    "slug": result.slug,
+                    "page_path": str(result.page_path),
+                    "source_paths": list(result.source_paths),
+                    "action": result.action,
+                }
+                for result in results
+            ],
+            "total": len(results),
+        }
+        if getattr(args, "json", False):
+            _print_json(payload)
+            return
+        print(f"Semantic memory wiki pages: {payload['total']}")
+        for page in payload["pages"]:
+            print(f"- {page['slug']} {page['action']} {page['page_path']}")
+        return
     raise ValueError("Unknown wiki action")
 
 
@@ -3156,6 +3179,14 @@ Examples:
     )
     wiki_lint_group.add_argument("--stale-after-days", type=int, default=30)
     wiki_lint_group.add_argument("--json", action="store_true")
+    wiki_compile_semantic_group = wiki_subparsers.add_parser(
+        "compile-semantic",
+        help="Compile confirmed or promoted semantic memory facts into wiki pages",
+        description=(
+            "Compile confirmed or promoted semantic memory facts into wiki pages"
+        ),
+    )
+    wiki_compile_semantic_group.add_argument("--json", action="store_true")
 
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a tweet and all its artifacts")

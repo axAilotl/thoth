@@ -23,6 +23,11 @@ from core.prompt_security import (
     THOTH_SECURITY_PATTERN_IDS_KEY,
     THOTH_SECURITY_POLICY_KEY,
 )
+from core.semantic_memory import (
+    SemanticMemoryCandidate,
+    SemanticMemoryEvidence,
+    SemanticMemoryStore,
+)
 from core.wiki_io import read_document
 from core.wiki_lint import WikiLintRunner
 from core.wiki_updater import CompiledWikiUpdater
@@ -639,3 +644,199 @@ def test_wiki_updater_requires_audit_reason_for_restricted_capture_events(
         "reason": "operator reviewed private note",
     }
     assert "event-private" in document.body
+
+
+def test_wiki_updater_compiles_only_confirmed_semantic_memory_with_evidence(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    layout.ensure_directories()
+    notes_dir = layout.vault_root / "notes"
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("ada.md", "thoth.md", "semantic.md", "rejected.md", "quarantined.md"):
+        (notes_dir / name).write_text(f"# {name}\n", encoding="utf-8")
+
+    store = SemanticMemoryStore(MetadataDB(str(layout.database_path)))
+    store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-person-confirmed",
+            candidate_type="preference",
+            status="confirmed",
+            text="Ada prefers morning writing blocks.",
+            subject="Ada",
+            predicate="prefers",
+            object_value="morning writing blocks",
+            entity_id="person:ada",
+            entity_type="person",
+            entity_name="Ada",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-person-confirmed",
+                evidence_id="evidence-person-confirmed",
+                source_path="notes/ada.md",
+                evidence_text="Ada asked to reserve mornings for writing.",
+                source_timestamp="2026-04-04T10:00:00Z",
+            ),
+        ),
+    )
+    store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-project-promoted",
+            candidate_type="project",
+            status="promoted",
+            text="Project Thoth uses evidence-gated semantic promotion.",
+            entity_id="project:thoth",
+            entity_type="project",
+            entity_name="Thoth",
+            metadata={"semantic_memory_trusted_structured": True},
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-project-promoted",
+                evidence_id="evidence-project-promoted",
+                artifact_id="project-manifest-thoth",
+                artifact_type="project_manifest",
+                source_path="notes/thoth.md",
+                evidence_text="The project manifest records semantic promotion.",
+            ),
+        ),
+    )
+    store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-topic-confirmed",
+            candidate_type="topic",
+            status="confirmed",
+            text="Semantic memory facts require source evidence.",
+            entity_type="topic",
+            entity_name="Semantic Memory",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-topic-confirmed",
+                evidence_id="evidence-topic-confirmed",
+                source_path="notes/semantic.md",
+                capture_event_id="event-semantic",
+                evidence_text="The review note requires citations.",
+            ),
+        ),
+    )
+    rejected = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-rejected",
+            candidate_type="preference",
+            text="Ada prefers noisy meetings.",
+            entity_id="person:ada",
+            entity_type="person",
+            entity_name="Ada",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-rejected",
+                evidence_id="evidence-rejected",
+                source_path="notes/rejected.md",
+                evidence_text="Rejected candidates must not compile.",
+            ),
+        ),
+    )
+    store.transition_candidate(rejected.candidate_id, "rejected")
+    store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-quarantined",
+            candidate_type="project",
+            status="promoted",
+            text="Quarantined semantic memory must not compile.",
+            entity_id="project:thoth",
+            entity_type="project",
+            entity_name="Thoth",
+            metadata={
+                "semantic_memory_trusted_structured": True,
+                THOTH_SECURITY_POLICY_KEY: {
+                    "status": "needs_review",
+                    "reason": "fixture quarantine",
+                },
+            },
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-quarantined",
+                evidence_id="evidence-quarantined",
+                artifact_type="project_manifest",
+                source_path="notes/quarantined.md",
+                evidence_text="Quarantined evidence must not appear.",
+            ),
+        ),
+    )
+    store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-no-evidence",
+            candidate_type="topic",
+            status="confirmed",
+            text="Confirmed facts without evidence are not compiled.",
+            entity_type="topic",
+            entity_name="Semantic Memory",
+        )
+    )
+
+    updater = CompiledWikiUpdater(config, layout=layout)
+    results = updater.update_from_semantic_memory(store)
+    slugs = {result.slug for result in results if result.action != "deleted"}
+
+    assert slugs == {
+        "person-ada",
+        "project-thoth",
+        "topic-semantic-memory",
+        "semantic-memory-digest",
+    }
+
+    person_document = read_document(layout.wiki_root / "pages" / "person-ada.md")
+    assert person_document.frontmatter["type"] == "Entity"
+    assert person_document.frontmatter["thoth_semantic_page_type"] == "person"
+    assert person_document.frontmatter["thoth_semantic_candidate_ids"] == [
+        "candidate-person-confirmed"
+    ]
+    assert "Ada prefers morning writing blocks." in person_document.body
+    assert "Ada asked to reserve mornings for writing." in person_document.body
+    assert "# Citations" in person_document.body
+    assert "[1] [notes/ada.md](#evidence-evidence-person-confirmed)" in (
+        person_document.body
+    )
+    assert "candidate-rejected" not in person_document.body
+    assert "noisy meetings" not in person_document.body
+
+    digest_document = read_document(
+        layout.wiki_root / "pages" / "semantic-memory-digest.md"
+    )
+    assert digest_document.frontmatter["type"] == "Topic"
+    assert digest_document.frontmatter["thoth_semantic_page_type"] == "digest"
+    assert set(digest_document.frontmatter["thoth_semantic_candidate_ids"]) == {
+        "candidate-person-confirmed",
+        "candidate-project-promoted",
+        "candidate-topic-confirmed",
+    }
+    assert "Project Thoth uses evidence-gated semantic promotion." in (
+        digest_document.body
+    )
+    assert "Semantic memory facts require source evidence." in digest_document.body
+    assert "Quarantined semantic memory must not compile." not in digest_document.body
+    assert "Confirmed facts without evidence are not compiled." not in (
+        digest_document.body
+    )
+
+    report = WikiLintRunner(config, layout=layout).lint(stale_after_days=999999)
+    assert not report.has_errors, [issue.code for issue in report.issues]
+
+    store.transition_candidate("candidate-person-confirmed", "rejected")
+    prune_results = updater.update_from_semantic_memory(store)
+
+    assert any(
+        result.slug == "person-ada" and result.action == "deleted"
+        for result in prune_results
+    )
+    assert not (layout.wiki_root / "pages" / "person-ada.md").exists()
+    updated_digest = read_document(
+        layout.wiki_root / "pages" / "semantic-memory-digest.md"
+    )
+    assert "Ada prefers morning writing blocks." not in updated_digest.body

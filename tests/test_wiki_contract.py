@@ -55,6 +55,9 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
         capture_page_key="2026-04-04",
         capture_event_count=2,
         capture_audit={"reason": "operator review", "include_restricted_events": True},
+        semantic_page_type="person",
+        semantic_candidate_ids=("candidate-b", "candidate-a", "candidate-b"),
+        semantic_evidence_ids=("evidence-b", "evidence-a", "evidence-b"),
         security_findings=(
             {"pattern_id": "prompt_override", "scope": "strict"},
             {"scope": "context", "pattern_id": "secret"},
@@ -88,6 +91,16 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
         "include_restricted_events": True,
         "reason": "operator review",
     }
+    assert frontmatter["thoth_semantic_memory_page"] is True
+    assert frontmatter["thoth_semantic_page_type"] == "person"
+    assert frontmatter["thoth_semantic_candidate_ids"] == [
+        "candidate-a",
+        "candidate-b",
+    ]
+    assert frontmatter["thoth_semantic_evidence_ids"] == [
+        "evidence-a",
+        "evidence-b",
+    ]
     assert frontmatter["thoth_security_findings"] == [
         {"pattern_id": "prompt_override", "scope": "strict"},
         {"pattern_id": "secret", "scope": "context"},

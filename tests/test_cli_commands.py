@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 import sys
 import json
@@ -77,6 +78,60 @@ def test_okf_lint_command_is_wired():
 
     assert result.returncode == 0
     assert "Validate the compiled wiki" in result.stdout
+
+
+def test_wiki_compile_semantic_command_is_wired():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, "thoth.py", "wiki", "compile-semantic", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Compile confirmed or promoted semantic memory facts" in result.stdout
+
+
+def test_wiki_compile_semantic_cli_reports_pages(monkeypatch, capsys):
+    import thoth
+
+    class FakeCompiledWikiUpdater:
+        def __init__(self, runtime_config, *, layout):
+            self.runtime_config = runtime_config
+            self.layout = layout
+
+        def update_from_semantic_memory(self):
+            return (
+                SimpleNamespace(
+                    slug="person-ada",
+                    page_path=Path("wiki/pages/person-ada.md"),
+                    source_paths=("notes/ada.md",),
+                    action="created",
+                ),
+            )
+
+    monkeypatch.setattr(thoth, "build_path_layout", lambda runtime_config: object())
+    monkeypatch.setattr(thoth, "CompiledWikiUpdater", FakeCompiledWikiUpdater)
+
+    asyncio.run(
+        thoth.cmd_wiki(
+            SimpleNamespace(
+                wiki_action="compile-semantic",
+                json=True,
+            )
+        )
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["total"] == 1
+    assert payload["pages"][0] == {
+        "slug": "person-ada",
+        "page_path": "wiki/pages/person-ada.md",
+        "source_paths": ["notes/ada.md"],
+        "action": "created",
+    }
 
 
 def test_connectors_list_command_reads_registry_metadata():

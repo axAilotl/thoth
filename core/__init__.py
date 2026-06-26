@@ -154,6 +154,13 @@ from .semantic_memory_review import (
     SemanticMemoryReviewNotFoundError,
     SemanticMemoryReviewService,
 )
+from .semantic_wiki_compiler import (
+    SEMANTIC_WIKI_ALLOWED_STATUSES,
+    SEMANTIC_WIKI_PAGE_MARKER,
+    SEMANTIC_WIKI_PAGE_TYPE_KEY,
+    SemanticMemoryWikiCompiler,
+    SemanticWikiPageResult,
+)
 from .hybrid_search import (
     HybridSearchFilters,
     HybridSearchHit,
@@ -315,6 +322,11 @@ __all__ = [
     'SemanticMemoryReviewError',
     'SemanticMemoryReviewNotFoundError',
     'SemanticMemoryReviewService',
+    'SEMANTIC_WIKI_ALLOWED_STATUSES',
+    'SEMANTIC_WIKI_PAGE_MARKER',
+    'SEMANTIC_WIKI_PAGE_TYPE_KEY',
+    'SemanticMemoryWikiCompiler',
+    'SemanticWikiPageResult',
     'HybridSearchFilters',
     'HybridSearchHit',
     'HybridSearchResult',

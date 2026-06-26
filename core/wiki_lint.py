@@ -238,6 +238,8 @@ class _WikiPageRecord:
     source_type: str | None
     event_ids: tuple[str, ...]
     capture_page_type: str | None
+    semantic_page_type: str | None
+    semantic_candidate_ids: tuple[str, ...]
     input_hash: str | None
     input_manifest: tuple[dict[str, Any], ...]
     change_provenance: dict[str, Any] | None
@@ -376,7 +378,9 @@ class WikiLintRunner:
             if len(claimants) <= 1:
                 continue
             claimants = [
-                claim for claim in claimants if not claim.capture_page_type
+                claim
+                for claim in claimants
+                if not claim.capture_page_type and not claim.semantic_page_type
             ]
             if len(claimants) <= 1:
                 continue
@@ -461,6 +465,8 @@ class WikiLintRunner:
             "thoth_event_ids",
             "thoth_source_ids",
             "thoth_session_ids",
+            "thoth_semantic_candidate_ids",
+            "thoth_semantic_evidence_ids",
             "thoth_input_manifest",
             "input_manifest",
         ):
@@ -634,7 +640,7 @@ class WikiLintRunner:
                         )
                     )
             elif not record.source_paths and not _is_non_empty_string(record.resource):
-                if not record.event_ids:
+                if not record.event_ids and not record.semantic_candidate_ids:
                     issues.append(
                         WikiLintIssue(
                             code="missing-provenance",
@@ -908,6 +914,16 @@ class WikiLintRunner:
                         if "thoth_capture_page_type" in frontmatter
                         and frontmatter["thoth_capture_page_type"] is not None
                         else None
+                    ),
+                    semantic_page_type=(
+                        str(frontmatter["thoth_semantic_page_type"]).strip()
+                        if "thoth_semantic_page_type" in frontmatter
+                        and frontmatter["thoth_semantic_page_type"] is not None
+                        else None
+                    ),
+                    semantic_candidate_ids=_frontmatter_sequence(
+                        frontmatter,
+                        "thoth_semantic_candidate_ids",
                     ),
                     input_hash=(
                         str(frontmatter["thoth_input_hash"]).strip()
