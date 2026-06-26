@@ -187,6 +187,7 @@ class PiSkillConnector:
             self.config,
             layout=self.layout,
             db=self.db,
+            collector_name="pi_skill_connector",
         ).collect(
             output_paths=[output_path],
             source_name=skill.source_name,
