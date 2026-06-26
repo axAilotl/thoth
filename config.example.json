@@ -85,7 +85,7 @@
         "enabled": true,
         "type": "pi",
         "command": "pi",
-        "install_if_missing": true,
+        "install_if_missing": false,
         "install_command": [
           "npm",
           "install",
@@ -201,6 +201,28 @@
       },
       "translation": {
         "system": "You translate markdown source documents into English. Preserve markdown structure, headings, lists, tables, links, code blocks, and inline formatting. Return only valid JSON with keys \"title\" and \"body\". \"title\" must be the translated title. \"body\" must be the translated markdown body without a top-level title heading. Do not include code fences, commentary, or extra keys."
+      }
+    }
+  },
+  "connectors": {
+    "plugin_dirs": [],
+    "skill_dirs": [],
+    "allowlist": [
+      "x_api",
+      "arxiv",
+      "github",
+      "huggingface",
+      "web_clipper",
+      "youtube",
+      "omi",
+      "skill_outputs",
+      "pi_skills"
+    ],
+    "pins": {
+      "pi_skills": {
+        "entrypoint": "collectors.pi_skill_connector:PiSkillConnector",
+        "cli_command": "connectors run pi_skills",
+        "origin": "builtin"
       }
     }
   },
@@ -645,6 +667,21 @@
         "knowledge_vault"
       ],
       "max_input_bytes": 200000,
+      "allowlist": [
+        "knowledge-collation"
+      ],
+      "command_pins": {
+        "pi": {
+          "command": "pi",
+          "pi_provider": "zai-coding-cn",
+          "model": "glm-5.2"
+        },
+        "pi_openrouter": {
+          "command": "pi",
+          "pi_provider": "openrouter",
+          "model": "z-ai/glm-5.2"
+        }
+      },
       "skills": [
         {
           "id": "knowledge-collation",

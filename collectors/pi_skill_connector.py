@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,9 +114,11 @@ class PiSkillConnector:
         routes = self._resolve_routes(provider=provider, model=model)
         route = routes[0]
         command = self._command_preview(route)
+        route_identity = self._command_identity(route)
         resolved_inputs = self._resolve_input_paths(input_paths, skill=skill, limit=limit)
         return {
             "skill_id": skill.id,
+            "allowlist": self._skill_allowlist_status(skill.id),
             "description": skill.description,
             "artifact_types": list(skill.artifact_types),
             "inputs": list(skill.inputs),
@@ -131,7 +134,18 @@ class PiSkillConnector:
                 "provider": route.provider,
                 "model": route.model,
                 "command": command,
+                "command_identity": route_identity,
+                "pin_drift": list(route_identity["drift"]),
+                "remote_install_blocked": bool(route_identity["install_if_missing"]),
             },
+            "routes": [
+                {
+                    "provider": item.provider,
+                    "model": item.model,
+                    "command_identity": self._command_identity(item),
+                }
+                for item in routes
+            ],
             "has_prompt": bool(str(prompt or "").strip() or skill.prompt.strip()),
         }
 
@@ -150,6 +164,7 @@ class PiSkillConnector:
         self.layout.ensure_directories()
         skill = self._resolve_skill(skill_id)
         routes = self._resolve_routes(provider=provider, model=model)
+        self._assert_route_policy(routes)
         resolved_inputs = self._resolve_input_paths(input_paths, skill=skill, limit=limit)
         run_prompt = await asyncio.to_thread(
             self._build_prompt,
@@ -194,12 +209,36 @@ class PiSkillConnector:
         requested = _clean_string(skill_id)
         if not requested:
             if len(skills) == 1:
-                return next(iter(skills.values()))
+                skill = next(iter(skills.values()))
+                self._assert_skill_allowlisted(skill.id)
+                return skill
             raise ValueError("pi_skills connector requires a skill id")
         try:
-            return skills[requested]
+            skill = skills[requested]
         except KeyError as exc:
             raise ValueError(f"Unknown Pi skill: {requested}") from exc
+        self._assert_skill_allowlisted(skill.id)
+        return skill
+
+    def _skill_allowlist_status(self, skill_id: str) -> dict[str, Any]:
+        allowlist = _optional_string_set(self._configured().get("allowlist"))
+        if allowlist is None:
+            return {
+                "configured": False,
+                "allowed": True,
+                "matched": [],
+            }
+        matched = [skill_id] if skill_id in allowlist else []
+        return {
+            "configured": True,
+            "allowed": bool(matched),
+            "matched": matched,
+        }
+
+    def _assert_skill_allowlisted(self, skill_id: str) -> None:
+        status = self._skill_allowlist_status(skill_id)
+        if not status["allowed"]:
+            raise ValueError(f"Pi skill is not allowlisted: {skill_id}")
 
     def _load_skills(self) -> dict[str, PiSkillDefinition]:
         configured = self._configured()
@@ -376,6 +415,85 @@ class PiSkillConnector:
             command.extend(["--model", model])
         command.append("<prompt>")
         return command
+
+    def _command_identity(self, route: PiSkillRoute) -> dict[str, Any]:
+        provider_cfg = self.config.get(f"llm.providers.{route.provider}", {}) or {}
+        if not isinstance(provider_cfg, Mapping):
+            provider_cfg = {}
+        command = str(provider_cfg.get("command") or "pi")
+        model = _model_id(provider_cfg, route.model) or route.model
+        identity = {
+            "provider": route.provider,
+            "configured_command": command,
+            "resolved_command": _resolve_command_path(command),
+            "pi_provider": _clean_string(provider_cfg.get("pi_provider")),
+            "model": model,
+            "install_if_missing": bool(provider_cfg.get("install_if_missing", False)),
+            "install_command_configured": bool(provider_cfg.get("install_command")),
+        }
+        pin = self._command_pin(route.provider, provider_cfg)
+        drift = []
+        if pin:
+            field_map = {
+                "command": "configured_command",
+                "configured_command": "configured_command",
+                "resolved_command": "resolved_command",
+                "pi_provider": "pi_provider",
+                "model": "model",
+            }
+            for pin_field, identity_field in field_map.items():
+                if pin_field not in pin:
+                    continue
+                expected = pin.get(pin_field)
+                actual = identity.get(identity_field)
+                if expected != actual:
+                    drift.append(
+                        {
+                            "field": pin_field,
+                            "expected": expected,
+                            "actual": actual,
+                        }
+                    )
+        identity["pin"] = dict(pin) if pin else {}
+        identity["pinned"] = bool(pin)
+        identity["drift"] = drift
+        return identity
+
+    def _command_pin(
+        self,
+        provider: str,
+        provider_cfg: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        configured = self._configured()
+        pins = configured.get("command_pins") or {}
+        if pins and not isinstance(pins, Mapping):
+            raise ValueError("sources.pi_skills.command_pins must be an object")
+        pin = pins.get(provider) if isinstance(pins, Mapping) else None
+        if pin is None:
+            pin = provider_cfg.get("command_pin")
+        if pin is None:
+            return {}
+        if not isinstance(pin, Mapping):
+            raise ValueError(f"Pi provider command pin must be an object: {provider}")
+        return pin
+
+    def _assert_route_policy(self, routes: Iterable[PiSkillRoute]) -> None:
+        problems = []
+        for route in routes:
+            identity = self._command_identity(route)
+            if identity["install_if_missing"]:
+                problems.append(
+                    f"provider {route.provider!r} enables install_if_missing"
+                )
+            if identity["drift"]:
+                drift_fields = ", ".join(
+                    str(item["field"]) for item in identity["drift"]
+                )
+                problems.append(
+                    f"provider {route.provider!r} command pin drift: {drift_fields}"
+                )
+        if problems:
+            raise ValueError("; ".join(problems))
 
     def _resolve_output_dir(self, value: str | Path | None) -> Path:
         configured = self._configured()
@@ -616,6 +734,16 @@ def _string_list(value: Any) -> list[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
+def _optional_string_set(value: Any) -> set[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return {item.strip() for item in value.split(",") if item.strip()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item).strip() for item in value if str(item).strip()}
+    raise ValueError("Pi skill allowlist must be an array or string")
+
+
 def _required_string(
     value: Mapping[str, Any],
     field_name: str,
@@ -671,6 +799,16 @@ def _model_id(provider_cfg: Mapping[str, Any], model: str | None) -> str | None:
     default_model = models.get("default")
     if isinstance(default_model, Mapping):
         return _clean_string(default_model.get("id"))
+    return None
+
+
+def _resolve_command_path(command: str) -> str | None:
+    resolved = shutil.which(command)
+    if resolved:
+        return str(Path(resolved).resolve())
+    command_path = Path(command).expanduser()
+    if command_path.exists():
+        return str(command_path.resolve())
     return None
 
 

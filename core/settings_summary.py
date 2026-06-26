@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -198,10 +199,13 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
                 "model": str(source_config.get("default_model") or "archivist_agent"),
             }
         )
+    route_identities = [
+        _summarize_pi_route_identity(config, source_config, route) for route in routes
+    ]
 
     try:
         skills = [
-            _summarize_pi_skill_manifest(item)
+            _summarize_pi_skill_manifest(item, source_config=source_config)
             for item in skill_items
             if item.get("id")
         ]
@@ -213,6 +217,7 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
             "default_provider": str(source_config.get("default_provider") or "pi"),
             "default_model": str(source_config.get("default_model") or "archivist_agent"),
             "routes": routes,
+            "route_identities": route_identities,
             "total": 0,
             "skills": [],
             "error": str(exc),
@@ -225,12 +230,17 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
         "default_provider": str(source_config.get("default_provider") or "pi"),
         "default_model": str(source_config.get("default_model") or "archivist_agent"),
         "routes": routes,
+        "route_identities": route_identities,
         "total": len(skills),
         "skills": skills,
     }
 
 
-def _summarize_pi_skill_manifest(item: dict[str, Any]) -> dict[str, Any]:
+def _summarize_pi_skill_manifest(
+    item: dict[str, Any],
+    *,
+    source_config: dict[str, Any],
+) -> dict[str, Any]:
     skill_id = str(item.get("id") or "").strip()
     if not skill_id:
         raise ValueError("Pi skill definition missing id")
@@ -268,7 +278,125 @@ def _summarize_pi_skill_manifest(item: dict[str, Any]) -> dict[str, Any]:
         "queue_behavior": queue_behavior,
         "allowed_side_effects": list(allowed_side_effects),
         "source_name": str(item.get("source_name") or ""),
+        "allowlist": _pi_skill_allowlist_status(skill_id, source_config),
     }
+
+
+def _pi_skill_allowlist_status(
+    skill_id: str,
+    source_config: dict[str, Any],
+) -> dict[str, Any]:
+    allowlist = _optional_string_set(source_config.get("allowlist"))
+    if allowlist is None:
+        return {
+            "configured": False,
+            "allowed": True,
+            "matched": [],
+        }
+    matched = [skill_id] if skill_id in allowlist else []
+    return {
+        "configured": True,
+        "allowed": bool(matched),
+        "matched": matched,
+    }
+
+
+def _summarize_pi_route_identity(
+    config: ConfigLike,
+    source_config: dict[str, Any],
+    route: dict[str, str],
+) -> dict[str, Any]:
+    provider = str(route.get("provider") or "")
+    provider_cfg = config.get(f"llm.providers.{provider}", {}) or {}
+    if not isinstance(provider_cfg, dict):
+        provider_cfg = {}
+    command = str(provider_cfg.get("command") or "pi")
+    model_alias = str(route.get("model") or "")
+    model = _pi_model_id(provider_cfg, model_alias) or model_alias or None
+    identity = {
+        "provider": provider,
+        "configured_command": command,
+        "resolved_command": _resolve_command_path(command),
+        "pi_provider": str(provider_cfg.get("pi_provider") or "") or None,
+        "model": model,
+        "install_if_missing": bool(provider_cfg.get("install_if_missing", False)),
+        "install_command_configured": bool(provider_cfg.get("install_command")),
+    }
+    pin = _pi_command_pin(source_config, provider_cfg, provider)
+    drift = []
+    if pin:
+        field_map = {
+            "command": "configured_command",
+            "configured_command": "configured_command",
+            "resolved_command": "resolved_command",
+            "pi_provider": "pi_provider",
+            "model": "model",
+        }
+        for pin_field, identity_field in field_map.items():
+            if pin_field not in pin:
+                continue
+            expected = pin.get(pin_field)
+            actual = identity.get(identity_field)
+            if expected != actual:
+                drift.append(
+                    {
+                        "field": pin_field,
+                        "expected": expected,
+                        "actual": actual,
+                    }
+                )
+    identity["pin"] = dict(pin) if pin else {}
+    identity["pinned"] = bool(pin)
+    identity["drift"] = drift
+    return identity
+
+
+def _pi_command_pin(
+    source_config: dict[str, Any],
+    provider_cfg: dict[str, Any],
+    provider: str,
+) -> dict[str, Any]:
+    pins = source_config.get("command_pins") or {}
+    if isinstance(pins, dict) and isinstance(pins.get(provider), dict):
+        return pins[provider]
+    provider_pin = provider_cfg.get("command_pin")
+    if isinstance(provider_pin, dict):
+        return provider_pin
+    return {}
+
+
+def _pi_model_id(provider_cfg: dict[str, Any], model: str | None) -> str | None:
+    models = provider_cfg.get("models")
+    if not isinstance(models, dict):
+        return model
+    if model and isinstance(models.get(model), dict):
+        return str(models[model].get("id") or model)
+    if model:
+        return model
+    default_model = models.get("default")
+    if isinstance(default_model, dict):
+        return str(default_model.get("id") or "") or None
+    return None
+
+
+def _resolve_command_path(command: str) -> str | None:
+    resolved = shutil.which(command)
+    if resolved:
+        return str(Path(resolved).resolve())
+    command_path = Path(command).expanduser()
+    if command_path.exists():
+        return str(command_path.resolve())
+    return None
+
+
+def _optional_string_set(value: Any) -> set[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return {item.strip() for item in value.split(",") if item.strip()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item).strip() for item in value if str(item).strip()}
+    raise ValueError("allowlist must be an array or string")
 
 
 def _required_manifest_string(
@@ -430,6 +558,8 @@ def _skills_group(pi_skills_summary: dict[str, Any]) -> dict[str, Any]:
         "items": pi_skills_summary.get("skills", []),
         "safety_mode": pi_skills_summary.get("safety_mode"),
         "output_dir": pi_skills_summary.get("output_dir"),
+        "routes": pi_skills_summary.get("routes", []),
+        "route_identities": pi_skills_summary.get("route_identities", []),
         "error": pi_skills_summary.get("error"),
     }
 

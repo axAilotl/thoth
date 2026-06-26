@@ -79,7 +79,7 @@ class ConnectorManifest:
         return bool(source_config.get("enabled", self.default_enabled))
 
     def to_dict(self, *, config: ConfigLike | None = None) -> dict[str, Any]:
-        return {
+        payload = {
             "name": self.name,
             "source_name": self.source_name,
             "source_aliases": list(self.source_aliases),
@@ -102,6 +102,9 @@ class ConnectorManifest:
             "enabled": self.is_enabled(config),
             "origin": self.origin,
         }
+        if config is not None:
+            payload["policy"] = connector_policy_status(self, config)
+        return payload
 
     @classmethod
     def from_mapping(
@@ -210,6 +213,81 @@ class ConnectorRegistry:
             ],
             "total": len(self._manifests),
         }
+
+
+def connector_policy_status(
+    manifest: ConnectorManifest,
+    config: ConfigLike,
+) -> dict[str, Any]:
+    """Return allowlist and pin status for a connector manifest."""
+    identity_names = tuple(dict.fromkeys((manifest.name, *manifest.source_names)))
+    allowlist = _optional_string_set(config.get("connectors.allowlist"))
+    if allowlist is None:
+        allowlist_status = {
+            "configured": False,
+            "allowed": True,
+            "matched": [],
+        }
+    else:
+        matched = [name for name in identity_names if name in allowlist]
+        allowlist_status = {
+            "configured": True,
+            "allowed": bool(matched),
+            "matched": matched,
+        }
+
+    return {
+        "allowlist": allowlist_status,
+        "pins": _connector_pin_status(manifest, config, identity_names),
+    }
+
+
+def _connector_pin_status(
+    manifest: ConnectorManifest,
+    config: ConfigLike,
+    identity_names: tuple[str, ...],
+) -> dict[str, Any]:
+    pins = config.get("connectors.pins", {}) or {}
+    if not isinstance(pins, Mapping):
+        raise ConnectorManifestError("connectors.pins must be an object")
+    matched_key = next((name for name in identity_names if name in pins), None)
+    if matched_key is None:
+        return {
+            "configured": False,
+            "matched": None,
+            "drift": [],
+        }
+    pin = pins.get(matched_key) or {}
+    if not isinstance(pin, Mapping):
+        raise ConnectorManifestError(
+            f"connectors.pins.{matched_key} must be an object"
+        )
+
+    actual = {
+        "name": manifest.name,
+        "source_name": manifest.source_name,
+        "entrypoint": manifest.entrypoint,
+        "cli_command": manifest.cli_command,
+        "origin": manifest.origin,
+    }
+    drift = []
+    for field_name, actual_value in actual.items():
+        if field_name not in pin:
+            continue
+        expected_value = pin.get(field_name)
+        if expected_value != actual_value:
+            drift.append(
+                {
+                    "field": field_name,
+                    "expected": expected_value,
+                    "actual": actual_value,
+                }
+            )
+    return {
+        "configured": True,
+        "matched": matched_key,
+        "drift": drift,
+    }
 
 
 BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
@@ -672,6 +750,16 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         raise ConnectorManifestError("connector manifest list fields must be arrays")
     return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _optional_string_set(value: Any) -> set[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return {item.strip() for item in value.split(",") if item.strip()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item).strip() for item in value if str(item).strip()}
+    raise ConnectorManifestError("connector allowlist must be an array or string")
 
 
 def _required_string_tuple(

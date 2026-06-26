@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import Config, config
-from .connector_registry import load_connector_registry
+from .connector_registry import connector_policy_status, load_connector_registry
 from .ingestion_runtime import KnowledgeArtifactRuntime
 from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
@@ -141,6 +141,7 @@ class AgentSurfaceService:
         """Plan or execute a connector through the shared agent service layer."""
         registry = load_connector_registry(self.config)
         manifest = registry.get(connector_name)
+        policy = connector_policy_status(manifest, self.config)
         sanitized_options = {
             str(key): value
             for key, value in dict(options or {}).items()
@@ -150,6 +151,7 @@ class AgentSurfaceService:
             "status": "planned",
             "execute": False,
             "connector": manifest.to_dict(config=self.config),
+            "policy": policy,
             "options": sanitized_options,
         }
         if not execute:
@@ -158,6 +160,17 @@ class AgentSurfaceService:
             return plan
         if not manifest.is_enabled(self.config):
             raise AgentSurfaceError(f"Connector is disabled: {connector_name}")
+        if not policy["allowlist"]["allowed"]:
+            raise AgentSurfaceError(
+                f"Connector is not allowlisted: {connector_name}"
+            )
+        if policy["pins"]["drift"]:
+            drift_fields = ", ".join(
+                str(item["field"]) for item in policy["pins"]["drift"]
+            )
+            raise AgentSurfaceError(
+                f"Connector pin drift detected for {connector_name}: {drift_fields}"
+            )
 
         handlers = {
             "arxiv": self._run_arxiv_connector,
@@ -174,7 +187,7 @@ class AgentSurfaceService:
             "pi_skills": self._run_pi_skills_connector,
             "pi_skill": self._run_pi_skills_connector,
         }
-        handler = handlers.get(connector_name)
+        handler = handlers.get(manifest.name) or handlers.get(connector_name)
         if handler is None:
             raise AgentSurfaceError(
                 f"Connector {connector_name!r} has no executable adapter registered"
