@@ -21,7 +21,7 @@ def _schema(properties: dict[str, Any], required: list[str] | None = None) -> di
 TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "name": "wiki_query",
-        "description": "Search wiki pages, artifacts, and capture events with provenance.",
+        "description": "Search wiki pages, artifacts, and capture events with an agent-safe response envelope.",
         "inputSchema": _schema(
             {
                 "query": {"type": "string"},
@@ -85,7 +85,7 @@ TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "search_capture_events",
-        "description": "Search capture events with cited provenance, security, and trust state.",
+        "description": "Search capture events with an agent-safe response envelope.",
         "inputSchema": _schema(
             {
                 "query": {"type": "string"},

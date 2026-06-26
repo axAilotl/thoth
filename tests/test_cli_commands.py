@@ -82,6 +82,33 @@ def test_connectors_list_command_reads_registry_metadata():
     ]
 
 
+def test_query_wiki_json_uses_agent_safe_response_model():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "thoth.py",
+            "query",
+            "wiki",
+            "no-such-query",
+            "--json",
+            "--limit",
+            "1",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["response_type"] == "thoth.agent_query_response"
+    assert payload["action_boundary"]["retrieval_payload_path"] == "retrieval.hits"
+    assert payload["retrieval"]["query"] == "no-such-query"
+    assert "hits" not in payload
+
+
 CAPTURE_EVENT = {
     "event_id": "event-1",
     "source_id": "source-1",

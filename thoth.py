@@ -2071,9 +2071,17 @@ def cmd_query(args):
         _print_json(payload)
         return
 
-    print(f"Wiki query: {payload['query']}")
-    print(f"Matches: {len(payload['hits'])}")
-    for hit in payload["hits"]:
+    retrieval = payload["retrieval"]
+    hits = retrieval["hits"]
+    print(f"Wiki query: {retrieval['query']}")
+    print(f"Answer: {payload['answer']}")
+    print(
+        f"Confidence: {payload['confidence']['level']} "
+        f"({payload['confidence']['score']})"
+    )
+    print(f"Security: {payload['security_state']['status']}")
+    print(f"Matches: {len(hits)}")
+    for hit in hits:
         provenance = hit.get("provenance") or {}
         artifact = provenance.get("artifact_id") or "-"
         identifier = (

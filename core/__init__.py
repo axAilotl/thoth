@@ -58,6 +58,12 @@ from .archivist_compiler import (
     ArchivistCompilerError,
 )
 from .agent_surface import AgentSurfaceError, AgentSurfaceService
+from .agent_response import (
+    AGENT_QUERY_RESPONSE_TYPE,
+    AGENT_QUERY_RESPONSE_VERSION,
+    agent_query_action_boundary,
+    build_agent_query_response,
+)
 from .capture_lifecycle import (
     CaptureLifecycleConfigError,
     CaptureLifecycleError,
@@ -222,6 +228,10 @@ __all__ = [
     'ArchivistCompilerError',
     'AgentSurfaceError',
     'AgentSurfaceService',
+    'AGENT_QUERY_RESPONSE_TYPE',
+    'AGENT_QUERY_RESPONSE_VERSION',
+    'agent_query_action_boundary',
+    'build_agent_query_response',
     'CaptureLifecycleConfigError',
     'CaptureLifecycleError',
     'CaptureLifecycleResult',

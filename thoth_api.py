@@ -1992,6 +1992,70 @@ async def bookmark_status(request: BookmarkStatusRequest):
     return {"statuses": response}
 
 
+@app.get("/api/query/wiki")
+async def query_wiki_endpoint(
+    query: str = Query(..., min_length=1),
+    limit: int = Query(default=10, ge=1, le=100),
+    include_quarantined: bool = Query(default=False),
+    result_types: Optional[List[str]] = Query(default=None),
+    source_types: Optional[List[str]] = Query(default=None),
+    source_ids: Optional[List[str]] = Query(default=None),
+    source_paths: Optional[List[str]] = Query(default=None),
+    artifact_types: Optional[List[str]] = Query(default=None),
+    event_types: Optional[List[str]] = Query(default=None),
+    wiki_kinds: Optional[List[str]] = Query(default=None),
+    tags: Optional[List[str]] = Query(default=None),
+    exclude_tags: Optional[List[str]] = Query(default=None),
+    security_statuses: Optional[List[str]] = Query(default=None),
+    min_trust_score: Optional[float] = Query(default=None),
+    time_after: Optional[str] = Query(default=None),
+    time_before: Optional[str] = Query(default=None),
+    created_after: Optional[str] = Query(default=None),
+    created_before: Optional[str] = Query(default=None),
+    updated_after: Optional[str] = Query(default=None),
+    updated_before: Optional[str] = Query(default=None),
+    use_embedding: bool = Query(default=False),
+):
+    """Search Thoth knowledge surfaces using the shared agent-safe response."""
+    try:
+        runtime_config = Config()
+        runtime_config.data = load_runtime_settings()
+        layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+        service = AgentSurfaceService(
+            runtime_config,
+            layout=layout,
+            db=MetadataDB(str(layout.database_path)),
+        )
+        return service.query_wiki(
+            query,
+            limit=limit,
+            include_quarantined=include_quarantined,
+            result_types=result_types,
+            source_types=source_types,
+            source_ids=source_ids,
+            source_paths=source_paths,
+            artifact_types=artifact_types,
+            event_types=event_types,
+            wiki_kinds=wiki_kinds,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            security_statuses=security_statuses,
+            min_trust_score=min_trust_score,
+            time_after=time_after,
+            time_before=time_before,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            use_embedding=use_embedding,
+        )
+    except (AgentSurfaceError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error querying wiki: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/research/missing-papers")
 async def get_missing_research_papers(
     min_references: int = Query(2, ge=1),

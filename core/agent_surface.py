@@ -20,6 +20,7 @@ from .agent_context import (
     capture_event_trust_state,
     hybrid_hit_citations,
 )
+from .agent_response import build_agent_query_response
 from .capture_surface import (
     CaptureSurfaceError,
     CaptureSurfaceNotFoundError,
@@ -129,13 +130,14 @@ class AgentSurfaceService:
             use_embedding=use_embedding,
         )
         hits = [self._serialize_hybrid_hit(hit) for hit in result.hits]
-        return {
-            "query": result.query,
-            "queried_at": result.queried_at,
-            "filters": result.filters,
-            "capabilities": result.capabilities,
-            "hits": hits,
-        }
+        return build_agent_query_response(
+            query=result.query,
+            queried_at=result.queried_at,
+            filters=result.filters,
+            capabilities=result.capabilities,
+            hits=hits,
+            query_kind="wiki_query",
+        )
 
     def list_artifacts(
         self,
@@ -247,7 +249,20 @@ class AgentSurfaceService:
         for hit in result.get("hits", []):
             if isinstance(hit, dict):
                 hit["citations"] = hybrid_hit_citations(hit)
-        return result
+        return build_agent_query_response(
+            query=str(result.get("query") or query),
+            queried_at=str(result.get("queried_at") or ""),
+            filters=result.get("filters") if isinstance(result.get("filters"), Mapping) else {},
+            capabilities=(
+                result.get("capabilities")
+                if isinstance(result.get("capabilities"), Mapping)
+                else {}
+            ),
+            hits=[
+                hit for hit in result.get("hits", []) if isinstance(hit, Mapping)
+            ],
+            query_kind="capture_event_search",
+        )
 
     def get_capture_event(
         self,
