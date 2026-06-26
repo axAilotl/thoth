@@ -106,7 +106,7 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert payload["runtime"]["groups"]["sources_and_skills"]["connectors"]["total"] == 9
+    assert payload["runtime"]["groups"]["sources_and_skills"]["connectors"]["total"] == 10
     assert payload["runtime"]["groups"]["sources_and_skills"]["skills"]["total"] == 1
     assert payload["runtime"]["groups"]["advanced"]["storage"]["raw_root"] == (
         str(tmp_path / "vault" / "raw")
@@ -114,7 +114,7 @@ topics:
     assert payload["runtime"]["groups"]["wiki_and_archivist"]["okf_target"] == "v0.1"
     assert payload["runtime"]["groups"]["overview"]["what_happened"] == [
         "0/0 providers enabled",
-        "8/9 sources enabled",
+        "9/10 sources enabled",
         "1 Pi skills configured",
         "1 archivist topics loaded",
     ]

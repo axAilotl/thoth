@@ -110,7 +110,7 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert summary["connectors"]["total"] == 9
+    assert summary["connectors"]["total"] == 10
     assert [item["name"] for item in summary["connectors"]["connectors"]] == [
         "x_api",
         "arxiv",
@@ -121,6 +121,7 @@ topics:
         "omi",
         "skill_outputs",
         "pi_skills",
+        "imported_markdown",
     ]
     web_clipper_connector = next(
         item
@@ -134,7 +135,7 @@ topics:
         "enabled": True,
         "fallback_providers": ["openai"],
     }
-    assert summary["groups"]["sources_and_skills"]["connectors"]["total"] == 9
+    assert summary["groups"]["sources_and_skills"]["connectors"]["total"] == 10
     assert summary["groups"]["sources_and_skills"]["skills"]["total"] == 1
     assert (
         summary["groups"]["sources_and_skills"]["skills"]["safety_mode"]
@@ -176,7 +177,7 @@ topics:
     )
     assert summary["groups"]["overview"]["what_happened"] == [
         "1/1 providers enabled",
-        "8/9 sources enabled",
+        "9/10 sources enabled",
         "1 Pi skills configured",
         "2 archivist topics loaded",
     ]
