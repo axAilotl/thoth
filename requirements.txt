@@ -10,3 +10,4 @@ youtube-transcript-api>=0.6.0
 tqdm>=4.65.0
 pydantic>=2.5.0
 httpx>=0.25.0
+psycopg[binary]>=3.2.0
