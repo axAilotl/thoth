@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,6 +14,11 @@ import yaml
 from .artifacts.web_clipper import WebClipperArtifact
 from .config import Config
 from .llm_interface import LLMInterface
+from .llm_validation import (
+    LLMJSONField,
+    LLMOutputValidationError,
+    parse_llm_json_response,
+)
 from .metadata_db import FileMetadata, MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import wrap_untrusted_content
@@ -37,6 +41,17 @@ ENGLISH_LANGUAGE_CODES = {
     "eng",
     "english",
 }
+
+TRANSLATION_RESPONSE_FIELDS = (
+    LLMJSONField(
+        "title",
+        str,
+        allow_empty=False,
+        max_length=500,
+        reject_prompt_threats=True,
+    ),
+    LLMJSONField("body", str, allow_empty=False, max_length=500000),
+)
 
 
 class TranslationCompanionError(RuntimeError):
@@ -114,21 +129,6 @@ def _is_english_language(value: str | None) -> bool:
     if language in ENGLISH_LANGUAGE_CODES:
         return True
     return language.startswith("en-")
-
-
-def _coerce_text(value: Any) -> str:
-    if value is None:
-        return ""
-    return " ".join(str(value).split()).strip()
-
-
-def _strip_code_fences(value: str) -> str:
-    text = value.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if len(lines) >= 2 and lines[-1].strip() == "```":
-            text = "\n".join(lines[1:-1]).strip()
-    return text
 
 
 def _extract_vault_relative_path(layout: PathLayout, artifact: WebClipperArtifact) -> str:
@@ -364,26 +364,20 @@ class EnglishCompanionPublisher:
         if response.error:
             raise TranslationRuntimeError(f"Translation generation failed: {response.error}")
 
-        content = _strip_code_fences(response.content or "")
-        if not content.strip():
-            raise TranslationRuntimeError("Translation generation returned empty content")
-
         try:
-            payload = json.loads(content)
-        except json.JSONDecodeError as exc:
+            payload = parse_llm_json_response(
+                response.content or "",
+                fields=TRANSLATION_RESPONSE_FIELDS,
+                object_name="translation response",
+                reject_extra_fields=True,
+            )
+        except LLMOutputValidationError as exc:
             raise TranslationRuntimeError(
-                f"Translation response was not valid JSON: {exc}"
+                f"Translation response validation failed: {exc}"
             ) from exc
 
-        if not isinstance(payload, dict):
-            raise TranslationRuntimeError("Translation response must be a JSON object")
-
-        translated_title = _coerce_text(payload.get("title"))
-        translated_body = _coerce_text(payload.get("body"))
-        if not translated_title or not translated_body:
-            raise TranslationRuntimeError(
-                "Translation response must include non-empty title and body fields"
-            )
+        translated_title = payload["title"].strip()
+        translated_body = payload["body"].strip()
 
         return {
             "title": translated_title,
