@@ -153,6 +153,8 @@ class AgentSurfaceService:
             "options": sanitized_options,
         }
         if not execute:
+            if manifest.name == "pi_skills":
+                plan["run_plan"] = self._plan_pi_skills_connector(sanitized_options)
             return plan
         if not manifest.is_enabled(self.config):
             raise AgentSurfaceError(f"Connector is disabled: {connector_name}")
@@ -169,6 +171,8 @@ class AgentSurfaceService:
             "skill_outputs": self._run_skill_outputs_connector,
             "external_skill": self._run_skill_outputs_connector,
             "last30days-skill": self._run_skill_outputs_connector,
+            "pi_skills": self._run_pi_skills_connector,
+            "pi_skill": self._run_pi_skills_connector,
         }
         handler = handlers.get(connector_name)
         if handler is None:
@@ -481,6 +485,49 @@ class AgentSurfaceService:
         )
         return result.to_dict()
 
+    def _plan_pi_skills_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        from collectors.pi_skill_connector import PiSkillConnector
+
+        connector = PiSkillConnector(self.config, layout=self.layout, db=self.db)
+        return connector.plan(
+            skill_id=options.get("skill") or options.get("skill_id"),
+            prompt=options.get("prompt"),
+            input_paths=(
+                options.get("input_paths")
+                or options.get("input_path")
+                or options.get("export_paths")
+                or options.get("export_path")
+            ),
+            output_dir=_first_string(options.get("output_dir") or options.get("output_dirs")),
+            provider=options.get("provider"),
+            model=options.get("model"),
+            limit=_optional_int(options.get("limit")),
+        )
+
+    def _run_pi_skills_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        from collectors.pi_skill_connector import PiSkillConnector
+
+        connector = PiSkillConnector(self.config, layout=self.layout, db=self.db)
+        result = _run_async(
+            connector.collect(
+                skill_id=options.get("skill") or options.get("skill_id"),
+                prompt=options.get("prompt"),
+                input_paths=(
+                    options.get("input_paths")
+                    or options.get("input_path")
+                    or options.get("export_paths")
+                    or options.get("export_path")
+                ),
+                output_dir=_first_string(
+                    options.get("output_dir") or options.get("output_dirs")
+                ),
+                provider=options.get("provider"),
+                model=options.get("model"),
+                limit=_optional_int(options.get("limit")),
+            )
+        )
+        return result.to_dict()
+
 
 def serialize_agent_payload(value: Any) -> Any:
     """Convert service objects into JSON-friendly payloads."""
@@ -531,6 +578,11 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(item).strip() for item in value if str(item).strip()]
     return [str(value).strip()] if str(value).strip() else []
+
+
+def _first_string(value: Any) -> str | None:
+    values = _string_list(value)
+    return values[0] if values else None
 
 
 def _optional_int(value: Any) -> int | None:

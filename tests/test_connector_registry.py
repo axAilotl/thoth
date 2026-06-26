@@ -19,7 +19,7 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
     registry = load_connector_registry(config, project_root=tmp_path)
     names = [manifest.name for manifest in registry.list()]
 
-    assert names[:8] == [
+    assert names[:9] == [
         "x_api",
         "arxiv",
         "github",
@@ -28,6 +28,7 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
         "youtube",
         "omi",
         "skill_outputs",
+        "pi_skills",
     ]
     assert registry.get("arxiv").artifact_types == ("paper",)
     assert registry.get("github").queue_capability is True
@@ -36,6 +37,7 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
     assert registry.get("omi").artifact_types == ("transcript",)
     assert registry.get("personal_transcripts").name == "omi"
     assert registry.get("last30days-skill").name == "skill_outputs"
+    assert registry.get("pi_skill").name == "pi_skills"
 
 
 def test_plugin_connector_manifest_is_loaded_after_builtins(tmp_path: Path):

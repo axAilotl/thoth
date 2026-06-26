@@ -616,6 +616,42 @@
         "*.jsonl"
       ],
       "source_name": "external_skill"
+    },
+    "pi_skills": {
+      "enabled": true,
+      "output_dir": ".thoth_system/skill_outputs/pi",
+      "default_provider": "pi",
+      "default_model": "archivist_agent",
+      "fallback": [
+        {
+          "provider": "pi",
+          "model": "archivist_agent"
+        },
+        {
+          "provider": "pi_openrouter",
+          "model": "archivist_agent"
+        }
+      ],
+      "default_input_roots": [
+        "knowledge_vault"
+      ],
+      "max_input_bytes": 200000,
+      "skills": [
+        {
+          "id": "knowledge-collation",
+          "description": "Collate user-owned exports or notes into Thoth artifact envelopes.",
+          "artifact_types": [
+            "paper",
+            "repository",
+            "transcript",
+            "tweet",
+            "video",
+            "web_clipper"
+          ],
+          "source_name": "pi_skill:knowledge-collation",
+          "prompt": "Convert the supplied user-owned material into Thoth skill output envelopes. Preserve provenance in payload.custom_metadata where possible. Return only JSON with an artifacts array."
+        }
+      ]
     }
   },
   "automation": {

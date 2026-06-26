@@ -49,6 +49,15 @@ def test_settings_api_returns_runtime_summary(monkeypatch, tmp_path: Path):
             "path": "meta.db",
         },
         "sources": {
+            "pi_skills": {
+                "enabled": True,
+                "skills": [
+                    {
+                        "id": "knowledge-collation",
+                        "artifact_types": ["transcript"],
+                    }
+                ],
+            },
             "web_clipper": {
                 "enabled": True,
                 "note_dirs": ["imports/notes"],
@@ -84,7 +93,8 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert payload["runtime"]["groups"]["connectors"]["total"] == 8
+    assert payload["runtime"]["groups"]["connectors"]["total"] == 9
+    assert payload["runtime"]["groups"]["skills"]["total"] == 1
     assert payload["runtime"]["groups"]["storage"]["raw_root"] == (
         str(tmp_path / "vault" / "raw")
     )

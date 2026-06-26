@@ -1710,6 +1710,11 @@ def cmd_connectors(args):
             "output_dirs": getattr(args, "output_dir", None),
             "file_patterns": getattr(args, "file_pattern", None),
             "source_name": getattr(args, "source_name", None),
+            "skill": getattr(args, "skill", None),
+            "prompt": getattr(args, "prompt", None),
+            "input_paths": getattr(args, "input_path", None),
+            "provider": getattr(args, "provider", None),
+            "model": getattr(args, "model", None),
             "device_id": getattr(args, "device_id", None),
             "speaker": getattr(args, "speaker", None),
             "session_id": getattr(args, "session_id", None),
@@ -2711,6 +2716,36 @@ Examples:
         type=str,
         default=None,
         help="Override source name for personal transcript imports",
+    )
+    connectors_run_parser.add_argument(
+        "--skill",
+        type=str,
+        default=None,
+        help="Pi skill id when running the pi_skills connector",
+    )
+    connectors_run_parser.add_argument(
+        "--prompt",
+        type=str,
+        default=None,
+        help="Operator prompt for the pi_skills connector",
+    )
+    connectors_run_parser.add_argument(
+        "--input-path",
+        action="append",
+        default=None,
+        help="Input file for the pi_skills connector; repeat for multiple files",
+    )
+    connectors_run_parser.add_argument(
+        "--provider",
+        type=str,
+        default=None,
+        help="Provider override for the pi_skills connector",
+    )
+    connectors_run_parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model or model alias override for the pi_skills connector",
     )
     connectors_run_parser.add_argument(
         "--device-id",

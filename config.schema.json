@@ -377,6 +377,57 @@
             "source_name": { "type": "string" }
           },
           "additionalProperties": true
+        },
+        "pi_skills": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "output_dir": { "type": "string" },
+            "default_provider": { "type": "string" },
+            "default_model": { "type": "string" },
+            "fallback": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "provider": { "type": "string" },
+                  "model": { "type": "string" }
+                },
+                "required": ["provider"],
+                "additionalProperties": true
+              }
+            },
+            "default_input_roots": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "max_input_bytes": { "type": "integer", "minimum": 1 },
+            "skills": {
+              "type": ["array", "object"],
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "description": { "type": "string" },
+                  "prompt": { "type": "string" },
+                  "prompt_template": { "type": "string" },
+                  "prompt_file": { "type": "string" },
+                  "artifact_types": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "source_name": { "type": "string" },
+                  "input_roots": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                },
+                "required": ["id"],
+                "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true

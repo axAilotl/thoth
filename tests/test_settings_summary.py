@@ -34,6 +34,19 @@ def make_config_data(tmp_path: Path) -> dict:
             },
         },
         "sources": {
+            "pi_skills": {
+                "enabled": True,
+                "output_dir": ".thoth_system/skill_outputs/pi",
+                "default_provider": "pi",
+                "default_model": "archivist_agent",
+                "skills": [
+                    {
+                        "id": "knowledge-collation",
+                        "description": "Collate user data",
+                        "artifact_types": ["transcript"],
+                    }
+                ],
+            },
             "web_clipper": {
                 "enabled": True,
                 "note_dirs": ["imports/notes"],
@@ -84,7 +97,7 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert summary["connectors"]["total"] == 8
+    assert summary["connectors"]["total"] == 9
     assert [item["name"] for item in summary["connectors"]["connectors"]] == [
         "x_api",
         "arxiv",
@@ -94,6 +107,7 @@ topics:
         "youtube",
         "omi",
         "skill_outputs",
+        "pi_skills",
     ]
     web_clipper_connector = next(
         item
@@ -107,7 +121,9 @@ topics:
         "enabled": True,
         "fallback_providers": ["openai"],
     }
-    assert summary["groups"]["connectors"]["total"] == 8
+    assert summary["groups"]["connectors"]["total"] == 9
+    assert summary["groups"]["skills"]["total"] == 1
+    assert summary["groups"]["skills"]["safety_mode"] == "no_tools_json"
     assert "web_clipper" in summary["groups"]["connectors"]["enabled"]
     x_api_connector = next(
         item

@@ -61,7 +61,7 @@ def test_connectors_list_command_reads_registry_metadata():
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     names = [item["name"] for item in payload["connectors"]]
-    assert names[:8] == [
+    assert names[:9] == [
         "x_api",
         "arxiv",
         "github",
@@ -70,4 +70,5 @@ def test_connectors_list_command_reads_registry_metadata():
         "youtube",
         "omi",
         "skill_outputs",
+        "pi_skills",
     ]

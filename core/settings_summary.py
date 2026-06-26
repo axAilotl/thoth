@@ -153,6 +153,68 @@ def _summarize_connectors(config: ConfigLike, *, project_root: Path) -> dict[str
     return summary
 
 
+def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str, Any]:
+    source_config = config.get("sources.pi_skills", {}) or {}
+    if not isinstance(source_config, dict):
+        return {"error": "sources.pi_skills must be an object", "enabled": False}
+
+    raw_skills = source_config.get("skills") or []
+    if isinstance(raw_skills, dict):
+        skill_items = [
+            {"id": key, **(value if isinstance(value, dict) else {})}
+            for key, value in raw_skills.items()
+        ]
+    elif isinstance(raw_skills, list):
+        skill_items = [item for item in raw_skills if isinstance(item, dict)]
+    else:
+        skill_items = []
+
+    output_dir = source_config.get("output_dir") or ".thoth_system/skill_outputs/pi"
+    output_path = Path(str(output_dir)).expanduser()
+    if not output_path.is_absolute():
+        output_path = project_root / output_path
+
+    fallback = source_config.get("fallback")
+    routes = []
+    if isinstance(fallback, list):
+        for item in fallback:
+            if not isinstance(item, dict) or not item.get("provider"):
+                continue
+            routes.append(
+                {
+                    "provider": str(item.get("provider")),
+                    "model": str(item.get("model") or ""),
+                }
+            )
+    if not routes:
+        routes.append(
+            {
+                "provider": str(source_config.get("default_provider") or "pi"),
+                "model": str(source_config.get("default_model") or "archivist_agent"),
+            }
+        )
+
+    return {
+        "enabled": bool(source_config.get("enabled", True)),
+        "output_dir": str(output_path),
+        "safety_mode": "no_tools_json",
+        "default_provider": str(source_config.get("default_provider") or "pi"),
+        "default_model": str(source_config.get("default_model") or "archivist_agent"),
+        "routes": routes,
+        "total": len(skill_items),
+        "skills": [
+            {
+                "id": str(item.get("id") or ""),
+                "description": str(item.get("description") or ""),
+                "artifact_types": list(item.get("artifact_types") or []),
+                "source_name": str(item.get("source_name") or ""),
+            }
+            for item in skill_items
+            if item.get("id")
+        ],
+    }
+
+
 def _summarize_providers(config: ConfigLike) -> dict[str, Any]:
     providers = config.get("llm.providers", {}) or {}
     tasks = config.get("llm.tasks", {}) or {}
@@ -266,6 +328,7 @@ def _summarize_grouped_config(
     layout_summary: dict[str, Any],
     archivist_summary: dict[str, Any],
     connectors_summary: dict[str, Any],
+    pi_skills_summary: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "providers": _summarize_providers(config),
@@ -278,6 +341,14 @@ def _summarize_grouped_config(
             ],
             "items": connectors_summary.get("connectors", []),
             "error": connectors_summary.get("error"),
+        },
+        "skills": {
+            "enabled": bool(pi_skills_summary.get("enabled", False)),
+            "total": pi_skills_summary.get("total", 0),
+            "items": pi_skills_summary.get("skills", []),
+            "safety_mode": pi_skills_summary.get("safety_mode"),
+            "output_dir": pi_skills_summary.get("output_dir"),
+            "error": pi_skills_summary.get("error"),
         },
         "storage": _summarize_storage(layout_summary),
         "wiki": _summarize_wiki_group(layout_summary, archivist_summary),
@@ -311,15 +382,18 @@ def build_settings_runtime_summary(
     archivist_summary = _summarize_archivist(config, project_root=project_root)
     web_clipper_summary = _summarize_web_clipper(config, project_root=project_root)
     connectors_summary = _summarize_connectors(config, project_root=project_root)
+    pi_skills_summary = _summarize_pi_skills(config, project_root=project_root)
     return {
         "layout": layout_summary,
         "archivist": archivist_summary,
         "web_clipper": web_clipper_summary,
         "connectors": connectors_summary,
+        "pi_skills": pi_skills_summary,
         "groups": _summarize_grouped_config(
             config,
             layout_summary=layout_summary,
             archivist_summary=archivist_summary,
             connectors_summary=connectors_summary,
+            pi_skills_summary=pi_skills_summary,
         ),
     }

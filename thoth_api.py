@@ -24,6 +24,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core import (
+    AgentSurfaceError,
+    AgentSurfaceService,
     ArchivistAdminError,
     ArchivistCompilerError,
     ArchivistRuntimeError,
@@ -64,8 +66,9 @@ from core.bookmark_ingest import (
     build_realtime_bookmark_record,
     merge_realtime_bookmark_record,
 )
+from core.config import Config
 from core.ingestion_runtime import get_knowledge_artifact_runtime
-from core.metadata_db import get_metadata_db, BookmarkQueueEntry
+from core.metadata_db import MetadataDB, get_metadata_db, BookmarkQueueEntry
 from core.non_live_state import (
     get_non_live_next_run_at,
     mark_non_live_run_finished,
@@ -732,6 +735,13 @@ class ArchivistRunRequest(BaseModel):
     limit: Optional[int] = Field(default=None, gt=0)
 
 
+class ConnectorRunRequest(BaseModel):
+    """Request payload for planning or executing a connector."""
+
+    execute: bool = False
+    options: Dict[str, Any] = Field(default_factory=dict)
+
+
 class BookmarkStatusRequest(BaseModel):
     """Request body for bookmark status lookups."""
 
@@ -1065,6 +1075,30 @@ async def update_env_vars(env_updates: Dict[str, str]):
     except Exception as e:
         logger.error(f"Error updating env vars: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/connectors/{connector_name}/run")
+def run_connector_endpoint(connector_name: str, request: ConnectorRunRequest):
+    """Plan or execute a connector through the shared agent surface."""
+    try:
+        runtime_config = Config()
+        runtime_config.data = load_runtime_settings()
+        layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+        service = AgentSurfaceService(
+            runtime_config,
+            layout=layout,
+            db=MetadataDB(str(layout.database_path)),
+        )
+        return service.run_connector(
+            connector_name,
+            execute=request.execute,
+            options=request.options,
+        )
+    except (AgentSurfaceError, KeyError, ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error running connector {connector_name}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/archivist/registry")
@@ -1440,6 +1474,16 @@ async def fetch_provider_models(provider_name: str, request: ProviderModelsReque
                 except Exception as e:
                     logger.warning(f"Could not fetch Ollama models: {e}")
                     models = ["llama3.2", "gemma3:27b", "mistral", "codellama"]
+
+        elif provider_type == 'pi':
+            models = [
+                "glm-5.2",
+                "glm-5.1",
+                "glm-5-turbo",
+                "z-ai/glm-5.2",
+                "deepseek/deepseek-v4-flash",
+                "google/gemini-3.1-flash-lite",
+            ]
 
         else:
             raise HTTPException(status_code=400, detail=f"Unknown provider type: {provider_type}")

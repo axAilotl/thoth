@@ -358,6 +358,36 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "config_namespace": "sources.skill_outputs",
         "default_enabled": True,
     },
+    {
+        "name": "pi_skills",
+        "source_name": "pi_skills",
+        "source_aliases": ["pi_skill"],
+        "display_name": "Pi Skills",
+        "description": "Run configured local Pi skills and ingest their JSON/JSONL artifact envelopes.",
+        "artifact_types": [
+            "paper",
+            "repository",
+            "transcript",
+            "tweet",
+            "video",
+            "web_clipper",
+        ],
+        "capabilities": ["skills", "pi", "envelopes", "queue", "raw_preservation"],
+        "config_keys": [
+            "sources.pi_skills.enabled",
+            "sources.pi_skills.skills",
+            "sources.pi_skills.output_dir",
+            "sources.pi_skills.default_provider",
+            "sources.pi_skills.default_model",
+            "sources.pi_skills.fallback",
+        ],
+        "auth": ["llm.providers.pi", "llm.providers.pi_openrouter"],
+        "queue_capability": True,
+        "entrypoint": "collectors.pi_skill_connector:PiSkillConnector",
+        "cli_command": "connectors run pi_skills",
+        "config_namespace": "sources.pi_skills",
+        "default_enabled": True,
+    },
 )
 
 
