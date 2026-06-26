@@ -64,6 +64,24 @@ INGESTION_QUARANTINE_STATUSES = frozenset(
         PROMPT_SECURITY_POLICY_BLOCKED,
     }
 )
+SEMANTIC_MEMORY_CANDIDATE_TYPES = (
+    "fact",
+    "claim",
+    "preference",
+    "obligation",
+    "person",
+    "project",
+    "topic",
+)
+SEMANTIC_MEMORY_CANDIDATE_TYPE_CHECK = "', '".join(SEMANTIC_MEMORY_CANDIDATE_TYPES)
+SEMANTIC_MEMORY_CANDIDATE_STATUSES = (
+    "proposed",
+    "confirmed",
+    "rejected",
+    "promoted",
+    "superseded",
+)
+SEMANTIC_MEMORY_CANDIDATE_STATUS_CHECK = "', '".join(SEMANTIC_MEMORY_CANDIDATE_STATUSES)
 
 
 def _payload_security_metadata(payload: dict[str, Any]) -> dict[str, Any]:
@@ -713,6 +731,82 @@ class MetadataDB:
 
         for index_sql in indexes:
             conn.execute(index_sql)
+
+    def ensure_semantic_memory_tables(self) -> None:
+        """Initialize semantic memory candidate and evidence tables on demand."""
+        with self._get_connection() as conn:
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS semantic_memory_candidates (
+                    candidate_id TEXT PRIMARY KEY,
+                    candidate_type TEXT NOT NULL CHECK (
+                        candidate_type IN ('{SEMANTIC_MEMORY_CANDIDATE_TYPE_CHECK}')
+                    ),
+                    status TEXT NOT NULL DEFAULT 'proposed' CHECK (
+                        status IN ('{SEMANTIC_MEMORY_CANDIDATE_STATUS_CHECK}')
+                    ),
+                    subject TEXT NOT NULL DEFAULT '',
+                    predicate TEXT NOT NULL DEFAULT '',
+                    object_text TEXT NOT NULL DEFAULT '',
+                    text TEXT NOT NULL,
+                    entity_id TEXT NOT NULL DEFAULT '',
+                    entity_type TEXT NOT NULL DEFAULT '',
+                    entity_name TEXT NOT NULL DEFAULT '',
+                    confidence REAL,
+                    privacy_class TEXT NOT NULL DEFAULT 'unspecified',
+                    supersedes_candidate_id TEXT,
+                    superseded_by_candidate_id TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                    write_provenance_json TEXT NOT NULL DEFAULT '{{}}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    status_updated_at TEXT NOT NULL,
+                    FOREIGN KEY (supersedes_candidate_id)
+                        REFERENCES semantic_memory_candidates (candidate_id),
+                    FOREIGN KEY (superseded_by_candidate_id)
+                        REFERENCES semantic_memory_candidates (candidate_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS semantic_memory_evidence (
+                    evidence_id TEXT PRIMARY KEY,
+                    candidate_id TEXT NOT NULL,
+                    artifact_id TEXT,
+                    artifact_type TEXT,
+                    capture_event_id TEXT,
+                    source_path TEXT,
+                    source_timestamp TEXT,
+                    evidence_text TEXT NOT NULL DEFAULT '',
+                    confidence REAL,
+                    privacy_class TEXT NOT NULL DEFAULT 'unspecified',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    write_provenance_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CHECK (
+                        artifact_id IS NOT NULL
+                        OR capture_event_id IS NOT NULL
+                        OR source_path IS NOT NULL
+                    ),
+                    FOREIGN KEY (candidate_id)
+                        REFERENCES semantic_memory_candidates (candidate_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            indexes = [
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_type_status ON semantic_memory_candidates (candidate_type, status)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_entity ON semantic_memory_candidates (entity_type, entity_id)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_status_updated ON semantic_memory_candidates (status, status_updated_at)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_candidate ON semantic_memory_evidence (candidate_id)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_artifact ON semantic_memory_evidence (artifact_id, artifact_type)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_capture_event ON semantic_memory_evidence (capture_event_id)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_source_path ON semantic_memory_evidence (source_path)",
+            ]
+            for index_sql in indexes:
+                conn.execute(index_sql)
 
     def ensure_research_graph_tables(self) -> None:
         """Initialize research paper graph tables on demand."""
