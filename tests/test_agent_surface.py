@@ -369,7 +369,7 @@ def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):
 
     response = server.call_tool("list_connectors", {})
     payload = json.loads(response["content"][0]["text"])
-    assert payload["total"] == 9
+    assert payload["total"] == 10
 
     response = server.call_tool("get_artifact", {"artifact_id": "mcp-paper"})
     payload = json.loads(response["content"][0]["text"])
