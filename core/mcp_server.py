@@ -76,6 +76,17 @@ TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
         ),
     },
     {
+        "name": "list_connector_runs",
+        "description": "List connector run history, checkpoints, failure reasons, and retry state.",
+        "inputSchema": _schema(
+            {
+                "connector_name": {"type": "string"},
+                "status": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "default": 20},
+            }
+        ),
+    },
+    {
         "name": "connector_run_plan",
         "description": "Return a safe connector run plan without executing the connector.",
         "inputSchema": _schema(
@@ -111,6 +122,7 @@ class ThothMCPServer:
             "get_artifact_provenance": self._get_artifact_provenance,
             "list_connectors": self._list_connectors,
             "run_connector": self._run_connector,
+            "list_connector_runs": self._list_connector_runs,
             "connector_run_plan": self._connector_run_plan,
             "research_missing_papers": self._research_missing_papers,
         }
@@ -202,6 +214,13 @@ class ThothMCPServer:
             str(arguments.get("connector_name") or ""),
             execute=bool(arguments.get("execute", False)),
             options=arguments.get("options") or {},
+        )
+
+    def _list_connector_runs(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.service.list_connector_runs(
+            connector_name=arguments.get("connector_name"),
+            status=arguments.get("status"),
+            limit=int(arguments.get("limit") or 20),
         )
 
     def _connector_run_plan(self, arguments: dict[str, Any]) -> dict[str, Any]:

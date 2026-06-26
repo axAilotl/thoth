@@ -1245,6 +1245,34 @@ def run_connector_endpoint(connector_name: str, request: ConnectorRunRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/api/connectors/runs")
+def list_connector_runs_endpoint(
+    connector_name: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=200),
+):
+    """Return connector run history and checkpoint state."""
+    try:
+        runtime_config = Config()
+        runtime_config.data = load_runtime_settings()
+        layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+        service = AgentSurfaceService(
+            runtime_config,
+            layout=layout,
+            db=MetadataDB(str(layout.database_path)),
+        )
+        return service.list_connector_runs(
+            connector_name=connector_name,
+            status=status,
+            limit=limit,
+        )
+    except (AgentSurfaceError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing connector runs: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/archivist/registry")
 async def get_archivist_registry():
     """Return the raw and parsed archivist registry for the settings UI."""

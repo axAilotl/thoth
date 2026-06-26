@@ -1770,6 +1770,38 @@ def cmd_connectors(args):
                     print(f"   {key}: {result[key]}")
         return
 
+    if args.connectors_action == "history":
+        from core.metadata_db import get_metadata_db
+
+        service = AgentSurfaceService(
+            config,
+            layout=build_path_layout(config),
+            db=get_metadata_db(),
+        )
+        payload = service.list_connector_runs(
+            connector_name=getattr(args, "connector_name", None),
+            status=getattr(args, "status", None),
+            limit=getattr(args, "limit", 20),
+        )
+        if getattr(args, "json", False):
+            _print_json(payload)
+            return
+
+        print("Connector runs")
+        for run in payload["runs"]:
+            failure = f" failure={run['failure_reason']}" if run.get("failure_reason") else ""
+            retry = (
+                f" next_retry_at={run['next_retry_at']}"
+                if run.get("next_retry_at")
+                else ""
+            )
+            print(
+                f"- {run['connector_name']} {run['status']} "
+                f"run={run['run_id']} outputs={run['output_count']} "
+                f"attempt={run['attempt']}/{run['max_attempts']}{failure}{retry}"
+            )
+        return
+
     registry = load_connector_registry(config, project_root=Path(__file__).parent)
     if getattr(args, "json", False):
         print(json.dumps(registry.to_dict(config=config), indent=2, sort_keys=True))
@@ -3007,6 +3039,34 @@ Examples:
         "--json",
         action="store_true",
         help="Emit the run plan/result as JSON",
+    )
+    connectors_history_parser = connectors_subparsers.add_parser(
+        "history",
+        help="List connector run history and checkpoints",
+        description="List connector run history, checkpoints, failure reasons, and retry state",
+    )
+    connectors_history_parser.add_argument(
+        "connector_name",
+        nargs="?",
+        default=None,
+        help="Optional connector registry name to filter by",
+    )
+    connectors_history_parser.add_argument(
+        "--status",
+        choices=("running", "completed", "failed"),
+        default=None,
+        help="Filter connector runs by status",
+    )
+    connectors_history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum run records to return",
+    )
+    connectors_history_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit connector run history as JSON",
     )
 
     archivist_parser = subparsers.add_parser(
