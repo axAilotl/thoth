@@ -68,7 +68,10 @@
                         "id": { "type": "string" },
                         "prompt": { "type": "string" },
                         "max_tokens": { "type": "integer" },
-                        "temperature": { "type": "number" }
+                        "temperature": { "type": "number" },
+                        "input_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+                        "output_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+                        "cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 }
                       },
                       "required": ["id"],
                       "additionalProperties": false

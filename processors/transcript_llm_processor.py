@@ -130,7 +130,7 @@ class TranscriptLLMProcessor:
                 logger.warning("Transcript LLM task disabled or no provider available")
                 return None
 
-            provider, model, _ = route
+            provider, model, model_cfg = route
             target_label = self._format_target_label(
                 context_id=context_id,
                 source_label=source_label,
@@ -157,6 +157,7 @@ class TranscriptLLMProcessor:
                     provider,
                     model,
                     cache_provider,
+                    model_cfg=model_cfg,
                     target_label=target_label,
                     context_id=context_id,
                     chunk_index=1
@@ -176,6 +177,7 @@ class TranscriptLLMProcessor:
                     provider,
                     model,
                     cache_provider,
+                    model_cfg=model_cfg,
                     target_label=target_label,
                     context_id=context_id
                 )
@@ -193,6 +195,7 @@ class TranscriptLLMProcessor:
         provider: str,
         model: str,
         cache_provider: str,
+        model_cfg: Dict[str, object],
         target_label: str,
         context_id: Optional[str] = None,
         chunk_index: Optional[int] = None
@@ -261,6 +264,8 @@ class TranscriptLLMProcessor:
                 system_prompt=prompt,
                 provider=provider,
                 model=model,
+                task="transcript",
+                usage_model_config=model_cfg,
                 max_tokens=16000,  # Large enough for long transcripts
                 temperature=0.1   # Low temperature for consistent formatting
             )
@@ -347,6 +352,7 @@ class TranscriptLLMProcessor:
         provider: str,
         model: str,
         cache_provider: str,
+        model_cfg: Dict[str, object],
         target_label: str,
         context_id: Optional[str] = None
     ) -> Optional[dict]:
@@ -397,6 +403,7 @@ class TranscriptLLMProcessor:
                     provider,
                     model,
                     cache_provider,
+                    model_cfg=model_cfg,
                     target_label=target_label,
                     context_id=context_id,
                     chunk_index=i

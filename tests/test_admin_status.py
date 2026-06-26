@@ -9,6 +9,7 @@ from core.admin_status import build_admin_status_dashboard
 from core.archivist_state import archivist_topic_state_key
 from core.capture_event_store import CaptureEvent, CaptureSession, CaptureSource
 from core.config import Config
+from core.llm_usage import record_llm_usage
 from core.metadata_db import BookmarkQueueEntry, IngestionQueueEntry, MetadataDB
 from core.path_layout import build_path_layout
 from core.wiki_io import render_frontmatter
@@ -170,6 +171,21 @@ topics:
     )
     run = db.begin_connector_run("omi", inputs={"export_paths": ["omi.json"]})
     assert run is not None
+    record_llm_usage(
+        provider="openrouter",
+        model="test/model",
+        task="archivist",
+        operation="generate",
+        input_text="source material",
+        output_text="compiled result",
+        pricing={
+            "input_cost_per_1k_tokens_usd": 1.0,
+            "output_cost_per_1k_tokens_usd": 1.0,
+        },
+        source_connector="omi",
+        run_id=run.run_id,
+        db=db,
+    )
     db.finish_connector_run(
         run.run_id,
         status="failed",
@@ -214,6 +230,10 @@ topics:
     assert payload["compiler_runs"]["archivist"]["topic_count"] == 1
     assert payload["compiler_runs"]["archivist"]["recent"][0]["last_candidate_count"] == 1
     assert payload["compiler_runs"]["capture_wiki"]["compiled_page_count"] == 1
+    assert payload["llm_usage"]["call_count"] == 1
+    assert payload["llm_usage"]["totals_by_source"][0]["source_connector"] == "omi"
+    assert payload["llm_usage"]["totals_by_task"][0]["task"] == "archivist"
+    assert payload["llm_usage"]["recent_expensive_runs"][0]["run_id"] == run.run_id
 
     stuck_reasons = {item["reason"] for item in payload["stuck_work"]["items"]}
     assert "network down" in stuck_reasons

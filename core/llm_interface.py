@@ -8,10 +8,12 @@ import logging
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import asyncio
 
+from .llm_usage import elapsed_ms, record_llm_usage, usage_timer_started
 from .prompt_security import wrap_untrusted_content
 from .sensitive_redaction import (
     SensitiveRedactionError,
@@ -20,6 +22,11 @@ from .sensitive_redaction import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_error_text(error: Any) -> str:
+    """Return provider errors with secret-like values redacted."""
+    return redact_sensitive_text(str(error)).redacted_text
 
 
 @dataclass
@@ -99,12 +106,13 @@ class OpenAIProvider(BaseLLMProvider):
                 provider="openai",
             )
         except Exception as e:
-            logger.error(f"OpenAI embedding error: {e}")
+            error = _safe_error_text(e)
+            logger.error(f"OpenAI embedding error: {error}")
             return EmbeddingResponse(
                 vectors=[],
                 model=self.model,
                 provider="openai",
-                error=str(e),
+                error=error,
             )
 
     async def generate(self, prompt: str, system_prompt: str = None, **kwargs) -> LLMResponse:
@@ -148,12 +156,13 @@ class OpenAIProvider(BaseLLMProvider):
                 tokens_used=tokens
             )
         except Exception as e:
-            logger.error(f"OpenAI generation error: {e}")
+            error = _safe_error_text(e)
+            logger.error(f"OpenAI generation error: {error}")
             return LLMResponse(
                 content="",
                 model=self.model,
                 provider="openai",
-                error=str(e)
+                error=error
             )
 
     def get_provider_name(self) -> str:
@@ -208,12 +217,13 @@ class OpenRouterProvider(BaseLLMProvider):
                 tokens_used=tokens
             )
         except Exception as e:
-            logger.error(f"OpenRouter generation error: {e}")
+            error = _safe_error_text(e)
+            logger.error(f"OpenRouter generation error: {error}")
             return LLMResponse(
                 content="",
                 model=self.model,
                 provider="openrouter",
-                error=str(e)
+                error=error
             )
     
     def get_provider_name(self) -> str:
@@ -232,12 +242,13 @@ class OpenRouterProvider(BaseLLMProvider):
                 provider="openrouter",
             )
         except Exception as e:
-            logger.error(f"OpenRouter embedding error: {e}")
+            error = _safe_error_text(e)
+            logger.error(f"OpenRouter embedding error: {error}")
             return EmbeddingResponse(
                 vectors=[],
                 model=self.model,
                 provider="openrouter",
-                error=str(e),
+                error=error,
             )
 
 
@@ -286,12 +297,13 @@ class AnthropicProvider(BaseLLMProvider):
                 tokens_used=tokens
             )
         except Exception as e:
-            logger.error(f"Anthropic generation error: {e}")
+            error = _safe_error_text(e)
+            logger.error(f"Anthropic generation error: {error}")
             return LLMResponse(
                 content="",
                 model=self.model,
                 provider="anthropic",
-                error=str(e)
+                error=error
             )
 
     def get_provider_name(self) -> str:
@@ -354,12 +366,13 @@ class LocalProvider(BaseLLMProvider):
                 tokens_used=tokens
             )
         except Exception as e:
-            logger.error(f"Local LLM generation error: {e}")
+            error = _safe_error_text(e)
+            logger.error(f"Local LLM generation error: {error}")
             return LLMResponse(
                 content="",
                 model=self.model,
                 provider="local",
-                error=str(e)
+                error=error
             )
     
     def get_provider_name(self) -> str:
@@ -378,12 +391,13 @@ class LocalProvider(BaseLLMProvider):
                 provider="local",
             )
         except Exception as e:
-            logger.error(f"Local embedding error: {e}")
+            error = _safe_error_text(e)
+            logger.error(f"Local embedding error: {error}")
             return EmbeddingResponse(
                 vectors=[],
                 model=self.model,
                 provider="local",
-                error=str(e),
+                error=error,
             )
 
 
@@ -486,22 +500,26 @@ class PiProvider(BaseLLMProvider):
                 error=f"Pi generation timed out after {timeout_seconds:g}s",
             )
         except Exception as exc:
-            logger.error(f"Pi generation error: {exc}")
+            error = _safe_error_text(exc)
+            logger.error(f"Pi generation error: {error}")
             return LLMResponse(
                 content="",
                 model=self.model,
                 provider="pi",
-                error=str(exc),
+                error=error,
             )
 
         stdout_text = stdout.decode("utf-8", errors="replace").strip()
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
         if process.returncode != 0:
+            error = _safe_error_text(
+                f"Pi exited with status {process.returncode}: {stderr_text}"
+            )
             return LLMResponse(
                 content="",
                 model=self.model,
                 provider="pi",
-                error=f"Pi exited with status {process.returncode}: {stderr_text}",
+                error=error,
             )
 
         return LLMResponse(
@@ -661,84 +679,195 @@ class LLMInterface:
         *,
         provider: str = None,
         model: str = None,
+        task: str = "embedding",
+        source_connector: str | None = None,
+        run_id: str | None = None,
     ) -> EmbeddingResponse:
         """Generate embeddings using either an explicit route or llm.tasks.embedding."""
+        started_at = usage_timer_started()
+        model_cfg: dict[str, Any] = {}
         if not texts:
-            return EmbeddingResponse(
+            response = EmbeddingResponse(
                 vectors=[],
                 model=model or "none",
                 provider=provider or "none",
                 error="No texts were provided for embeddings",
             )
+            self._record_embedding_usage(
+                response,
+                texts=texts,
+                task=task,
+                pricing={},
+                source_connector=source_connector,
+                run_id=run_id,
+                started_at=started_at,
+            )
+            return response
 
         if provider is None or model is None:
             route = self._resolve_task_route('embedding')
             if route is None:
-                return EmbeddingResponse(
+                response = EmbeddingResponse(
                     vectors=[],
                     model=model or "none",
                     provider=provider or "none",
                     error="No embedding provider configured",
                 )
-            provider, model, _ = route
+                self._record_embedding_usage(
+                    response,
+                    texts=texts,
+                    task=task,
+                    pricing={},
+                    source_connector=source_connector,
+                    run_id=run_id,
+                    started_at=started_at,
+                )
+                return response
+            provider, model, model_cfg = route
+        else:
+            model_cfg = self._model_config_for_provider(provider, model)
 
         selected_provider = self.providers.get(provider)
         if not selected_provider:
-            return EmbeddingResponse(
+            response = EmbeddingResponse(
                 vectors=[],
                 model=model or "none",
                 provider=provider or "none",
                 error=f"Provider '{provider}' not available",
             )
+            self._record_embedding_usage(
+                response,
+                texts=texts,
+                task=task,
+                pricing=self._usage_pricing(provider, model, task, model_cfg, {}),
+                source_connector=source_connector,
+                run_id=run_id,
+                started_at=started_at,
+            )
+            return response
 
         original_model = getattr(selected_provider, 'model', None)
         if model and hasattr(selected_provider, 'model'):
             selected_provider.model = model
         try:
-            return await selected_provider.embed_texts(texts)
+            response = await selected_provider.embed_texts(texts)
+            self._record_embedding_usage(
+                response,
+                texts=texts,
+                task=task,
+                pricing=self._usage_pricing(provider, model, task, model_cfg, {}),
+                source_connector=source_connector,
+                run_id=run_id,
+                started_at=started_at,
+            )
+            return response
+        except Exception as exc:
+            response = EmbeddingResponse(
+                vectors=[],
+                model=model or "none",
+                provider=provider or "none",
+                error=_safe_error_text(exc),
+            )
+            self._record_embedding_usage(
+                response,
+                texts=texts,
+                task=task,
+                pricing=self._usage_pricing(provider, model, task, model_cfg, {}),
+                source_connector=source_connector,
+                run_id=run_id,
+                started_at=started_at,
+            )
+            raise
         finally:
             if model and hasattr(selected_provider, 'model'):
                 selected_provider.model = original_model
 
     async def generate(self, prompt: str, system_prompt: str = None, provider: str = None, model: str = None, **kwargs) -> LLMResponse:
         """Generate text using specified or default provider"""
+        usage_task = str(kwargs.pop("task", "generic") or "generic")
+        source_connector = kwargs.pop("source_connector", None)
+        run_id = kwargs.pop("run_id", None)
+        usage_model_config = kwargs.pop("usage_model_config", None)
+        started_at = usage_timer_started()
         try:
             prompt, system_prompt, redaction_metadata = self._redact_prompt_payload(
                 prompt,
                 system_prompt,
             )
         except SensitiveRedactionError as exc:
-            return LLMResponse(
+            response = LLMResponse(
                 content="",
                 model=model or "none",
                 provider=provider or "none",
                 error=f"Blocked: sensitive content could not be safely redacted: {exc}",
             )
+            self._record_generation_usage(
+                response,
+                prompt="",
+                system_prompt=None,
+                task=usage_task,
+                pricing={},
+                source_connector=source_connector,
+                run_id=run_id,
+                started_at=started_at,
+            )
+            return response
 
         if not provider:
             # Fallback to default route from any task (first available provider)
             if not self.providers:
-                return LLMResponse(
+                response = LLMResponse(
                     content="",
                     model="none",
                     provider="none",
                     error="No LLM providers configured"
                 )
+                self._record_generation_usage(
+                    response,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    task=usage_task,
+                    pricing={},
+                    source_connector=source_connector,
+                    run_id=run_id,
+                    started_at=started_at,
+                )
+                return response
             provider = next(iter(self.providers.keys()))
 
         selected_provider = self.providers.get(provider)
         if not selected_provider:
-            return LLMResponse(
+            response = LLMResponse(
                 content="",
                 model="none",
                 provider=provider,
                 error=f"Provider '{provider}' not available"
             )
+            self._record_generation_usage(
+                response,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                task=usage_task,
+                pricing=self._usage_pricing(provider, model, usage_task, usage_model_config, kwargs),
+                source_connector=source_connector,
+                run_id=run_id,
+                started_at=started_at,
+            )
+            return response
 
         models = self.provider_models.get(provider, {})
         model_id = model
         if not model_id:
             model_id = models.get('default', {}).get('id')
+        if usage_model_config is None:
+            usage_model_config = self._model_config_for_provider(provider, model_id)
+        usage_pricing = self._usage_pricing(
+            provider,
+            model_id,
+            usage_task,
+            usage_model_config,
+            kwargs,
+        )
 
         if model_id and hasattr(selected_provider, 'model'):
             original_model = selected_provider.model
@@ -747,14 +876,202 @@ class LLMInterface:
                 result = await selected_provider.generate(prompt, system_prompt, **kwargs)
                 if redaction_metadata:
                     result.redaction_metadata = redaction_metadata
+                self._record_generation_usage(
+                    result,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    task=usage_task,
+                    pricing=usage_pricing,
+                    source_connector=source_connector,
+                    run_id=run_id,
+                    started_at=started_at,
+                )
                 return result
+            except Exception as exc:
+                response = LLMResponse(
+                    content="",
+                    model=model_id or "none",
+                    provider=provider,
+                    error=_safe_error_text(exc),
+                )
+                self._record_generation_usage(
+                    response,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    task=usage_task,
+                    pricing=usage_pricing,
+                    source_connector=source_connector,
+                    run_id=run_id,
+                    started_at=started_at,
+                )
+                raise
             finally:
                 selected_provider.model = original_model
         else:
             result = await selected_provider.generate(prompt, system_prompt, **kwargs)
             if redaction_metadata:
                 result.redaction_metadata = redaction_metadata
+            self._record_generation_usage(
+                result,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                task=usage_task,
+                pricing=usage_pricing,
+                source_connector=source_connector,
+                run_id=run_id,
+                started_at=started_at,
+            )
             return result
+
+    def _record_generation_usage(
+        self,
+        response: LLMResponse,
+        *,
+        prompt: str,
+        system_prompt: str | None,
+        task: str,
+        pricing: Mapping[str, Any],
+        source_connector: str | None,
+        run_id: str | None,
+        started_at: float | None,
+    ) -> None:
+        input_text = "\n".join(part for part in (system_prompt, prompt) if part)
+        record_llm_usage(
+            provider=response.provider,
+            model=response.model,
+            task=task,
+            operation="generate",
+            input_text=input_text,
+            output_text=response.content or "",
+            provider_tokens=response.tokens_used,
+            provider_cost=response.cost,
+            pricing=pricing,
+            cache_hit=False,
+            source_connector=source_connector,
+            run_id=run_id,
+            status="error" if response.error else "ok",
+            error=response.error,
+            redaction_metadata=response.redaction_metadata,
+            duration_ms=elapsed_ms(started_at),
+            db=getattr(self, "usage_db", None),
+        )
+
+    def _record_embedding_usage(
+        self,
+        response: EmbeddingResponse,
+        *,
+        texts: Sequence[str],
+        task: str,
+        pricing: Mapping[str, Any],
+        source_connector: str | None,
+        run_id: str | None,
+        started_at: float | None,
+    ) -> None:
+        input_text = "\n".join(str(text or "") for text in texts)
+        record_llm_usage(
+            provider=response.provider,
+            model=response.model,
+            task=task,
+            operation="embedding",
+            input_text=input_text,
+            output_text="",
+            pricing=pricing,
+            cache_hit=False,
+            source_connector=source_connector,
+            run_id=run_id,
+            status="error" if response.error else "ok",
+            error=response.error,
+            duration_ms=elapsed_ms(started_at),
+            db=getattr(self, "usage_db", None),
+        )
+
+    def _record_vision_usage(
+        self,
+        *,
+        provider: str,
+        model: str,
+        model_cfg: Mapping[str, Any],
+        system_prompt: str,
+        image_bytes: int,
+        output_text: str,
+        provider_tokens: int | None,
+        error: str | None,
+        started_at: float | None,
+    ) -> None:
+        input_bytes = len((system_prompt or "").encode("utf-8")) + max(0, int(image_bytes or 0))
+        record_llm_usage(
+            provider=provider,
+            model=model,
+            task="alt_text",
+            operation="generate",
+            input_bytes=input_bytes,
+            output_text=output_text or "",
+            provider_tokens=provider_tokens,
+            pricing=self._usage_pricing(provider, model, "alt_text", model_cfg, {}),
+            cache_hit=False,
+            status="error" if error else "ok",
+            error=error,
+            duration_ms=elapsed_ms(started_at),
+            db=getattr(self, "usage_db", None),
+        )
+
+    def _model_config_for_provider(
+        self,
+        provider: str | None,
+        model_id: str | None,
+    ) -> dict[str, Any]:
+        models = self.provider_models.get(provider or "", {})
+        if not model_id:
+            return dict(models.get("default", {}) or {})
+        for model_cfg in models.values():
+            if isinstance(model_cfg, Mapping) and model_cfg.get("id") == model_id:
+                return dict(model_cfg)
+        return {}
+
+    def _usage_pricing(
+        self,
+        provider: str | None,
+        model_id: str | None,
+        task: str | None,
+        model_cfg: Mapping[str, Any] | None,
+        call_options: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        keys = (
+            "input_cost_per_1k_tokens_usd",
+            "output_cost_per_1k_tokens_usd",
+            "cost_per_1k_tokens_usd",
+        )
+        pricing: dict[str, Any] = {}
+
+        def merge(source: Mapping[str, Any] | None) -> None:
+            if not isinstance(source, Mapping):
+                return
+            for key in keys:
+                if source.get(key) is not None:
+                    pricing[key] = source[key]
+
+        observability = self.config.get("observability", {})
+        pricing_config = observability.get("pricing", {}) if isinstance(observability, Mapping) else {}
+        if isinstance(pricing_config, Mapping):
+            merge(pricing_config.get("defaults") if isinstance(pricing_config.get("defaults"), Mapping) else None)
+            task_pricing = pricing_config.get("tasks", {})
+            if isinstance(task_pricing, Mapping):
+                merge(task_pricing.get(task or ""))
+            provider_pricing = pricing_config.get(provider or "")
+            if isinstance(provider_pricing, Mapping):
+                merge(provider_pricing)
+                provider_models = provider_pricing.get("models", {})
+                if isinstance(provider_models, Mapping):
+                    merge(provider_models.get(model_id or ""))
+                merge(provider_pricing.get(model_id or ""))
+
+        provider_cfg = self.config.get("providers", {}).get(provider or "", {})
+        merge(provider_cfg if isinstance(provider_cfg, Mapping) else None)
+        task_cfg = self.config.get("tasks", {}).get(task or "", {})
+        merge(task_cfg if isinstance(task_cfg, Mapping) else None)
+        merge(model_cfg)
+        merge(call_options)
+        return pricing
 
     def _redact_prompt_payload(
         self,
@@ -799,6 +1116,8 @@ class LLMInterface:
             system_prompt=system_prompt,
             provider=provider,
             model=model_id,
+            task="tags",
+            usage_model_config=model_cfg,
             max_tokens=model_cfg.get('max_tokens', 100),
             temperature=model_cfg.get('temperature', 0.3)
         )
@@ -841,6 +1160,8 @@ class LLMInterface:
             system_prompt=system_prompt,
             provider=provider,
             model=model_id,
+            task="summary",
+            usage_model_config=model_cfg,
             max_tokens=model_cfg.get('max_tokens', 200),
             temperature=model_cfg.get('temperature', 0.5)
         )
@@ -886,57 +1207,103 @@ class LLMInterface:
             # For OpenRouter, we need to use the vision model
             if provider == 'openrouter' and hasattr(selected_provider, 'client'):
                 vision_model = model_id or model_cfg.get('id') or 'z-ai/glm-4.5v'
-                
+
                 logger.debug(f"Generating alt text with {vision_model} for image: {image_file.name}")
-                
+
                 try:
+                    started_at = usage_timer_started()
                     response = await selected_provider.client.chat.completions.create(
                         model=vision_model,
                         messages=[
                             {
                                 "role": "system",
-                                "content": system_prompt
+                                "content": system_prompt,
                             },
                             {
                                 "role": "user",
                                 "content": [
                                     {
                                         "type": "text",
-                                        "text": "Please provide alt text for this image."
+                                        "text": "Please provide alt text for this image.",
                                     },
                                     {
                                         "type": "image_url",
                                         "image_url": {
-                                            "url": f"data:{mime_type};base64,{image_data}"
-                                        }
-                                    }
-                                ]
-                            }
+                                            "url": f"data:{mime_type};base64,{image_data}",
+                                        },
+                                    },
+                                ],
+                            },
                         ],
                         max_tokens=150,
-                        temperature=0.3
+                        temperature=0.3,
                     )
-                    
+
                     if not response.choices:
                         logger.error(f"No response choices for alt text generation: {image_path}")
+                        self._record_vision_usage(
+                            provider=provider,
+                            model=vision_model,
+                            model_cfg=model_cfg,
+                            system_prompt=system_prompt,
+                            image_bytes=len(image_data.encode("utf-8")),
+                            output_text="",
+                            provider_tokens=getattr(getattr(response, "usage", None), "total_tokens", None),
+                            error="No response choices for alt text generation",
+                            started_at=started_at,
+                        )
                         return "Alt text generation failed - no response"
-                    
+
                     alt_text = response.choices[0].message.content
                     if not alt_text:
                         logger.error(f"Empty alt text response for: {image_path}")
+                        self._record_vision_usage(
+                            provider=provider,
+                            model=vision_model,
+                            model_cfg=model_cfg,
+                            system_prompt=system_prompt,
+                            image_bytes=len(image_data.encode("utf-8")),
+                            output_text="",
+                            provider_tokens=getattr(getattr(response, "usage", None), "total_tokens", None),
+                            error="Empty alt text response",
+                            started_at=started_at,
+                        )
                         return "Alt text generation failed - empty response"
-                        
+
                     alt_text = alt_text.strip()
-                    
+
                     # Ensure it's under 125 characters as requested
                     if len(alt_text) > 125:
                         alt_text = alt_text[:122] + "..."
-                    
+
                     logger.debug(f"Generated alt text ({len(alt_text)} chars): {alt_text}")
+                    self._record_vision_usage(
+                        provider=provider,
+                        model=vision_model,
+                        model_cfg=model_cfg,
+                        system_prompt=system_prompt,
+                        image_bytes=len(image_data.encode("utf-8")),
+                        output_text=alt_text,
+                        provider_tokens=getattr(getattr(response, "usage", None), "total_tokens", None),
+                        error=None,
+                        started_at=started_at,
+                    )
                     return alt_text
-                    
+
                 except Exception as api_error:
-                    logger.error(f"OpenRouter API error for alt text {image_path}: {api_error}")
+                    error = _safe_error_text(api_error)
+                    logger.error(f"OpenRouter API error for alt text {image_path}: {error}")
+                    self._record_vision_usage(
+                        provider=provider,
+                        model=vision_model,
+                        model_cfg=model_cfg,
+                        system_prompt=system_prompt,
+                        image_bytes=len(image_data.encode("utf-8")),
+                        output_text="",
+                        provider_tokens=None,
+                        error=error,
+                        started_at=locals().get("started_at"),
+                    )
                     return f"Alt text generation failed - API error"
             
             # For other providers, return placeholder for now
@@ -945,6 +1312,8 @@ class LLMInterface:
                 system_prompt=system_prompt,
                 provider=provider,
                 model=model_id,
+                task="alt_text",
+                usage_model_config=model_cfg,
                 max_tokens=model_cfg.get('max_tokens', 150),
                 temperature=model_cfg.get('temperature', 0.3)
             )

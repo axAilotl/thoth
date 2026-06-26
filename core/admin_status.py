@@ -12,6 +12,7 @@ from .admin_status_stuck import queue_status, stuck_work_status
 from .admin_status_utils import dt_text, error_item, parse_datetime
 from .capture_event_store import CaptureEventStore
 from .config import Config
+from .llm_usage import build_llm_usage_status
 from .metadata_db import MetadataDB
 from .path_layout import build_path_layout
 from .postgres import PostgresConfigError, open_postgres_connection, resolve_postgres_settings
@@ -58,6 +59,7 @@ def build_admin_status_dashboard(
             project_root=project_root,
             now=now_dt,
         )
+        llm_usage_payload = build_llm_usage_status(metadata_db)
         section_errors = [
             item
             for item in (
@@ -65,6 +67,7 @@ def build_admin_status_dashboard(
                 error_item("queues", queue_payload.get("error")),
                 error_item("stale_pages", stale_payload.get("error")),
                 error_item("compiler_runs", compiler_payload.get("error")),
+                error_item("llm_usage", llm_usage_payload.get("error")),
             )
             if item
         ]
@@ -95,6 +98,7 @@ def build_admin_status_dashboard(
             "queue_counts": queue_payload,
             "stale_pages": stale_payload,
             "compiler_runs": compiler_payload,
+            "llm_usage": llm_usage_payload,
             "stuck_work": stuck_payload,
             "errors": section_errors,
         }

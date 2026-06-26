@@ -242,6 +242,8 @@ class ArchivistCompiler:
             system_prompt=system_prompt,
             provider=provider_name,
             model=model_id,
+            task="archivist",
+            usage_model_config=model_cfg,
             max_tokens=int(model_cfg.get("max_tokens", 1800) or 1800),
             temperature=float(model_cfg.get("temperature", 0.2) or 0.2),
         )

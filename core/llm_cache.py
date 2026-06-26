@@ -56,7 +56,23 @@ class LLMCache:
                 
                 self.hits += 1
                 logger.debug(f"LLM cache HIT for {task_type}: {cache_key}")
-                return cached_data.get('result')
+                result = cached_data.get('result')
+                try:
+                    from .llm_usage import record_llm_cache_hit
+
+                    record_llm_cache_hit(
+                        task_type=task_type,
+                        model_provider=model,
+                        content=content,
+                        result=result,
+                    )
+                except Exception as usage_error:
+                    logger.warning(
+                        "Failed to record LLM cache usage for %s: %s",
+                        task_type,
+                        redact_sensitive_text(str(usage_error)).redacted_text,
+                    )
+                return result
             else:
                 self.misses += 1
                 logger.debug(f"LLM cache MISS for {task_type}: {cache_key}")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import shutil
 from dataclasses import dataclass, field
@@ -678,12 +679,15 @@ class PiSkillConnector:
             if route.provider not in interface.providers:
                 last_error = f"Pi provider is unavailable: {route.provider}"
                 continue
-            response = await interface.generate(
-                prompt,
-                system_prompt=SYSTEM_PROMPT,
-                provider=route.provider,
-                model=route.model,
-            )
+            generate_kwargs = {
+                "prompt": prompt,
+                "system_prompt": SYSTEM_PROMPT,
+                "provider": route.provider,
+                "model": route.model,
+            }
+            if _generate_accepts_kwarg(interface.generate, "task"):
+                generate_kwargs["task"] = "pi_skill"
+            response = await interface.generate(**generate_kwargs)
             if response.error:
                 last_error = response.error
                 continue
@@ -870,6 +874,17 @@ def _safe_slug(value: Any) -> str:
     chars = [char if char.isalnum() else "-" for char in text]
     slug = "-".join(part for part in "".join(chars).split("-") if part)
     return slug or "pi-skill"
+
+
+def _generate_accepts_kwarg(generate_func: Any, name: str) -> bool:
+    try:
+        signature = inspect.signature(generate_func)
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == name
+        for parameter in signature.parameters.values()
+    )
 
 
 def _model_id(provider_cfg: Mapping[str, Any], model: str | None) -> str | None:

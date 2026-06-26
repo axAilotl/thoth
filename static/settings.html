@@ -1598,6 +1598,14 @@
                         <div class="stat-value" id="health-stuck">-</div>
                         <div class="stat-label">Stuck Work</div>
                     </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-llm-cost">-</div>
+                        <div class="stat-label">LLM Cost Est.</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-llm-calls">-</div>
+                        <div class="stat-label">LLM Calls</div>
+                    </div>
                 </div>
                 <div class="form-group" style="margin-top: 16px;">
                     <label>Source Health</label>
@@ -1614,6 +1622,18 @@
                 <div class="form-group">
                     <label>Stuck Work</label>
                     <div id="health-stuck-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Recent Expensive LLM Runs</label>
+                    <div id="health-llm-expensive-runs" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>LLM Totals by Source</label>
+                    <div id="health-llm-source-totals" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>LLM Totals by Task</label>
+                    <div id="health-llm-task-totals" class="security-table-wrap"></div>
                 </div>
                 <div class="form-group">
                     <label>Errors</label>
@@ -2255,6 +2275,13 @@
             element.innerHTML = value || '';
         }
 
+        function formatUsd(value) {
+            const number = Number(value || 0);
+            if (!Number.isFinite(number)) return '$0.0000';
+            if (number >= 1) return `$${number.toFixed(2)}`;
+            return `$${number.toFixed(4)}`;
+        }
+
         function updateOverviewRuntime(groups) {
             const overview = groups?.overview || {};
             const advanced = groups?.advanced || {};
@@ -2624,12 +2651,79 @@
             `;
         }
 
+        function renderLLMExpensiveRuns(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No LLM usage has been recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Run</th>
+                            <th>Source</th>
+                            <th>Tasks</th>
+                            <th>Calls</th>
+                            <th>Tokens</th>
+                            <th>Cost</th>
+                            <th>Last</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.run_id || '')}</td>
+                                <td>${escapeHtml(row.source_connector || 'direct')}</td>
+                                <td>${escapeHtml((row.tasks || []).join(', ') || '-')}</td>
+                                <td>${escapeHtml(row.call_count ?? 0)}<br><span class="stat-label">cache ${escapeHtml(row.cache_hits ?? 0)}</span></td>
+                                <td>${escapeHtml(row.total_tokens_estimate ?? 0)}</td>
+                                <td>${escapeHtml(formatUsd(row.cost_estimate_usd))}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.last_recorded_at))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderLLMTotals(rows, key, emptyText) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return `<div class="security-empty">${escapeHtml(emptyText)}</div>`;
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>${key === 'task' ? 'Task' : 'Source'}</th>
+                            <th>Calls</th>
+                            <th>Cache Hits</th>
+                            <th>Tokens</th>
+                            <th>Cost</th>
+                            <th>Last</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row[key] || 'direct')}</td>
+                                <td>${escapeHtml(row.call_count ?? 0)}</td>
+                                <td>${escapeHtml(row.cache_hits ?? 0)}</td>
+                                <td>${escapeHtml(row.total_tokens_estimate ?? 0)}</td>
+                                <td>${escapeHtml(formatUsd(row.cost_estimate_usd))}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.last_recorded_at))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
         function renderAdminStatusDashboard(status) {
             const sourceHealth = status?.source_health || {};
             const events = status?.event_counts || {};
             const queues = status?.queue_counts || {};
             const stalePages = status?.stale_pages || {};
             const compilerRuns = status?.compiler_runs || {};
+            const llmUsage = status?.llm_usage || {};
             const stuck = status?.stuck_work || {};
             const bookmarkTotal = queues.bookmark_queue?.total || 0;
             const ingestionTotal = queues.ingestion_queue?.total || 0;
@@ -2642,10 +2736,21 @@
             setTextValue('health-stale-pages', stalePages.total ?? 0);
             setTextValue('health-compiler-runs', archivistCount + captureCompileCount);
             setTextValue('health-stuck', stuck.total ?? 0);
+            setTextValue('health-llm-cost', formatUsd(llmUsage.total_cost_estimate_usd));
+            setTextValue('health-llm-calls', llmUsage.call_count ?? 0);
             setHtmlValue('health-source-table', renderHealthSources(sourceHealth.sources || []));
             setHtmlValue('health-sessions-table', renderHealthSessions(status?.recent_sessions?.sessions || []));
             setHtmlValue('health-compiler-list', renderHealthCompiler(status || {}));
             setHtmlValue('health-stuck-list', renderHealthStuck(stuck.items || []));
+            setHtmlValue('health-llm-expensive-runs', renderLLMExpensiveRuns(llmUsage.recent_expensive_runs || []));
+            setHtmlValue(
+                'health-llm-source-totals',
+                renderLLMTotals(llmUsage.totals_by_source || [], 'source_connector', 'No LLM source totals are recorded.')
+            );
+            setHtmlValue(
+                'health-llm-task-totals',
+                renderLLMTotals(llmUsage.totals_by_task || [], 'task', 'No LLM task totals are recorded.')
+            );
 
             const errorLines = (status?.errors || []).map(item => {
                 return `${item.section || 'status'}: ${item.reason || 'unknown error'}`;

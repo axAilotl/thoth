@@ -358,6 +358,8 @@ class EnglishCompanionPublisher:
             system_prompt=system_prompt,
             provider=provider,
             model=model_id,
+            task="translation",
+            usage_model_config=model_cfg,
             max_tokens=model_cfg.get("max_tokens", 1200),
             temperature=model_cfg.get("temperature", 0.2),
         )
