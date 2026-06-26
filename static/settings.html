@@ -649,18 +649,17 @@
             <button class="tab active" data-tab="stats">Overview</button>
             <button class="tab" data-tab="pipeline">Sources &amp; Skills</button>
             <button class="tab" data-tab="archivist">Wiki &amp; Archivist</button>
-            <button class="tab" data-tab="providers">Models</button>
-            <button class="tab" data-tab="tasks">Task Routing</button>
+            <button class="tab" data-tab="security">Security</button>
             <button class="tab" data-tab="paths">Advanced</button>
         </div>
 
-        <!-- LLM Providers Tab -->
+        <!-- LLM Providers Advanced Section -->
         <div id="providers" class="tab-content">
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <h2 class="card-title">LLM Providers</h2>
-                        <p class="card-description">Configure AI providers, API keys, and models. Providers with vision support can be used for image alt-text generation.</p>
+                        <h2 class="card-title">Advanced: Model Providers</h2>
+                        <p class="card-description">Configure AI providers, API keys, and model aliases. Most operators only need this when changing provider accounts or model routes.</p>
                     </div>
                 </div>
 
@@ -678,12 +677,12 @@
             </div>
         </div>
 
-        <!-- Task Routing Tab -->
+        <!-- Task Routing Advanced Section -->
         <div id="tasks" class="tab-content">
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <h2 class="card-title">Task Routing</h2>
+                        <h2 class="card-title">Advanced: Task Routing</h2>
                         <p class="card-description">Configure which provider and model alias handles each AI task. Translation routing is used for English companion generation.</p>
                     </div>
                 </div>
@@ -1419,6 +1418,31 @@
             </div>
         </div>
 
+        <!-- Security Tab -->
+        <div id="security" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Security</h2>
+                        <p class="card-description">Read-only runtime status for configured auth, prompt handling, and connector side-effect declarations.</p>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Connector Auth Status</label>
+                    <textarea id="security-auth-summary" rows="7" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Prompt and Redaction Handling</label>
+                    <textarea id="security-prompt-summary" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Declared Safety Modes and Side Effects</label>
+                    <textarea id="security-side-effects" rows="6" readonly></textarea>
+                </div>
+            </div>
+        </div>
+
         <!-- Stats Tab -->
         <div id="stats" class="tab-content active">
             <div class="card">
@@ -1473,6 +1497,26 @@
                         <div class="stat-value" id="overview-okf">-</div>
                         <div class="stat-label">Wiki Target</div>
                     </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Operator Summary</h2>
+                        <p class="card-description">Runtime summary organized around what happened, what is stuck, and what should run next.</p>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>What Happened</label>
+                    <textarea id="overview-what-happened" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>What Is Stuck</label>
+                    <textarea id="overview-what-stuck" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>What Should Run Next</label>
+                    <textarea id="overview-run-next" rows="4" readonly></textarea>
                 </div>
             </div>
         </div>
@@ -1534,13 +1578,20 @@
         let archivistRegistryState = null;
 
         // Tab switching
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                tab.classList.add('active');
-                document.getElementById(tab.dataset.tab).classList.add('active');
+        function showTab(tabName) {
+            const activeContentIds = tabName === 'paths'
+                ? ['providers', 'tasks', 'paths']
+                : [tabName];
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.tab === tabName);
             });
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.toggle('active', activeContentIds.includes(content.id));
+            });
+        }
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => showTab(tab.dataset.tab));
         });
 
         function showAlert(message, type = 'success') {
@@ -2052,14 +2103,25 @@
         }
 
         function updateOverviewRuntime(groups) {
-            const providers = groups?.providers || {};
-            const connectors = groups?.connectors || {};
-            const skills = groups?.skills || {};
-            const wiki = groups?.wiki || {};
+            const overview = groups?.overview || {};
+            const advanced = groups?.advanced || {};
+            const sources = groups?.sources_and_skills || {};
+            const wiki = groups?.wiki_and_archivist || {};
+            const providers = advanced.providers || {};
+            const connectors = sources.connectors || {};
+            const skills = sources.skills || {};
             setTextValue('overview-providers', `${(providers.enabled || []).length}/${providers.total || 0}`);
             setTextValue('overview-connectors', `${(connectors.enabled || []).length}/${connectors.total || 0}`);
             setTextValue('overview-skills', `${skills.enabled ? 'on' : 'off'} / ${skills.total || 0}`);
             setTextValue('overview-okf', wiki.okf_target || '-');
+            setFieldValue('overview-what-happened', multilineFromValue(overview.what_happened || []));
+            setFieldValue(
+                'overview-what-stuck',
+                (overview.what_is_stuck || []).length > 0
+                    ? multilineFromValue(overview.what_is_stuck)
+                    : 'Nothing currently reported'
+            );
+            setFieldValue('overview-run-next', multilineFromValue(overview.what_should_run_next || []));
         }
 
         function renderPiSkillOptions(piSkills) {
@@ -2083,9 +2145,12 @@
         }
 
         function formatConnectorRuntimeSummary(group) {
-            const connectors = group?.items || group?.connectors || [];
+            const connectorGroup = group?.connectors && !Array.isArray(group.connectors)
+                ? group.connectors
+                : group;
+            const connectors = connectorGroup?.items || connectorGroup?.connectors || [];
             if (!Array.isArray(connectors) || connectors.length === 0) {
-                return group?.error ? `ERROR: ${group.error}` : 'No connector metadata loaded';
+                return connectorGroup?.error ? `ERROR: ${connectorGroup.error}` : 'No connector metadata loaded';
             }
             return connectors.map(connector => {
                 const artifacts = (connector.artifact_types || []).join(', ') || 'none';
@@ -2114,26 +2179,63 @@
             }).join('\n\n');
         }
 
+        function formatSecurityRuntimeSummary(security) {
+            const auth = security?.connector_auth || [];
+            const authSummary = auth.length > 0
+                ? auth.map(item => [
+                    `${item.name}: ${item.enabled ? 'enabled' : 'disabled'}`,
+                    `  configured: ${(item.configured || []).length}/${item.total || 0}`,
+                    `  missing: ${joinList(item.missing || [])}`
+                ].join('\n')).join('\n\n')
+                : 'No connector auth requirements reported';
+
+            const prompt = security?.prompt_security || {};
+            const promptSummary = [
+                `threat scanner: ${prompt.threat_scanner || 'not reported'}`,
+                `sensitive redaction: ${prompt.sensitive_redaction || 'not reported'}`,
+                `configured prompt groups: ${joinList(prompt.configured_prompt_groups || [])}`
+            ].join('\n');
+
+            const sideEffects = [
+                `safety modes: ${joinList(security?.safety_modes || [])}`,
+                `allowed side effects: ${joinList(security?.allowed_side_effects || [])}`
+            ].join('\n');
+
+            return { authSummary, promptSummary, sideEffects };
+        }
+
         function formatGroupedRuntimeSummary(groups) {
             if (!groups || typeof groups !== 'object') {
                 return 'Grouped runtime summary unavailable';
             }
-            const providers = groups.providers || {};
-            const connectors = groups.connectors || {};
-            const skills = groups.skills || {};
-            const storage = groups.storage || {};
-            const wiki = groups.wiki || {};
-            const automation = groups.automation || {};
+            const overview = groups.overview || {};
+            const sources = groups.sources_and_skills || {};
+            const connectors = sources.connectors || {};
+            const skills = sources.skills || {};
+            const wiki = groups.wiki_and_archivist || {};
+            const advanced = groups.advanced || {};
+            const providers = advanced.providers || {};
+            const storage = advanced.storage || {};
+            const automation = advanced.automation || {};
             return [
-                `providers: ${(providers.enabled || []).length}/${providers.total || 0} enabled`,
-                `connectors: ${(connectors.enabled || []).length}/${connectors.total || 0} enabled`,
-                `skills: ${skills.enabled ? 'enabled' : 'disabled'} (${skills.total || 0})`,
-                `storage.vault: ${storage.vault_root || storage.error || ''}`,
-                `storage.raw: ${storage.raw_root || ''}`,
-                `storage.system: ${storage.system_root || ''}`,
-                `wiki.root: ${wiki.wiki_root || wiki.error || ''}`,
-                `wiki.okf: ${wiki.okf_target || ''}`,
-                `automation: ${joinList(automation.enabled || [])}`
+                'overview:',
+                `  happened: ${joinList(overview.what_happened || [])}`,
+                `  stuck: ${joinList(overview.what_is_stuck || [])}`,
+                `  run next: ${joinList(overview.what_should_run_next || [])}`,
+                'sources_and_skills:',
+                `  connectors: ${(connectors.enabled || []).length}/${connectors.total || 0} enabled`,
+                `  skills: ${skills.enabled ? 'enabled' : 'disabled'} (${skills.total || 0})`,
+                'wiki_and_archivist:',
+                `  wiki.root: ${wiki.wiki_root || wiki.error || ''}`,
+                `  wiki.okf: ${wiki.okf_target || ''}`,
+                `  archivist topics: ${wiki.archivist_topic_count || 0}`,
+                'security:',
+                `  safety modes: ${joinList(groups.security?.safety_modes || [])}`,
+                'advanced:',
+                `  providers: ${(providers.enabled || []).length}/${providers.total || 0} enabled`,
+                `  storage.vault: ${storage.vault_root || storage.error || ''}`,
+                `  storage.system: ${storage.system_root || ''}`,
+                `  automation: ${joinList(automation.enabled || [])}`
             ].join('\n');
         }
 
@@ -2809,12 +2911,16 @@
                 renderPiSkillOptions(runtime.pi_skills || {});
                 setFieldValue(
                     'runtime-connectors-summary',
-                    formatConnectorRuntimeSummary(runtimeGroups.connectors || runtime.connectors || {})
+                    formatConnectorRuntimeSummary(runtimeGroups.sources_and_skills || runtime.connectors || {})
                 );
                 setFieldValue(
                     'runtime-config-groups',
                     formatGroupedRuntimeSummary(runtimeGroups)
                 );
+                const securitySummary = formatSecurityRuntimeSummary(runtimeGroups.security || {});
+                setFieldValue('security-auth-summary', securitySummary.authSummary);
+                setFieldValue('security-prompt-summary', securitySummary.promptSummary);
+                setFieldValue('security-side-effects', securitySummary.sideEffects);
 
                 await refreshXApiStatus();
                 consumeXApiAuthQueryParams();

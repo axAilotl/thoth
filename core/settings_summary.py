@@ -404,37 +404,229 @@ def _summarize_automation(config: ConfigLike) -> dict[str, Any]:
     }
 
 
+def _connector_group(connectors_summary: dict[str, Any]) -> dict[str, Any]:
+    connectors = connectors_summary.get("connectors", [])
+    return {
+        "total": connectors_summary.get("total", 0),
+        "enabled": [
+            item["name"]
+            for item in connectors
+            if item.get("enabled")
+        ],
+        "items": connectors,
+        "error": connectors_summary.get("error"),
+    }
+
+
+def _skills_group(pi_skills_summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": bool(pi_skills_summary.get("enabled", False)),
+        "total": pi_skills_summary.get("total", 0),
+        "items": pi_skills_summary.get("skills", []),
+        "safety_mode": pi_skills_summary.get("safety_mode"),
+        "output_dir": pi_skills_summary.get("output_dir"),
+        "error": pi_skills_summary.get("error"),
+    }
+
+
+def _summarize_sources_and_skills(
+    connectors_summary: dict[str, Any],
+    pi_skills_summary: dict[str, Any],
+    web_clipper_summary: dict[str, Any],
+) -> dict[str, Any]:
+    connectors = _connector_group(connectors_summary)
+    skills = _skills_group(pi_skills_summary)
+    return {
+        "connectors": connectors,
+        "skills": skills,
+        "web_clipper": {
+            "enabled": bool(web_clipper_summary.get("enabled", False)),
+            "configured": bool(web_clipper_summary.get("configured", False)),
+            "watch_dirs": list(web_clipper_summary.get("watch_dirs") or []),
+            "error": web_clipper_summary.get("error"),
+        },
+    }
+
+
+def _summarize_wiki_and_archivist(
+    layout_summary: dict[str, Any],
+    archivist_summary: dict[str, Any],
+    automation_summary: dict[str, Any],
+) -> dict[str, Any]:
+    wiki = _summarize_wiki_group(layout_summary, archivist_summary)
+    corpus = archivist_summary.get("corpus") or {}
+    return {
+        **wiki,
+        "archivist_configured": bool(archivist_summary.get("configured", False)),
+        "archivist_exists": bool(archivist_summary.get("exists", False)),
+        "archivist_error": archivist_summary.get("error"),
+        "corpus_error": archivist_summary.get("corpus_error"),
+        "corpus": corpus,
+        "automation": (automation_summary.get("jobs") or {}).get("archivist", {}),
+    }
+
+
+def _summarize_security(
+    config: ConfigLike,
+    *,
+    providers_summary: dict[str, Any],
+    connectors_summary: dict[str, Any],
+    pi_skills_summary: dict[str, Any],
+) -> dict[str, Any]:
+    connector_auth = []
+    for connector in connectors_summary.get("connectors", []):
+        auth_status = connector.get("auth_status") or {}
+        auth_keys = list(auth_status.get("keys") or [])
+        if not auth_keys:
+            continue
+        connector_auth.append(
+            {
+                "name": connector.get("name"),
+                "enabled": bool(connector.get("enabled", False)),
+                "configured": list(auth_status.get("configured") or []),
+                "missing": list(auth_status.get("missing") or []),
+                "total": len(auth_keys),
+            }
+        )
+
+    provider_auth = [
+        {
+            "name": provider["name"],
+            "enabled": provider["enabled"],
+            "has_api_key_env": provider["has_api_key_env"],
+        }
+        for provider in providers_summary.get("providers", [])
+    ]
+
+    side_effects = set()
+    safety_modes = set()
+    for connector in connectors_summary.get("connectors", []):
+        side_effects.update(connector.get("allowed_side_effects") or [])
+        if connector.get("safety_mode"):
+            safety_modes.add(str(connector["safety_mode"]))
+    for skill in pi_skills_summary.get("skills", []):
+        side_effects.update(skill.get("allowed_side_effects") or [])
+        if skill.get("safety_mode"):
+            safety_modes.add(str(skill["safety_mode"]))
+
+    prompts = config.get("llm.prompts", {}) or {}
+    prompt_groups = sorted(prompts.keys()) if isinstance(prompts, dict) else []
+    return {
+        "connector_auth": connector_auth,
+        "provider_auth": provider_auth,
+        "prompt_security": {
+            "threat_scanner": "available",
+            "sensitive_redaction": "available",
+            "configured_prompt_groups": prompt_groups,
+        },
+        "safety_modes": sorted(safety_modes),
+        "allowed_side_effects": sorted(side_effects),
+    }
+
+
+def _summarize_overview(
+    *,
+    providers_summary: dict[str, Any],
+    sources_and_skills: dict[str, Any],
+    wiki_and_archivist: dict[str, Any],
+    automation_summary: dict[str, Any],
+    layout_summary: dict[str, Any],
+) -> dict[str, Any]:
+    connectors = sources_and_skills["connectors"]
+    skills = sources_and_skills["skills"]
+    what_happened = [
+        (
+            f"{len(providers_summary.get('enabled') or [])}/"
+            f"{providers_summary.get('total', 0)} providers enabled"
+        ),
+        f"{len(connectors.get('enabled') or [])}/{connectors.get('total', 0)} sources enabled",
+        f"{skills.get('total', 0)} Pi skills configured",
+        f"{wiki_and_archivist.get('archivist_topic_count', 0)} archivist topics loaded",
+    ]
+
+    stuck = []
+    for summary in (layout_summary, connectors, skills, sources_and_skills["web_clipper"]):
+        if summary.get("error"):
+            stuck.append(str(summary["error"]))
+    if wiki_and_archivist.get("archivist_error"):
+        stuck.append(str(wiki_and_archivist["archivist_error"]))
+    if wiki_and_archivist.get("corpus_error"):
+        stuck.append(str(wiki_and_archivist["corpus_error"]))
+
+    for connector in connectors.get("items", []):
+        auth_status = connector.get("auth_status") or {}
+        if connector.get("enabled") and auth_status.get("missing"):
+            missing = ", ".join(auth_status["missing"])
+            stuck.append(f"{connector['name']} missing auth: {missing}")
+
+    run_next = []
+    jobs = automation_summary.get("jobs") or {}
+    for key in automation_summary.get("enabled") or []:
+        interval = jobs.get(key, {}).get("interval_hours")
+        suffix = f" every {interval}h" if interval else ""
+        run_next.append(f"{key}{suffix}")
+    if not run_next:
+        run_next.append("No background jobs enabled")
+
+    return {
+        "what_happened": what_happened,
+        "what_is_stuck": stuck,
+        "what_should_run_next": run_next,
+        "counts": {
+            "providers_enabled": len(providers_summary.get("enabled") or []),
+            "providers_total": providers_summary.get("total", 0),
+            "sources_enabled": len(connectors.get("enabled") or []),
+            "sources_total": connectors.get("total", 0),
+            "skills_total": skills.get("total", 0),
+            "archivist_topics": wiki_and_archivist.get("archivist_topic_count", 0),
+        },
+    }
+
+
 def _summarize_grouped_config(
     config: ConfigLike,
     *,
     layout_summary: dict[str, Any],
     archivist_summary: dict[str, Any],
     connectors_summary: dict[str, Any],
+    web_clipper_summary: dict[str, Any],
     pi_skills_summary: dict[str, Any],
 ) -> dict[str, Any]:
+    providers_summary = _summarize_providers(config)
+    automation_summary = _summarize_automation(config)
+    sources_and_skills = _summarize_sources_and_skills(
+        connectors_summary,
+        pi_skills_summary,
+        web_clipper_summary,
+    )
+    wiki_and_archivist = _summarize_wiki_and_archivist(
+        layout_summary,
+        archivist_summary,
+        automation_summary,
+    )
+    security = _summarize_security(
+        config,
+        providers_summary=providers_summary,
+        connectors_summary=connectors_summary,
+        pi_skills_summary=pi_skills_summary,
+    )
     return {
-        "providers": _summarize_providers(config),
-        "connectors": {
-            "total": connectors_summary.get("total", 0),
-            "enabled": [
-                item["name"]
-                for item in connectors_summary.get("connectors", [])
-                if item.get("enabled")
-            ],
-            "items": connectors_summary.get("connectors", []),
-            "error": connectors_summary.get("error"),
+        "overview": _summarize_overview(
+            providers_summary=providers_summary,
+            sources_and_skills=sources_and_skills,
+            wiki_and_archivist=wiki_and_archivist,
+            automation_summary=automation_summary,
+            layout_summary=layout_summary,
+        ),
+        "sources_and_skills": sources_and_skills,
+        "wiki_and_archivist": wiki_and_archivist,
+        "security": security,
+        "advanced": {
+            "providers": providers_summary,
+            "task_routing": providers_summary.get("tasks", {}),
+            "storage": _summarize_storage(layout_summary),
+            "automation": automation_summary,
         },
-        "skills": {
-            "enabled": bool(pi_skills_summary.get("enabled", False)),
-            "total": pi_skills_summary.get("total", 0),
-            "items": pi_skills_summary.get("skills", []),
-            "safety_mode": pi_skills_summary.get("safety_mode"),
-            "output_dir": pi_skills_summary.get("output_dir"),
-            "error": pi_skills_summary.get("error"),
-        },
-        "storage": _summarize_storage(layout_summary),
-        "wiki": _summarize_wiki_group(layout_summary, archivist_summary),
-        "automation": _summarize_automation(config),
     }
 
 
@@ -476,6 +668,7 @@ def build_settings_runtime_summary(
             layout_summary=layout_summary,
             archivist_summary=archivist_summary,
             connectors_summary=connectors_summary,
+            web_clipper_summary=web_clipper_summary,
             pi_skills_summary=pi_skills_summary,
         ),
     }
