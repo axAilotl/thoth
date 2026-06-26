@@ -8,10 +8,11 @@ That belongs in the wiki scaffold/maintenance layer.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 from .config import Config
 from .path_layout import build_path_layout
@@ -68,6 +69,37 @@ def okf_type_for_wiki_page(kind: str, record_type: str = "wiki_page") -> str:
     return OKF_TYPE_BY_WIKI_KIND.get(kind, "Reference")
 
 
+def _stable_unique_strings(values: Tuple[str, ...]) -> Tuple[str, ...]:
+    cleaned = (str(value).strip() for value in values)
+    return tuple(sorted({value for value in cleaned if value}))
+
+
+def _stable_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _stable_metadata_value(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+        }
+    if isinstance(value, (list, tuple, set)):
+        normalized = [_stable_metadata_value(item) for item in value]
+        return sorted(normalized, key=_metadata_sort_key)
+    return value
+
+
+def _metadata_sort_key(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def _stable_security_findings(values: Tuple[Any, ...]) -> Tuple[Any, ...]:
+    normalized = [
+        _stable_metadata_value(value)
+        for value in values
+        if value not in (None, {}, [], ())
+    ]
+    deduped = {_metadata_sort_key(value): value for value in normalized}
+    return tuple(deduped[key] for key in sorted(deduped))
+
+
 @dataclass(frozen=True)
 class WikiPageSpec:
     """Declarative schema for a compiled wiki page."""
@@ -92,13 +124,29 @@ class WikiPageSpec:
     resource: str | None = None
     artifact_id: str | None = None
     source_type: str | None = None
+    event_ids: Tuple[str, ...] = field(default_factory=tuple)
+    security_findings: Tuple[Any, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "aliases", _stable_unique_strings(self.aliases))
+        object.__setattr__(self, "source_paths", _stable_unique_strings(self.source_paths))
+        object.__setattr__(self, "related_slugs", _stable_unique_strings(self.related_slugs))
+        object.__setattr__(self, "query_terms", _stable_unique_strings(self.query_terms))
+        object.__setattr__(self, "event_ids", _stable_unique_strings(self.event_ids))
+        object.__setattr__(
+            self,
+            "security_findings",
+            _stable_security_findings(self.security_findings),
+        )
 
     def frontmatter(self) -> Dict[str, Any]:
         """Render a frontmatter dictionary for the compiled wiki page."""
         okf_type = self.okf_type or okf_type_for_wiki_page(self.kind, self.record_type)
         data = {
             "type": okf_type,
+            "id": self.slug,
             "thoth_type": self.record_type,
+            "thoth_id": self.slug,
             "title": self.title,
             "description": self.summary,
             "resource": self.resource,
@@ -120,6 +168,8 @@ class WikiPageSpec:
             "thoth_updated_at": self.updated_at,
             "thoth_artifact_id": self.artifact_id,
             "thoth_source_type": self.source_type,
+            "thoth_event_ids": list(self.event_ids) or None,
+            "thoth_security_findings": list(self.security_findings) or None,
             # Legacy aliases retained so existing local readers and hand-authored
             # pages keep working while new metadata has namespaced equivalents.
             "slug": self.slug,

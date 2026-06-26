@@ -48,6 +48,11 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
         source_paths=("raw/bookmarks/item.md",),
         related_slugs=("agents",),
         updated_at="2026-04-04T00:00:00Z",
+        event_ids=("event-b", "event-a", "event-b"),
+        security_findings=(
+            {"pattern_id": "prompt_override", "scope": "strict"},
+            {"scope": "context", "pattern_id": "secret"},
+        ),
     )
 
     assert contract.root == tmp_path / "wiki"
@@ -57,7 +62,9 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
 
     frontmatter = contract.frontmatter_for(spec)
     assert frontmatter["type"] == "Topic"
+    assert frontmatter["id"] == "llm-knowledge-base"
     assert frontmatter["thoth_type"] == "wiki_page"
+    assert frontmatter["thoth_id"] == "llm-knowledge-base"
     assert frontmatter["title"] == "LLM Knowledge Base"
     assert frontmatter["description"] == "Compiled notes for the wiki loop."
     assert frontmatter["timestamp"] == "2026-04-04T00:00:00Z"
@@ -65,6 +72,11 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
     assert frontmatter["thoth_slug"] == "llm-knowledge-base"
     assert frontmatter["thoth_kind"] == "topic"
     assert frontmatter["thoth_source_paths"] == ["raw/bookmarks/item.md"]
+    assert frontmatter["thoth_event_ids"] == ["event-a", "event-b"]
+    assert frontmatter["thoth_security_findings"] == [
+        {"pattern_id": "prompt_override", "scope": "strict"},
+        {"pattern_id": "secret", "scope": "context"},
+    ]
     assert frontmatter["slug"] == "llm-knowledge-base"
     assert frontmatter["kind"] == "topic"
     assert frontmatter["aliases"] == ["knowledge-base"]

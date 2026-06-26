@@ -10,6 +10,7 @@ from core.config import config
 from core.ingestion_runtime import KnowledgeArtifactRuntime
 from core.metadata_db import IngestionQueueEntry, MetadataDB
 from core.path_layout import build_path_layout
+from core.wiki_io import read_document
 from core.wiki_updater import CompiledWikiUpdater
 
 
@@ -181,3 +182,78 @@ def test_ingestion_runtime_updates_wiki_after_dispatch(
     assert len(dispatch_results) == 1
     assert wiki_page.exists()
     assert "Repo description" in wiki_page.read_text(encoding="utf-8")
+
+
+def test_wiki_updater_emits_deterministic_provenance_and_security_frontmatter(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    stars_dir = layout.vault_root / "stars"
+    repos_dir = layout.vault_root / "repos"
+    stars_dir.mkdir(parents=True, exist_ok=True)
+    repos_dir.mkdir(parents=True, exist_ok=True)
+    (stars_dir / "owner_repo_summary.md").write_text("# summary\n", encoding="utf-8")
+    (repos_dir / "github_owner_repo_README.md").write_text("# readme\n", encoding="utf-8")
+
+    result = CompiledWikiUpdater(config, layout=layout).update_from_artifact(
+        RepositoryArtifact(
+            id="gh_1",
+            source_type="github",
+            repo_name="owner/repo",
+            description="Repository summary",
+            stars=12,
+            language="python",
+            topics=["zeta", "alpha", "zeta"],
+            custom_metadata={
+                "event_ids": ["event-b", "event-a", "event-b"],
+                "security_findings": [
+                    {"pattern_id": "prompt_override", "scope": "strict"},
+                ],
+            },
+            normalized_metadata={
+                "redaction": {
+                    "finding_count": 1,
+                    "categories": {"api_key": 1},
+                    "findings": [{"category": "api_key", "pattern_id": "generic"}],
+                }
+            },
+        ),
+        dispatch_details={"repo_name": "owner/repo"},
+    )
+
+    document = read_document(result.page_path)
+
+    assert result.source_paths == (
+        "repos/github_owner_repo_README.md",
+        "stars/owner_repo_summary.md",
+    )
+    assert document.frontmatter["type"] == "Entity"
+    assert document.frontmatter["id"] == "repo-owner-repo"
+    assert document.frontmatter["thoth_id"] == "repo-owner-repo"
+    assert document.frontmatter["thoth_artifact_id"] == "gh_1"
+    assert document.frontmatter["thoth_source_paths"] == [
+        "repos/github_owner_repo_README.md",
+        "stars/owner_repo_summary.md",
+    ]
+    assert document.frontmatter["thoth_event_ids"] == ["event-a", "event-b"]
+    assert document.frontmatter["thoth_security_findings"] == [
+        {"category": "api_key", "pattern_id": "generic", "source": "redaction"},
+        {"pattern_id": "prompt_override", "scope": "strict", "source": "security_findings"},
+    ]
+    assert "- Topics: `alpha`, `zeta`" in document.body
+
+    sources_section = document.body.split("## Sources", maxsplit=1)[1].split(
+        "# Citations", maxsplit=1
+    )[0]
+    citations_section = document.body.split("# Citations", maxsplit=1)[1]
+    assert sources_section.index("repos/github_owner_repo_README.md") < sources_section.index(
+        "stars/owner_repo_summary.md"
+    )
+    assert citations_section.index("[1] [Canonical resource]") < citations_section.index(
+        "[2] [repos/github_owner_repo_README.md]"
+    )
+    assert citations_section.index(
+        "[2] [repos/github_owner_repo_README.md]"
+    ) < citations_section.index("[3] [stars/owner_repo_summary.md]")

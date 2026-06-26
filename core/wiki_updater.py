@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -77,6 +77,106 @@ def _render_frontmatter(data: dict[str, Any]) -> str:
         allow_unicode=True,
         default_flow_style=False,
     ) + "---\n"
+
+
+_EVENT_ID_KEYS = (
+    "thoth_event_id",
+    "thoth_event_ids",
+    "event_id",
+    "event_ids",
+    "capture_event_id",
+    "capture_event_ids",
+)
+_SECURITY_FINDING_KEYS = (
+    "thoth_security_findings",
+    "security_findings",
+    "prompt_security_findings",
+)
+_SECURITY_REPORT_KEYS = (
+    "security",
+    "prompt_security",
+    "redaction",
+    "redaction_metadata",
+    "sensitive_redaction",
+)
+
+
+def _as_sequence(value: Any) -> tuple[Any, ...]:
+    if value is None:
+        return tuple()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, Mapping):
+        return (value,)
+    if isinstance(value, (list, tuple, set)):
+        return tuple(value)
+    return (value,)
+
+
+def _string_values(value: Any) -> tuple[str, ...]:
+    values: list[str] = []
+    if isinstance(value, Mapping):
+        for key in ("id", "event_id", "capture_event_id"):
+            if key in value:
+                values.extend(_string_values(value[key]))
+        return tuple(values)
+
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            values.extend(_string_values(item))
+            continue
+        text = str(item).strip()
+        if text:
+            values.append(text)
+    return tuple(values)
+
+
+def _mapping_has_security_findings(value: Mapping[str, Any]) -> bool:
+    findings = value.get("findings")
+    if _as_sequence(findings):
+        return True
+
+    finding_count = value.get("finding_count")
+    if isinstance(finding_count, int) and finding_count > 0:
+        return True
+    if (
+        isinstance(finding_count, str)
+        and finding_count.isdigit()
+        and int(finding_count) > 0
+    ):
+        return True
+
+    if value.get("redacted") is True or value.get("has_findings") is True:
+        return True
+
+    categories = value.get("categories")
+    return isinstance(categories, Mapping) and bool(categories)
+
+
+def _has_security_findings(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return _mapping_has_security_findings(value)
+    if isinstance(value, str):
+        return bool(value.strip())
+    return bool(_as_sequence(value))
+
+
+def _security_finding_entries(source_key: str, value: Any) -> tuple[Any, ...]:
+    if isinstance(value, Mapping):
+        findings = value.get("findings")
+        if _as_sequence(findings):
+            return tuple(_security_finding_entries(source_key, findings))
+        return ({**value, "source": value.get("source") or source_key},)
+
+    entries: list[Any] = []
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            entries.append({**item, "source": item.get("source") or source_key})
+        else:
+            text = str(item).strip()
+            if text:
+                entries.append({"source": source_key, "finding": text})
+    return tuple(entries)
 
 
 @dataclass(frozen=True)
@@ -172,6 +272,8 @@ class CompiledWikiUpdater:
             resource=spec.resource,
             artifact_id=spec.artifact_id,
             source_type=spec.source_type,
+            event_ids=spec.event_ids,
+            security_findings=spec.security_findings,
         )
         content = self._render_page(updated_spec, artifact, dispatch_details=dispatch_details)
         action = "updated" if page_path.exists() else "created"
@@ -248,6 +350,8 @@ class CompiledWikiUpdater:
             resource=self._resource_for_artifact(artifact),
             artifact_id=artifact.id,
             source_type=artifact.source_type,
+            event_ids=self._event_ids_for_artifact(artifact),
+            security_findings=self._security_findings_for_artifact(artifact),
         )
 
     def _title_slug_and_summary(
@@ -336,7 +440,7 @@ class CompiledWikiUpdater:
                 candidates.append(self.layout.vault_root / artifact.source_relative_path)
             elif artifact.source_path:
                 candidates.append(Path(artifact.source_path))
-            for managed_path in artifact.output_paths.values():
+            for _kind, managed_path in sorted(artifact.output_paths.items()):
                 if managed_path:
                     candidates.append(Path(managed_path))
         elif isinstance(artifact, VideoArtifact):
@@ -345,7 +449,7 @@ class CompiledWikiUpdater:
                 candidates.append(
                     archive_path if archive_path.is_absolute() else self.layout.vault_root / archive_path
                 )
-            for managed_path in artifact.output_paths.values():
+            for _kind, managed_path in sorted(artifact.output_paths.items()):
                 if managed_path:
                     path = Path(managed_path)
                     candidates.append(path if path.is_absolute() else self.layout.vault_root / path)
@@ -355,7 +459,7 @@ class CompiledWikiUpdater:
                 candidates.append(
                     transcript_path if transcript_path.is_absolute() else self.layout.vault_root / transcript_path
                 )
-            for managed_path in artifact.output_paths.values():
+            for _kind, managed_path in sorted(artifact.output_paths.items()):
                 if managed_path:
                     path = Path(managed_path)
                     candidates.append(path if path.is_absolute() else self.layout.vault_root / path)
@@ -370,6 +474,39 @@ class CompiledWikiUpdater:
                 continue
         deduped = dict.fromkeys(normalized)
         return tuple(deduped.keys())
+
+    def _metadata_mappings_for_artifact(
+        self, artifact: KnowledgeArtifact
+    ) -> tuple[Mapping[str, Any], ...]:
+        mappings: list[Mapping[str, Any]] = []
+        for value in (artifact.normalized_metadata, artifact.custom_metadata):
+            if isinstance(value, Mapping):
+                mappings.append(value)
+        canonical_record = artifact.canonical_record()
+        for key in ("normalized_metadata", "provenance", "raw_payload", "source_identity"):
+            value = canonical_record.get(key)
+            if isinstance(value, Mapping):
+                mappings.append(value)
+        return tuple(mappings)
+
+    def _event_ids_for_artifact(self, artifact: KnowledgeArtifact) -> tuple[str, ...]:
+        event_ids: list[str] = []
+        for metadata in self._metadata_mappings_for_artifact(artifact):
+            for key in _EVENT_ID_KEYS:
+                if key in metadata:
+                    event_ids.extend(_string_values(metadata[key]))
+        return tuple(dict.fromkeys(event_ids))
+
+    def _security_findings_for_artifact(self, artifact: KnowledgeArtifact) -> tuple[Any, ...]:
+        findings: list[Any] = []
+        for metadata in self._metadata_mappings_for_artifact(artifact):
+            for key in _SECURITY_FINDING_KEYS:
+                if key in metadata and _has_security_findings(metadata[key]):
+                    findings.extend(_security_finding_entries(key, metadata[key]))
+            for key in _SECURITY_REPORT_KEYS:
+                if key in metadata and _has_security_findings(metadata[key]):
+                    findings.extend(_security_finding_entries(key, metadata[key]))
+        return tuple(findings)
 
     def _resource_for_artifact(self, artifact: KnowledgeArtifact) -> str | None:
         if isinstance(artifact, PaperArtifact):
@@ -480,7 +617,10 @@ class CompiledWikiUpdater:
             if artifact.language:
                 lines.append(f"- Language: `{artifact.language}`")
             if artifact.topics:
-                lines.append(f"- Topics: {', '.join(f'`{topic}`' for topic in artifact.topics)}")
+                topics = sorted(
+                    {str(topic).strip() for topic in artifact.topics if str(topic).strip()}
+                )
+                lines.append(f"- Topics: {', '.join(f'`{topic}`' for topic in topics)}")
             return lines
 
         if isinstance(artifact, PaperArtifact):
@@ -549,7 +689,10 @@ class CompiledWikiUpdater:
             if artifact.summary:
                 lines.append(f"- Summary: {artifact.summary}")
             if artifact.tags:
-                lines.append(f"- Tags: {', '.join(f'`{tag}`' for tag in artifact.tags)}")
+                tags = sorted(
+                    {str(tag).strip() for tag in artifact.tags if str(tag).strip()}
+                )
+                lines.append(f"- Tags: {', '.join(f'`{tag}`' for tag in tags)}")
             transcript = artifact.processed_transcript or artifact.raw_transcript
             if transcript:
                 lines.append(f"- Transcript: {_truncate_summary(transcript)}")

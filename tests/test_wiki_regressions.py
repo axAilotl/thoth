@@ -90,8 +90,8 @@ def test_compiled_wiki_updater_preserves_created_at_and_refreshes_index(
 
     assert result.action == "updated"
     assert result.source_paths == (
-        "stars/owner_repo_summary.md",
         "repos/github_owner_repo_README.md",
+        "stars/owner_repo_summary.md",
     )
     assert updated_document.frontmatter["created_at"] == original_created_at
     assert updated_document.frontmatter["updated_at"] != original_created_at
