@@ -88,7 +88,7 @@ class _FakeLLMInterface:
         )
 
 
-def test_transcript_llm_skips_recent_failed_chunk_and_uses_raw_fallback(
+def test_transcript_llm_skips_recent_failed_chunk_and_uses_redacted_fallback(
     tmp_path: Path,
     monkeypatch,
     restore_runtime_config,
@@ -114,7 +114,7 @@ def test_transcript_llm_skips_recent_failed_chunk_and_uses_raw_fallback(
     _FakeLLMInterface.calls = 0
 
     processor = TranscriptLLMProcessor()
-    transcript_text = "[00:00] hello world"
+    transcript_text = "[00:00] hello world OPENAI_API_KEY=sk-proj-" + "a" * 32
     chunk_hash = processor._hash_content(transcript_text)
     metadata_db.upsert_transcript_chunk(
         "video-123",
@@ -130,11 +130,13 @@ def test_transcript_llm_skips_recent_failed_chunk_and_uses_raw_fallback(
 
     assert _FakeLLMInterface.calls == 0
     assert result is not None
-    assert result["text"] == transcript_text
+    assert "sk-proj-" not in result["text"]
+    assert "OPENAI_API_KEY=[[REDACTED_ENV_SECRET_1]]" in result["text"]
     assert result["summary"] == ""
     assert result["tags"] == ""
     assert result["chunk_metadata"]["fallback_used"] is True
     assert result["chunk_metadata"]["failed_chunks"] == [1]
+    assert result["chunk_metadata"]["redaction"]["categories"] == {"env_secret": 1}
 
 
 def test_transcript_llm_retries_after_failed_chunk_cooldown_expires(

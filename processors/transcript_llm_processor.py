@@ -17,6 +17,7 @@ from core.llm_cache import llm_cache
 from core.metadata_db import get_metadata_db
 from core.pipeline_registry import PipelineStage, pipeline_registry, register_pipeline_stages
 from core.prompt_security import wrap_untrusted_content
+from core.sensitive_redaction import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
 
@@ -402,11 +403,13 @@ class TranscriptLLMProcessor:
 
                 if fallback_chunks:
                     logger.warning(
-                        "Using raw transcript text for %s due to %s failed chunk(s)",
+                        "Using redacted transcript fallback for %s due to %s failed chunk(s)",
                         target_label,
                         len(fallback_chunks),
                     )
-                    combined_text_segments.extend(chunk for _, chunk, _ in fallback_chunks)
+                    combined_text_segments.extend(
+                        self._redact_fallback_text(chunk) for _, chunk, _ in fallback_chunks
+                    )
 
                 combined_text = '\n\n'.join(segment for segment in combined_text_segments if segment)
 
@@ -443,10 +446,12 @@ class TranscriptLLMProcessor:
                 return result
             elif fallback_chunks:
                 logger.warning(
-                    "Returning raw transcript fallback for %s because all LLM chunk attempts failed",
+                    "Returning redacted transcript fallback for %s because all LLM chunk attempts failed",
                     target_label,
                 )
-                fallback_text = '\n\n'.join(chunk for _, chunk, _ in fallback_chunks)
+                fallback_text = '\n\n'.join(
+                    self._redact_fallback_text(chunk) for _, chunk, _ in fallback_chunks
+                )
                 return {
                     'text': fallback_text,
                     'summary': '',
@@ -569,20 +574,28 @@ class TranscriptLLMProcessor:
         *,
         chunks_total: int,
     ) -> Dict[str, object]:
-        """Return a raw-text fallback result without spending another LLM call."""
+        """Return a redacted-text fallback result without spending another LLM call."""
         failed_chunks = [chunk_index] if chunk_index is not None else []
+        redaction = redact_sensitive_text(transcript_text)
+        metadata = {
+            'chunks_total': chunks_total,
+            'chunks_processed': 0,
+            'chunks_failed': len(failed_chunks) or 1,
+            'fallback_used': True,
+            'failed_chunks': failed_chunks,
+        }
+        if redaction.has_findings:
+            metadata['redaction'] = redaction.to_metadata()
         return {
-            'text': transcript_text,
+            'text': redaction.redacted_text,
             'summary': '',
             'tags': '',
-            'chunk_metadata': {
-                'chunks_total': chunks_total,
-                'chunks_processed': 0,
-                'chunks_failed': len(failed_chunks) or 1,
-                'fallback_used': True,
-                'failed_chunks': failed_chunks,
-            },
+            'chunk_metadata': metadata,
         }
+
+    def _redact_fallback_text(self, transcript_text: str) -> str:
+        """Redact sensitive values in transcript text used after LLM chunk failure."""
+        return redact_sensitive_text(transcript_text).redacted_text
 
     def _hash_content(self, text: str) -> str:
         """Hash transcript content for cache validation."""

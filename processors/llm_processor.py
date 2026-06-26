@@ -395,9 +395,11 @@ class LLMProcessor:
             # Persist to DB
             try:
                 from core.metadata_db import get_metadata_db
+                from core.sensitive_redaction import redact_sensitive_text
                 db = get_metadata_db()
                 import json, hashlib
-                content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
+                redacted_content = redact_sensitive_text(content).redacted_text
+                content_hash = hashlib.sha256(redacted_content.encode('utf-8')).hexdigest()[:16]
                 cache_key = f"tags_{content_hash}"
                 db.upsert_llm_cache(cache_key, 'tags', content_hash, json.dumps({'tags': tags}), cache_id)
             except Exception:
@@ -438,9 +440,11 @@ class LLMProcessor:
             # Persist to DB
             try:
                 from core.metadata_db import get_metadata_db
+                from core.sensitive_redaction import redact_sensitive_text
                 db = get_metadata_db()
                 import json, hashlib
-                content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
+                redacted_content = redact_sensitive_text(content).redacted_text
+                content_hash = hashlib.sha256(redacted_content.encode('utf-8')).hexdigest()[:16]
                 cache_key = f"tweet_summary_{content_hash}"
                 db.upsert_llm_cache(cache_key, 'tweet_summary', content_hash, json.dumps({'summary': summary}), cache_id)
             except Exception:
