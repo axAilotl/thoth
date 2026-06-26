@@ -142,6 +142,81 @@ def test_connector_checkpoint_records_resume_token_from_result(
     )
 
 
+def test_connector_run_history_surfaces_metadata_links_and_redacts_secrets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+    export_path = tmp_path / "omi-export.json"
+    export_path.write_text("{}", encoding="utf-8")
+    secret = "omi-secret-token"
+
+    def run_connector(options):
+        assert options["api_key"] == secret
+        return {
+            "queued_count": 1,
+            "queued": [
+                {
+                    "artifact_id": "omi-note",
+                    "artifact_type": "transcript",
+                    "source": "omi",
+                    "event_id": "capture_event_1",
+                    "source_id": "capture_source_1",
+                    "raw_ref_id": "raw_ref_1",
+                    "artifact_link_id": "artifact_link_1",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "_run_omi_connector", run_connector)
+
+    payload = service.run_connector(
+        "omi",
+        execute=True,
+        options={
+            "export_paths": [str(export_path)],
+            "api_key": secret,
+            "api_key_env": "OMI_API_KEY",
+            "actor": "unit-test-agent",
+        },
+    )
+
+    encoded_payload = json.dumps(payload, ensure_ascii=False)
+    assert secret not in encoded_payload
+    assert payload["options"]["api_key"] == "[redacted]"
+    assert payload["options"]["api_key_env"] == "OMI_API_KEY"
+
+    run = payload["history"]["run"]
+    assert run["metadata"]["command"] == "connectors run omi"
+    assert run["metadata"]["actor"] == "unit-test-agent"
+    assert run["metadata"]["safety_mode"] == "network_ingest_queue"
+    assert run["metadata"]["input_paths"] == [str(export_path)]
+    assert run["metadata"]["output_hash"].startswith("sha256:")
+    assert run["metadata"]["run_timestamp"]
+    assert run["outputs"] == [
+        {
+            "artifact_id": "omi-note",
+            "artifact_type": "transcript",
+            "source": "omi",
+            "queue_status": "pending",
+            "recorded_at": run["outputs"][0]["recorded_at"],
+            "capture_event_id": "capture_event_1",
+            "capture_source_id": "capture_source_1",
+            "raw_ref_id": "raw_ref_1",
+            "artifact_link_id": "artifact_link_1",
+        }
+    ]
+
+    history = service.list_connector_runs(connector_name="omi", limit=5)
+
+    assert secret not in json.dumps(history, ensure_ascii=False)
+    assert history["runs"][0]["metadata"]["actor"] == "unit-test-agent"
+    assert history["runs"][0]["outputs"][0]["capture_event_id"] == "capture_event_1"
+
+
 def test_mcp_lists_connector_runs(tmp_path: Path):
     config = _config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from dataclasses import asdict, is_dataclass
@@ -219,7 +220,13 @@ class AgentSurfaceService:
             limit=limit,
         )
         return {
-            "runs": [_serialize_connector_run(run) for run in runs],
+            "runs": [
+                _serialize_connector_run(
+                    run,
+                    outputs=self.db.list_connector_run_outputs(run.run_id),
+                )
+                for run in runs
+            ],
             "checkpoints": [
                 _serialize_connector_checkpoint(checkpoint)
                 for checkpoint in checkpoints
@@ -252,19 +259,22 @@ class AgentSurfaceService:
         registry = load_connector_registry(self.config)
         manifest = registry.get(connector_name)
         policy = connector_policy_status(manifest, self.config)
-        sanitized_options = {
+        execution_options = {
             str(key): value
             for key, value in dict(options or {}).items()
             if value is not None
         }
-        checkpoint_key = connector_checkpoint_key(manifest.name, sanitized_options)
+        checkpoint_inputs = _connector_checkpoint_inputs(execution_options)
+        history_options = _redact_sensitive_value(checkpoint_inputs)
+        actor = self._resolve_connector_actor(execution_options)
+        checkpoint_key = connector_checkpoint_key(manifest.name, checkpoint_inputs)
         checkpoint = self.db.get_connector_checkpoint(manifest.name, checkpoint_key)
         plan = {
             "status": "planned",
             "execute": False,
             "connector": manifest.to_dict(config=self.config),
             "policy": policy,
-            "options": sanitized_options,
+            "options": history_options,
             "history": {
                 "checkpoint_key": checkpoint_key,
                 "checkpoint": _serialize_connector_checkpoint(checkpoint),
@@ -272,7 +282,7 @@ class AgentSurfaceService:
         }
         if not execute:
             if manifest.name == "pi_skills":
-                plan["run_plan"] = self._plan_pi_skills_connector(sanitized_options)
+                plan["run_plan"] = self._plan_pi_skills_connector(execution_options)
             return plan
         if not manifest.is_enabled(self.config):
             raise AgentSurfaceError(f"Connector is disabled: {connector_name}")
@@ -311,9 +321,14 @@ class AgentSurfaceService:
 
         run = self.db.begin_connector_run(
             manifest.name,
-            inputs=sanitized_options,
+            inputs=history_options,
             checkpoint_key=checkpoint_key,
             resume_token=checkpoint.resume_token if checkpoint else None,
+            metadata=_initial_connector_run_metadata(
+                manifest,
+                options=history_options,
+                actor=actor,
+            ),
         )
         if run is None:
             raise AgentSurfaceError(
@@ -325,7 +340,7 @@ class AgentSurfaceService:
                 run.run_id,
                 checkpoint_id=run.checkpoint_id,
             ):
-                result = handler(sanitized_options)
+                result = handler(execution_options)
             serialized_result = serialize_agent_payload(result)
             if self.db.connector_run_output_count(run.run_id) == 0:
                 self._record_connector_result_outputs(
@@ -348,6 +363,12 @@ class AgentSurfaceService:
                 output_count=output_count,
                 resume_token=_connector_resume_token(serialized_result),
                 state=_connector_checkpoint_state(serialized_result),
+                metadata=_finished_connector_run_metadata(
+                    manifest,
+                    options=history_options,
+                    result=serialized_result,
+                    actor=actor,
+                ),
             ) or run
         except Exception as exc:
             failure_reason = str(exc).strip() or exc.__class__.__name__
@@ -356,6 +377,7 @@ class AgentSurfaceService:
                 status="failed",
                 output_count=self.db.connector_run_output_count(run.run_id),
                 failure_reason=failure_reason,
+                metadata={"failure_reason": failure_reason},
             )
             raise
 
@@ -367,10 +389,26 @@ class AgentSurfaceService:
             "result": serialized_result,
             "history": {
                 "checkpoint_key": checkpoint_key,
-                "run": _serialize_connector_run(run),
+                "run": _serialize_connector_run(
+                    run,
+                    outputs=self.db.list_connector_run_outputs(run.run_id),
+                ),
                 "checkpoint": _serialize_connector_checkpoint(checkpoint),
             },
         }
+
+    def _resolve_connector_actor(self, options: Mapping[str, Any]) -> str | None:
+        for value in (
+            options.get("actor"),
+            options.get("run_actor"),
+            self.config.get("connectors.actor"),
+            os.getenv("THOTH_ACTOR"),
+            os.getenv("USER"),
+        ):
+            actor = _optional_text(value)
+            if actor:
+                return actor
+        return None
 
     def missing_papers(
         self,
@@ -445,6 +483,10 @@ class AgentSurfaceService:
                 artifact_type=output["artifact_type"],
                 source=output["source"],
                 queue_status=output["queue_status"],
+                capture_event_id=output.get("capture_event_id"),
+                capture_source_id=output.get("capture_source_id"),
+                raw_ref_id=output.get("raw_ref_id"),
+                artifact_link_id=output.get("artifact_link_id"),
             ):
                 raise AgentSurfaceError(
                     f"Failed to record connector output {output['artifact_id']}"
@@ -760,12 +802,17 @@ class AgentSurfaceService:
                 provider=options.get("provider"),
                 model=options.get("model"),
                 limit=_optional_int(options.get("limit")),
+                actor=self._resolve_connector_actor(options),
             )
         )
         return result.to_dict()
 
 
-def _serialize_connector_run(record: Any) -> dict[str, Any] | None:
+def _serialize_connector_run(
+    record: Any,
+    *,
+    outputs: list[Any] | None = None,
+) -> dict[str, Any] | None:
     if record is None:
         return None
     return {
@@ -784,6 +831,25 @@ def _serialize_connector_run(record: Any) -> dict[str, Any] | None:
         "next_retry_at": record.next_retry_at,
         "retry_state": _json_object(record.retry_state_json),
         "resume_token": record.resume_token,
+        "metadata": _json_object(getattr(record, "metadata_json", None)),
+        "outputs": [
+            _serialize_connector_run_output(output)
+            for output in (outputs or [])
+        ],
+    }
+
+
+def _serialize_connector_run_output(record: Any) -> dict[str, Any]:
+    return {
+        "artifact_id": record.artifact_id,
+        "artifact_type": record.artifact_type,
+        "source": record.source,
+        "queue_status": record.queue_status,
+        "recorded_at": record.recorded_at,
+        "capture_event_id": getattr(record, "capture_event_id", None),
+        "capture_source_id": getattr(record, "capture_source_id", None),
+        "raw_ref_id": getattr(record, "raw_ref_id", None),
+        "artifact_link_id": getattr(record, "artifact_link_id", None),
     }
 
 
@@ -816,6 +882,127 @@ def _json_object(value: str | None) -> dict[str, Any]:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _initial_connector_run_metadata(
+    manifest: Any,
+    *,
+    options: Mapping[str, Any],
+    actor: str | None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "command": manifest.cli_command or manifest.entrypoint,
+        "entrypoint": manifest.entrypoint,
+        "input_paths": _connector_input_paths(options),
+        "run_timestamp": None,
+        "actor": actor,
+        "provider": _optional_text(options.get("provider")),
+        "model": _optional_text(options.get("model")),
+        "safety_mode": manifest.safety_mode,
+        "queue_behavior": manifest.queue_behavior,
+        "allowed_side_effects": list(manifest.allowed_side_effects),
+    }
+    return _compact_metadata(metadata)
+
+
+def _finished_connector_run_metadata(
+    manifest: Any,
+    *,
+    options: Mapping[str, Any],
+    result: Any,
+    actor: str | None,
+) -> dict[str, Any]:
+    metadata = _initial_connector_run_metadata(manifest, options=options, actor=actor)
+    execution_metadata = (
+        result.get("execution_metadata")
+        if isinstance(result, Mapping)
+        else None
+    )
+    if isinstance(execution_metadata, Mapping):
+        metadata.update(_redact_sensitive_value(execution_metadata))
+    metadata.setdefault("output_hash", _hash_agent_payload(result))
+    return _compact_metadata(metadata)
+
+
+def _compact_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in metadata.items()
+        if value is not None and value != ""
+    }
+
+
+def _hash_agent_payload(value: Any) -> str:
+    serialized = json.dumps(
+        serialize_agent_payload(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return "sha256:" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _connector_checkpoint_inputs(options: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in options.items()
+        if str(key) not in {"actor", "run_actor"}
+    }
+
+
+def _connector_input_paths(options: Mapping[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for key, value in options.items():
+        key_text = str(key).lower()
+        if key_text not in {
+            "input_path",
+            "input_paths",
+            "output_path",
+            "output_paths",
+            "export_path",
+            "export_paths",
+            "export_dir",
+            "export_dirs",
+            "output_dirs",
+        }:
+            continue
+        paths.extend(_string_list(value))
+    return list(dict.fromkeys(paths))
+
+
+def _redact_sensitive_value(value: Any, *, key: str | None = None) -> Any:
+    if key and _is_sensitive_key(key):
+        return "[redacted]"
+    if isinstance(value, Mapping):
+        return {
+            str(item_key): _redact_sensitive_value(item_value, key=str(item_key))
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (list, tuple, set)):
+        return [_redact_sensitive_value(item) for item in value]
+    return value
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered.endswith("_env") or lowered.endswith(".env"):
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "api_key",
+            "authorization",
+            "bearer",
+            "client_secret",
+            "credential",
+            "password",
+            "private_key",
+            "secret",
+            "token",
+        )
+    )
 
 
 def _connector_output_count(result: Any) -> int:
@@ -917,8 +1104,8 @@ def _connector_artifact_outputs(
     *,
     default_artifact_type: str,
     default_source: str,
-) -> list[dict[str, str]]:
-    outputs: dict[str, dict[str, str]] = {}
+) -> list[dict[str, Any]]:
+    outputs: dict[str, dict[str, Any]] = {}
 
     def add(
         artifact_id: Any,
@@ -926,11 +1113,15 @@ def _connector_artifact_outputs(
         artifact_type: Any = None,
         source: Any = None,
         queue_status: Any = None,
+        capture_event_id: Any = None,
+        capture_source_id: Any = None,
+        raw_ref_id: Any = None,
+        artifact_link_id: Any = None,
     ) -> None:
         text = str(artifact_id or "").strip()
         if not text:
             return
-        outputs.setdefault(
+        output = outputs.setdefault(
             text,
             {
                 "artifact_id": text,
@@ -939,6 +1130,15 @@ def _connector_artifact_outputs(
                 "queue_status": str(queue_status or "pending"),
             },
         )
+        for key, value in {
+            "capture_event_id": capture_event_id,
+            "capture_source_id": capture_source_id,
+            "raw_ref_id": raw_ref_id,
+            "artifact_link_id": artifact_link_id,
+        }.items():
+            clean_value = str(value or "").strip()
+            if clean_value:
+                output[key] = clean_value
 
     def visit(value: Any, *, parent_key: str | None = None) -> None:
         if isinstance(value, Mapping):
@@ -950,23 +1150,39 @@ def _connector_artifact_outputs(
             )
             artifact_type = value.get("artifact_type") or value.get("type")
             queue_status = value.get("queue_status") or value.get("status") or "pending"
+            capture_event_id = value.get("capture_event_id") or value.get("event_id")
+            capture_source_id = value.get("capture_source_id") or value.get("source_id")
+            raw_ref_id = value.get("raw_ref_id")
+            artifact_link_id = value.get("artifact_link_id")
             add(
                 value.get("artifact_id") or value.get("queue_artifact_id"),
                 artifact_type=artifact_type,
                 source=source,
                 queue_status=queue_status,
+                capture_event_id=capture_event_id,
+                capture_source_id=capture_source_id,
+                raw_ref_id=raw_ref_id,
+                artifact_link_id=artifact_link_id,
             )
             add(
                 value.get("video_artifact_id"),
                 artifact_type="video",
                 source=source,
                 queue_status=queue_status,
+                capture_event_id=capture_event_id,
+                capture_source_id=capture_source_id,
+                raw_ref_id=raw_ref_id,
+                artifact_link_id=artifact_link_id,
             )
             add(
                 value.get("transcript_artifact_id"),
                 artifact_type="transcript",
                 source=source,
                 queue_status=queue_status,
+                capture_event_id=capture_event_id,
+                capture_source_id=capture_source_id,
+                raw_ref_id=raw_ref_id,
+                artifact_link_id=artifact_link_id,
             )
             for key in ("queued", "records", "artifacts", "items"):
                 child = value.get(key)
@@ -980,6 +1196,10 @@ def _connector_artifact_outputs(
                         artifact_type=artifact_type,
                         source=source,
                         queue_status=queue_status,
+                        capture_event_id=capture_event_id,
+                        capture_source_id=capture_source_id,
+                        raw_ref_id=raw_ref_id,
+                        artifact_link_id=artifact_link_id,
                     )
         elif isinstance(value, (list, tuple)):
             for item in value:

@@ -184,6 +184,20 @@ def _json_string_tuple(value: str | None) -> tuple[str, ...]:
     return tuple(str(item) for item in payload if str(item).strip())
 
 
+def _clean_optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _row_get(row: sqlite3.Row, key: str, default: Any = None) -> Any:
+    try:
+        if key not in row.keys():
+            return default
+        return row[key]
+    except Exception:
+        return default
+
+
 def _stable_connector_json(value: Mapping[str, Any] | None) -> str:
     return json.dumps(dict(value or {}), ensure_ascii=False, sort_keys=True, default=str)
 
@@ -553,6 +567,23 @@ class ConnectorRunRecord:
     next_retry_at: Optional[str] = None
     retry_state_json: Optional[str] = None
     resume_token: Optional[str] = None
+    metadata_json: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ConnectorRunOutputRecord:
+    """Artifact and capture-event links emitted by one connector run."""
+
+    run_id: str
+    artifact_id: str
+    artifact_type: str
+    source: str
+    queue_status: str
+    recorded_at: str
+    capture_event_id: Optional[str] = None
+    capture_source_id: Optional[str] = None
+    raw_ref_id: Optional[str] = None
+    artifact_link_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -811,6 +842,7 @@ class MetadataDB:
                 next_retry_at TEXT,
                 retry_state_json TEXT,
                 resume_token TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{{}}',
                 FOREIGN KEY (checkpoint_id) REFERENCES connector_checkpoints (checkpoint_id)
             )
         """)
@@ -822,6 +854,10 @@ class MetadataDB:
                 source TEXT NOT NULL,
                 queue_status TEXT NOT NULL,
                 recorded_at TEXT NOT NULL,
+                capture_event_id TEXT,
+                capture_source_id TEXT,
+                raw_ref_id TEXT,
+                artifact_link_id TEXT,
                 PRIMARY KEY (run_id, artifact_id),
                 FOREIGN KEY (run_id) REFERENCES connector_runs (run_id)
             )
@@ -837,10 +873,15 @@ class MetadataDB:
                 first_recorded_at TEXT NOT NULL,
                 last_recorded_at TEXT NOT NULL,
                 queue_status TEXT NOT NULL,
+                capture_event_id TEXT,
+                capture_source_id TEXT,
+                raw_ref_id TEXT,
+                artifact_link_id TEXT,
                 PRIMARY KEY (checkpoint_id, artifact_id),
                 FOREIGN KEY (checkpoint_id) REFERENCES connector_checkpoints (checkpoint_id)
             )
         """)
+        self._ensure_connector_run_metadata_schema(conn)
 
         # Ensure new columns exist when upgrading from earlier schema
         try:
@@ -1434,6 +1475,38 @@ class MetadataDB:
         """)
         conn.execute("DROP TABLE ingestion_queue")
         conn.execute("ALTER TABLE ingestion_queue_new RENAME TO ingestion_queue")
+
+    def _ensure_connector_run_metadata_schema(self, conn: sqlite3.Connection) -> None:
+        """Add connector run metadata/link columns on databases from older builds."""
+        self._ensure_columns(
+            conn,
+            "connector_runs",
+            {
+                "metadata_json": "metadata_json TEXT NOT NULL DEFAULT '{}'",
+            },
+        )
+        link_columns = {
+            "capture_event_id": "capture_event_id TEXT",
+            "capture_source_id": "capture_source_id TEXT",
+            "raw_ref_id": "raw_ref_id TEXT",
+            "artifact_link_id": "artifact_link_id TEXT",
+        }
+        self._ensure_columns(conn, "connector_run_outputs", link_columns)
+        self._ensure_columns(conn, "connector_checkpoint_outputs", link_columns)
+
+    def _ensure_columns(
+        self,
+        conn: sqlite3.Connection,
+        table_name: str,
+        column_ddls: Mapping[str, str],
+    ) -> None:
+        existing = {
+            str(row["name"])
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        for column_name, ddl in column_ddls.items():
+            if column_name not in existing:
+                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {ddl}")
     
     # GraphQL cache index operations
     def upsert_graphql_cache_entry(self, tweet_id: str, cache_path: str) -> bool:
@@ -2595,6 +2668,7 @@ class MetadataDB:
         checkpoint_key: Optional[str] = None,
         resume_token: Optional[str] = None,
         max_attempts: int = 5,
+        metadata: Mapping[str, Any] | None = None,
     ) -> Optional[ConnectorRunRecord]:
         """Create a connector run attempt and its resumable checkpoint row."""
         clean_connector = str(connector_name or "").strip()
@@ -2607,6 +2681,7 @@ class MetadataDB:
         )
         checkpoint_id = _connector_checkpoint_id(clean_connector, resolved_key)
         inputs_json = _stable_connector_json(resolved_inputs)
+        metadata_json = _stable_connector_json(metadata)
         now_iso = datetime.now().isoformat()
         capped_max_attempts = max(1, int(max_attempts or 1))
         run_id = f"connector_run_{uuid.uuid4().hex}"
@@ -2686,8 +2761,8 @@ class MetadataDB:
                         run_id, connector_name, checkpoint_key, checkpoint_id,
                         status, inputs_json, started_at, finished_at, output_count,
                         failure_reason, attempt, max_attempts, next_retry_at,
-                        retry_state_json, resume_token
-                    ) VALUES (?, ?, ?, ?, 'running', ?, ?, NULL, 0, NULL, ?, ?, NULL, ?, ?)
+                        retry_state_json, resume_token, metadata_json
+                    ) VALUES (?, ?, ?, ?, 'running', ?, ?, NULL, 0, NULL, ?, ?, NULL, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -2700,6 +2775,7 @@ class MetadataDB:
                         capped_max_attempts,
                         json.dumps(retry_state, ensure_ascii=False, sort_keys=True),
                         resume_token,
+                        metadata_json,
                     ),
                 )
                 conn.execute(
@@ -2731,6 +2807,10 @@ class MetadataDB:
         artifact_type: str,
         source: str,
         queue_status: str = "pending",
+        capture_event_id: Optional[str] = None,
+        capture_source_id: Optional[str] = None,
+        raw_ref_id: Optional[str] = None,
+        artifact_link_id: Optional[str] = None,
     ) -> bool:
         """Attach one queued artifact to a connector run and checkpoint."""
         clean_run_id = str(run_id or "").strip()
@@ -2753,9 +2833,32 @@ class MetadataDB:
                 )
                 conn.execute(
                     """
-                    INSERT OR IGNORE INTO connector_run_outputs (
-                        run_id, artifact_id, artifact_type, source, queue_status, recorded_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO connector_run_outputs (
+                        run_id, artifact_id, artifact_type, source, queue_status,
+                        recorded_at, capture_event_id, capture_source_id,
+                        raw_ref_id, artifact_link_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(run_id, artifact_id) DO UPDATE SET
+                        artifact_type=excluded.artifact_type,
+                        source=excluded.source,
+                        queue_status=excluded.queue_status,
+                        recorded_at=excluded.recorded_at,
+                        capture_event_id=COALESCE(
+                            excluded.capture_event_id,
+                            connector_run_outputs.capture_event_id
+                        ),
+                        capture_source_id=COALESCE(
+                            excluded.capture_source_id,
+                            connector_run_outputs.capture_source_id
+                        ),
+                        raw_ref_id=COALESCE(
+                            excluded.raw_ref_id,
+                            connector_run_outputs.raw_ref_id
+                        ),
+                        artifact_link_id=COALESCE(
+                            excluded.artifact_link_id,
+                            connector_run_outputs.artifact_link_id
+                        )
                     """,
                     (
                         clean_run_id,
@@ -2764,6 +2867,10 @@ class MetadataDB:
                         str(source or "unknown"),
                         str(queue_status or "pending"),
                         now_iso,
+                        _clean_optional_text(capture_event_id),
+                        _clean_optional_text(capture_source_id),
+                        _clean_optional_text(raw_ref_id),
+                        _clean_optional_text(artifact_link_id),
                     ),
                 )
                 if resolved_checkpoint_id:
@@ -2772,14 +2879,31 @@ class MetadataDB:
                         INSERT INTO connector_checkpoint_outputs (
                             checkpoint_id, artifact_id, artifact_type, source,
                             first_run_id, last_run_id, first_recorded_at,
-                            last_recorded_at, queue_status
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            last_recorded_at, queue_status, capture_event_id,
+                            capture_source_id, raw_ref_id, artifact_link_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(checkpoint_id, artifact_id) DO UPDATE SET
                             artifact_type=excluded.artifact_type,
                             source=excluded.source,
                             last_run_id=excluded.last_run_id,
                             last_recorded_at=excluded.last_recorded_at,
-                            queue_status=excluded.queue_status
+                            queue_status=excluded.queue_status,
+                            capture_event_id=COALESCE(
+                                excluded.capture_event_id,
+                                connector_checkpoint_outputs.capture_event_id
+                            ),
+                            capture_source_id=COALESCE(
+                                excluded.capture_source_id,
+                                connector_checkpoint_outputs.capture_source_id
+                            ),
+                            raw_ref_id=COALESCE(
+                                excluded.raw_ref_id,
+                                connector_checkpoint_outputs.raw_ref_id
+                            ),
+                            artifact_link_id=COALESCE(
+                                excluded.artifact_link_id,
+                                connector_checkpoint_outputs.artifact_link_id
+                            )
                         """,
                         (
                             resolved_checkpoint_id,
@@ -2791,6 +2915,10 @@ class MetadataDB:
                             now_iso,
                             now_iso,
                             str(queue_status or "pending"),
+                            _clean_optional_text(capture_event_id),
+                            _clean_optional_text(capture_source_id),
+                            _clean_optional_text(raw_ref_id),
+                            _clean_optional_text(artifact_link_id),
                         ),
                     )
                     conn.execute(
@@ -2835,6 +2963,7 @@ class MetadataDB:
         state: Mapping[str, Any] | None = None,
         failure_reason: Optional[str] = None,
         max_attempts: Optional[int] = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> Optional[ConnectorRunRecord]:
         """Mark a connector run completed or failed and refresh its checkpoint."""
         clean_run_id = str(run_id or "").strip()
@@ -2880,6 +3009,16 @@ class MetadataDB:
                     failure_reason=clean_failure,
                     next_retry_at=next_retry_at,
                 )
+                metadata_payload = _json_payload(_row_get(row, "metadata_json"))
+                if isinstance(metadata, Mapping):
+                    metadata_payload.update(dict(metadata))
+                metadata_payload.setdefault("run_started_at", row["started_at"])
+                metadata_payload["run_finished_at"] = finished_at
+                metadata_payload["run_timestamp"] = metadata_payload.get(
+                    "run_timestamp",
+                    row["started_at"],
+                )
+                metadata_payload["status"] = clean_status
                 conn.execute(
                     """
                     UPDATE connector_runs
@@ -2890,7 +3029,8 @@ class MetadataDB:
                         max_attempts=?,
                         next_retry_at=?,
                         retry_state_json=?,
-                        resume_token=COALESCE(?, resume_token)
+                        resume_token=COALESCE(?, resume_token),
+                        metadata_json=?
                     WHERE run_id = ?
                     """,
                     (
@@ -2902,6 +3042,7 @@ class MetadataDB:
                         next_retry_at,
                         json.dumps(retry_state, ensure_ascii=False, sort_keys=True),
                         resume_token,
+                        _stable_connector_json(metadata_payload),
                         clean_run_id,
                     ),
                 )
@@ -3013,6 +3154,32 @@ class MetadataDB:
             logger.error(f"Failed to count connector run outputs {run_id}: {e}")
             return 0
 
+    def list_connector_run_outputs(
+        self,
+        run_id: str,
+    ) -> List[ConnectorRunOutputRecord]:
+        """List artifact and capture-event links for a connector run."""
+        clean_run_id = str(run_id or "").strip()
+        if not clean_run_id:
+            return []
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT run_id, artifact_id, artifact_type, source, queue_status,
+                           recorded_at, capture_event_id, capture_source_id,
+                           raw_ref_id, artifact_link_id
+                    FROM connector_run_outputs
+                    WHERE run_id = ?
+                    ORDER BY recorded_at ASC, artifact_id ASC
+                    """,
+                    (clean_run_id,),
+                ).fetchall()
+                return [self._connector_run_output_from_row(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list connector run outputs {clean_run_id}: {e}")
+            return []
+
     def get_connector_checkpoint(
         self,
         connector_name: str,
@@ -3077,6 +3244,24 @@ class MetadataDB:
             next_retry_at=row["next_retry_at"],
             retry_state_json=row["retry_state_json"],
             resume_token=row["resume_token"],
+            metadata_json=_row_get(row, "metadata_json"),
+        )
+
+    def _connector_run_output_from_row(
+        self,
+        row: sqlite3.Row,
+    ) -> ConnectorRunOutputRecord:
+        return ConnectorRunOutputRecord(
+            run_id=row["run_id"],
+            artifact_id=row["artifact_id"],
+            artifact_type=row["artifact_type"],
+            source=row["source"],
+            queue_status=row["queue_status"],
+            recorded_at=row["recorded_at"],
+            capture_event_id=_row_get(row, "capture_event_id"),
+            capture_source_id=_row_get(row, "capture_source_id"),
+            raw_ref_id=_row_get(row, "raw_ref_id"),
+            artifact_link_id=_row_get(row, "artifact_link_id"),
         )
 
     def _connector_checkpoint_from_row(

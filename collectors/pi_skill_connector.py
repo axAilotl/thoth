@@ -78,6 +78,7 @@ class PiSkillRunResult:
     model: str | None
     skill_output: dict[str, Any]
     budget: dict[str, Any] = field(default_factory=dict)
+    execution_metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -88,6 +89,7 @@ class PiSkillRunResult:
             "skill_output": self.skill_output,
             "queued_count": self.skill_output.get("queued_count", 0),
             "budget": self.budget,
+            "execution_metadata": self.execution_metadata,
         }
 
 
@@ -176,6 +178,7 @@ class PiSkillConnector:
         provider: str | None = None,
         model: str | None = None,
         limit: int | None = None,
+        actor: str | None = None,
     ) -> PiSkillRunResult:
         """Run a Pi skill, persist its raw output, and ingest validated envelopes."""
         self.layout.ensure_directories()
@@ -215,6 +218,7 @@ class PiSkillConnector:
             source_name=skill.source_name,
             limit=limit,
         )
+        command_identity = self._command_identity(route)
         return PiSkillRunResult(
             skill_id=skill.id,
             output_path=output_path,
@@ -222,6 +226,22 @@ class PiSkillConnector:
             model=route.model,
             skill_output=skill_output_result.to_dict(),
             budget=budget.summary(),
+            execution_metadata=_compact_metadata(
+                {
+                    "command": self._command_preview(route),
+                    "command_identity": command_identity,
+                    "provider": route.provider,
+                    "model": route.model,
+                    "resolved_model": command_identity.get("model"),
+                    "input_paths": [str(path) for path in resolved_inputs],
+                    "output_path": str(output_path),
+                    "output_hash": _file_sha256(output_path),
+                    "run_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "actor": _clean_string(actor),
+                    "safety_mode": skill.safety_mode,
+                    "skill_id": skill.id,
+                }
+            ),
         )
 
     def _add_payload_budget(
@@ -750,6 +770,22 @@ def _serialize_payload(payload: Any, *, output_format: str) -> str:
         envelopes = _envelope_payloads(payload)
         return "\n".join(json.dumps(item, ensure_ascii=False) for item in envelopes) + "\n"
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def _compact_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in metadata.items()
+        if value is not None and value != ""
+    }
 
 
 def _envelope_payloads(payload: Any) -> list[Any]:

@@ -273,11 +273,38 @@ def test_pi_skills_execute_queues_valid_skill_output(monkeypatch, tmp_path: Path
     payload = service.run_connector(
         "pi_skills",
         execute=True,
-        options={"skill": "collect-notes", "prompt": "Collect this."},
+        options={
+            "skill": "collect-notes",
+            "prompt": "Collect this.",
+            "actor": "pi-test-agent",
+        },
     )
 
     assert payload["status"] == "completed"
     assert payload["result"]["queued_count"] == 1
+    execution_metadata = payload["result"]["execution_metadata"]
+    assert execution_metadata["provider"] == "pi"
+    assert execution_metadata["model"] == "archivist_agent"
+    assert execution_metadata["resolved_model"] == "glm-5.2"
+    assert execution_metadata["command"][:6] == [
+        "pi",
+        "--print",
+        "--mode",
+        "text",
+        "--no-tools",
+        "--no-session",
+    ]
+    assert execution_metadata["input_paths"] == []
+    assert execution_metadata["output_hash"].startswith("sha256:")
+    assert execution_metadata["actor"] == "pi-test-agent"
+    assert execution_metadata["safety_mode"] == "no_tools_json"
+    run_metadata = payload["history"]["run"]["metadata"]
+    assert run_metadata["output_hash"] == execution_metadata["output_hash"]
+    assert run_metadata["actor"] == "pi-test-agent"
+    assert payload["history"]["run"]["outputs"][0]["artifact_id"] == "pi-skill-note"
+    assert payload["history"]["run"]["outputs"][0]["capture_event_id"].startswith(
+        "event:"
+    )
     entry = db.get_ingestion_entry("pi-skill-note")
     assert entry is not None
     assert entry.source == "pi_skill:collect-notes"
