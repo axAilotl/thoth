@@ -65,6 +65,13 @@ from .capture_lifecycle import (
     CaptureLifecycleService,
     get_capture_lifecycle_service,
 )
+from .capture_surface import (
+    CaptureSurfaceConfigError,
+    CaptureSurfaceError,
+    CaptureSurfaceNotFoundError,
+    CaptureSurfaceService,
+    open_capture_surface,
+)
 from .mcp_server import ThothMCPServer
 from .archivist_runtime import (
     ARCHIVIST_JOB_NAME,
@@ -196,6 +203,11 @@ __all__ = [
     'CaptureLifecycleResult',
     'CaptureLifecycleService',
     'get_capture_lifecycle_service',
+    'CaptureSurfaceConfigError',
+    'CaptureSurfaceError',
+    'CaptureSurfaceNotFoundError',
+    'CaptureSurfaceService',
+    'open_capture_surface',
     'ThothMCPServer',
     'ARCHIVIST_JOB_NAME',
     'ArchivistRuntimeError',

@@ -842,12 +842,21 @@ class CaptureEventStore:
             )
         return tuple(persisted)
 
-    def list_security_findings(self, *, event_id: str | None = None) -> tuple[SecurityFinding, ...]:
-        where = ""
-        params: tuple[Any, ...] = ()
+    def list_security_findings(
+        self,
+        *,
+        event_id: str | None = None,
+        raw_ref_id: str | None = None,
+    ) -> tuple[SecurityFinding, ...]:
+        filters: list[str] = []
+        params: list[Any] = []
         if event_id:
-            where = "WHERE event_id = %s"
-            params = (_clean_required(event_id, "event_id"),)
+            filters.append("event_id = %s")
+            params.append(_clean_required(event_id, "event_id"))
+        if raw_ref_id:
+            filters.append("raw_ref_id = %s")
+            params.append(_clean_required(raw_ref_id, "raw_ref_id"))
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
         rows = self.conn.execute(
             f"""
             SELECT finding_id, event_id, raw_ref_id, finding_type, severity, status,
@@ -856,7 +865,7 @@ class CaptureEventStore:
             {where}
             ORDER BY detected_at, finding_id
             """,
-            params,
+            tuple(params),
         ).fetchall()
         return tuple(_security_finding_from_row(row) for row in rows)
 
