@@ -125,6 +125,12 @@ class WikiPageSpec:
     artifact_id: str | None = None
     source_type: str | None = None
     event_ids: Tuple[str, ...] = field(default_factory=tuple)
+    source_ids: Tuple[str, ...] = field(default_factory=tuple)
+    session_ids: Tuple[str, ...] = field(default_factory=tuple)
+    capture_page_type: str | None = None
+    capture_page_key: str | None = None
+    capture_event_count: int | None = None
+    capture_audit: Mapping[str, Any] | None = None
     security_findings: Tuple[Any, ...] = field(default_factory=tuple)
     security_policy: Mapping[str, Any] | None = None
 
@@ -134,6 +140,8 @@ class WikiPageSpec:
         object.__setattr__(self, "related_slugs", _stable_unique_strings(self.related_slugs))
         object.__setattr__(self, "query_terms", _stable_unique_strings(self.query_terms))
         object.__setattr__(self, "event_ids", _stable_unique_strings(self.event_ids))
+        object.__setattr__(self, "source_ids", _stable_unique_strings(self.source_ids))
+        object.__setattr__(self, "session_ids", _stable_unique_strings(self.session_ids))
         object.__setattr__(
             self,
             "security_findings",
@@ -170,6 +178,14 @@ class WikiPageSpec:
             "thoth_artifact_id": self.artifact_id,
             "thoth_source_type": self.source_type,
             "thoth_event_ids": list(self.event_ids) or None,
+            "thoth_source_ids": list(self.source_ids) or None,
+            "thoth_session_ids": list(self.session_ids) or None,
+            "thoth_capture_page_type": self.capture_page_type,
+            "thoth_capture_page_key": self.capture_page_key,
+            "thoth_capture_event_count": self.capture_event_count,
+            "thoth_capture_audit": _stable_metadata_value(self.capture_audit)
+            if self.capture_audit
+            else None,
             "thoth_security_findings": list(self.security_findings) or None,
             "thoth_security_policy": _stable_metadata_value(self.security_policy)
             if self.security_policy

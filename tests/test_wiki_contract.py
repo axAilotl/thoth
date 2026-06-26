@@ -49,6 +49,12 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
         related_slugs=("agents",),
         updated_at="2026-04-04T00:00:00Z",
         event_ids=("event-b", "event-a", "event-b"),
+        source_ids=("source-b", "source-a", "source-b"),
+        session_ids=("session-b", "session-a", "session-b"),
+        capture_page_type="daily",
+        capture_page_key="2026-04-04",
+        capture_event_count=2,
+        capture_audit={"reason": "operator review", "include_restricted_events": True},
         security_findings=(
             {"pattern_id": "prompt_override", "scope": "strict"},
             {"scope": "context", "pattern_id": "secret"},
@@ -73,6 +79,15 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
     assert frontmatter["thoth_kind"] == "topic"
     assert frontmatter["thoth_source_paths"] == ["raw/bookmarks/item.md"]
     assert frontmatter["thoth_event_ids"] == ["event-a", "event-b"]
+    assert frontmatter["thoth_source_ids"] == ["source-a", "source-b"]
+    assert frontmatter["thoth_session_ids"] == ["session-a", "session-b"]
+    assert frontmatter["thoth_capture_page_type"] == "daily"
+    assert frontmatter["thoth_capture_page_key"] == "2026-04-04"
+    assert frontmatter["thoth_capture_event_count"] == 2
+    assert frontmatter["thoth_capture_audit"] == {
+        "include_restricted_events": True,
+        "reason": "operator review",
+    }
     assert frontmatter["thoth_security_findings"] == [
         {"pattern_id": "prompt_override", "scope": "strict"},
         {"pattern_id": "secret", "scope": "context"},

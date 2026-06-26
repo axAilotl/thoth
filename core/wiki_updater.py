@@ -19,6 +19,8 @@ from .artifacts import (
     VideoArtifact,
     WebClipperArtifact,
 )
+from .capture_event_store import CaptureEventStore
+from .wiki_capture_compiler import CaptureWikiCompiler
 from .config import Config
 from .metadata_db import MetadataDB
 from .path_layout import PathLayout, build_path_layout
@@ -105,8 +107,6 @@ _SECURITY_REPORT_KEYS = (
     "redaction_metadata",
     "sensitive_redaction",
 )
-
-
 def _as_sequence(value: Any) -> tuple[Any, ...]:
     if value is None:
         return tuple()
@@ -307,6 +307,45 @@ class CompiledWikiUpdater:
             source_paths=updated_spec.source_paths,
             action=action,
         )
+
+    def update_from_capture_events(
+        self,
+        event_store: CaptureEventStore,
+        *,
+        source_id: str | None = None,
+        session_id: str | None = None,
+        include_restricted_events: bool = False,
+        audit_reason: str | None = None,
+    ) -> tuple[WikiUpdateResult, ...]:
+        """Compile daily/source/entity wiki pages from capture events."""
+        compiled = CaptureWikiCompiler(
+            layout=self.layout,
+            contract=self.contract,
+        ).compile(
+            event_store,
+            source_id=source_id,
+            session_id=session_id,
+            include_restricted_events=include_restricted_events,
+            audit_reason=audit_reason,
+        )
+        results = tuple(
+            WikiUpdateResult(
+                slug=result.slug,
+                page_path=result.page_path,
+                source_paths=result.source_paths,
+                action=result.action,
+            )
+            for result in compiled
+        )
+        self.refresh_index()
+        if results:
+            append_wiki_log_entry(
+                self.scaffold,
+                "Compiled capture event wiki pages: "
+                + ", ".join(f"`{result.slug}`" for result in results)
+                + ".",
+            )
+        return results
 
     def refresh_index(self) -> Path:
         self.prune_legacy_tweet_pages()

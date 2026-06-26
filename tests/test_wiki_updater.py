@@ -6,6 +6,15 @@ from types import SimpleNamespace
 import pytest
 
 from core.artifacts import RepositoryArtifact
+from core.capture_event_store import (
+    ArtifactLink,
+    CaptureEvent,
+    CaptureEventStore,
+    CaptureSession,
+    CaptureSource,
+    RawArtifactRef,
+    SecurityFinding,
+)
 from core.config import config
 from core.ingestion_runtime import KnowledgeArtifactRuntime
 from core.metadata_db import IngestionQueueEntry, MetadataDB
@@ -15,7 +24,9 @@ from core.prompt_security import (
     THOTH_SECURITY_POLICY_KEY,
 )
 from core.wiki_io import read_document
+from core.wiki_lint import WikiLintRunner
 from core.wiki_updater import CompiledWikiUpdater
+from test_capture_event_store import FakeCaptureConnection
 from tests.security_hostile_fixtures import hostile_text
 
 
@@ -41,6 +52,111 @@ def _configure_runtime_config(tmp_path: Path) -> None:
     config.set("paths.wiki_dir", "wiki")
     config.set("paths.digests_dir", "_digests")
     config.set("database.path", "meta.db")
+
+
+def _capture_store_with_public_and_restricted_events(layout):
+    public_raw = layout.raw_root / "capture" / "public.json"
+    public_raw.parent.mkdir(parents=True, exist_ok=True)
+    public_raw.write_text(
+        '{"raw_content":"do not copy this raw transcript"}\n',
+        encoding="utf-8",
+    )
+    restricted_raw = layout.raw_root / "capture" / "restricted.json"
+    restricted_raw.write_text('{"text":"private note"}\n', encoding="utf-8")
+
+    store = CaptureEventStore(
+        FakeCaptureConnection(),
+        schema="capture_unit",
+        raw_roots=[layout.raw_root],
+    )
+    source = store.upsert_source(
+        CaptureSource(
+            source_id="source-public",
+            source_name="manual-notes",
+            source_type="manual",
+            base_uri="https://example.test/manual",
+        )
+    )
+    session = store.upsert_session(
+        CaptureSession(
+            source_id=source.source_id,
+            session_id="session-public",
+            native_session_id="sync-2026-04-04",
+            session_type="manual",
+            started_at="2026-04-04T10:00:00Z",
+        )
+    )
+    public_event = store.upsert_event(
+        CaptureEvent(
+            event_id="event-public",
+            source_id=source.source_id,
+            session_id=session.session_id,
+            event_type="note",
+            native_event_id="note-public",
+            occurred_at="2026-04-04T10:15:00Z",
+            captured_at="2026-04-04T10:16:00Z",
+            payload={
+                "title": "Public capture note",
+                "raw_content": "do not render this payload blob",
+                "normalized_metadata": {
+                    "people": [{"id": "ada", "name": "Ada Lovelace"}],
+                    "projects": [{"id": "thoth", "name": "Thoth"}],
+                },
+            },
+            privacy={"classification": "public"},
+        )
+    )
+    public_ref = store.upsert_raw_ref(
+        RawArtifactRef.from_file(
+            public_raw,
+            source_id=source.source_id,
+            session_id=session.session_id,
+            event_id=public_event.event_id,
+            raw_roots=[layout.raw_root],
+        )
+    )
+    store.upsert_artifact_link(
+        ArtifactLink(
+            event_id=public_event.event_id,
+            raw_ref_id=public_ref.raw_ref_id,
+            artifact_id="artifact-public",
+            artifact_type="note",
+        )
+    )
+    store.upsert_security_finding(
+        SecurityFinding(
+            event_id=public_event.event_id,
+            finding_type="classifier",
+            severity="low",
+            status="open",
+            fingerprint="low-classifier",
+            details={"pattern_id": "benign-marker", "scope": "context"},
+        )
+    )
+
+    restricted_event = store.upsert_event(
+        CaptureEvent(
+            event_id="event-private",
+            source_id=source.source_id,
+            session_id=session.session_id,
+            event_type="note",
+            native_event_id="note-private",
+            occurred_at="2026-04-04T11:00:00Z",
+            captured_at="2026-04-04T11:01:00Z",
+            payload={"title": "Private capture note"},
+            privacy={"classification": "private"},
+        )
+    )
+    store.upsert_raw_ref(
+        RawArtifactRef.from_file(
+            restricted_raw,
+            source_id=source.source_id,
+            session_id=session.session_id,
+            event_id=restricted_event.event_id,
+            raw_roots=[layout.raw_root],
+        )
+    )
+    return store
 
 
 def test_wiki_updater_creates_repository_page_and_refreshes_index(
@@ -307,3 +423,105 @@ def test_wiki_updater_emits_deterministic_provenance_and_security_frontmatter(
     assert citations_section.index(
         "[2] [repos/github_owner_repo_README.md]"
     ) < citations_section.index("[3] [stars/owner_repo_summary.md]")
+
+
+def test_wiki_updater_compiles_capture_event_rollup_pages_with_filters(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    store = _capture_store_with_public_and_restricted_events(layout)
+
+    updater = CompiledWikiUpdater(config, layout=layout)
+    results = updater.update_from_capture_events(store)
+
+    slugs = {result.slug for result in results}
+    assert slugs == {
+        "capture-daily-2026-04-04",
+        "capture-weekly-2026-w14",
+        "capture-source-manual-notes",
+        "capture-session-session-public",
+        "person-ada",
+        "project-thoth",
+    }
+
+    daily_page = layout.wiki_root / "pages" / "capture-daily-2026-04-04.md"
+    document = read_document(daily_page)
+    assert document.frontmatter["type"] == "Topic"
+    assert document.frontmatter["thoth_capture_page_type"] == "daily"
+    assert document.frontmatter["thoth_capture_page_key"] == "2026-04-04"
+    assert document.frontmatter["thoth_capture_event_count"] == 1
+    assert document.frontmatter["thoth_event_ids"] == ["event-public"]
+    assert document.frontmatter["thoth_source_ids"] == ["source-public"]
+    assert document.frontmatter["thoth_session_ids"] == ["session-public"]
+    assert document.frontmatter["thoth_source_paths"] == [
+        "raw/capture/public.json"
+    ]
+    assert document.frontmatter["thoth_security_findings"] == [
+        {
+            "event_id": "event-public",
+            "finding_id": document.frontmatter["thoth_security_findings"][0][
+                "finding_id"
+            ],
+            "finding_type": "classifier",
+            "severity": "low",
+            "status": "open",
+            "fingerprint": "low-classifier",
+            "pattern_id": "benign-marker",
+            "scope": "context",
+        }
+    ]
+    assert "## Sources" in document.body
+    assert "# Citations" in document.body
+    assert "raw/capture/public.json" in document.body
+    assert "Capture event event-public" in document.body
+    assert "event-private" not in document.body
+    assert "do not copy this raw transcript" not in document.body
+    assert "do not render this payload blob" not in document.body
+
+    assert (layout.wiki_root / "pages" / "person-ada.md").exists()
+    assert (layout.wiki_root / "pages" / "project-thoth.md").exists()
+
+    report = WikiLintRunner(config, layout=layout).lint(stale_after_days=999999)
+    assert not report.has_errors
+
+
+def test_wiki_updater_requires_audit_reason_for_restricted_capture_events(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    store = _capture_store_with_public_and_restricted_events(layout)
+    updater = CompiledWikiUpdater(config, layout=layout)
+
+    with pytest.raises(ValueError, match="audit_reason"):
+        updater.update_from_capture_events(
+            store,
+            include_restricted_events=True,
+        )
+
+    results = updater.update_from_capture_events(
+        store,
+        include_restricted_events=True,
+        audit_reason="operator reviewed private note",
+    )
+
+    daily_page = next(
+        result.page_path
+        for result in results
+        if result.slug == "capture-daily-2026-04-04"
+    )
+    document = read_document(daily_page)
+    assert document.frontmatter["thoth_event_ids"] == [
+        "event-private",
+        "event-public",
+    ]
+    assert document.frontmatter["thoth_capture_event_count"] == 2
+    assert document.frontmatter["thoth_capture_audit"] == {
+        "compiled_at": document.frontmatter["thoth_capture_audit"]["compiled_at"],
+        "include_restricted_events": True,
+        "reason": "operator reviewed private note",
+    }
+    assert "event-private" in document.body
