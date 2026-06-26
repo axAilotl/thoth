@@ -3,7 +3,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from core.agent_surface import AgentSurfaceService
+import pytest
+
+from core.agent_surface import AgentSurfaceError, AgentSurfaceService
 from core.artifacts import PaperArtifact, RepositoryArtifact
 from core.config import Config
 from core.mcp_server import ThothMCPServer
@@ -146,6 +148,56 @@ def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):
         }
     )
     assert rpc_response["result"]["tools"][0]["name"] == "wiki_query"
+
+
+def test_connector_execution_rejects_unallowlisted_connector(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("connectors.allowlist", ["github"])
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    plan = service.run_connector("arxiv", options={"topics": "agents"})
+
+    assert plan["policy"]["allowlist"] == {
+        "configured": True,
+        "allowed": False,
+        "matched": [],
+    }
+    with pytest.raises(AgentSurfaceError, match="not allowlisted"):
+        service.run_connector(
+            "arxiv",
+            execute=True,
+            options={"topics": "agents"},
+        )
+
+
+def test_connector_execution_rejects_pin_drift(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("connectors.allowlist", ["arxiv"])
+    config.set(
+        "connectors.pins",
+        {"arxiv": {"entrypoint": "collectors.changed:ChangedCollector"}},
+    )
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    plan = service.run_connector("arxiv", options={"topics": "agents"})
+
+    assert plan["policy"]["pins"]["drift"] == [
+        {
+            "field": "entrypoint",
+            "expected": "collectors.changed:ChangedCollector",
+            "actual": "collectors.arxiv_collector:ArXivCollector",
+        }
+    ]
+    with pytest.raises(AgentSurfaceError, match="pin drift"):
+        service.run_connector(
+            "arxiv",
+            execute=True,
+            options={"topics": "agents"},
+        )
 
 
 def test_stable_agent_cli_groups_are_wired():

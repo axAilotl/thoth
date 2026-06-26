@@ -24,6 +24,17 @@
                   "type": "array",
                   "items": { "type": "string" }
                 },
+                "command_pin": {
+                  "type": "object",
+                  "properties": {
+                    "command": { "type": "string" },
+                    "configured_command": { "type": "string" },
+                    "resolved_command": { "type": ["string", "null"] },
+                    "pi_provider": { "type": ["string", "null"] },
+                    "model": { "type": ["string", "null"] }
+                  },
+                  "additionalProperties": true
+                },
                 "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
                 "extra_args": {
                   "type": "array",
@@ -188,6 +199,38 @@
             "migration_lock_id": { "type": "integer" }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "connectors": {
+      "type": "object",
+      "properties": {
+        "plugin_dirs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "skill_dirs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "allowlist": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "pins": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "source_name": { "type": "string" },
+              "entrypoint": { "type": "string" },
+              "cli_command": { "type": ["string", "null"] },
+              "origin": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": true
@@ -418,6 +461,24 @@
               "items": { "type": "string" }
             },
             "max_input_bytes": { "type": "integer", "minimum": 1 },
+            "allowlist": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "command_pins": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "command": { "type": "string" },
+                  "configured_command": { "type": "string" },
+                  "resolved_command": { "type": ["string", "null"] },
+                  "pi_provider": { "type": ["string", "null"] },
+                  "model": { "type": ["string", "null"] }
+                },
+                "additionalProperties": true
+              }
+            },
             "skills": {
               "type": ["array", "object"],
               "items": {

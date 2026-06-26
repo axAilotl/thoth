@@ -97,6 +97,74 @@ def test_pi_skills_dry_run_exposes_locked_down_command(tmp_path: Path):
         "local_file_write",
         "artifact_queue_write",
     ]
+    assert payload["run_plan"]["allowlist"]["allowed"] is True
+    assert payload["run_plan"]["route"]["command_identity"]["configured_command"] == "pi"
+    assert payload["run_plan"]["route"]["remote_install_blocked"] is False
+
+
+def test_pi_skills_rejects_unallowlisted_skill(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("sources.pi_skills.allowlist", ["other-skill"])
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    with pytest.raises(ValueError, match="not allowlisted"):
+        service.run_connector("pi_skills", options={"skill": "collect-notes"})
+
+
+def test_pi_skills_surfaces_and_rejects_command_pin_drift(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("sources.pi_skills.allowlist", ["collect-notes"])
+    config.set(
+        "sources.pi_skills.command_pins",
+        {
+            "pi": {
+                "command": "other-pi",
+                "pi_provider": "zai-coding-cn",
+                "model": "glm-5.2",
+            }
+        },
+    )
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    payload = service.run_connector(
+        "pi_skills",
+        options={"skill": "collect-notes"},
+    )
+
+    assert payload["run_plan"]["route"]["pin_drift"] == [
+        {"field": "command", "expected": "other-pi", "actual": "pi"}
+    ]
+    with pytest.raises(ValueError, match="command pin drift"):
+        service.run_connector(
+            "pi_skills",
+            execute=True,
+            options={"skill": "collect-notes"},
+        )
+
+
+def test_pi_skills_blocks_remote_install_route(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("llm.providers.pi.install_if_missing", True)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    payload = service.run_connector(
+        "pi_skills",
+        options={"skill": "collect-notes"},
+    )
+
+    assert payload["run_plan"]["route"]["remote_install_blocked"] is True
+    with pytest.raises(ValueError, match="install_if_missing"):
+        service.run_connector(
+            "pi_skills",
+            execute=True,
+            options={"skill": "collect-notes"},
+        )
 
 
 def test_pi_skills_missing_manifest_controls_fail_closed(tmp_path: Path):
