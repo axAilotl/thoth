@@ -188,6 +188,97 @@ def test_archivist_retrieval_excludes_quarantined_source_ids(tmp_path: Path):
     assert db.get_archivist_corpus_document("vault:repos/quarantined.md") is None
 
 
+def test_archivist_retrieval_blocks_hostile_source_text_before_context(tmp_path: Path):
+    config, db = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    repos_dir = layout.vault_root / "repos"
+    repos_dir.mkdir(parents=True, exist_ok=True)
+    (repos_dir / "safe.md").write_text(
+        "# Safe Persona Memory\n\nCompanion persona memory loops.\n",
+        encoding="utf-8",
+    )
+    (repos_dir / "hostile.md").write_text(
+        "# Hostile Persona Memory\n\n"
+        "Companion persona memory loops.\n\n"
+        f"{hostile_text('fake_citations')}\n",
+        encoding="utf-8",
+    )
+
+    topic = ArchivistTopicDefinition(
+        id="companion",
+        title="Companion",
+        output_path="pages/topic-companion.md",
+        include_roots=("repos",),
+        source_types=("repository",),
+        include_terms=("companion", "persona"),
+    )
+
+    result = select_archivist_candidates(topic, config=config, layout=layout, db=db)
+
+    assert [candidate.scope_relative_path for candidate in result.candidates] == [
+        "repos/safe.md",
+    ]
+    assert db.get_archivist_corpus_document("vault:repos/hostile.md") is None
+
+
+def test_archivist_retrieval_caps_repeated_source_in_context(tmp_path: Path):
+    config, db = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    repos_dir = layout.vault_root / "repos"
+    repos_dir.mkdir(parents=True, exist_ok=True)
+    source_a_paths = []
+    for index in range(3):
+        path = repos_dir / f"source_a_{index}.md"
+        path.write_text(
+            f"# Source A {index}\n\nCompanion persona memory retrieval.\n",
+            encoding="utf-8",
+        )
+        source_a_paths.append(path)
+    source_b_path = repos_dir / "source_b.md"
+    source_b_path.write_text(
+        "# Source B\n\nCompanion persona memory retrieval.\n",
+        encoding="utf-8",
+    )
+    for path in source_a_paths:
+        db.upsert_file(
+            FileMetadata(
+                path=str(path),
+                file_type="readme",
+                size_bytes=path.stat().st_size,
+                updated_at="2026-04-04T00:00:00",
+                source_id="repo-a",
+            )
+        )
+    db.upsert_file(
+        FileMetadata(
+            path=str(source_b_path),
+            file_type="readme",
+            size_bytes=source_b_path.stat().st_size,
+            updated_at="2026-04-04T00:00:00",
+            source_id="repo-b",
+        )
+    )
+
+    topic = ArchivistTopicDefinition(
+        id="companion",
+        title="Companion",
+        output_path="pages/topic-companion.md",
+        include_roots=("repos",),
+        source_types=("repository",),
+        include_terms=("companion", "persona"),
+        max_sources=3,
+    )
+
+    result = select_archivist_candidates(topic, config=config, layout=layout, db=db)
+    source_ids = [candidate.source_id for candidate in result.candidates]
+
+    assert len(result.candidates) == 3
+    assert source_ids.count("repo-a") == 2
+    assert source_ids.count("repo-b") == 1
+
+
 def test_archivist_semantic_retrieval_uses_embedding_route(tmp_path: Path):
     config, db = make_config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)

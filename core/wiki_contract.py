@@ -100,6 +100,27 @@ def _stable_security_findings(values: Tuple[Any, ...]) -> Tuple[Any, ...]:
     return tuple(deduped[key] for key in sorted(deduped))
 
 
+def _stable_influence_sources(values: Tuple[Any, ...]) -> Tuple[Dict[str, Any], ...]:
+    records: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        record = {
+            str(key): _stable_metadata_value(item)
+            for key, item in value.items()
+            if item not in (None, "", [], {})
+        }
+        if not record:
+            continue
+        fingerprint = _metadata_sort_key(record)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        records.append(record)
+    return tuple(records)
+
+
 @dataclass(frozen=True)
 class WikiPageSpec:
     """Declarative schema for a compiled wiki page."""
@@ -112,6 +133,7 @@ class WikiPageSpec:
     summary: str = ""
     aliases: Tuple[str, ...] = field(default_factory=tuple)
     source_paths: Tuple[str, ...] = field(default_factory=tuple)
+    influence_sources: Tuple[Any, ...] = field(default_factory=tuple)
     related_slugs: Tuple[str, ...] = field(default_factory=tuple)
     language: str = "en"
     translated_from: str | None = None
@@ -131,6 +153,11 @@ class WikiPageSpec:
     def __post_init__(self) -> None:
         object.__setattr__(self, "aliases", _stable_unique_strings(self.aliases))
         object.__setattr__(self, "source_paths", _stable_unique_strings(self.source_paths))
+        object.__setattr__(
+            self,
+            "influence_sources",
+            _stable_influence_sources(self.influence_sources),
+        )
         object.__setattr__(self, "related_slugs", _stable_unique_strings(self.related_slugs))
         object.__setattr__(self, "query_terms", _stable_unique_strings(self.query_terms))
         object.__setattr__(self, "event_ids", _stable_unique_strings(self.event_ids))
@@ -158,6 +185,7 @@ class WikiPageSpec:
             "thoth_summary": self.summary,
             "thoth_aliases": list(self.aliases),
             "thoth_source_paths": list(self.source_paths),
+            "thoth_influence_sources": list(self.influence_sources),
             "thoth_related_slugs": list(self.related_slugs),
             "thoth_language": self.language,
             "thoth_translated_from": self.translated_from,
@@ -181,6 +209,7 @@ class WikiPageSpec:
             "summary": self.summary,
             "aliases": list(self.aliases),
             "source_paths": list(self.source_paths),
+            "influence_sources": list(self.influence_sources),
             "related_slugs": list(self.related_slugs),
             "language": self.language,
             "translated_from": self.translated_from,
@@ -250,6 +279,16 @@ class WikiContract:
         for source_path in spec.source_paths:
             if not source_path or not source_path.strip():
                 raise ValueError("Wiki page source_paths cannot contain empty entries")
+        for influence in spec.influence_sources:
+            if not isinstance(influence, Mapping):
+                raise ValueError("Wiki page influence_sources entries must be objects")
+            forbidden = {
+                key
+                for key in influence
+                if any(marker in str(key).lower() for marker in ("content", "excerpt", "secret"))
+            }
+            if forbidden:
+                raise ValueError("Wiki page influence_sources cannot include source content")
         for related_slug in spec.related_slugs:
             self.validate_slug(related_slug)
 

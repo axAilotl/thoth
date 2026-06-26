@@ -146,6 +146,18 @@ def _json_payload(value: str | None) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _json_string_tuple(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    try:
+        payload = json.loads(value)
+    except Exception:
+        return ()
+    if not isinstance(payload, list):
+        return ()
+    return tuple(str(item) for item in payload if str(item).strip())
+
+
 def _payload_source_path(payload: Mapping[str, Any]) -> str | None:
     custom_metadata = payload.get("custom_metadata")
     normalized_metadata = payload.get("normalized_metadata")
@@ -1333,10 +1345,39 @@ class MetadataDB:
                     size_bytes INTEGER NOT NULL,
                     updated_at TEXT NOT NULL,
                     source_id TEXT,
+                    source_key TEXT NOT NULL DEFAULT '',
+                    source_trust_score REAL NOT NULL DEFAULT 1.0,
+                    source_trust_reason TEXT NOT NULL DEFAULT 'prompt_security_allowed',
+                    source_security_status TEXT NOT NULL DEFAULT 'allowed',
+                    source_security_pattern_ids_json TEXT NOT NULL DEFAULT '[]',
                     indexed_at TEXT NOT NULL
                 )
                 """
             )
+            existing_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(archivist_corpus_documents)")
+            }
+            for column_name, ddl in (
+                ("source_key", "source_key TEXT NOT NULL DEFAULT ''"),
+                ("source_trust_score", "source_trust_score REAL NOT NULL DEFAULT 1.0"),
+                (
+                    "source_trust_reason",
+                    "source_trust_reason TEXT NOT NULL DEFAULT 'legacy_unscanned'",
+                ),
+                (
+                    "source_security_status",
+                    "source_security_status TEXT NOT NULL DEFAULT 'allowed'",
+                ),
+                (
+                    "source_security_pattern_ids_json",
+                    "source_security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'",
+                ),
+            ):
+                if column_name not in existing_columns:
+                    conn.execute(
+                        f"ALTER TABLE archivist_corpus_documents ADD COLUMN {ddl}"
+                    )
             try:
                 conn.execute(
                     """
@@ -1403,9 +1444,14 @@ class MetadataDB:
                     size_bytes,
                     updated_at,
                     source_id,
+                    source_key,
+                    source_trust_score,
+                    source_trust_reason,
+                    source_security_status,
+                    source_security_pattern_ids_json,
                     indexed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(candidate_key) DO UPDATE SET
                     path=excluded.path,
                     scope=excluded.scope,
@@ -1420,6 +1466,11 @@ class MetadataDB:
                     size_bytes=excluded.size_bytes,
                     updated_at=excluded.updated_at,
                     source_id=excluded.source_id,
+                    source_key=excluded.source_key,
+                    source_trust_score=excluded.source_trust_score,
+                    source_trust_reason=excluded.source_trust_reason,
+                    source_security_status=excluded.source_security_status,
+                    source_security_pattern_ids_json=excluded.source_security_pattern_ids_json,
                     indexed_at=excluded.indexed_at
                 """,
                 (
@@ -1437,6 +1488,11 @@ class MetadataDB:
                     document.size_bytes,
                     document.updated_at,
                     document.source_id,
+                    document.source_key,
+                    float(document.source_trust_score),
+                    document.source_trust_reason,
+                    document.source_security_status,
+                    json.dumps(list(document.source_security_pattern_ids), ensure_ascii=False),
                     indexed_at,
                 ),
             )
@@ -1496,6 +1552,13 @@ class MetadataDB:
                 size_bytes=row["size_bytes"],
                 updated_at=row["updated_at"],
                 source_id=row["source_id"],
+                source_key=row["source_key"] or "",
+                source_trust_score=float(row["source_trust_score"] or 1.0),
+                source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
+                source_security_status=row["source_security_status"] or "allowed",
+                source_security_pattern_ids=_json_string_tuple(
+                    row["source_security_pattern_ids_json"]
+                ),
             )
 
     def list_archivist_corpus_documents(
@@ -1557,6 +1620,13 @@ class MetadataDB:
                     size_bytes=row["size_bytes"],
                     updated_at=row["updated_at"],
                     source_id=row["source_id"],
+                    source_key=row["source_key"] or "",
+                    source_trust_score=float(row["source_trust_score"] or 1.0),
+                    source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
+                    source_security_status=row["source_security_status"] or "allowed",
+                    source_security_pattern_ids=_json_string_tuple(
+                        row["source_security_pattern_ids_json"]
+                    ),
                 )
                 for row in rows
             ]
@@ -1670,6 +1740,13 @@ class MetadataDB:
                     size_bytes=row["size_bytes"],
                     updated_at=row["updated_at"],
                     source_id=row["source_id"],
+                    source_key=row["source_key"] or "",
+                    source_trust_score=float(row["source_trust_score"] or 1.0),
+                    source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
+                    source_security_status=row["source_security_status"] or "allowed",
+                    source_security_pattern_ids=_json_string_tuple(
+                        row["source_security_pattern_ids_json"]
+                    ),
                 )
                 rank_score = float(row["rank_score"]) if row["rank_score"] is not None else 0.0
                 results.append((document, rank_score))

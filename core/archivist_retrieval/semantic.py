@@ -60,7 +60,7 @@ async def retrieve_semantic_documents(
     missing: list[ArchivistCorpusDocument] = []
     for document in documents:
         payload = stored.get(document.candidate_key)
-        if payload is None or payload.get("source_hash") != document.source_hash:
+        if payload is None or payload.get("source_hash") != document.embedding_source_hash():
             missing.append(document)
 
     if missing:
@@ -87,7 +87,7 @@ async def retrieve_semantic_documents(
                     candidate_key=document.candidate_key,
                     provider=provider_name,
                     model=model_id,
-                    source_hash=document.source_hash,
+                    source_hash=document.embedding_source_hash(),
                     vector=list(vector),
                 )
 
@@ -129,6 +129,9 @@ def _embedding_text(document: ArchivistCorpusDocument) -> str:
         [
             f"Title: {document.title}",
             f"Source Type: {document.source_type}",
+            f"Source ID: {document.source_id or 'n/a'}",
+            f"Source Key: {document.source_key or 'n/a'}",
+            f"Source Trust: {document.source_trust_score:.3f} ({document.source_trust_reason})",
             f"Tags: {', '.join(document.tags) if document.tags else 'none'}",
             f"Path: {document.scope_relative_path}",
             "",

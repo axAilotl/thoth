@@ -287,6 +287,18 @@ def test_wiki_updater_emits_deterministic_provenance_and_security_frontmatter(
         "repos/github_owner_repo_README.md",
         "stars/owner_repo_summary.md",
     ]
+    assert document.frontmatter["thoth_influence_sources"] == [
+        {
+            "artifact_id": "gh_1",
+            "source_path": "repos/github_owner_repo_README.md",
+            "source_type": "github",
+        },
+        {
+            "artifact_id": "gh_1",
+            "source_path": "stars/owner_repo_summary.md",
+            "source_type": "github",
+        },
+    ]
     assert document.frontmatter["thoth_event_ids"] == ["event-a", "event-b"]
     assert document.frontmatter["thoth_security_findings"] == [
         {"category": "api_key", "pattern_id": "generic", "source": "redaction"},

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 from pathlib import Path
 
 RETRIEVAL_MODES = {"literal", "full_text", "semantic", "hybrid"}
@@ -24,6 +26,8 @@ class ArchivistRetrievalPolicy:
     semantic_weight: float = 0.55
     full_text_weight: float = 0.35
     recency_weight: float = 0.10
+    max_per_source: int = 3
+    max_source_share: float = 0.5
     source_type_weights: tuple[tuple[str, float], ...] = ()
 
     def weight_for_source_type(self, source_type: str) -> float:
@@ -66,6 +70,11 @@ class ArchivistCorpusDocument:
     size_bytes: int
     updated_at: str
     source_id: str | None = None
+    source_key: str = ""
+    source_trust_score: float = 1.0
+    source_trust_reason: str = "prompt_security_allowed"
+    source_security_status: str = "allowed"
+    source_security_pattern_ids: tuple[str, ...] = field(default_factory=tuple)
 
     def search_corpus(self) -> str:
         parts = [
@@ -78,6 +87,21 @@ class ArchivistCorpusDocument:
             self.source_id or "",
         ]
         return " ".join(part for part in parts if part).lower()
+
+    def embedding_source_hash(self) -> str:
+        """Return a cache key that includes source trust/provenance metadata."""
+
+        payload = {
+            "source_hash": self.source_hash,
+            "source_key": self.source_key,
+            "source_id": self.source_id or "",
+            "source_trust_score": round(float(self.source_trust_score), 6),
+            "source_trust_reason": self.source_trust_reason,
+            "source_security_status": self.source_security_status,
+            "source_security_pattern_ids": list(self.source_security_pattern_ids),
+        }
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
