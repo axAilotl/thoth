@@ -130,6 +130,14 @@ from .connector_registry import (
     load_connector_registry,
 )
 from .research_graph import ResearchGraphService
+from .semantic_memory import (
+    SemanticMemoryCandidate,
+    SemanticMemoryError,
+    SemanticMemoryEvidence,
+    SemanticMemoryStore,
+    SemanticMemoryTransitionError,
+    SemanticMemoryValidationError,
+)
 from .wiki_query import WikiQueryHit, WikiQueryResult, WikiQueryRunner, WikiQueryWriteBackResult
 from .wiki_scaffold import (
     WikiScaffold,
@@ -266,6 +274,12 @@ __all__ = [
     'ConnectorRegistry',
     'load_connector_registry',
     'ResearchGraphService',
+    'SemanticMemoryCandidate',
+    'SemanticMemoryError',
+    'SemanticMemoryEvidence',
+    'SemanticMemoryStore',
+    'SemanticMemoryTransitionError',
+    'SemanticMemoryValidationError',
     'WikiQueryHit',
     'WikiQueryResult',
     'WikiQueryRunner',
