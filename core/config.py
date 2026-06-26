@@ -237,6 +237,13 @@ class Config:
             if rate_limit_config.get('window_duration', 0) <= 0:
                 errors.append("rate_limit.window_duration must be positive")
 
+        try:
+            from .postgres import validate_capture_event_store_config
+
+            errors.extend(validate_capture_event_store_config(self))
+        except Exception as exc:
+            errors.append(str(exc))
+
         x_api_config = self.get('sources.x_api', {})
         if isinstance(x_api_config, dict) and x_api_config.get('enabled', False):
             required_x_api_keys = ('client_id', 'redirect_uri')

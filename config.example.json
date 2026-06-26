@@ -455,7 +455,16 @@
     "enabled": true,
     "path": ".thoth_system/meta.db",
     "wal_mode": true,
-    "auto_vacuum": true
+    "auto_vacuum": true,
+    "capture_event_store": {
+      "enabled": false,
+      "backend": "postgres",
+      "dsn_env": "THOTH_POSTGRES_DSN",
+      "schema": "thoth_capture",
+      "connect_timeout_seconds": 10,
+      "application_name": "thoth-capture-event-store",
+      "migration_lock_id": 840729145
+    }
   },
   "research_graph": {
     "metadata_api": {
