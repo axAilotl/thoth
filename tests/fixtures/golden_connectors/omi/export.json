@@ -1,0 +1,25 @@
+{
+  "sessions": [
+    {
+      "id": "golden-omi-session",
+      "title": "Golden Omi planning note",
+      "device_id": "omi-golden-device",
+      "started_at": "2026-04-04T10:00:00Z",
+      "ended_at": "2026-04-04T10:04:00Z",
+      "language": "en",
+      "summary": "Discussed fixture coverage for connector regressions.",
+      "segments": [
+        {
+          "timestamp": "2026-04-04T10:00:00Z",
+          "speaker": "Ada",
+          "text": "Keep the raw Omi export byte-for-byte available."
+        },
+        {
+          "timestamp": "2026-04-04T10:02:00Z",
+          "speaker": "Ada",
+          "text": "Queue a normalized transcript artifact for wiki compilation."
+        }
+      ]
+    }
+  ]
+}
