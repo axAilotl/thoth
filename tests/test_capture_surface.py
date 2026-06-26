@@ -1,4 +1,7 @@
+from copy import deepcopy
 from pathlib import Path
+
+import pytest
 
 from core.capture_event_store import (
     ArtifactLink,
@@ -13,6 +16,10 @@ from core.capture_event_store import (
     SecurityFinding,
 )
 from core.capture_surface import CaptureSurfaceService
+from core.config import config
+from core.path_layout import build_path_layout
+from core.wiki_io import read_document
+from core.wiki_updater import CompiledWikiUpdater
 
 from test_capture_event_store import FakeCaptureConnection
 
@@ -118,6 +125,18 @@ def _surface(tmp_path: Path) -> tuple[CaptureSurfaceService, str]:
     return CaptureSurfaceService(store), event.event_id
 
 
+def _configure_runtime_config(tmp_path: Path) -> None:
+    config.data = {}
+    config.set("paths.vault_dir", str(tmp_path / "vault"))
+    config.set("paths.system_dir", ".thoth_system")
+    config.set("paths.cache_dir", "graphql_cache")
+    config.set("paths.raw_dir", "raw")
+    config.set("paths.library_dir", "library")
+    config.set("paths.wiki_dir", "wiki")
+    config.set("paths.digests_dir", "_digests")
+    config.set("database.path", "meta.db")
+
+
 def test_capture_surface_lists_sources_and_events_with_policy_state(tmp_path: Path):
     surface, _event_id = _surface(tmp_path)
 
@@ -157,3 +176,47 @@ def test_capture_surface_event_detail_includes_capture_metadata(tmp_path: Path):
         "event-finding",
         "raw-ref-finding",
     }
+
+
+def test_capture_surface_compiles_wiki_pages_with_audited_restricted_include(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = deepcopy(config.data)
+    try:
+        _configure_runtime_config(tmp_path)
+        surface, event_id = _surface(tmp_path)
+        layout = build_path_layout(config)
+        updater = CompiledWikiUpdater(config, layout=layout)
+
+        assert surface.compile_wiki_pages(updater) == {"pages": [], "total": 0}
+        with pytest.raises(ValueError, match="audit_reason"):
+            surface.compile_wiki_pages(
+                updater,
+                include_restricted_events=True,
+            )
+
+        payload = surface.compile_wiki_pages(
+            updater,
+            include_restricted_events=True,
+            audit_reason="operator reviewed restricted capture event",
+        )
+
+        assert payload["total"] == 4
+        slugs = {page["slug"] for page in payload["pages"]}
+        assert "capture-daily-unknown-date" in slugs
+        assert "capture-weekly-unknown-week" in slugs
+        assert "capture-source-manual" in slugs
+        assert any(slug.startswith("capture-session-") for slug in slugs)
+        daily_page = next(
+            Path(page["page_path"])
+            for page in payload["pages"]
+            if page["slug"] == "capture-daily-unknown-date"
+        )
+        document = read_document(daily_page)
+        assert document.frontmatter["thoth_event_ids"] == [event_id]
+        assert document.frontmatter["thoth_capture_audit"]["reason"] == (
+            "operator reviewed restricted capture event"
+        )
+    finally:
+        config.data = original

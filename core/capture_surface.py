@@ -28,6 +28,7 @@ from .postgres import (
     open_postgres_connection,
     resolve_postgres_settings,
 )
+from .wiki_updater import CompiledWikiUpdater
 
 
 class CaptureSurfaceError(RuntimeError):
@@ -118,6 +119,34 @@ class CaptureSurfaceService:
         response = result.to_dict()
         response["event"] = self.get_event(result.event_id)
         return _json_safe(response)
+
+    def compile_wiki_pages(
+        self,
+        updater: CompiledWikiUpdater,
+        *,
+        source_id: str | None = None,
+        session_id: str | None = None,
+        include_restricted_events: bool = False,
+        audit_reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Compile event-backed wiki pages through the shared wiki updater."""
+        results = updater.update_from_capture_events(
+            self.event_store,
+            source_id=source_id,
+            session_id=session_id,
+            include_restricted_events=include_restricted_events,
+            audit_reason=audit_reason,
+        )
+        pages = [
+            {
+                "slug": result.slug,
+                "page_path": result.page_path,
+                "source_paths": result.source_paths,
+                "action": result.action,
+            }
+            for result in results
+        ]
+        return _json_safe({"pages": pages, "total": len(pages)})
 
     def _event_payload(
         self,

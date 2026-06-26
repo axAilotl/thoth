@@ -213,6 +213,8 @@ class _WikiPageRecord:
     resource: str | None
     artifact_id: str | None
     source_type: str | None
+    event_ids: tuple[str, ...]
+    capture_page_type: str | None
     body_links: tuple[str, ...]
 
 
@@ -344,6 +346,11 @@ class WikiLintRunner:
         for source_path, claimants in source_claims.items():
             if len(claimants) <= 1:
                 continue
+            claimants = [
+                claim for claim in claimants if not claim.capture_page_type
+            ]
+            if len(claimants) <= 1:
+                continue
             titles = {claim.title for claim in claimants}
             kinds = {claim.kind for claim in claimants}
             record_types = {claim.record_type for claim in claimants}
@@ -422,6 +429,9 @@ class WikiLintRunner:
             "influence_sources",
             "thoth_related_slugs",
             "related_slugs",
+            "thoth_event_ids",
+            "thoth_source_ids",
+            "thoth_session_ids",
         ):
             if field_name in record.frontmatter and not _is_sequence_value(
                 record.frontmatter[field_name]
@@ -593,17 +603,18 @@ class WikiLintRunner:
                         )
                     )
             elif not record.source_paths and not _is_non_empty_string(record.resource):
-                issues.append(
-                    WikiLintIssue(
-                        code="missing-provenance",
-                        severity="error",
-                        message=(
-                            "Generated wiki page must include artifact provenance, "
-                            "source paths, or a canonical resource."
-                        ),
-                        page_path=record.path,
+                if not record.event_ids:
+                    issues.append(
+                        WikiLintIssue(
+                            code="missing-provenance",
+                            severity="error",
+                            message=(
+                                "Generated wiki page must include artifact provenance, "
+                                "source paths, event ids, or a canonical resource."
+                            ),
+                            page_path=record.path,
+                        )
                     )
-                )
 
         if record.record_type == "wiki_query":
             missing_query_fields = [
@@ -803,6 +814,13 @@ class WikiLintRunner:
                         str(frontmatter["thoth_source_type"]).strip()
                         if "thoth_source_type" in frontmatter
                         and frontmatter["thoth_source_type"] is not None
+                        else None
+                    ),
+                    event_ids=_frontmatter_sequence(frontmatter, "thoth_event_ids"),
+                    capture_page_type=(
+                        str(frontmatter["thoth_capture_page_type"]).strip()
+                        if "thoth_capture_page_type" in frontmatter
+                        and frontmatter["thoth_capture_page_type"] is not None
                         else None
                     ),
                     body_links=_extract_markdown_links(document.body),

@@ -22,6 +22,7 @@ from core import (
     ArchivistCompiler,
     CaptureSurfaceError,
     CaptureSurfaceNotFoundError,
+    CompiledWikiUpdater,
     Tweet,
     config,
     build_path_layout,
@@ -1831,6 +1832,20 @@ def cmd_capture(args):
                 )
             elif args.capture_action == "event":
                 payload = surface.get_event(args.event_id)
+            elif args.capture_action == "compile-wiki":
+                layout = build_path_layout(config)
+                updater = CompiledWikiUpdater(config, layout=layout)
+                payload = surface.compile_wiki_pages(
+                    updater,
+                    source_id=getattr(args, "source_id", None),
+                    session_id=getattr(args, "session_id", None),
+                    include_restricted_events=getattr(
+                        args,
+                        "include_restricted_events",
+                        False,
+                    ),
+                    audit_reason=getattr(args, "audit_reason", None),
+                )
             elif args.capture_action == "ingest":
                 payload_obj = _read_json_arg(
                     getattr(args, "payload_json", None),
@@ -1873,7 +1888,11 @@ def cmd_capture(args):
     except (CaptureSurfaceError, ValueError, FileNotFoundError, OSError) as exc:
         raise SystemExit(str(exc)) from exc
 
-    if getattr(args, "json", False) or args.capture_action in {"event", "ingest"}:
+    if getattr(args, "json", False) or args.capture_action in {
+        "compile-wiki",
+        "event",
+        "ingest",
+    }:
         _print_json(payload)
         return
 
@@ -2538,6 +2557,19 @@ Examples:
     )
     capture_event_parser.add_argument("event_id")
     capture_event_parser.add_argument("--json", action="store_true")
+    capture_compile_wiki_parser = capture_subparsers.add_parser(
+        "compile-wiki",
+        help="Compile event-backed wiki pages from capture events",
+    )
+    capture_compile_wiki_parser.add_argument("--source-id", type=str, default=None)
+    capture_compile_wiki_parser.add_argument("--session-id", type=str, default=None)
+    capture_compile_wiki_parser.add_argument(
+        "--include-restricted-events",
+        action="store_true",
+        help="Include private, sensitive, or quarantined events; requires --audit-reason",
+    )
+    capture_compile_wiki_parser.add_argument("--audit-reason", default=None)
+    capture_compile_wiki_parser.add_argument("--json", action="store_true")
     capture_ingest_parser = capture_subparsers.add_parser(
         "ingest",
         help="Manually capture an artifact through the lifecycle service",
