@@ -177,6 +177,10 @@ class ConnectorCaptureQueue:
             artifact_type=result.artifact_type,
             source=result.source_name,
             queue_status=result.queue_status,
+            capture_event_id=result.event_id,
+            capture_source_id=result.source_id,
+            raw_ref_id=result.raw_ref_id,
+            artifact_link_id=result.artifact_link_id,
         ):
             raise RuntimeError(
                 f"Failed to record connector output {result.queue_artifact_id} "
