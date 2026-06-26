@@ -10,9 +10,15 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import Config, config
+from .connector_capture import connector_run_context
 from .connector_registry import connector_policy_status, load_connector_registry
 from .ingestion_runtime import KnowledgeArtifactRuntime
-from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
+from .metadata_db import (
+    IngestionQueueEntry,
+    MetadataDB,
+    connector_checkpoint_key,
+    get_metadata_db,
+)
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import (
     THOTH_REDACTION_METADATA_KEY,
@@ -161,6 +167,32 @@ class AgentSurfaceService:
         """Return connector registry metadata."""
         return load_connector_registry(self.config).to_dict(config=self.config)
 
+    def list_connector_runs(
+        self,
+        *,
+        connector_name: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Return connector run history and current checkpoints."""
+        runs = self.db.list_connector_runs(
+            connector_name=connector_name,
+            status=status,
+            limit=limit,
+        )
+        checkpoints = self.db.list_connector_checkpoints(
+            connector_name=connector_name,
+            limit=limit,
+        )
+        return {
+            "runs": [_serialize_connector_run(run) for run in runs],
+            "checkpoints": [
+                _serialize_connector_checkpoint(checkpoint)
+                for checkpoint in checkpoints
+            ],
+            "total": len(runs),
+        }
+
     def connector_run_plan(
         self,
         connector_name: str,
@@ -191,12 +223,18 @@ class AgentSurfaceService:
             for key, value in dict(options or {}).items()
             if value is not None
         }
+        checkpoint_key = connector_checkpoint_key(manifest.name, sanitized_options)
+        checkpoint = self.db.get_connector_checkpoint(manifest.name, checkpoint_key)
         plan = {
             "status": "planned",
             "execute": False,
             "connector": manifest.to_dict(config=self.config),
             "policy": policy,
             "options": sanitized_options,
+            "history": {
+                "checkpoint_key": checkpoint_key,
+                "checkpoint": _serialize_connector_checkpoint(checkpoint),
+            },
         }
         if not execute:
             if manifest.name == "pi_skills":
@@ -237,12 +275,67 @@ class AgentSurfaceService:
                 f"Connector {connector_name!r} has no executable adapter registered"
             )
 
-        result = handler(sanitized_options)
+        run = self.db.begin_connector_run(
+            manifest.name,
+            inputs=sanitized_options,
+            checkpoint_key=checkpoint_key,
+            resume_token=checkpoint.resume_token if checkpoint else None,
+        )
+        if run is None:
+            raise AgentSurfaceError(
+                f"Failed to start connector run history for {connector_name}"
+            )
+
+        try:
+            with connector_run_context(
+                run.run_id,
+                checkpoint_id=run.checkpoint_id,
+            ):
+                result = handler(sanitized_options)
+            serialized_result = serialize_agent_payload(result)
+            if self.db.connector_run_output_count(run.run_id) == 0:
+                self._record_connector_result_outputs(
+                    run_id=run.run_id,
+                    checkpoint_id=run.checkpoint_id,
+                    result=serialized_result,
+                    default_artifact_type=manifest.artifact_types[0]
+                    if manifest.artifact_types
+                    else "artifact",
+                    default_source=manifest.source_name,
+                )
+            recorded_output_count = self.db.connector_run_output_count(run.run_id)
+            output_count = max(
+                recorded_output_count,
+                _connector_output_count(serialized_result),
+            )
+            run = self.db.finish_connector_run(
+                run.run_id,
+                status="completed",
+                output_count=output_count,
+                resume_token=_connector_resume_token(serialized_result),
+                state=_connector_checkpoint_state(serialized_result),
+            ) or run
+        except Exception as exc:
+            failure_reason = str(exc).strip() or exc.__class__.__name__
+            self.db.finish_connector_run(
+                run.run_id,
+                status="failed",
+                output_count=self.db.connector_run_output_count(run.run_id),
+                failure_reason=failure_reason,
+            )
+            raise
+
+        checkpoint = self.db.get_connector_checkpoint(manifest.name, checkpoint_key)
         return {
             **plan,
             "status": "completed",
             "execute": True,
-            "result": serialize_agent_payload(result),
+            "result": serialized_result,
+            "history": {
+                "checkpoint_key": checkpoint_key,
+                "run": _serialize_connector_run(run),
+                "checkpoint": _serialize_connector_checkpoint(checkpoint),
+            },
         }
 
     def missing_papers(
@@ -272,6 +365,32 @@ class AgentSurfaceService:
             "capabilities": _json_list(entry.capabilities_json),
             "security_metadata": _security_metadata_from_payload(entry.payload_json),
         }
+
+    def _record_connector_result_outputs(
+        self,
+        *,
+        run_id: str,
+        checkpoint_id: str | None,
+        result: Any,
+        default_artifact_type: str,
+        default_source: str,
+    ) -> None:
+        for output in _connector_artifact_outputs(
+            result,
+            default_artifact_type=default_artifact_type,
+            default_source=default_source,
+        ):
+            if not self.db.record_connector_run_output(
+                run_id,
+                checkpoint_id=checkpoint_id,
+                artifact_id=output["artifact_id"],
+                artifact_type=output["artifact_type"],
+                source=output["source"],
+                queue_status=output["queue_status"],
+            ):
+                raise AgentSurfaceError(
+                    f"Failed to record connector output {output['artifact_id']}"
+                )
 
     def _run_arxiv_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
         from collectors.arxiv_collector import ArXivCollector
@@ -585,6 +704,230 @@ class AgentSurfaceService:
             )
         )
         return result.to_dict()
+
+
+def _serialize_connector_run(record: Any) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    return {
+        "run_id": record.run_id,
+        "connector_name": record.connector_name,
+        "checkpoint_key": record.checkpoint_key,
+        "checkpoint_id": record.checkpoint_id,
+        "status": record.status,
+        "inputs": _json_object(record.inputs_json),
+        "started_at": record.started_at,
+        "finished_at": record.finished_at,
+        "output_count": record.output_count,
+        "failure_reason": record.failure_reason,
+        "attempt": record.attempt,
+        "max_attempts": record.max_attempts,
+        "next_retry_at": record.next_retry_at,
+        "retry_state": _json_object(record.retry_state_json),
+        "resume_token": record.resume_token,
+    }
+
+
+def _serialize_connector_checkpoint(record: Any) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    return {
+        "checkpoint_id": record.checkpoint_id,
+        "connector_name": record.connector_name,
+        "checkpoint_key": record.checkpoint_key,
+        "status": record.status,
+        "inputs": _json_object(record.inputs_json),
+        "state": _json_object(record.state_json),
+        "resume_token": record.resume_token,
+        "output_count": record.output_count,
+        "last_run_id": record.last_run_id,
+        "failure_reason": record.failure_reason,
+        "attempt": record.attempt,
+        "max_attempts": record.max_attempts,
+        "next_retry_at": record.next_retry_at,
+        "updated_at": record.updated_at,
+    }
+
+
+def _json_object(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _connector_output_count(result: Any) -> int:
+    candidates: list[int] = []
+    if isinstance(result, Mapping):
+        for key in (
+            "queued_count",
+            "output_count",
+            "bookmarks_emitted",
+            "api_conversation_count",
+            "changed_count",
+        ):
+            value = result.get(key)
+            try:
+                if value is not None:
+                    candidates.append(max(0, int(value)))
+            except (TypeError, ValueError):
+                pass
+        for key in ("queued", "records", "payloads"):
+            value = result.get(key)
+            if isinstance(value, list):
+                candidates.append(len(value))
+        for value in result.values():
+            if isinstance(value, (Mapping, list, tuple)):
+                candidates.append(_connector_output_count(value))
+    elif isinstance(result, (list, tuple)):
+        candidates.append(len(result))
+        for value in result:
+            if isinstance(value, (Mapping, list, tuple)):
+                candidates.append(_connector_output_count(value))
+    return max(candidates or [0])
+
+
+def _connector_resume_token(result: Any) -> str | None:
+    if not isinstance(result, Mapping):
+        return None
+    for key in ("resume_token", "next_page_token", "next_token", "pagination_token"):
+        value = result.get(key)
+        text = str(value or "").strip()
+        if text:
+            return text
+    checkpoint = result.get("checkpoint")
+    if isinstance(checkpoint, Mapping):
+        for key in (
+            "resume_token",
+            "next_page_token",
+            "next_token",
+            "pagination_token",
+            "last_synced_bookmark_id",
+        ):
+            value = checkpoint.get(key)
+            text = str(value or "").strip()
+            if text:
+                return text
+    return None
+
+
+def _connector_checkpoint_state(result: Any) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "counts": _connector_counts(result),
+        "artifact_ids": [
+            output["artifact_id"]
+            for output in _connector_artifact_outputs(
+                result,
+                default_artifact_type="artifact",
+                default_source="connector",
+            )
+        ],
+    }
+    if isinstance(result, Mapping) and isinstance(result.get("checkpoint"), Mapping):
+        state["checkpoint"] = dict(result["checkpoint"])
+    return state
+
+
+def _connector_counts(result: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not isinstance(result, Mapping):
+        return counts
+    for key in (
+        "queued_count",
+        "output_count",
+        "bookmarks_emitted",
+        "api_conversation_count",
+        "changed_count",
+        "scanned_count",
+        "staged_count",
+    ):
+        value = result.get(key)
+        try:
+            if value is not None:
+                counts[key] = max(0, int(value))
+        except (TypeError, ValueError):
+            pass
+    return counts
+
+
+def _connector_artifact_outputs(
+    result: Any,
+    *,
+    default_artifact_type: str,
+    default_source: str,
+) -> list[dict[str, str]]:
+    outputs: dict[str, dict[str, str]] = {}
+
+    def add(
+        artifact_id: Any,
+        *,
+        artifact_type: Any = None,
+        source: Any = None,
+        queue_status: Any = None,
+    ) -> None:
+        text = str(artifact_id or "").strip()
+        if not text:
+            return
+        outputs.setdefault(
+            text,
+            {
+                "artifact_id": text,
+                "artifact_type": str(artifact_type or default_artifact_type),
+                "source": str(source or default_source),
+                "queue_status": str(queue_status or "pending"),
+            },
+        )
+
+    def visit(value: Any, *, parent_key: str | None = None) -> None:
+        if isinstance(value, Mapping):
+            source = (
+                value.get("source")
+                or value.get("source_name")
+                or value.get("source_type")
+                or default_source
+            )
+            artifact_type = value.get("artifact_type") or value.get("type")
+            queue_status = value.get("queue_status") or value.get("status") or "pending"
+            add(
+                value.get("artifact_id") or value.get("queue_artifact_id"),
+                artifact_type=artifact_type,
+                source=source,
+                queue_status=queue_status,
+            )
+            add(
+                value.get("video_artifact_id"),
+                artifact_type="video",
+                source=source,
+                queue_status=queue_status,
+            )
+            add(
+                value.get("transcript_artifact_id"),
+                artifact_type="transcript",
+                source=source,
+                queue_status=queue_status,
+            )
+            for key in ("queued", "records", "artifacts", "items"):
+                child = value.get(key)
+                if isinstance(child, (list, tuple)):
+                    visit(child, parent_key=key)
+            if parent_key in {"queued", "records", "artifacts", "items"}:
+                payload = value.get("payload")
+                if isinstance(payload, Mapping):
+                    add(
+                        payload.get("artifact_id") or payload.get("id"),
+                        artifact_type=artifact_type,
+                        source=source,
+                        queue_status=queue_status,
+                    )
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                visit(item, parent_key=parent_key)
+
+    visit(result)
+    return list(outputs.values())
 
 
 def serialize_agent_payload(value: Any) -> Any:

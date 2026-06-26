@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
@@ -18,6 +20,40 @@ from .metadata_db import MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
 from .postgres import open_postgres_connection, resolve_postgres_settings
 from .postgres_migrations import apply_postgres_migrations
+
+
+@dataclass(frozen=True)
+class ConnectorRunContext:
+    """Active connector run metadata used while queueing artifacts."""
+
+    run_id: str
+    checkpoint_id: str | None = None
+
+
+_ACTIVE_CONNECTOR_RUN: ContextVar[ConnectorRunContext | None] = ContextVar(
+    "thoth_active_connector_run",
+    default=None,
+)
+
+
+@contextmanager
+def connector_run_context(
+    run_id: str,
+    *,
+    checkpoint_id: str | None = None,
+) -> Iterator[ConnectorRunContext]:
+    """Bind queued connector artifacts to a run history record."""
+    context = ConnectorRunContext(run_id=run_id, checkpoint_id=checkpoint_id)
+    token = _ACTIVE_CONNECTOR_RUN.set(context)
+    try:
+        yield context
+    finally:
+        _ACTIVE_CONNECTOR_RUN.reset(token)
+
+
+def current_connector_run_context() -> ConnectorRunContext | None:
+    """Return the active connector run context, if connector execution set one."""
+    return _ACTIVE_CONNECTOR_RUN.get()
 
 
 class ConnectorCaptureQueue:
@@ -87,7 +123,7 @@ class ConnectorCaptureQueue:
         capabilities: Iterable[str] | None = None,
     ) -> CaptureLifecycleResult:
         """Persist one artifact queue row and optional capture event records."""
-        return lifecycle.capture_to_queue(
+        result = lifecycle.capture_to_queue(
             artifact_type=artifact_type,
             payload=artifact.to_dict(),
             source=source,
@@ -98,6 +134,8 @@ class ConnectorCaptureQueue:
             priority=priority,
             capabilities=capabilities if capabilities is not None else artifact.capabilities,
         )
+        self._record_run_output(result)
+        return result
 
     def queue_payload(
         self,
@@ -114,7 +152,7 @@ class ConnectorCaptureQueue:
         capabilities: Iterable[str] | None = None,
     ) -> CaptureLifecycleResult:
         """Persist a connector payload that has not yet been materialized."""
-        return lifecycle.capture_to_queue(
+        result = lifecycle.capture_to_queue(
             artifact_type=artifact_type,
             payload=payload,
             source=source,
@@ -125,6 +163,25 @@ class ConnectorCaptureQueue:
             priority=priority,
             capabilities=capabilities,
         )
+        self._record_run_output(result)
+        return result
+
+    def _record_run_output(self, result: CaptureLifecycleResult) -> None:
+        context = current_connector_run_context()
+        if context is None:
+            return
+        if not self.db.record_connector_run_output(
+            context.run_id,
+            checkpoint_id=context.checkpoint_id,
+            artifact_id=result.queue_artifact_id,
+            artifact_type=result.artifact_type,
+            source=result.source_name,
+            queue_status=result.queue_status,
+        ):
+            raise RuntimeError(
+                f"Failed to record connector output {result.queue_artifact_id} "
+                f"for run {context.run_id}"
+            )
 
 
 def connector_raw_roots(layout: PathLayout) -> tuple[Path, ...]:

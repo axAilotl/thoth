@@ -3,9 +3,11 @@ SQLite Metadata Database - Persistent metadata for efficient re-runs and browser
 Stores tweets, downloads, LLM cache, files index, and more for fast lookups
 """
 
+import hashlib
 import sqlite3
 import json
 import logging
+import uuid
 from pathlib import Path
 from collections import Counter
 from typing import Any, Dict, List, Mapping, Optional
@@ -82,6 +84,12 @@ SEMANTIC_MEMORY_CANDIDATE_STATUSES = (
     "superseded",
 )
 SEMANTIC_MEMORY_CANDIDATE_STATUS_CHECK = "', '".join(SEMANTIC_MEMORY_CANDIDATE_STATUSES)
+CONNECTOR_RUN_ALLOWED_STATUSES = (
+    'running',
+    'completed',
+    'failed',
+)
+CONNECTOR_RUN_STATUS_CHECK = "', '".join(CONNECTOR_RUN_ALLOWED_STATUSES)
 
 
 def _payload_security_metadata(payload: dict[str, Any]) -> dict[str, Any]:
@@ -174,6 +182,50 @@ def _json_string_tuple(value: str | None) -> tuple[str, ...]:
     if not isinstance(payload, list):
         return ()
     return tuple(str(item) for item in payload if str(item).strip())
+
+
+def _stable_connector_json(value: Mapping[str, Any] | None) -> str:
+    return json.dumps(dict(value or {}), ensure_ascii=False, sort_keys=True, default=str)
+
+
+def connector_checkpoint_key(connector_name: str, inputs: Mapping[str, Any] | None) -> str:
+    """Return a stable idempotency key for a connector input set."""
+    payload = {
+        "connector_name": str(connector_name or "").strip(),
+        "inputs": dict(inputs or {}),
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return digest
+
+
+def _connector_checkpoint_id(connector_name: str, checkpoint_key: str) -> str:
+    digest = hashlib.sha256(
+        f"{connector_name}:{checkpoint_key}".encode("utf-8")
+    ).hexdigest()[:24]
+    return f"connector_checkpoint_{digest}"
+
+
+def _connector_retry_state(
+    *,
+    status: str,
+    attempt: int,
+    max_attempts: int,
+    failure_reason: str | None,
+    next_retry_at: str | None,
+) -> dict[str, Any]:
+    retryable = status == "failed" and bool(next_retry_at)
+    return {
+        "status": status,
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "retryable": retryable,
+        "failure_reason": failure_reason,
+        "next_retry_at": next_retry_at,
+    }
 
 
 def _payload_source_path(payload: Mapping[str, Any]) -> str | None:
@@ -483,6 +535,47 @@ class IngestionQueueEntry:
 
 
 @dataclass(frozen=True)
+class ConnectorRunRecord:
+    """Durable history for one connector execution attempt."""
+
+    run_id: str
+    connector_name: str
+    checkpoint_key: str
+    checkpoint_id: Optional[str]
+    status: str
+    inputs_json: str
+    started_at: str
+    finished_at: Optional[str] = None
+    output_count: int = 0
+    failure_reason: Optional[str] = None
+    attempt: int = 1
+    max_attempts: int = 5
+    next_retry_at: Optional[str] = None
+    retry_state_json: Optional[str] = None
+    resume_token: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ConnectorCheckpointRecord:
+    """Latest resumable state for a connector input signature."""
+
+    checkpoint_id: str
+    connector_name: str
+    checkpoint_key: str
+    status: str
+    inputs_json: str
+    state_json: str
+    updated_at: str
+    resume_token: Optional[str] = None
+    output_count: int = 0
+    last_run_id: Optional[str] = None
+    failure_reason: Optional[str] = None
+    attempt: int = 0
+    max_attempts: int = 5
+    next_retry_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class ResearchPaperRecord:
     """Normalized paper metadata stored for research graph operations."""
 
@@ -681,6 +774,74 @@ class MetadataDB:
         """)
         self._ensure_ingestion_queue_statuses(conn)
 
+        # Connector run history and checkpoints for idempotent resumable imports.
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS connector_checkpoints (
+                checkpoint_id TEXT PRIMARY KEY,
+                connector_name TEXT NOT NULL,
+                checkpoint_key TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('{CONNECTOR_RUN_STATUS_CHECK}')),
+                inputs_json TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{{}}',
+                resume_token TEXT,
+                output_count INTEGER NOT NULL DEFAULT 0,
+                last_run_id TEXT,
+                failure_reason TEXT,
+                attempt INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 5,
+                next_retry_at TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE(connector_name, checkpoint_key)
+            )
+        """)
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS connector_runs (
+                run_id TEXT PRIMARY KEY,
+                connector_name TEXT NOT NULL,
+                checkpoint_key TEXT NOT NULL,
+                checkpoint_id TEXT,
+                status TEXT NOT NULL CHECK (status IN ('{CONNECTOR_RUN_STATUS_CHECK}')),
+                inputs_json TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                output_count INTEGER NOT NULL DEFAULT 0,
+                failure_reason TEXT,
+                attempt INTEGER NOT NULL DEFAULT 1,
+                max_attempts INTEGER NOT NULL DEFAULT 5,
+                next_retry_at TEXT,
+                retry_state_json TEXT,
+                resume_token TEXT,
+                FOREIGN KEY (checkpoint_id) REFERENCES connector_checkpoints (checkpoint_id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS connector_run_outputs (
+                run_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                queue_status TEXT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, artifact_id),
+                FOREIGN KEY (run_id) REFERENCES connector_runs (run_id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS connector_checkpoint_outputs (
+                checkpoint_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                first_run_id TEXT NOT NULL,
+                last_run_id TEXT NOT NULL,
+                first_recorded_at TEXT NOT NULL,
+                last_recorded_at TEXT NOT NULL,
+                queue_status TEXT NOT NULL,
+                PRIMARY KEY (checkpoint_id, artifact_id),
+                FOREIGN KEY (checkpoint_id) REFERENCES connector_checkpoints (checkpoint_id)
+            )
+        """)
+
         # Ensure new columns exist when upgrading from earlier schema
         try:
             conn.execute("ALTER TABLE bookmark_queue ADD COLUMN processed_with_graphql BOOLEAN DEFAULT 0")
@@ -725,6 +886,12 @@ class MetadataDB:
             "CREATE INDEX IF NOT EXISTS idx_ingestion_status ON ingestion_queue (status, next_attempt_at)",
             "CREATE INDEX IF NOT EXISTS idx_ingestion_type ON ingestion_queue (artifact_type)",
             "CREATE INDEX IF NOT EXISTS idx_ingestion_priority ON ingestion_queue (priority DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_runs_name_started ON connector_runs (connector_name, started_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_runs_status ON connector_runs (status, next_retry_at)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_runs_checkpoint ON connector_runs (connector_name, checkpoint_key)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_checkpoints_name ON connector_checkpoints (connector_name, updated_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_run_outputs_artifact ON connector_run_outputs (artifact_id)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_checkpoint_outputs_artifact ON connector_checkpoint_outputs (artifact_id)",
             "CREATE INDEX IF NOT EXISTS idx_transcript_chunk_context ON transcript_chunk_cache (context_id)",
             "CREATE INDEX IF NOT EXISTS idx_automation_state_updated_at ON automation_state (updated_at)"
         ]
@@ -2332,6 +2499,520 @@ class MetadataDB:
         except Exception as e:
             logger.error(f"Failed to delete bookmark entry {tweet_id}: {e}")
             return False
+
+    # Connector run history and checkpoint operations
+    def begin_connector_run(
+        self,
+        connector_name: str,
+        *,
+        inputs: Mapping[str, Any] | None = None,
+        checkpoint_key: Optional[str] = None,
+        resume_token: Optional[str] = None,
+        max_attempts: int = 5,
+    ) -> Optional[ConnectorRunRecord]:
+        """Create a connector run attempt and its resumable checkpoint row."""
+        clean_connector = str(connector_name or "").strip()
+        if not clean_connector:
+            raise ValueError("connector_name is required")
+        resolved_inputs = dict(inputs or {})
+        resolved_key = checkpoint_key or connector_checkpoint_key(
+            clean_connector,
+            resolved_inputs,
+        )
+        checkpoint_id = _connector_checkpoint_id(clean_connector, resolved_key)
+        inputs_json = _stable_connector_json(resolved_inputs)
+        now_iso = datetime.now().isoformat()
+        capped_max_attempts = max(1, int(max_attempts or 1))
+        run_id = f"connector_run_{uuid.uuid4().hex}"
+
+        try:
+            with self._get_connection() as conn:
+                existing_checkpoint = conn.execute(
+                    """
+                    SELECT * FROM connector_checkpoints
+                    WHERE connector_name = ? AND checkpoint_key = ?
+                    """,
+                    (clean_connector, resolved_key),
+                ).fetchone()
+                if existing_checkpoint is None:
+                    conn.execute(
+                        """
+                        INSERT INTO connector_checkpoints (
+                            checkpoint_id, connector_name, checkpoint_key, status,
+                            inputs_json, state_json, resume_token, output_count,
+                            last_run_id, failure_reason, attempt, max_attempts,
+                            next_retry_at, updated_at
+                        ) VALUES (?, ?, ?, 'running', ?, '{}', ?, 0, NULL, NULL, 0, ?, NULL, ?)
+                        """,
+                        (
+                            checkpoint_id,
+                            clean_connector,
+                            resolved_key,
+                            inputs_json,
+                            resume_token,
+                            capped_max_attempts,
+                            now_iso,
+                        ),
+                    )
+                else:
+                    checkpoint_id = existing_checkpoint["checkpoint_id"]
+                    resume_token = resume_token or existing_checkpoint["resume_token"]
+                    conn.execute(
+                        """
+                        UPDATE connector_checkpoints
+                        SET status='running',
+                            inputs_json=?,
+                            resume_token=?,
+                            failure_reason=NULL,
+                            next_retry_at=NULL,
+                            max_attempts=?,
+                            updated_at=?
+                        WHERE checkpoint_id = ?
+                        """,
+                        (
+                            inputs_json,
+                            resume_token,
+                            capped_max_attempts,
+                            now_iso,
+                            checkpoint_id,
+                        ),
+                    )
+
+                attempt_row = conn.execute(
+                    """
+                    SELECT COALESCE(MAX(attempt), 0) + 1 AS next_attempt
+                    FROM connector_runs
+                    WHERE connector_name = ? AND checkpoint_key = ?
+                    """,
+                    (clean_connector, resolved_key),
+                ).fetchone()
+                attempt = int(attempt_row["next_attempt"] or 1)
+                retry_state = _connector_retry_state(
+                    status="running",
+                    attempt=attempt,
+                    max_attempts=capped_max_attempts,
+                    failure_reason=None,
+                    next_retry_at=None,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO connector_runs (
+                        run_id, connector_name, checkpoint_key, checkpoint_id,
+                        status, inputs_json, started_at, finished_at, output_count,
+                        failure_reason, attempt, max_attempts, next_retry_at,
+                        retry_state_json, resume_token
+                    ) VALUES (?, ?, ?, ?, 'running', ?, ?, NULL, 0, NULL, ?, ?, NULL, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        clean_connector,
+                        resolved_key,
+                        checkpoint_id,
+                        inputs_json,
+                        now_iso,
+                        attempt,
+                        capped_max_attempts,
+                        json.dumps(retry_state, ensure_ascii=False, sort_keys=True),
+                        resume_token,
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE connector_checkpoints
+                    SET last_run_id=?,
+                        attempt=?,
+                        updated_at=?
+                    WHERE checkpoint_id = ?
+                    """,
+                    (run_id, attempt, now_iso, checkpoint_id),
+                )
+
+                row = conn.execute(
+                    "SELECT * FROM connector_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                return self._connector_run_from_row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to begin connector run {clean_connector}: {e}")
+            return None
+
+    def record_connector_run_output(
+        self,
+        run_id: str,
+        *,
+        checkpoint_id: Optional[str] = None,
+        artifact_id: str,
+        artifact_type: str,
+        source: str,
+        queue_status: str = "pending",
+    ) -> bool:
+        """Attach one queued artifact to a connector run and checkpoint."""
+        clean_run_id = str(run_id or "").strip()
+        clean_artifact_id = str(artifact_id or "").strip()
+        if not clean_run_id or not clean_artifact_id:
+            return False
+        now_iso = datetime.now().isoformat()
+        try:
+            with self._get_connection() as conn:
+                run = conn.execute(
+                    "SELECT checkpoint_id FROM connector_runs WHERE run_id = ?",
+                    (clean_run_id,),
+                ).fetchone()
+                if run is None:
+                    return False
+                resolved_checkpoint_id = (
+                    str(checkpoint_id or "").strip()
+                    or run["checkpoint_id"]
+                    or None
+                )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO connector_run_outputs (
+                        run_id, artifact_id, artifact_type, source, queue_status, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        clean_run_id,
+                        clean_artifact_id,
+                        str(artifact_type or "artifact"),
+                        str(source or "unknown"),
+                        str(queue_status or "pending"),
+                        now_iso,
+                    ),
+                )
+                if resolved_checkpoint_id:
+                    conn.execute(
+                        """
+                        INSERT INTO connector_checkpoint_outputs (
+                            checkpoint_id, artifact_id, artifact_type, source,
+                            first_run_id, last_run_id, first_recorded_at,
+                            last_recorded_at, queue_status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(checkpoint_id, artifact_id) DO UPDATE SET
+                            artifact_type=excluded.artifact_type,
+                            source=excluded.source,
+                            last_run_id=excluded.last_run_id,
+                            last_recorded_at=excluded.last_recorded_at,
+                            queue_status=excluded.queue_status
+                        """,
+                        (
+                            resolved_checkpoint_id,
+                            clean_artifact_id,
+                            str(artifact_type or "artifact"),
+                            str(source or "unknown"),
+                            clean_run_id,
+                            clean_run_id,
+                            now_iso,
+                            now_iso,
+                            str(queue_status or "pending"),
+                        ),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE connector_checkpoints
+                        SET output_count = (
+                                SELECT COUNT(*)
+                                FROM connector_checkpoint_outputs
+                                WHERE checkpoint_id = ?
+                            ),
+                            updated_at = ?
+                        WHERE checkpoint_id = ?
+                        """,
+                        (resolved_checkpoint_id, now_iso, resolved_checkpoint_id),
+                    )
+                conn.execute(
+                    """
+                    UPDATE connector_runs
+                    SET output_count = (
+                            SELECT COUNT(*)
+                            FROM connector_run_outputs
+                            WHERE run_id = ?
+                        )
+                    WHERE run_id = ?
+                    """,
+                    (clean_run_id, clean_run_id),
+                )
+                return True
+        except Exception as e:
+            logger.error(
+                f"Failed to record connector output {clean_artifact_id} for {clean_run_id}: {e}"
+            )
+            return False
+
+    def finish_connector_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        output_count: Optional[int] = None,
+        resume_token: Optional[str] = None,
+        state: Mapping[str, Any] | None = None,
+        failure_reason: Optional[str] = None,
+        max_attempts: Optional[int] = None,
+    ) -> Optional[ConnectorRunRecord]:
+        """Mark a connector run completed or failed and refresh its checkpoint."""
+        clean_run_id = str(run_id or "").strip()
+        clean_status = str(status or "").strip()
+        if clean_status not in CONNECTOR_RUN_ALLOWED_STATUSES:
+            raise ValueError(f"Unsupported connector run status: {status}")
+
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM connector_runs WHERE run_id = ?",
+                    (clean_run_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+
+                finished_at = datetime.now().isoformat()
+                attempt = int(row["attempt"] or 1)
+                resolved_max_attempts = max(
+                    1,
+                    int(max_attempts or row["max_attempts"] or 1),
+                )
+                counted_outputs = conn.execute(
+                    "SELECT COUNT(*) AS count FROM connector_run_outputs WHERE run_id = ?",
+                    (clean_run_id,),
+                ).fetchone()
+                persisted_output_count = int(counted_outputs["count"] or 0)
+                resolved_output_count = max(
+                    persisted_output_count,
+                    int(output_count or 0),
+                )
+                next_retry_at = None
+                clean_failure = str(failure_reason).strip() if failure_reason else None
+                if clean_status == "failed" and attempt < resolved_max_attempts:
+                    delay_seconds = min(3600, 300 * (2 ** max(0, attempt - 1)))
+                    next_retry_at = (
+                        datetime.now() + timedelta(seconds=delay_seconds)
+                    ).isoformat()
+                retry_state = _connector_retry_state(
+                    status=clean_status,
+                    attempt=attempt,
+                    max_attempts=resolved_max_attempts,
+                    failure_reason=clean_failure,
+                    next_retry_at=next_retry_at,
+                )
+                conn.execute(
+                    """
+                    UPDATE connector_runs
+                    SET status=?,
+                        finished_at=?,
+                        output_count=?,
+                        failure_reason=?,
+                        max_attempts=?,
+                        next_retry_at=?,
+                        retry_state_json=?,
+                        resume_token=COALESCE(?, resume_token)
+                    WHERE run_id = ?
+                    """,
+                    (
+                        clean_status,
+                        finished_at,
+                        resolved_output_count,
+                        clean_failure,
+                        resolved_max_attempts,
+                        next_retry_at,
+                        json.dumps(retry_state, ensure_ascii=False, sort_keys=True),
+                        resume_token,
+                        clean_run_id,
+                    ),
+                )
+
+                checkpoint_id = row["checkpoint_id"]
+                if checkpoint_id:
+                    checkpoint_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM connector_checkpoint_outputs
+                        WHERE checkpoint_id = ?
+                        """,
+                        (checkpoint_id,),
+                    ).fetchone()
+                    checkpoint_output_count = max(
+                        int(checkpoint_count["count"] or 0),
+                        resolved_output_count,
+                    )
+                    conn.execute(
+                        """
+                        UPDATE connector_checkpoints
+                        SET status=?,
+                            state_json=?,
+                            resume_token=COALESCE(?, resume_token),
+                            output_count=?,
+                            failure_reason=?,
+                            attempt=?,
+                            max_attempts=?,
+                            next_retry_at=?,
+                            updated_at=?
+                        WHERE checkpoint_id = ?
+                        """,
+                        (
+                            clean_status,
+                            _stable_connector_json(state),
+                            resume_token,
+                            checkpoint_output_count,
+                            clean_failure,
+                            attempt,
+                            resolved_max_attempts,
+                            next_retry_at,
+                            finished_at,
+                            checkpoint_id,
+                        ),
+                    )
+
+                updated = conn.execute(
+                    "SELECT * FROM connector_runs WHERE run_id = ?",
+                    (clean_run_id,),
+                ).fetchone()
+                return self._connector_run_from_row(updated) if updated else None
+        except Exception as e:
+            logger.error(f"Failed to finish connector run {clean_run_id}: {e}")
+            return None
+
+    def get_connector_run(self, run_id: str) -> Optional[ConnectorRunRecord]:
+        """Fetch one connector run history record."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM connector_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                return self._connector_run_from_row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to read connector run {run_id}: {e}")
+            return None
+
+    def list_connector_runs(
+        self,
+        *,
+        connector_name: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[ConnectorRunRecord]:
+        """List connector run history, newest first."""
+        where: list[str] = []
+        params: list[Any] = []
+        if connector_name:
+            where.append("connector_name = ?")
+            params.append(str(connector_name))
+        if status:
+            where.append("status = ?")
+            params.append(str(status))
+
+        query = "SELECT * FROM connector_runs"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(query, tuple(params)).fetchall()
+                return [self._connector_run_from_row(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list connector runs: {e}")
+            return []
+
+    def connector_run_output_count(self, run_id: str) -> int:
+        """Return the number of distinct artifacts recorded for a run."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS count FROM connector_run_outputs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                return int(row["count"] or 0) if row else 0
+        except Exception as e:
+            logger.error(f"Failed to count connector run outputs {run_id}: {e}")
+            return 0
+
+    def get_connector_checkpoint(
+        self,
+        connector_name: str,
+        checkpoint_key: str,
+    ) -> Optional[ConnectorCheckpointRecord]:
+        """Fetch checkpoint state for one connector input signature."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT * FROM connector_checkpoints
+                    WHERE connector_name = ? AND checkpoint_key = ?
+                    """,
+                    (connector_name, checkpoint_key),
+                ).fetchone()
+                return self._connector_checkpoint_from_row(row) if row else None
+        except Exception as e:
+            logger.error(
+                f"Failed to read connector checkpoint {connector_name}:{checkpoint_key}: {e}"
+            )
+            return None
+
+    def list_connector_checkpoints(
+        self,
+        *,
+        connector_name: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[ConnectorCheckpointRecord]:
+        """List latest connector checkpoints, newest first."""
+        where: list[str] = []
+        params: list[Any] = []
+        if connector_name:
+            where.append("connector_name = ?")
+            params.append(str(connector_name))
+        query = "SELECT * FROM connector_checkpoints"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(query, tuple(params)).fetchall()
+                return [self._connector_checkpoint_from_row(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list connector checkpoints: {e}")
+            return []
+
+    def _connector_run_from_row(self, row: sqlite3.Row) -> ConnectorRunRecord:
+        return ConnectorRunRecord(
+            run_id=row["run_id"],
+            connector_name=row["connector_name"],
+            checkpoint_key=row["checkpoint_key"],
+            checkpoint_id=row["checkpoint_id"],
+            status=row["status"],
+            inputs_json=row["inputs_json"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            output_count=int(row["output_count"] or 0),
+            failure_reason=row["failure_reason"],
+            attempt=int(row["attempt"] or 1),
+            max_attempts=int(row["max_attempts"] or 5),
+            next_retry_at=row["next_retry_at"],
+            retry_state_json=row["retry_state_json"],
+            resume_token=row["resume_token"],
+        )
+
+    def _connector_checkpoint_from_row(
+        self,
+        row: sqlite3.Row,
+    ) -> ConnectorCheckpointRecord:
+        return ConnectorCheckpointRecord(
+            checkpoint_id=row["checkpoint_id"],
+            connector_name=row["connector_name"],
+            checkpoint_key=row["checkpoint_key"],
+            status=row["status"],
+            inputs_json=row["inputs_json"],
+            state_json=row["state_json"],
+            updated_at=row["updated_at"],
+            resume_token=row["resume_token"],
+            output_count=int(row["output_count"] or 0),
+            last_run_id=row["last_run_id"],
+            failure_reason=row["failure_reason"],
+            attempt=int(row["attempt"] or 0),
+            max_attempts=int(row["max_attempts"] or 5),
+            next_retry_at=row["next_retry_at"],
+        )
 
     # Ingestion queue operations
     def upsert_ingestion_entry(self, entry: IngestionQueueEntry) -> bool:
