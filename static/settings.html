@@ -566,6 +566,53 @@
         }
         .stat-label { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
 
+        .security-table-wrap {
+            overflow-x: auto;
+            border: 1px solid rgba(202, 162, 94, 0.1);
+            background: rgba(15, 10, 7, 0.3);
+        }
+        .security-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.84rem;
+        }
+        .security-table th,
+        .security-table td {
+            text-align: left;
+            vertical-align: top;
+            padding: 9px 10px;
+            border-bottom: 1px solid rgba(202, 162, 94, 0.1);
+        }
+        .security-table th {
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+        .security-empty {
+            padding: 14px;
+            color: var(--text-secondary);
+            border: 1px dashed var(--border);
+            background: rgba(15, 10, 7, 0.2);
+        }
+        .lint-result {
+            margin-top: 12px;
+            padding: 12px;
+            border: 1px solid rgba(202, 162, 94, 0.12);
+            background: rgba(15, 10, 7, 0.3);
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            white-space: pre-wrap;
+        }
+        a.btn {
+            text-decoration: none;
+        }
+        a.btn.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
         /* Modal */
         .modal-overlay {
             display: none;
@@ -1428,6 +1475,52 @@
                     </div>
                 </div>
 
+                <div class="stats-grid" id="security-dashboard-stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="security-artifacts-total">-</div>
+                        <div class="stat-label">Artifacts Checked</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="security-findings-total">-</div>
+                        <div class="stat-label">Findings</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="security-quarantined-total">-</div>
+                        <div class="stat-label">Quarantined</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="security-strict-total">-</div>
+                        <div class="stat-label">Strict Failures</div>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 18px;">
+                    <label>Findings by Connector/Source</label>
+                    <div id="security-findings-by-source" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Quarantined Artifacts</label>
+                    <div id="security-quarantine-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Strict Failures</label>
+                    <div id="security-strict-failures" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Secret Redactions</label>
+                    <textarea id="security-redactions" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Lint Actions</label>
+                    <div class="btn-group" style="margin-top: 0;">
+                        <button class="btn btn-secondary btn-small" id="security-okf-lint-button" onclick="runSettingsLint('okf')">Run OKF Lint</button>
+                        <button class="btn btn-secondary btn-small" id="security-security-lint-button" onclick="runSettingsLint('security')">Run Security Lint</button>
+                        <a class="btn btn-secondary btn-small disabled" id="security-okf-lint-download" href="/api/settings/lint/okf/download" download>Download OKF JSON</a>
+                        <a class="btn btn-secondary btn-small disabled" id="security-security-lint-download" href="/api/settings/lint/security/download" download>Download Security JSON</a>
+                    </div>
+                    <div id="security-lint-result" class="lint-result">No lint run yet</div>
+                </div>
+
                 <div class="form-group">
                     <label>Connector Auth Status</label>
                     <textarea id="security-auth-summary" rows="7" readonly></textarea>
@@ -2102,6 +2195,12 @@
             element.textContent = value ?? '';
         }
 
+        function setHtmlValue(id, value) {
+            const element = document.getElementById(id);
+            if (!element) return;
+            element.innerHTML = value || '';
+        }
+
         function updateOverviewRuntime(groups) {
             const overview = groups?.overview || {};
             const advanced = groups?.advanced || {};
@@ -2202,6 +2301,162 @@
             ].join('\n');
 
             return { authSummary, promptSummary, sideEffects };
+        }
+
+        function formatCountMap(values) {
+            const entries = Object.entries(values || {});
+            if (entries.length === 0) return 'None';
+            return entries
+                .map(([key, value]) => `${key}: ${value}`)
+                .join('\n');
+        }
+
+        function renderSecuritySourceFindings(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No prompt-security findings are recorded by source.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th>Total</th>
+                            <th>Patterns</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.source || 'unknown')}</td>
+                                <td>${escapeHtml(row.total ?? 0)}</td>
+                                <td>${escapeHtml(formatCountMap(row.patterns || {}))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderSecurityArtifacts(rows, emptyText) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return `<div class="security-empty">${escapeHtml(emptyText)}</div>`;
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Artifact</th>
+                            <th>Source</th>
+                            <th>Status</th>
+                            <th>Policy</th>
+                            <th>Patterns</th>
+                            <th>Redactions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.artifact_id || '')}<br><span class="stat-label">${escapeHtml(row.artifact_type || '')}</span></td>
+                                <td>${escapeHtml(row.source || '')}</td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.policy_status || '')}<br><span class="stat-label">${escapeHtml(row.policy_reason || '')}</span></td>
+                                <td>${escapeHtml(joinList(row.strict_pattern_ids?.length ? row.strict_pattern_ids : row.pattern_ids || []))}</td>
+                                <td>${escapeHtml(formatCountMap(row.redaction_categories || {}))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderSecurityDashboard(security) {
+            const dashboard = security?.dashboard || {};
+            const counts = dashboard.counts || {};
+            setTextValue('security-artifacts-total', counts.total ?? 0);
+            setTextValue('security-findings-total', counts.findings ?? 0);
+            setTextValue('security-quarantined-total', counts.quarantined ?? 0);
+            setTextValue('security-strict-total', counts.strict_failures ?? 0);
+            setHtmlValue(
+                'security-findings-by-source',
+                renderSecuritySourceFindings(dashboard.findings_by_source || [])
+            );
+            setHtmlValue(
+                'security-quarantine-list',
+                renderSecurityArtifacts(
+                    dashboard.quarantined_artifacts || [],
+                    'No quarantined artifacts are recorded.'
+                )
+            );
+            setHtmlValue(
+                'security-strict-failures',
+                renderSecurityArtifacts(
+                    dashboard.strict_failures || [],
+                    'No strict security failures are recorded.'
+                )
+            );
+            const redactions = dashboard.redactions || {};
+            setFieldValue(
+                'security-redactions',
+                [
+                    `total: ${redactions.total || 0}`,
+                    formatCountMap(redactions.by_category || {})
+                ].join('\n')
+            );
+        }
+
+        function enableLintDownload(kind, href) {
+            const link = document.getElementById(`security-${kind}-lint-download`);
+            if (!link) return;
+            if (href) link.href = href;
+            link.classList.remove('disabled');
+        }
+
+        function renderLintResult(payload) {
+            const summary = payload.summary || {};
+            const issues = Array.isArray(payload.issues) ? payload.issues : [];
+            const issueLines = issues.slice(0, 8).map(issue => {
+                const target = issue.artifact_id || issue.path || issue.page_path || '';
+                return `${issue.severity || 'info'} ${issue.code || 'issue'}${target ? ` (${target})` : ''}`;
+            });
+            const more = issues.length > issueLines.length
+                ? `\n... ${issues.length - issueLines.length} more issue(s) in downloaded JSON`
+                : '';
+            setHtmlValue(
+                'security-lint-result',
+                escapeHtml([
+                    `${(payload.kind || 'lint').toUpperCase()} lint: ${payload.status || 'unknown'}`,
+                    `checked_at: ${payload.checked_at || 'unknown'}`,
+                    `summary: ${JSON.stringify(summary)}`,
+                    issueLines.length > 0 ? `issues:\n${issueLines.join('\n')}${more}` : 'issues: none',
+                    payload.report_path ? `report: ${payload.report_path}` : ''
+                ].filter(Boolean).join('\n'))
+            );
+        }
+
+        async function runSettingsLint(kind) {
+            const button = document.getElementById(`security-${kind}-lint-button`);
+            if (button) button.disabled = true;
+            setTextValue('security-lint-result', `Running ${kind} lint...`);
+            try {
+                const response = await fetch(`${API_BASE}/api/settings/lint/${encodeURIComponent(kind)}`, {
+                    method: 'POST'
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || `Failed to run ${kind} lint`);
+                }
+                renderLintResult(payload);
+                enableLintDownload(kind, payload.download_url);
+                showAlert(`${kind.toUpperCase()} lint complete: ${payload.status}`);
+                if (kind === 'security') {
+                    await loadConfig();
+                }
+            } catch (e) {
+                setTextValue('security-lint-result', `${kind} lint failed: ${e.message}`);
+                showAlert(`${kind} lint failed: ${e.message}`, 'error');
+            } finally {
+                if (button) button.disabled = false;
+            }
         }
 
         function formatGroupedRuntimeSummary(groups) {
@@ -2918,6 +3173,7 @@
                     formatGroupedRuntimeSummary(runtimeGroups)
                 );
                 const securitySummary = formatSecurityRuntimeSummary(runtimeGroups.security || {});
+                renderSecurityDashboard(runtimeGroups.security || {});
                 setFieldValue('security-auth-summary', securitySummary.authSummary);
                 setFieldValue('security-prompt-summary', securitySummary.promptSummary);
                 setFieldValue('security-side-effects', securitySummary.sideEffects);

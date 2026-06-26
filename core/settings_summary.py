@@ -604,6 +604,7 @@ def _summarize_wiki_and_archivist(
 def _summarize_security(
     config: ConfigLike,
     *,
+    layout_summary: dict[str, Any],
     providers_summary: dict[str, Any],
     connectors_summary: dict[str, Any],
     pi_skills_summary: dict[str, Any],
@@ -654,8 +655,59 @@ def _summarize_security(
             "sensitive_redaction": "available",
             "configured_prompt_groups": prompt_groups,
         },
+        "dashboard": _summarize_security_dashboard(layout_summary),
         "safety_modes": sorted(safety_modes),
         "allowed_side_effects": sorted(side_effects),
+    }
+
+
+def _empty_security_dashboard(
+    *,
+    database_path: str | None = None,
+    exists: bool = False,
+) -> dict[str, Any]:
+    return {
+        "database_path": database_path,
+        "exists": exists,
+        "counts": {
+            "total": 0,
+            "with_findings": 0,
+            "findings": 0,
+            "redacted": 0,
+            "redactions": 0,
+            "quarantined": 0,
+            "strict_failures": 0,
+            "by_status": {},
+            "by_source": {},
+            "by_finding_type": {},
+            "by_pattern": {},
+            "by_redaction_category": {},
+        },
+        "quarantined_artifacts": [],
+        "strict_failures": [],
+        "redactions": {"total": 0, "by_category": {}},
+        "findings_by_source": [],
+    }
+
+
+def _summarize_security_dashboard(layout_summary: dict[str, Any]) -> dict[str, Any]:
+    database_path = str(layout_summary.get("database_path") or "").strip()
+    if not database_path:
+        return _empty_security_dashboard()
+    db_path = Path(database_path)
+    if not db_path.exists():
+        return _empty_security_dashboard(database_path=database_path, exists=False)
+    try:
+        summary = MetadataDB(str(db_path)).get_ingestion_security_summary(limit=25)
+    except Exception as exc:
+        return {
+            **_empty_security_dashboard(database_path=database_path, exists=True),
+            "error": str(exc),
+        }
+    return {
+        **summary,
+        "database_path": database_path,
+        "exists": True,
     }
 
 
@@ -664,6 +716,7 @@ def _summarize_overview(
     providers_summary: dict[str, Any],
     sources_and_skills: dict[str, Any],
     wiki_and_archivist: dict[str, Any],
+    security_summary: dict[str, Any],
     automation_summary: dict[str, Any],
     layout_summary: dict[str, Any],
 ) -> dict[str, Any]:
@@ -678,6 +731,13 @@ def _summarize_overview(
         f"{skills.get('total', 0)} Pi skills configured",
         f"{wiki_and_archivist.get('archivist_topic_count', 0)} archivist topics loaded",
     ]
+    security_dashboard = security_summary.get("dashboard") or {}
+    security_counts = security_dashboard.get("counts") or {}
+    if security_dashboard.get("exists"):
+        what_happened.append(
+            f"{security_counts.get('findings', 0)} security findings across "
+            f"{security_counts.get('with_findings', 0)} artifacts"
+        )
 
     stuck = []
     for summary in (layout_summary, connectors, skills, sources_and_skills["web_clipper"]):
@@ -687,12 +747,20 @@ def _summarize_overview(
         stuck.append(str(wiki_and_archivist["archivist_error"]))
     if wiki_and_archivist.get("corpus_error"):
         stuck.append(str(wiki_and_archivist["corpus_error"]))
+    if security_dashboard.get("error"):
+        stuck.append(str(security_dashboard["error"]))
 
     for connector in connectors.get("items", []):
         auth_status = connector.get("auth_status") or {}
         if connector.get("enabled") and auth_status.get("missing"):
             missing = ", ".join(auth_status["missing"])
             stuck.append(f"{connector['name']} missing auth: {missing}")
+    quarantined = int(security_counts.get("quarantined") or 0)
+    strict_failures = int(security_counts.get("strict_failures") or 0)
+    if quarantined:
+        stuck.append(f"{quarantined} artifact(s) quarantined for security review")
+    if strict_failures:
+        stuck.append(f"{strict_failures} strict security failure(s) blocked")
 
     run_next = []
     jobs = automation_summary.get("jobs") or {}
@@ -741,6 +809,7 @@ def _summarize_grouped_config(
     )
     security = _summarize_security(
         config,
+        layout_summary=layout_summary,
         providers_summary=providers_summary,
         connectors_summary=connectors_summary,
         pi_skills_summary=pi_skills_summary,
@@ -750,6 +819,7 @@ def _summarize_grouped_config(
             providers_summary=providers_summary,
             sources_and_skills=sources_and_skills,
             wiki_and_archivist=wiki_and_archivist,
+            security_summary=security,
             automation_summary=automation_summary,
             layout_summary=layout_summary,
         ),

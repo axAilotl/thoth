@@ -69,6 +69,7 @@ from core.bookmark_ingest import (
     build_realtime_bookmark_record,
     merge_realtime_bookmark_record,
 )
+from core.admin_lint import admin_lint_report_path, run_admin_lint
 from core.config import Config
 from core.ingestion_runtime import get_knowledge_artifact_runtime
 from core.metadata_db import MetadataDB, get_metadata_db, BookmarkQueueEntry
@@ -1034,6 +1035,48 @@ async def get_settings():
         logger.error(f"Error loading settings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/api/settings/lint/{lint_kind}")
+async def run_settings_lint(lint_kind: str):
+    """Run an operator lint action and persist a downloadable JSON report."""
+    try:
+        return run_admin_lint(
+            load_runtime_settings(),
+            project_root=BASE_CONFIG_PATH.parent,
+            lint_kind=lint_kind,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error running {lint_kind} lint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/settings/lint/{lint_kind}/download")
+async def download_settings_lint(lint_kind: str):
+    """Download the most recent persisted operator lint report."""
+    normalized_kind = str(lint_kind or "").strip().lower()
+    if normalized_kind not in {"okf", "wiki", "security"}:
+        raise HTTPException(
+            status_code=400,
+            detail="lint kind must be one of: okf, wiki, security",
+        )
+    try:
+        report_path = admin_lint_report_path(
+            load_runtime_settings(),
+            project_root=BASE_CONFIG_PATH.parent,
+            lint_kind=normalized_kind,
+        )
+    except Exception as e:
+        logger.error(f"Error resolving {normalized_kind} lint report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="Lint report has not been run yet")
+    return FileResponse(
+        report_path,
+        media_type="application/json",
+        filename=report_path.name,
+    )
 
 @app.post("/api/settings/config")
 async def update_config(updates: Dict[str, Any]):
