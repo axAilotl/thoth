@@ -7,6 +7,7 @@ import sqlite3
 import json
 import logging
 from pathlib import Path
+from collections import Counter
 from typing import Any, Dict, List, Mapping, Optional
 from datetime import datetime, timedelta
 from contextlib import contextmanager
@@ -319,6 +320,68 @@ def _security_policy_last_error(policy: Mapping[str, Any]) -> str | None:
     if status == PROMPT_SECURITY_POLICY_NEEDS_REVIEW:
         return f"security review required: {policy.get('reason')}"
     return None
+
+
+def _security_findings_for_summary(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, list):
+        return ()
+    findings = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        findings.append(
+            {
+                key: item.get(key)
+                for key in (
+                    "scanner",
+                    "finding_type",
+                    "pattern_id",
+                    "scope",
+                    "severity",
+                    "status",
+                )
+                if item.get(key) is not None
+            }
+        )
+    return tuple(findings)
+
+
+def _redaction_categories(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    categories = value.get("categories")
+    if not isinstance(categories, Mapping):
+        return {}
+    result: dict[str, int] = {}
+    for category, count in categories.items():
+        try:
+            numeric_count = int(count)
+        except (TypeError, ValueError):
+            continue
+        if numeric_count > 0:
+            result[str(category)] = numeric_count
+    return dict(sorted(result.items()))
+
+
+def _redaction_total(value: Any) -> int:
+    if not isinstance(value, Mapping):
+        return 0
+    try:
+        explicit_count = int(value.get("finding_count") or 0)
+    except (TypeError, ValueError):
+        explicit_count = 0
+    return max(explicit_count, sum(_redaction_categories(value).values()))
+
+
+def _safe_dashboard_error(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.startswith("security policy blocked:"):
+        return text
+    if text.startswith("security review required:"):
+        return text
+    return "available"
 
 
 @dataclass
@@ -2438,6 +2501,165 @@ class MetadataDB:
         except Exception as e:
             logger.error(f"Failed to list ingestion entries: {e}")
             return []
+
+    def get_ingestion_security_summary(self, *, limit: int = 25) -> Dict[str, Any]:
+        """Return sanitized ingestion security state for operator dashboards."""
+        capped_limit = max(1, min(int(limit), 100))
+        empty_counts = {
+            "total": 0,
+            "with_findings": 0,
+            "findings": 0,
+            "redacted": 0,
+            "redactions": 0,
+            "quarantined": 0,
+            "strict_failures": 0,
+            "by_status": {},
+            "by_source": {},
+            "by_finding_type": {},
+            "by_pattern": {},
+            "by_redaction_category": {},
+        }
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT artifact_id, artifact_type, source, status, payload_json,
+                           attempts, last_error, created_at, processed_at
+                    FROM ingestion_queue
+                    ORDER BY created_at DESC, artifact_id ASC
+                    """
+                ).fetchall()
+        except Exception as e:
+            logger.error(f"Failed to summarize ingestion security state: {e}")
+            return {
+                "error": str(e),
+                "counts": empty_counts,
+                "quarantined_artifacts": [],
+                "strict_failures": [],
+                "redactions": {"total": 0, "by_category": {}},
+                "findings_by_source": [],
+            }
+
+        status_counts: Counter[str] = Counter()
+        source_counts: Counter[str] = Counter()
+        finding_type_counts: Counter[str] = Counter()
+        pattern_counts: Counter[str] = Counter()
+        redaction_counts: Counter[str] = Counter()
+        findings_by_source: dict[str, Counter[str]] = {}
+        quarantined_artifacts: list[dict[str, Any]] = []
+        strict_failures: list[dict[str, Any]] = []
+        quarantined_total = 0
+        strict_failure_total = 0
+        total_findings = 0
+        with_findings = 0
+        redacted_entries = 0
+
+        for row in rows:
+            artifact_id = str(row["artifact_id"] or "")
+            artifact_type = str(row["artifact_type"] or "")
+            source = str(row["source"] or "unknown")
+            status = str(row["status"] or "unknown")
+            status_counts[status] += 1
+            source_counts[source] += 1
+
+            payload = _json_payload(row["payload_json"])
+            metadata = payload.get("normalized_metadata")
+            if not isinstance(metadata, Mapping):
+                metadata = {}
+
+            findings = _security_findings_for_summary(
+                metadata.get(THOTH_SECURITY_FINDINGS_KEY)
+            )
+            if findings:
+                with_findings += 1
+            total_findings += len(findings)
+
+            for finding in findings:
+                finding_type = str(finding.get("finding_type") or "prompt_security")
+                pattern_id = str(finding.get("pattern_id") or "unknown")
+                finding_type_counts[finding_type] += 1
+                pattern_counts[pattern_id] += 1
+                findings_by_source.setdefault(source, Counter())[pattern_id] += 1
+
+            redaction = metadata.get(THOTH_REDACTION_METADATA_KEY)
+            redaction_total = _redaction_total(redaction)
+            if redaction_total:
+                redacted_entries += 1
+                for category, count in _redaction_categories(redaction).items():
+                    redaction_counts[category] += count
+
+            policy = prompt_security_policy_for_metadata(
+                metadata,
+                source_type=source,
+                source_label=f"{artifact_type}:{source}:{artifact_id}",
+                source_path=_payload_source_path(payload),
+            )
+            policy_status = str(policy.get("status") or status)
+            is_quarantined = status in INGESTION_QUARANTINE_STATUSES or (
+                policy_status in INGESTION_QUARANTINE_STATUSES
+            )
+            is_strict_failure = policy_status == PROMPT_SECURITY_POLICY_BLOCKED or (
+                bool(policy.get("strict_source"))
+                and bool(policy.get("strict_pattern_ids") or policy.get("pattern_ids"))
+                and status in INGESTION_QUARANTINE_STATUSES
+            )
+            if is_quarantined:
+                quarantined_total += 1
+            if is_strict_failure:
+                strict_failure_total += 1
+
+            artifact_summary = {
+                "artifact_id": artifact_id,
+                "artifact_type": artifact_type,
+                "source": source,
+                "status": status,
+                "policy_status": policy_status,
+                "policy_reason": str(policy.get("reason") or ""),
+                "max_severity": str(policy.get("max_severity") or "none"),
+                "pattern_ids": list(policy.get("pattern_ids") or []),
+                "strict_pattern_ids": list(policy.get("strict_pattern_ids") or []),
+                "redaction_categories": _redaction_categories(redaction),
+                "redaction_count": redaction_total,
+                "attempts": int(row["attempts"] or 0),
+                "last_error": _safe_dashboard_error(row["last_error"]),
+                "created_at": row["created_at"],
+                "processed_at": row["processed_at"],
+            }
+            if is_quarantined and len(quarantined_artifacts) < capped_limit:
+                quarantined_artifacts.append(artifact_summary)
+            if is_strict_failure and len(strict_failures) < capped_limit:
+                strict_failures.append(artifact_summary)
+
+        return {
+            "counts": {
+                "total": len(rows),
+                "with_findings": with_findings,
+                "findings": total_findings,
+                "redacted": redacted_entries,
+                "redactions": sum(redaction_counts.values()),
+                "quarantined": quarantined_total,
+                "strict_failures": strict_failure_total,
+                "by_status": dict(sorted(status_counts.items())),
+                "by_source": dict(sorted(source_counts.items())),
+                "by_finding_type": dict(sorted(finding_type_counts.items())),
+                "by_pattern": dict(sorted(pattern_counts.items())),
+                "by_redaction_category": dict(sorted(redaction_counts.items())),
+            },
+            "quarantined_artifacts": quarantined_artifacts,
+            "strict_failures": strict_failures,
+            "redactions": {
+                "total": sum(redaction_counts.values()),
+                "by_category": dict(sorted(redaction_counts.items())),
+            },
+            "findings_by_source": [
+                {
+                    "source": source,
+                    "total": sum(counter.values()),
+                    "patterns": dict(sorted(counter.items())),
+                }
+                for source, counter in sorted(findings_by_source.items())
+            ],
+        }
     
     def delete_tweet(self, tweet_id: str) -> bool:
         """Delete tweet metadata."""
