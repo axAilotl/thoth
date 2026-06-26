@@ -50,6 +50,9 @@ def test_agent_surface_queries_wiki_with_provenance(tmp_path: Path):
     assert hit["title"] == "owner/agent-repo"
     assert hit["provenance"]["artifact_id"] == "gh_1"
     assert hit["provenance"]["source_type"] == "github"
+    assert hit["security"]["status"] == "allowed"
+    assert "score" in hit["trust"]
+    assert result["capabilities"]["embedding"]["available"] is False
 
 
 def test_agent_surface_artifact_lookup_returns_canonical_provenance(tmp_path: Path):
@@ -125,6 +128,73 @@ def test_agent_surface_lists_queue_security_metadata(tmp_path: Path):
     detail = service.get_artifact("suspicious-paper", include_quarantined=True)
     detail_findings = detail["queue"]["security_metadata"][THOTH_SECURITY_FINDINGS_KEY]
     assert findings == detail_findings
+
+
+def test_agent_surface_hybrid_query_searches_artifacts_with_filters(tmp_path: Path):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    db.upsert_ingestion_entry(
+        IngestionQueueEntry(
+            artifact_id="safe-repo",
+            artifact_type="repository",
+            source="github",
+            payload_json=json.dumps(
+                {
+                    "id": "safe-repo",
+                    "source_type": "github",
+                    "repo_name": "Hybrid Search Repo",
+                    "description": "Agent-facing hybrid retrieval filters",
+                    "tags": ["retrieval"],
+                }
+            ),
+            created_at="2026-04-04T00:00:00",
+        )
+    )
+    db.upsert_ingestion_entry(
+        IngestionQueueEntry(
+            artifact_id="blocked-repo",
+            artifact_type="repository",
+            source="github",
+            status="blocked",
+            payload_json=json.dumps(
+                {
+                    "id": "blocked-repo",
+                    "source_type": "github",
+                    "repo_name": "Blocked Hybrid Search Repo",
+                    "description": "Agent-facing hybrid retrieval filters",
+                    "tags": ["retrieval"],
+                }
+            ),
+            created_at="2026-04-05T00:00:00",
+        )
+    )
+
+    service = AgentSurfaceService(config, layout=layout, db=db)
+    result = service.query_wiki(
+        "hybrid retrieval",
+        result_types=["artifact"],
+        tags=["retrieval"],
+        limit=10,
+    )
+
+    assert [hit["artifact_id"] for hit in result["hits"]] == ["safe-repo"]
+    hit = result["hits"][0]
+    assert hit["result_type"] == "artifact"
+    assert hit["provenance"]["artifact_id"] == "safe-repo"
+    assert hit["security"]["status"] == "allowed"
+    assert hit["trust"]["score"] == 1.0
+
+    review_result = service.query_wiki(
+        "hybrid retrieval",
+        result_types=["artifact"],
+        include_quarantined=True,
+        limit=10,
+    )
+    assert {hit["artifact_id"] for hit in review_result["hits"]} == {
+        "safe-repo",
+        "blocked-repo",
+    }
 
 
 def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):

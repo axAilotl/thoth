@@ -178,6 +178,27 @@ def test_capture_surface_event_detail_includes_capture_metadata(tmp_path: Path):
     }
 
 
+def test_capture_surface_search_events_requires_explicit_quarantine_include(
+    tmp_path: Path,
+):
+    surface, event_id = _surface(tmp_path)
+
+    default_result = surface.search_events("manual note", limit=5)
+
+    assert default_result["hits"] == []
+    review_result = surface.search_events(
+        "manual note",
+        limit=5,
+        include_quarantined=True,
+    )
+    assert [hit["event_id"] for hit in review_result["hits"]] == [event_id]
+    hit = review_result["hits"][0]
+    assert hit["result_type"] == "capture_event"
+    assert hit["provenance"]["event_id"] == event_id
+    assert hit["security"]["status"] == "needs_review"
+    assert hit["trust"]["score"] == 0.25
+
+
 def test_capture_surface_compiles_wiki_pages_with_audited_restricted_include(
     tmp_path: Path, monkeypatch
 ):

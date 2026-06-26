@@ -1997,7 +1997,18 @@ def cmd_query(args):
     from core.metadata_db import get_metadata_db
 
     service = AgentSurfaceService(config, layout=build_path_layout(config), db=get_metadata_db())
-    payload = service.query_wiki(args.query, limit=max(1, int(args.limit or 10)))
+    payload = service.query_wiki(
+        args.query,
+        limit=max(1, int(args.limit or 10)),
+        include_quarantined=bool(getattr(args, "include_quarantined", False)),
+        result_types=getattr(args, "type", None),
+        source_types=getattr(args, "source_type", None),
+        tags=getattr(args, "tag", None),
+        security_statuses=getattr(args, "security_status", None),
+        min_trust_score=getattr(args, "min_trust_score", None),
+        time_after=getattr(args, "time_after", None),
+        time_before=getattr(args, "time_before", None),
+    )
     if getattr(args, "json", False):
         _print_json(payload)
         return
@@ -2007,7 +2018,16 @@ def cmd_query(args):
     for hit in payload["hits"]:
         provenance = hit.get("provenance") or {}
         artifact = provenance.get("artifact_id") or "-"
-        print(f"- {hit['title']} [{hit['slug']}] score={hit['score']} artifact={artifact}")
+        identifier = (
+            hit.get("slug")
+            or hit.get("artifact_id")
+            or hit.get("event_id")
+            or hit["result_id"]
+        )
+        print(
+            f"- {hit['title']} [{identifier}] "
+            f"type={hit['result_type']} score={hit['score']} artifact={artifact}"
+        )
 
 
 async def cmd_wiki(args):
@@ -2688,6 +2708,34 @@ Examples:
     )
     query_wiki_parser.add_argument("query", help="Wiki search query")
     query_wiki_parser.add_argument("--limit", type=int, default=10)
+    query_wiki_parser.add_argument(
+        "--include-quarantined",
+        action="store_true",
+        help="Include content that requires security review",
+    )
+    query_wiki_parser.add_argument(
+        "--type",
+        action="append",
+        help="Result type filter: wiki_page, artifact, or capture_event",
+    )
+    query_wiki_parser.add_argument(
+        "--source-type",
+        action="append",
+        help="Source type filter such as github, arxiv, or web_clipper",
+    )
+    query_wiki_parser.add_argument(
+        "--tag",
+        action="append",
+        help="Tag filter; repeat to include more tags",
+    )
+    query_wiki_parser.add_argument(
+        "--security-status",
+        action="append",
+        help="Security status filter such as allowed, needs_review, or blocked",
+    )
+    query_wiki_parser.add_argument("--min-trust-score", type=float, default=None)
+    query_wiki_parser.add_argument("--time-after", type=str, default=None)
+    query_wiki_parser.add_argument("--time-before", type=str, default=None)
     query_wiki_parser.add_argument("--json", action="store_true")
 
     wiki_parser = subparsers.add_parser(

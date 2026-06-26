@@ -141,6 +141,12 @@ from .semantic_memory import (
     SemanticMemoryTransitionError,
     SemanticMemoryValidationError,
 )
+from .hybrid_search import (
+    HybridSearchFilters,
+    HybridSearchHit,
+    HybridSearchResult,
+    HybridSearchService,
+)
 from .wiki_query import WikiQueryHit, WikiQueryResult, WikiQueryRunner, WikiQueryWriteBackResult
 from .wiki_scaffold import (
     WikiScaffold,
@@ -286,6 +292,10 @@ __all__ = [
     'SemanticMemoryStore',
     'SemanticMemoryTransitionError',
     'SemanticMemoryValidationError',
+    'HybridSearchFilters',
+    'HybridSearchHit',
+    'HybridSearchResult',
+    'HybridSearchService',
     'WikiQueryHit',
     'WikiQueryResult',
     'WikiQueryRunner',

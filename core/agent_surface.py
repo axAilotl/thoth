@@ -30,7 +30,7 @@ from .prompt_security import (
     prompt_security_requires_review,
 )
 from .research_graph import ResearchGraphService
-from .wiki_io import read_document
+from .hybrid_search import HybridSearchFilters, HybridSearchHit
 from .wiki_query import WikiQueryRunner
 
 
@@ -47,43 +47,77 @@ class AgentSurfaceService:
         *,
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
+        event_store: Any | None = None,
     ):
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
+        self.event_store = event_store
 
-    def query_wiki(self, query: str, *, limit: int = 10) -> dict[str, Any]:
-        """Search the compiled wiki and include source provenance for each hit."""
-        runner = WikiQueryRunner(self.config, layout=self.layout)
-        result = runner.search(query, limit=limit)
-        hits = []
-        for hit in result.hits:
-            document = read_document(hit.page_path)
-            frontmatter = document.frontmatter
-            hits.append(
-                {
-                    "slug": hit.slug,
-                    "title": hit.title,
-                    "summary": hit.summary,
-                    "score": hit.score,
-                    "matched_fields": list(hit.matched_fields),
-                    "page_path": str(hit.page_path),
-                    "kind": hit.kind,
-                    "record_type": hit.record_type,
-                    "provenance": {
-                        "artifact_id": frontmatter.get("thoth_artifact_id")
-                        or frontmatter.get("artifact_id"),
-                        "source_type": frontmatter.get("thoth_source_type")
-                        or frontmatter.get("source_type"),
-                        "source_paths": list(hit.source_paths),
-                        "resource": frontmatter.get("resource"),
-                        "related_slugs": list(hit.related_slugs),
-                    },
-                }
-            )
+    def query_wiki(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        include_quarantined: bool = False,
+        result_types: Any = None,
+        source_types: Any = None,
+        source_ids: Any = None,
+        source_paths: Any = None,
+        artifact_types: Any = None,
+        event_types: Any = None,
+        wiki_kinds: Any = None,
+        tags: Any = None,
+        exclude_tags: Any = None,
+        security_statuses: Any = None,
+        min_trust_score: float | None = None,
+        time_after: str | None = None,
+        time_before: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        updated_after: str | None = None,
+        updated_before: str | None = None,
+        use_embedding: bool = False,
+    ) -> dict[str, Any]:
+        """Search wiki, artifact, and capture-event sources with provenance."""
+        runner = WikiQueryRunner(
+            self.config,
+            layout=self.layout,
+            db=self.db,
+            event_store=self.event_store,
+        )
+        filters = HybridSearchFilters(
+            result_types=result_types,
+            source_types=source_types,
+            source_ids=source_ids,
+            source_paths=source_paths,
+            artifact_types=artifact_types,
+            event_types=event_types,
+            wiki_kinds=wiki_kinds,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            security_statuses=security_statuses,
+            min_trust_score=min_trust_score,
+            time_after=time_after,
+            time_before=time_before,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            include_quarantined=include_quarantined,
+        )
+        result = runner.hybrid_search(
+            query,
+            limit=limit,
+            filters=filters,
+            use_embedding=use_embedding,
+        )
+        hits = [self._serialize_hybrid_hit(hit) for hit in result.hits]
         return {
             "query": result.query,
             "queried_at": result.queried_at,
+            "filters": result.filters,
+            "capabilities": result.capabilities,
             "hits": hits,
         }
 
@@ -364,6 +398,30 @@ class AgentSurfaceService:
             "processed_at": entry.processed_at,
             "capabilities": _json_list(entry.capabilities_json),
             "security_metadata": _security_metadata_from_payload(entry.payload_json),
+        }
+
+    def _serialize_hybrid_hit(self, hit: HybridSearchHit) -> dict[str, Any]:
+        return {
+            "result_id": hit.result_id,
+            "result_type": hit.result_type,
+            "slug": hit.slug,
+            "title": hit.title,
+            "summary": hit.summary,
+            "score": hit.score,
+            "matched_fields": list(hit.matched_fields),
+            "page_path": hit.page_path,
+            "artifact_id": hit.artifact_id,
+            "event_id": hit.event_id,
+            "source_type": hit.source_type,
+            "source_id": hit.source_id,
+            "timestamp": hit.timestamp,
+            "created_at": hit.created_at,
+            "updated_at": hit.updated_at,
+            "tags": list(hit.tags),
+            "search_modes": list(hit.search_modes),
+            "provenance": hit.provenance,
+            "security": hit.security,
+            "trust": hit.trust,
         }
 
     def _record_connector_result_outputs(
