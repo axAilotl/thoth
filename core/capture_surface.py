@@ -21,6 +21,7 @@ from .capture_event_store import (
 )
 from .capture_lifecycle import CaptureLifecycleService
 from .config import Config, config
+from .hybrid_search import HybridSearchFilters, HybridSearchService
 from .metadata_db import MetadataDB
 from .path_layout import PathLayout, build_path_layout
 from .postgres import (
@@ -51,9 +52,11 @@ class CaptureSurfaceService:
         event_store: CaptureEventStore,
         *,
         lifecycle_service: CaptureLifecycleService | None = None,
+        db: MetadataDB | None = None,
     ) -> None:
         self.event_store = event_store
         self.lifecycle_service = lifecycle_service
+        self.db = db
 
     def list_sources(self) -> dict[str, Any]:
         """Return configured capture sources."""
@@ -85,6 +88,44 @@ class CaptureSurfaceService:
         if event is None:
             raise CaptureSurfaceNotFoundError(f"capture event not found: {event_id}")
         return self._event_payload(event, include_payload=True)
+
+    def search_events(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        include_quarantined: bool = False,
+        source_types: Any = None,
+        source_ids: Any = None,
+        source_paths: Any = None,
+        event_types: Any = None,
+        tags: Any = None,
+        exclude_tags: Any = None,
+        security_statuses: Any = None,
+        min_trust_score: float | None = None,
+        time_after: str | None = None,
+        time_before: str | None = None,
+    ) -> dict[str, Any]:
+        """Search capture events with provenance and security/trust state."""
+        filters = HybridSearchFilters(
+            result_types=("capture_event",),
+            source_types=source_types,
+            source_ids=source_ids,
+            source_paths=source_paths,
+            event_types=event_types,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            security_statuses=security_statuses,
+            min_trust_score=min_trust_score,
+            time_after=time_after,
+            time_before=time_before,
+            include_quarantined=include_quarantined,
+        )
+        result = HybridSearchService(
+            db=self.db,
+            event_store=self.event_store,
+        ).search(query, limit=limit, filters=filters)
+        return _json_safe(result)
 
     def ingest_manual(
         self,
@@ -322,6 +363,7 @@ def open_capture_surface(
             yield CaptureSurfaceService(
                 event_store,
                 lifecycle_service=lifecycle,
+                db=surface_db,
             )
     except PostgresConfigError as exc:
         raise CaptureSurfaceConfigError(str(exc)) from exc

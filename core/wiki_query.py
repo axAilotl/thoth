@@ -10,6 +10,7 @@ import re
 from typing import Any, Iterable, Sequence
 
 from .config import Config
+from .hybrid_search import HybridSearchFilters, HybridSearchResult, HybridSearchService
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import prompt_security_requires_review
 from .wiki_contract import (
@@ -113,9 +114,13 @@ class WikiQueryRunner:
         *,
         layout: PathLayout | None = None,
         contract: WikiContract | None = None,
+        db: Any | None = None,
+        event_store: Any | None = None,
     ):
         self.config = config
         self.layout = layout or build_path_layout(config)
+        self.db = db
+        self.event_store = event_store
         self.project_root = self.layout.vault_root.parent
         self.scaffold = build_wiki_scaffold(
             config,
@@ -124,6 +129,27 @@ class WikiQueryRunner:
         self.contract = contract or build_wiki_contract(
             config,
             project_root=self.project_root,
+        )
+
+    def hybrid_search(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        filters: HybridSearchFilters | None = None,
+        use_embedding: bool = False,
+    ) -> HybridSearchResult:
+        """Search wiki pages plus configured artifact and capture-event sources."""
+        service = HybridSearchService(
+            contract=self.contract,
+            db=self.db,
+            event_store=self.event_store,
+        )
+        return service.search(
+            query,
+            limit=limit,
+            filters=filters,
+            use_embedding=use_embedding,
         )
 
     def search(

@@ -2,6 +2,8 @@ from copy import deepcopy
 from pathlib import Path
 
 from core.config import config
+from core.hybrid_search import HybridSearchFilters
+from core.metadata_db import IngestionQueueEntry, MetadataDB
 from core.path_layout import build_path_layout
 from core.wiki_contract import WikiPageSpec, build_wiki_contract
 from core.wiki_io import atomic_write_text, render_frontmatter
@@ -120,5 +122,113 @@ def test_wiki_query_searches_and_writes_back_curated_pages(tmp_path: Path, monke
         assert "repo-owner-repo" in page_content
         assert "Influence Sources: `stars/owner_repo_summary.md`" in page_content
         assert index_path.read_text(encoding="utf-8").count("query-agentic-workflows.md") == 1
+    finally:
+        config.data = original
+
+
+def test_hybrid_search_filters_artifacts_and_excludes_quarantined_by_default(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = make_config(tmp_path)
+    try:
+        layout = build_path_layout(config, project_root=tmp_path)
+        contract = build_wiki_contract(config, project_root=tmp_path)
+        db = MetadataDB(str(layout.database_path))
+
+        _write_page(
+            contract,
+            WikiPageSpec(
+                title="Hybrid Retrieval",
+                slug="hybrid-retrieval",
+                kind="topic",
+                summary="Agentic workflow retrieval with wiki provenance",
+                source_paths=("pages/hybrid.md",),
+                source_type="wiki",
+                source_ids=("wiki-source",),
+                updated_at="2026-04-04T00:00:00Z",
+            ),
+            "# Hybrid Retrieval\n\nAgentic workflows use lexical local search.",
+        )
+        db.upsert_ingestion_entry(
+            IngestionQueueEntry(
+                artifact_id="artifact-safe",
+                artifact_type="repository",
+                source="github",
+                status="pending",
+                payload_json=(
+                    '{"id":"repo-safe","source_type":"github",'
+                    '"repo_name":"Agentic Retrieval Repo",'
+                    '"description":"Agentic workflows with lexical filters",'
+                    '"tags":["retrieval"]}'
+                ),
+                created_at="2026-04-05T00:00:00",
+            )
+        )
+        db.upsert_ingestion_entry(
+            IngestionQueueEntry(
+                artifact_id="artifact-blocked",
+                artifact_type="repository",
+                source="github",
+                status="blocked",
+                payload_json=(
+                    '{"id":"repo-blocked","source_type":"github",'
+                    '"repo_name":"Blocked Agentic Retrieval",'
+                    '"description":"Agentic workflows with blocked content",'
+                    '"tags":["retrieval"]}'
+                ),
+                created_at="2026-04-06T00:00:00",
+            )
+        )
+
+        runner = WikiQueryRunner(config, layout=layout, contract=contract, db=db)
+        result = runner.hybrid_search(
+            "agentic workflows",
+            limit=10,
+            filters=HybridSearchFilters(
+                result_types=("wiki_page", "artifact"),
+                source_types=("github", "wiki"),
+            ),
+        )
+
+        ids = {hit.result_id for hit in result.hits}
+        assert "wiki_page:hybrid-retrieval" in ids
+        assert "artifact:artifact-safe" in ids
+        assert "artifact:artifact-blocked" not in ids
+        assert result.capabilities["embedding"]["available"] is False
+        assert all(hit.provenance for hit in result.hits)
+        assert all(hit.security["status"] == "allowed" for hit in result.hits)
+        assert all("score" in hit.trust for hit in result.hits)
+
+        artifact_only = runner.hybrid_search(
+            "agentic workflows",
+            limit=10,
+            filters=HybridSearchFilters(
+                result_types=("artifact",),
+                tags=("retrieval",),
+                time_after="2026-04-04T12:00:00Z",
+            ),
+        )
+        assert [hit.result_id for hit in artifact_only.hits] == ["artifact:artifact-safe"]
+
+        review_result = runner.hybrid_search(
+            "agentic workflows",
+            limit=10,
+            filters=HybridSearchFilters(
+                result_types=("artifact",),
+                include_quarantined=True,
+            ),
+        )
+        assert {hit.result_id for hit in review_result.hits} == {
+            "artifact:artifact-safe",
+            "artifact:artifact-blocked",
+        }
+        blocked = next(
+            hit
+            for hit in review_result.hits
+            if hit.result_id == "artifact:artifact-blocked"
+        )
+        assert blocked.security["requires_review"] is True
+        assert blocked.trust["score"] == 0.0
     finally:
         config.data = original
