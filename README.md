@@ -174,14 +174,14 @@ Current archivist workflow:
 
 1. Edit the live local `archivist_topics.yaml`, either in `/settings` or on disk.
 2. Adjust the archivist prompt files in `prompts/` if you want to change synthesis style or sectioning.
-3. Configure the `archivist` task route. The tracked default prefers local `pi` with the `archivist_agent` model alias and falls back to direct OpenRouter.
+3. Configure the `archivist` task route. The tracked default prefers the existing local `pi` setup with `zai-coding-cn/glm-5.2`, then falls back to a Pi/OpenRouter profile, then direct OpenRouter.
 4. Configure `embedding` too if any topic uses semantic or hybrid retrieval.
 5. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
 6. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages.
 7. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
 8. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
 
-The Pi-backed provider is generation-only inside Thoth. It invokes `pi --print --no-tools --no-session --no-context-files`, so the Archivist gets Pi's model/profile behavior without granting it file editing or shell tools during wiki compilation. For OpenRouter-backed Pi runs, Thoth bridges the existing `OPEN_ROUTER_API_KEY` setting into Pi's expected `OPENROUTER_API_KEY` environment variable.
+The Pi-backed provider is generation-only inside Thoth. It invokes `pi --print --no-tools --no-session --no-context-files`, so the Archivist gets Pi's model/profile behavior without granting it file editing or shell tools during wiki compilation. The primary `pi` provider uses the installed Pi auth/config as-is. The `pi_openrouter` fallback can install `@earendil-works/pi-coding-agent` if `pi` is missing and bridges the existing `OPEN_ROUTER_API_KEY` setting into Pi's expected `OPENROUTER_API_KEY` environment variable.
 
 ## Storage Layout
 

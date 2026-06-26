@@ -69,10 +69,25 @@ def test_llm_interface_resolves_pi_archivist_route(monkeypatch):
             "providers": {
                 "pi": {
                     "enabled": True,
+                    "type": "pi",
+                    "command": "pi",
+                    "pi_provider": "zai-coding-cn",
+                    "models": {
+                        "default": {"id": "glm-5-turbo"},
+                        "archivist_agent": {
+                            "id": "glm-5.2",
+                            "max_tokens": 6000,
+                            "temperature": 0.2,
+                        },
+                    },
+                },
+                "pi_openrouter": {
+                    "enabled": True,
+                    "type": "pi",
                     "command": "pi",
                     "pi_provider": "openrouter",
+                    "api_key_env": "OPEN_ROUTER_API_KEY",
                     "models": {
-                        "default": {"id": "deepseek/deepseek-v4-flash"},
                         "archivist_agent": {
                             "id": "z-ai/glm-5.2",
                             "max_tokens": 6000,
@@ -84,7 +99,10 @@ def test_llm_interface_resolves_pi_archivist_route(monkeypatch):
             "tasks": {
                 "archivist": {
                     "enabled": True,
-                    "fallback": [{"provider": "pi", "model": "archivist_agent"}],
+                    "fallback": [
+                        {"provider": "pi", "model": "archivist_agent"},
+                        {"provider": "pi_openrouter", "model": "archivist_agent"},
+                    ],
                 }
             },
         }
@@ -92,6 +110,37 @@ def test_llm_interface_resolves_pi_archivist_route(monkeypatch):
 
     assert interface.resolve_task_route("archivist") == (
         "pi",
-        "z-ai/glm-5.2",
-        {"id": "z-ai/glm-5.2", "max_tokens": 6000, "temperature": 0.2},
+        "glm-5.2",
+        {"id": "glm-5.2", "max_tokens": 6000, "temperature": 0.2},
     )
+
+
+def test_pi_provider_can_install_when_missing(monkeypatch):
+    calls = {"which": 0, "install": None}
+
+    def fake_which(command):
+        calls["which"] += 1
+        return None if calls["which"] == 1 else "/usr/local/bin/pi"
+
+    def fake_run(command, **kwargs):
+        calls["install"] = (command, kwargs)
+
+    monkeypatch.setattr("core.llm_interface.shutil.which", fake_which)
+    monkeypatch.setattr("core.llm_interface.subprocess.run", fake_run)
+
+    provider = PiProvider(
+        command="pi",
+        pi_provider="openrouter",
+        model="z-ai/glm-5.2",
+        install_if_missing=True,
+        install_command=["npm", "install", "-g", "@earendil-works/pi-coding-agent"],
+    )
+
+    assert provider.command == "/usr/local/bin/pi"
+    assert calls["install"][0] == [
+        "npm",
+        "install",
+        "-g",
+        "@earendil-works/pi-coding-agent",
+    ]
+    assert calls["install"][1]["check"] is True

@@ -6,6 +6,7 @@ Supports OpenAI, OpenRouter, Anthropic, local models, and Pi CLI runs
 import os
 import logging
 import shutil
+import subprocess
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -387,21 +388,54 @@ class PiProvider(BaseLLMProvider):
         command: str = "pi",
         pi_provider: str | None = None,
         api_key_env: str | None = None,
-        model: str = "z-ai/glm-5.2",
+        model: str = "glm-5.2",
         timeout_seconds: float = 300.0,
         extra_args: List[str] | None = None,
+        install_if_missing: bool = False,
+        install_command: List[str] | None = None,
     ):
         super().__init__(model=model)
-        resolved_command = shutil.which(command)
-        if not resolved_command and os.path.exists(command):
-            resolved_command = command
-        if not resolved_command:
-            raise ValueError(f"Pi command not found: {command}")
+        resolved_command = self._resolve_command(
+            command,
+            install_if_missing=install_if_missing,
+            install_command=install_command,
+        )
         self.command = resolved_command
         self.pi_provider = pi_provider
         self.api_key_env = api_key_env
         self.timeout_seconds = float(timeout_seconds)
         self.extra_args = list(extra_args or [])
+
+    def _resolve_command(
+        self,
+        command: str,
+        *,
+        install_if_missing: bool,
+        install_command: List[str] | None,
+    ) -> str:
+        resolved_command = shutil.which(command)
+        if not resolved_command and os.path.exists(command):
+            resolved_command = command
+        if not resolved_command and install_if_missing:
+            command_parts = list(
+                install_command
+                or ["npm", "install", "-g", "@earendil-works/pi-coding-agent"]
+            )
+            if not command_parts:
+                raise ValueError("Pi install_command cannot be empty")
+            subprocess.run(
+                command_parts,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            resolved_command = shutil.which(command)
+            if not resolved_command and os.path.exists(command):
+                resolved_command = command
+        if not resolved_command:
+            raise ValueError(f"Pi command not found: {command}")
+        return resolved_command
 
     async def generate(self, prompt: str, system_prompt: str = None, **kwargs) -> LLMResponse:
         cmd = [
@@ -518,45 +552,48 @@ class LLMInterface:
             for name, cfg in provider_cfg.items():
                 if not cfg.get('enabled', False):
                     continue
+                provider_type = cfg.get('type', name)
 
                 models = cfg.get('models', {}) or {}
                 self.provider_models[name] = models
                 default_model = models.get('default', {}).get('id')
 
-                env_var = cfg.get('api_key_env') or default_env.get(name)
+                env_var = cfg.get('api_key_env') or default_env.get(provider_type)
                 api_key = os.getenv(env_var) if env_var else None
 
                 try:
-                    if name == 'openai':
+                    if provider_type == 'openai':
                         if not api_key:
                             logger.warning("OpenAI provider enabled but OPENAI_API_KEY missing")
                             continue
                         instance = OpenAIProvider(api_key=api_key, model=default_model or 'gpt-4o-mini')
-                    elif name == 'openrouter':
+                    elif provider_type == 'openrouter':
                         if not api_key:
                             logger.warning("OpenRouter provider enabled but OPEN_ROUTER_API_KEY missing")
                             continue
                         base_url = cfg.get('base_url', 'https://openrouter.ai/api/v1')
                         instance = OpenRouterProvider(api_key=api_key, base_url=base_url, model=default_model or 'anthropic/claude-3-haiku')
-                    elif name == 'anthropic':
+                    elif provider_type == 'anthropic':
                         if not api_key:
                             logger.warning("Anthropic provider enabled but ANTHROPIC_API missing")
                             continue
                         instance = AnthropicProvider(api_key=api_key, model=default_model or 'claude-3-haiku-20240307')
-                    elif name == 'local':
+                    elif provider_type == 'local':
                         base_url = cfg.get('base_url', 'http://localhost:11434/v1')
                         instance = LocalProvider(base_url=base_url, model=default_model or 'llama3.2')
-                    elif name == 'pi':
+                    elif provider_type == 'pi':
                         instance = PiProvider(
                             command=cfg.get('command', 'pi'),
                             pi_provider=cfg.get('pi_provider'),
                             api_key_env=cfg.get('api_key_env'),
-                            model=default_model or 'z-ai/glm-5.2',
+                            model=default_model or 'glm-5.2',
                             timeout_seconds=float(cfg.get('timeout_seconds', 300) or 300),
                             extra_args=cfg.get('extra_args') or [],
+                            install_if_missing=bool(cfg.get('install_if_missing', False)),
+                            install_command=cfg.get('install_command'),
                         )
                     else:
-                        logger.warning(f"Unknown LLM provider '{name}' - skipping")
+                        logger.warning(f"Unknown LLM provider '{name}' of type '{provider_type}' - skipping")
                         continue
 
                     self.providers[name] = instance

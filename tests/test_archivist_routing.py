@@ -43,15 +43,27 @@ def test_default_archivist_route_prefers_pi_agent_profile():
 
     pi_provider = payload["llm"]["providers"]["pi"]
     assert pi_provider["enabled"] is True
+    assert pi_provider["type"] == "pi"
     assert pi_provider["command"] == "pi"
-    assert pi_provider["pi_provider"] == "openrouter"
-    assert pi_provider["api_key_env"] == "OPEN_ROUTER_API_KEY"
-    assert pi_provider["models"]["archivist_agent"]["id"] == "z-ai/glm-5.2"
+    assert pi_provider["pi_provider"] == "zai-coding-cn"
+    assert pi_provider["models"]["archivist_agent"]["id"] == "glm-5.2"
+
+    pi_openrouter = payload["llm"]["providers"]["pi_openrouter"]
+    assert pi_openrouter["enabled"] is True
+    assert pi_openrouter["type"] == "pi"
+    assert pi_openrouter["install_if_missing"] is True
+    assert pi_openrouter["pi_provider"] == "openrouter"
+    assert pi_openrouter["api_key_env"] == "OPEN_ROUTER_API_KEY"
+    assert pi_openrouter["models"]["archivist_agent"]["id"] == "z-ai/glm-5.2"
 
     archivist_task = payload["llm"]["tasks"]["archivist"]
     assert archivist_task["enabled"] is True
     assert archivist_task["fallback"][0] == {
         "provider": "pi",
+        "model": "archivist_agent",
+    }
+    assert archivist_task["fallback"][1] == {
+        "provider": "pi_openrouter",
         "model": "archivist_agent",
     }
 

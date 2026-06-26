@@ -13,11 +13,17 @@
               "type": "object",
               "properties": {
                 "enabled": { "type": "boolean" },
+                "type": { "type": "string" },
                 "api_key_env": { "type": "string" },
                 "base_url": { "type": ["string", "null"] },
                 "has_vision": { "type": "boolean" },
                 "command": { "type": "string" },
                 "pi_provider": { "type": "string" },
+                "install_if_missing": { "type": "boolean" },
+                "install_command": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
                 "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
                 "extra_args": {
                   "type": "array",
