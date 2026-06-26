@@ -599,6 +599,28 @@
       },
       "additionalProperties": true
     },
+    "semantic_memory": {
+      "type": "object",
+      "properties": {
+        "promotion": {
+          "type": "object",
+          "properties": {
+            "min_evidence_count": { "type": "integer", "minimum": 1 },
+            "min_distinct_sources": { "type": "integer", "minimum": 1 },
+            "trusted_structured_artifact_types": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "trusted_structured_metadata_keys": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "automation": {
       "type": "object",
       "properties": {

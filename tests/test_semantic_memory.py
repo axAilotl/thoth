@@ -4,16 +4,26 @@ import pytest
 
 from core.metadata_db import MetadataDB
 from core.semantic_memory import (
+    SEMANTIC_MEMORY_PROMOTION_METADATA_KEY,
     SemanticMemoryCandidate,
     SemanticMemoryEvidence,
+    SemanticMemoryPromotionConfigError,
+    SemanticMemoryPromotionPolicy,
     SemanticMemoryStore,
     SemanticMemoryTransitionError,
     SemanticMemoryValidationError,
 )
 
 
-def make_store(tmp_path: Path) -> SemanticMemoryStore:
-    return SemanticMemoryStore(MetadataDB(str(tmp_path / "meta.db")))
+def make_store(
+    tmp_path: Path,
+    *,
+    promotion_policy: SemanticMemoryPromotionPolicy | None = None,
+) -> SemanticMemoryStore:
+    return SemanticMemoryStore(
+        MetadataDB(str(tmp_path / "meta.db")),
+        promotion_policy=promotion_policy,
+    )
 
 
 def test_semantic_memory_stores_candidates_and_queryable_evidence(tmp_path: Path):
@@ -87,6 +97,10 @@ def test_semantic_memory_enforces_states_and_immutable_types(tmp_path: Path):
     )
     assert proposed.status == "proposed"
 
+    with pytest.raises(SemanticMemoryTransitionError):
+        store.transition_candidate(proposed.candidate_id, "promoted")
+    assert store.get_candidate(proposed.candidate_id).status == "proposed"
+
     confirmed = store.transition_candidate(
         proposed.candidate_id,
         "confirmed",
@@ -94,6 +108,16 @@ def test_semantic_memory_enforces_states_and_immutable_types(tmp_path: Path):
     )
     assert confirmed.status == "confirmed"
     assert confirmed.write_provenance["last_status_transition"]["from"] == "proposed"
+
+    with pytest.raises(SemanticMemoryTransitionError):
+        store.update_candidate(
+            SemanticMemoryCandidate(
+                candidate_id=confirmed.candidate_id,
+                candidate_type="fact",
+                status="rejected",
+                text="Generic updates must not change review status.",
+            )
+        )
 
     promoted = store.transition_candidate(confirmed.candidate_id, "promoted")
     assert promoted.status == "promoted"
@@ -135,6 +159,240 @@ def test_semantic_memory_enforces_states_and_immutable_types(tmp_path: Path):
 
     with pytest.raises(SemanticMemoryTransitionError):
         store.transition_candidate(superseded.candidate_id, "confirmed")
+
+
+def test_semantic_memory_promotion_requires_repeated_evidence(tmp_path: Path):
+    store = make_store(tmp_path)
+    candidate = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-single-transcript-guess",
+            candidate_type="preference",
+            text="Ada prefers afternoon meetings.",
+            subject="Ada",
+            predicate="prefers",
+            object_value="afternoon meetings",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-single-transcript-guess",
+                evidence_id="evidence-transcript-1",
+                artifact_id="transcript-1",
+                artifact_type="transcript",
+                evidence_text="A model guessed this from one transcript.",
+            ),
+        ),
+    )
+
+    decision = store.evaluate_promotion(candidate.candidate_id)
+    assert decision.allowed is False
+    assert decision.reason == "insufficient_evidence"
+    assert decision.evidence_count == 1
+
+    with pytest.raises(SemanticMemoryTransitionError):
+        store.promote_candidate(candidate.candidate_id)
+    assert store.get_candidate(candidate.candidate_id).status == "proposed"
+
+    store.add_evidence(
+        SemanticMemoryEvidence(
+            candidate_id=candidate.candidate_id,
+            evidence_id="evidence-transcript-2",
+            artifact_id="transcript-2",
+            artifact_type="transcript",
+            evidence_text="The same preference appeared in a separate transcript.",
+        )
+    )
+
+    promoted = store.promote_candidate(
+        candidate.candidate_id,
+        write_provenance={"actor": "semantic-promoter"},
+    )
+    assert promoted.status == "promoted"
+    promotion_gate = promoted.metadata[SEMANTIC_MEMORY_PROMOTION_METADATA_KEY]
+    assert promotion_gate["reason"] == "repeated_evidence"
+    assert promotion_gate["evidence_count"] == 2
+    assert promotion_gate["distinct_source_count"] == 2
+    assert (
+        promoted.write_provenance["last_status_transition"][
+            SEMANTIC_MEMORY_PROMOTION_METADATA_KEY
+        ]["reason"]
+        == "repeated_evidence"
+    )
+
+
+def test_semantic_memory_promotion_thresholds_are_configurable(tmp_path: Path):
+    policy = SemanticMemoryPromotionPolicy.from_mapping(
+        {
+            "min_evidence_count": 3,
+            "min_distinct_sources": 2,
+            "trusted_structured_artifact_types": ["operator_record"],
+            "trusted_structured_metadata_keys": ["operator_verified"],
+        }
+    )
+    store = make_store(tmp_path, promotion_policy=policy)
+    candidate = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-configured-threshold",
+            candidate_type="fact",
+            text="Project Thoth has a semantic memory review queue.",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-configured-threshold",
+                evidence_id="evidence-threshold-1",
+                artifact_id="artifact-a",
+                artifact_type="note",
+            ),
+            SemanticMemoryEvidence(
+                candidate_id="candidate-configured-threshold",
+                evidence_id="evidence-threshold-2",
+                artifact_id="artifact-b",
+                artifact_type="note",
+            ),
+        ),
+    )
+
+    decision = store.evaluate_promotion(candidate.candidate_id)
+    assert decision.allowed is False
+    assert decision.min_evidence_count == 3
+    assert decision.evidence_count == 2
+
+    store.add_evidence(
+        SemanticMemoryEvidence(
+            candidate_id=candidate.candidate_id,
+            evidence_id="evidence-threshold-3",
+            artifact_id="artifact-c",
+            artifact_type="note",
+        )
+    )
+    assert store.promote_candidate(candidate.candidate_id).status == "promoted"
+
+    with pytest.raises(SemanticMemoryPromotionConfigError):
+        SemanticMemoryPromotionPolicy.from_mapping({"min_evidence_count": 0})
+
+
+def test_semantic_memory_promotes_trusted_structured_input(tmp_path: Path):
+    store = make_store(tmp_path)
+    candidate = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-trusted-structured",
+            candidate_type="person",
+            text="Ada is the operator profile owner.",
+            subject="Ada",
+            predicate="is",
+            object_value="operator profile owner",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-trusted-structured",
+                evidence_id="evidence-contact-card",
+                artifact_id="contact-card-ada",
+                artifact_type="contact_card",
+                evidence_text="Structured contact card identifies Ada.",
+            ),
+        ),
+    )
+
+    promoted = store.promote_candidate(candidate.candidate_id)
+    assert promoted.status == "promoted"
+    assert (
+        promoted.metadata[SEMANTIC_MEMORY_PROMOTION_METADATA_KEY]["reason"]
+        == "trusted_structured_input"
+    )
+
+
+def test_semantic_memory_rejected_candidates_need_new_evidence_to_reappear(
+    tmp_path: Path,
+):
+    store = make_store(tmp_path)
+    rejected = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-rejected-preference",
+            candidate_type="preference",
+            text="Ada prefers evening standups.",
+            subject="Ada",
+            predicate="prefers",
+            object_value="evening standups",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-rejected-preference",
+                evidence_id="evidence-rejected-original",
+                source_path="transcripts/day-1.txt",
+                evidence_text="A single transcript guess.",
+            ),
+        ),
+    )
+    store.transition_candidate(rejected.candidate_id, "rejected")
+
+    with pytest.raises(SemanticMemoryValidationError):
+        store.add_candidate(
+            SemanticMemoryCandidate(
+                candidate_id="candidate-rejected-reappears",
+                candidate_type="preference",
+                text="Ada prefers evening standups.",
+                subject="Ada",
+                predicate="prefers",
+                object_value="evening standups",
+            ),
+            evidence=(
+                SemanticMemoryEvidence(
+                    candidate_id="candidate-rejected-reappears",
+                    evidence_id="evidence-rejected-repeat",
+                    source_path="transcripts/day-1.txt",
+                    evidence_text="The same evidence should not re-open the claim.",
+                ),
+            ),
+        )
+
+    update_candidate = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-rejected-update",
+            candidate_type="preference",
+            text="Ada prefers written updates.",
+            subject="Ada",
+            predicate="prefers",
+            object_value="written updates",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-rejected-update",
+                evidence_id="evidence-rejected-update",
+                source_path="transcripts/day-1.txt",
+                evidence_text="The same source should not revive rejected claims.",
+            ),
+        ),
+    )
+    with pytest.raises(SemanticMemoryValidationError):
+        store.update_candidate(
+            SemanticMemoryCandidate(
+                candidate_id=update_candidate.candidate_id,
+                candidate_type="preference",
+                text="Ada prefers evening standups.",
+                subject="Ada",
+                predicate="prefers",
+                object_value="evening standups",
+            )
+        )
+
+    reappeared = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-rejected-new-evidence",
+            candidate_type="preference",
+            text="Ada prefers evening standups.",
+            subject="Ada",
+            predicate="prefers",
+            object_value="evening standups",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-rejected-new-evidence",
+                evidence_id="evidence-rejected-new",
+                source_path="transcripts/day-2.txt",
+                evidence_text="A separate source repeats the claim.",
+            ),
+        ),
+    )
+    assert reappeared.status == "proposed"
 
 
 def test_semantic_memory_fails_closed_on_invalid_inputs(tmp_path: Path):

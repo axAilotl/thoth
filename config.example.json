@@ -533,6 +533,25 @@
       "api_key": ""
     }
   },
+  "semantic_memory": {
+    "promotion": {
+      "min_evidence_count": 2,
+      "min_distinct_sources": 2,
+      "trusted_structured_artifact_types": [
+        "calendar_event",
+        "contact_card",
+        "manual_preference",
+        "manual_profile",
+        "project_manifest",
+        "structured_note",
+        "task_record"
+      ],
+      "trusted_structured_metadata_keys": [
+        "semantic_memory_trusted_structured",
+        "trusted_structured_input"
+      ]
+    }
+  },
   "youtube": {
     "enable_embeddings": true,
     "enable_transcripts": true,

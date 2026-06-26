@@ -19,6 +19,14 @@ from .metadata_db import (
     SEMANTIC_MEMORY_CANDIDATE_TYPES,
     get_metadata_db,
 )
+from .semantic_memory_promotion import (
+    SEMANTIC_MEMORY_PROMOTION_METADATA_KEY,
+    SemanticMemoryPromotionConfigError,
+    SemanticMemoryPromotionDecision,
+    SemanticMemoryPromotionPolicy,
+    metadata_flag_enabled,
+    semantic_text_fingerprint,
+)
 
 
 JsonObject = dict[str, Any]
@@ -300,8 +308,16 @@ class SemanticMemoryEvidence:
 class SemanticMemoryStore:
     """SQLite-backed repository for semantic memory candidates and evidence."""
 
-    def __init__(self, db: MetadataDB | None = None):
+    def __init__(
+        self,
+        db: MetadataDB | None = None,
+        *,
+        promotion_policy: SemanticMemoryPromotionPolicy | None = None,
+    ):
         self.db = db or get_metadata_db()
+        self.promotion_policy = (
+            promotion_policy or SemanticMemoryPromotionPolicy.from_config()
+        )
         self.db.ensure_semantic_memory_tables()
 
     def add_candidate(
@@ -311,11 +327,29 @@ class SemanticMemoryStore:
         evidence: Iterable[SemanticMemoryEvidence] = (),
     ) -> SemanticMemoryCandidate:
         """Insert a new candidate and optional evidence links."""
+        evidence_items = tuple(evidence)
         candidate = self._candidate_with_timestamps(candidate, existing=None)
         with self.db._get_connection() as conn:
             self._validate_candidate_links(conn, candidate)
+            self._validate_rejected_candidate_reappearance(
+                conn,
+                candidate,
+                evidence_items,
+            )
+            if candidate.status == "promoted":
+                promotion_decision = self._promotion_decision_in_connection(
+                    conn,
+                    candidate,
+                    evidence_items=evidence_items,
+                    explicit_status=candidate.status,
+                )
+                self._require_promotion_allowed(promotion_decision)
+                candidate = self._candidate_with_promotion_audit(
+                    candidate,
+                    promotion_decision,
+                )
             self._insert_candidate(conn, candidate)
-            for evidence_item in evidence:
+            for evidence_item in evidence_items:
                 evidence_item = self._evidence_for_candidate(
                     evidence_item,
                     candidate_id=candidate.candidate_id,
@@ -334,9 +368,20 @@ class SemanticMemoryStore:
                 raise SemanticMemoryTransitionError(
                     "semantic memory candidate_type is immutable"
                 )
+            if existing.status != candidate.status:
+                raise SemanticMemoryTransitionError(
+                    "semantic memory status changes require transition_candidate"
+                )
             _validate_status_transition(existing.status, candidate.status)
             candidate = self._candidate_with_timestamps(candidate, existing=existing)
             self._validate_candidate_links(conn, candidate)
+            if existing.status != "rejected":
+                self._validate_rejected_candidate_reappearance(
+                    conn,
+                    candidate,
+                    self._list_evidence_in_connection(conn, candidate.candidate_id),
+                    exclude_candidate_id=candidate.candidate_id,
+                )
             self._update_candidate_row(conn, candidate)
             return self._get_candidate_in_connection(conn, candidate.candidate_id)
 
@@ -361,6 +406,15 @@ class SemanticMemoryStore:
             existing = self._get_candidate_in_connection(conn, candidate_id)
             _validate_status_transition(existing.status, status)
             superseded_by_candidate_id = _clean_optional(superseded_by_candidate_id)
+            promotion_decision: SemanticMemoryPromotionDecision | None = None
+            if existing.status != "promoted" and status == "promoted":
+                promotion_decision = self._promotion_decision_in_connection(
+                    conn,
+                    existing,
+                    explicit_status=existing.status,
+                )
+                self._require_promotion_allowed(promotion_decision)
+
             if status == "superseded":
                 superseded_by_candidate_id = (
                     superseded_by_candidate_id or existing.superseded_by_candidate_id
@@ -387,6 +441,13 @@ class SemanticMemoryStore:
             if provenance_patch:
                 transition_record["write_provenance"] = provenance_patch
             next_metadata = {**existing.metadata, **metadata_patch}
+            if promotion_decision:
+                transition_record[SEMANTIC_MEMORY_PROMOTION_METADATA_KEY] = (
+                    promotion_decision.to_metadata()
+                )
+                next_metadata[SEMANTIC_MEMORY_PROMOTION_METADATA_KEY] = (
+                    promotion_decision.to_metadata()
+                )
             next_provenance = {
                 **existing.write_provenance,
                 "last_status_transition": transition_record,
@@ -413,6 +474,37 @@ class SemanticMemoryStore:
                 ),
             )
             return self._get_candidate_in_connection(conn, candidate_id)
+
+    def promote_candidate(
+        self,
+        candidate_id: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        write_provenance: Mapping[str, Any] | None = None,
+        promoted_at: str | None = None,
+    ) -> SemanticMemoryCandidate:
+        """Promote a candidate only when the configured evidence gate allows it."""
+        return self.transition_candidate(
+            candidate_id,
+            "promoted",
+            metadata=metadata,
+            write_provenance=write_provenance,
+            transitioned_at=promoted_at,
+        )
+
+    def evaluate_promotion(
+        self,
+        candidate_id: str,
+    ) -> SemanticMemoryPromotionDecision:
+        """Evaluate whether a candidate is eligible for semantic promotion."""
+        candidate_id = _clean_required(candidate_id, "candidate_id")
+        with self.db._get_connection() as conn:
+            candidate = self._get_candidate_in_connection(conn, candidate_id)
+            return self._promotion_decision_in_connection(
+                conn,
+                candidate,
+                explicit_status=candidate.status,
+            )
 
     def add_evidence(self, evidence: SemanticMemoryEvidence) -> SemanticMemoryEvidence:
         """Insert an evidence link for an existing candidate."""
@@ -626,6 +718,154 @@ class SemanticMemoryStore:
             updated_at=evidence.updated_at or now,
         )
 
+    def _candidate_with_promotion_audit(
+        self,
+        candidate: SemanticMemoryCandidate,
+        decision: SemanticMemoryPromotionDecision,
+    ) -> SemanticMemoryCandidate:
+        decision_metadata = decision.to_metadata()
+        return SemanticMemoryCandidate(
+            candidate_id=candidate.candidate_id,
+            candidate_type=candidate.candidate_type,
+            status=candidate.status,
+            subject=candidate.subject,
+            predicate=candidate.predicate,
+            object_value=candidate.object_value,
+            text=candidate.text,
+            entity_id=candidate.entity_id,
+            entity_type=candidate.entity_type,
+            entity_name=candidate.entity_name,
+            confidence=candidate.confidence,
+            privacy_class=candidate.privacy_class,
+            supersedes_candidate_id=candidate.supersedes_candidate_id,
+            superseded_by_candidate_id=candidate.superseded_by_candidate_id,
+            metadata={
+                **candidate.metadata,
+                SEMANTIC_MEMORY_PROMOTION_METADATA_KEY: decision_metadata,
+            },
+            write_provenance=candidate.write_provenance,
+            created_at=candidate.created_at,
+            updated_at=candidate.updated_at,
+            status_updated_at=candidate.status_updated_at,
+        )
+
+    def _promotion_decision_in_connection(
+        self,
+        conn: sqlite3.Connection,
+        candidate: SemanticMemoryCandidate,
+        *,
+        evidence_items: Iterable[SemanticMemoryEvidence] | None = None,
+        explicit_status: str | None = None,
+    ) -> SemanticMemoryPromotionDecision:
+        evidence_tuple = (
+            tuple(evidence_items)
+            if evidence_items is not None
+            else self._list_evidence_in_connection(conn, candidate.candidate_id)
+        )
+        source_keys = {
+            self._evidence_source_key(evidence_item)
+            for evidence_item in evidence_tuple
+        }
+        trusted_structured_input = self._is_trusted_structured_input(
+            candidate,
+            evidence_tuple,
+        )
+        explicitly_confirmed = explicit_status == "confirmed"
+        if explicitly_confirmed:
+            reason = "explicit_confirmation"
+            allowed = True
+        elif trusted_structured_input:
+            reason = "trusted_structured_input"
+            allowed = True
+        elif (
+            len(evidence_tuple) >= self.promotion_policy.min_evidence_count
+            and len(source_keys) >= self.promotion_policy.min_distinct_sources
+        ):
+            reason = "repeated_evidence"
+            allowed = True
+        else:
+            reason = "insufficient_evidence"
+            allowed = False
+        return SemanticMemoryPromotionDecision(
+            allowed=allowed,
+            reason=reason,
+            candidate_status=explicit_status or candidate.status,
+            evidence_count=len(evidence_tuple),
+            distinct_source_count=len(source_keys),
+            min_evidence_count=self.promotion_policy.min_evidence_count,
+            min_distinct_sources=self.promotion_policy.min_distinct_sources,
+            explicitly_confirmed=explicitly_confirmed,
+            trusted_structured_input=trusted_structured_input,
+        )
+
+    def _require_promotion_allowed(
+        self,
+        decision: SemanticMemoryPromotionDecision,
+    ) -> None:
+        if decision.allowed:
+            return
+        raise SemanticMemoryTransitionError(
+            "semantic memory promotion requires explicit confirmation, "
+            "trusted structured input, or repeated evidence; "
+            f"found {decision.evidence_count} evidence item(s) from "
+            f"{decision.distinct_source_count} distinct source(s), "
+            f"thresholds are {decision.min_evidence_count} evidence item(s) "
+            f"and {decision.min_distinct_sources} distinct source(s)"
+        )
+
+    def _is_trusted_structured_input(
+        self,
+        candidate: SemanticMemoryCandidate,
+        evidence_items: tuple[SemanticMemoryEvidence, ...],
+    ) -> bool:
+        keys = self.promotion_policy.trusted_structured_metadata_keys
+        if metadata_flag_enabled(candidate.metadata, keys):
+            return True
+        trusted_artifact_types = set(
+            self.promotion_policy.trusted_structured_artifact_types
+        )
+        for evidence_item in evidence_items:
+            if evidence_item.artifact_type in trusted_artifact_types:
+                return True
+            if metadata_flag_enabled(evidence_item.metadata, keys):
+                return True
+        return False
+
+    def _validate_rejected_candidate_reappearance(
+        self,
+        conn: sqlite3.Connection,
+        candidate: SemanticMemoryCandidate,
+        evidence_items: tuple[SemanticMemoryEvidence, ...],
+        *,
+        exclude_candidate_id: str | None = None,
+    ) -> None:
+        rejected_candidates = self._equivalent_rejected_candidates(
+            conn,
+            candidate,
+            exclude_candidate_id=exclude_candidate_id,
+        )
+        if not rejected_candidates:
+            return
+        new_source_keys = {
+            self._evidence_source_key(evidence_item)
+            for evidence_item in evidence_items
+        }
+        rejected_source_keys: set[str] = set()
+        for rejected_candidate in rejected_candidates:
+            rejected_source_keys.update(
+                self._evidence_source_key(evidence_item)
+                for evidence_item in self._list_evidence_in_connection(
+                    conn,
+                    rejected_candidate.candidate_id,
+                )
+            )
+        if new_source_keys.difference(rejected_source_keys):
+            return
+        raise SemanticMemoryValidationError(
+            "semantic memory candidate matches a rejected candidate and requires "
+            "new evidence before reappearing"
+        )
+
     def _evidence_for_candidate(
         self,
         evidence: SemanticMemoryEvidence,
@@ -647,6 +887,86 @@ class SemanticMemoryStore:
             self._require_candidate_exists(conn, candidate.supersedes_candidate_id)
         if candidate.superseded_by_candidate_id:
             self._require_candidate_exists(conn, candidate.superseded_by_candidate_id)
+
+    def _equivalent_rejected_candidates(
+        self,
+        conn: sqlite3.Connection,
+        candidate: SemanticMemoryCandidate,
+        *,
+        exclude_candidate_id: str | None = None,
+    ) -> tuple[SemanticMemoryCandidate, ...]:
+        fingerprint = self._candidate_fingerprint(candidate)
+        excluded_id = _clean_optional(exclude_candidate_id)
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM semantic_memory_candidates
+            WHERE status = 'rejected'
+              AND candidate_type = ?
+            """,
+            (candidate.candidate_type,),
+        ).fetchall()
+        return tuple(
+            existing
+            for existing in (self._candidate_from_row(row) for row in rows)
+            if existing.candidate_id != excluded_id
+            if self._candidate_fingerprint(existing) == fingerprint
+        )
+
+    def _candidate_fingerprint(
+        self,
+        candidate: SemanticMemoryCandidate,
+    ) -> tuple[str, ...]:
+        entity = candidate.entity_id or ":".join(
+            part
+            for part in (
+                semantic_text_fingerprint(candidate.entity_type),
+                semantic_text_fingerprint(candidate.entity_name),
+            )
+            if part
+        )
+        subject = semantic_text_fingerprint(candidate.subject)
+        predicate = semantic_text_fingerprint(candidate.predicate)
+        object_value = semantic_text_fingerprint(candidate.object_value)
+        if subject and predicate and object_value:
+            return (
+                "triple",
+                candidate.candidate_type,
+                entity,
+                subject,
+                predicate,
+                object_value,
+            )
+        return (
+            "text",
+            candidate.candidate_type,
+            entity,
+            semantic_text_fingerprint(candidate.text),
+        )
+
+    def _evidence_source_key(self, evidence: SemanticMemoryEvidence) -> str:
+        if evidence.artifact_id:
+            return f"artifact:{evidence.artifact_type or ''}:{evidence.artifact_id}"
+        if evidence.capture_event_id:
+            return f"capture_event:{evidence.capture_event_id}"
+        if evidence.source_path:
+            return f"source_path:{evidence.source_path}"
+        return f"evidence:{evidence.evidence_id}"
+
+    def _list_evidence_in_connection(
+        self,
+        conn: sqlite3.Connection,
+        candidate_id: str,
+    ) -> tuple[SemanticMemoryEvidence, ...]:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM semantic_memory_evidence
+            WHERE candidate_id = ?
+            """,
+            (_clean_required(candidate_id, "candidate_id"),),
+        ).fetchall()
+        return tuple(self._evidence_from_row(row) for row in rows)
 
     def _require_candidate_exists(
         self,
@@ -903,9 +1223,13 @@ class SemanticMemoryStore:
 __all__ = [
     "SEMANTIC_MEMORY_ALLOWED_CANDIDATE_TYPES",
     "SEMANTIC_MEMORY_ALLOWED_STATUSES",
+    "SEMANTIC_MEMORY_PROMOTION_METADATA_KEY",
     "SemanticMemoryCandidate",
     "SemanticMemoryError",
     "SemanticMemoryEvidence",
+    "SemanticMemoryPromotionConfigError",
+    "SemanticMemoryPromotionDecision",
+    "SemanticMemoryPromotionPolicy",
     "SemanticMemoryStore",
     "SemanticMemoryTransitionError",
     "SemanticMemoryValidationError",
