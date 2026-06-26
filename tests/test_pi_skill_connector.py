@@ -47,6 +47,17 @@ def _config(tmp_path: Path) -> Config:
                     "id": "collect-notes",
                     "description": "Collect notes",
                     "artifact_types": ["transcript"],
+                    "inputs": ["operator_prompt", "local_files:allowed_input_roots"],
+                    "outputs": ["skill_output_envelopes", "artifact_queue:transcript"],
+                    "auth": ["llm.providers.pi"],
+                    "safety_mode": "no_tools_json",
+                    "queue_behavior": "queues_artifacts",
+                    "allowed_side_effects": [
+                        "llm_api_call",
+                        "local_file_read",
+                        "local_file_write",
+                        "artifact_queue_write",
+                    ],
                     "source_name": "pi_skill:collect-notes",
                     "prompt": "Create transcript envelopes.",
                 }
@@ -79,6 +90,25 @@ def test_pi_skills_dry_run_exposes_locked_down_command(tmp_path: Path):
     ]
     assert "--no-context-files" in command
     assert payload["run_plan"]["safety_mode"] == "no_tools_json"
+    assert payload["run_plan"]["queue_behavior"] == "queues_artifacts"
+    assert payload["run_plan"]["allowed_side_effects"] == [
+        "llm_api_call",
+        "local_file_read",
+        "local_file_write",
+        "artifact_queue_write",
+    ]
+
+
+def test_pi_skills_missing_manifest_controls_fail_closed(tmp_path: Path):
+    config = _config(tmp_path)
+    skills = config.get("sources.pi_skills.skills")
+    skills[0].pop("safety_mode")
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    with pytest.raises(ValueError, match="requires safety_mode"):
+        service.run_connector("pi_skills", options={"skill": "collect-notes"})
 
 
 def test_pi_skills_execute_queues_valid_skill_output(monkeypatch, tmp_path: Path):

@@ -18,6 +18,15 @@ class ConnectorManifestError(ValueError):
     """Raised when a connector manifest is missing required contract fields."""
 
 
+FORBIDDEN_ALLOWED_SIDE_EFFECTS = {
+    "direct_wiki_write",
+    "wiki_write",
+    "wiki_file_write",
+    "write_wiki",
+    "wiki:write",
+}
+
+
 @dataclass(frozen=True)
 class ConnectorManifest:
     """Declarative metadata for a connector that can produce artifacts."""
@@ -26,8 +35,13 @@ class ConnectorManifest:
     source_name: str
     display_name: str
     artifact_types: tuple[str, ...]
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
     entrypoint: str
     queue_capability: bool
+    safety_mode: str
+    queue_behavior: str
+    allowed_side_effects: tuple[str, ...]
     capabilities: tuple[str, ...] = field(default_factory=tuple)
     config_keys: tuple[str, ...] = field(default_factory=tuple)
     auth: tuple[str, ...] = field(default_factory=tuple)
@@ -60,8 +74,13 @@ class ConnectorManifest:
             "display_name": self.display_name,
             "description": self.description,
             "artifact_types": list(self.artifact_types),
+            "inputs": list(self.inputs),
+            "outputs": list(self.outputs),
             "entrypoint": self.entrypoint,
             "queue_capability": self.queue_capability,
+            "queue_behavior": self.queue_behavior,
+            "safety_mode": self.safety_mode,
+            "allowed_side_effects": list(self.allowed_side_effects),
             "capabilities": list(self.capabilities),
             "config_keys": list(self.config_keys),
             "auth": list(self.auth),
@@ -87,9 +106,33 @@ class ConnectorManifest:
             field_name="artifact_types",
             origin=origin,
         )
+        inputs = _required_string_tuple(
+            value.get("inputs"),
+            field_name="inputs",
+            origin=origin,
+        )
+        outputs = _required_string_tuple(
+            value.get("outputs"),
+            field_name="outputs",
+            origin=origin,
+        )
         capabilities = _string_tuple(value.get("capabilities"))
         config_keys = _string_tuple(value.get("config_keys"))
-        auth = _string_tuple(value.get("auth"))
+        auth = _required_string_tuple(
+            value.get("auth"),
+            field_name="auth",
+            origin=origin,
+            allow_empty=True,
+        )
+        safety_mode = _required_string(value, "safety_mode", origin=origin)
+        queue_behavior = _required_string(value, "queue_behavior", origin=origin)
+        allowed_side_effects = _required_string_tuple(
+            value.get("allowed_side_effects"),
+            field_name="allowed_side_effects",
+            origin=origin,
+            allow_empty=True,
+        )
+        validate_allowed_side_effects(allowed_side_effects, origin=origin)
         source_aliases = _string_tuple(value.get("source_aliases"))
         cli_command = _optional_string(value.get("cli_command"))
         config_namespace = _optional_string(value.get("config_namespace"))
@@ -107,8 +150,13 @@ class ConnectorManifest:
             source_name=source_name,
             display_name=display_name,
             artifact_types=artifact_types,
+            inputs=inputs,
+            outputs=outputs,
             entrypoint=entrypoint,
             queue_capability=queue_capability,
+            safety_mode=safety_mode,
+            queue_behavior=queue_behavior,
+            allowed_side_effects=allowed_side_effects,
             capabilities=capabilities,
             config_keys=config_keys,
             auth=auth,
@@ -158,6 +206,8 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "display_name": "X API Bookmarks",
         "description": "Backfill X/Twitter bookmarks into the bookmark queue.",
         "artifact_types": ["tweet"],
+        "inputs": ["remote_api:x_bookmarks"],
+        "outputs": ["artifact_queue:tweet"],
         "capabilities": ["bookmarks", "oauth", "queue"],
         "config_keys": [
             "sources.x_api.client_id",
@@ -171,6 +221,14 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
             "x_api_token_bundle",
         ],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "network_ingest_queue",
+        "allowed_side_effects": [
+            "network_read",
+            "auth_token_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "core.x_api_bookmark_sync:run_x_api_bookmark_backfill",
         "cli_command": "x-api-sync",
         "config_namespace": "sources.x_api",
@@ -183,6 +241,8 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "display_name": "arXiv",
         "description": "Discover papers from arXiv search and category feeds.",
         "artifact_types": ["paper"],
+        "inputs": ["remote_api:arxiv"],
+        "outputs": ["artifact_queue:paper"],
         "capabilities": ["papers", "metadata", "queue"],
         "config_keys": [
             "sources.arxiv.source",
@@ -193,6 +253,13 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         ],
         "auth": [],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "network_ingest_queue",
+        "allowed_side_effects": [
+            "network_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "collectors.arxiv_collector:ArXivCollector",
         "cli_command": "arxiv",
         "config_namespace": "sources.arxiv",
@@ -204,6 +271,8 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "display_name": "GitHub Stars",
         "description": "Collect starred GitHub repositories.",
         "artifact_types": ["repository"],
+        "inputs": ["remote_api:github_stars"],
+        "outputs": ["artifact_queue:repository"],
         "capabilities": ["repositories", "stars", "queue"],
         "config_keys": [
             "sources.github.enabled",
@@ -213,6 +282,14 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         ],
         "auth": ["sources.github.token", "GITHUB_API", "GITHUB_TOKEN"],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "network_ingest_queue",
+        "allowed_side_effects": [
+            "network_read",
+            "auth_token_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "collectors.social_collector:SocialCollector.discover_github_stars",
         "cli_command": "social",
         "config_namespace": "sources.github",
@@ -224,6 +301,8 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "display_name": "Hugging Face Likes",
         "description": "Collect liked Hugging Face models, datasets, and spaces.",
         "artifact_types": ["repository"],
+        "inputs": ["remote_api:huggingface_likes"],
+        "outputs": ["artifact_queue:repository"],
         "capabilities": ["repositories", "likes", "queue"],
         "config_keys": [
             "sources.huggingface.enabled",
@@ -242,6 +321,14 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
             "HUGGINGFACE_API_TOKEN",
         ],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "network_ingest_queue",
+        "allowed_side_effects": [
+            "network_read",
+            "auth_token_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "collectors.social_collector:SocialCollector.discover_hf_likes",
         "cli_command": "social",
         "config_namespace": "sources.huggingface",
@@ -253,6 +340,11 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "display_name": "Web Clipper",
         "description": "Index configured Web Clipper notes and staged attachments.",
         "artifact_types": ["web_clipper"],
+        "inputs": [
+            "local_files:web_clipper_notes",
+            "local_files:web_clipper_attachments",
+        ],
+        "outputs": ["artifact_queue:web_clipper"],
         "capabilities": ["markdown", "frontmatter", "attachments", "queue"],
         "config_keys": [
             "sources.web_clipper.enabled",
@@ -263,6 +355,13 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         ],
         "auth": [],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "local_ingest_queue",
+        "allowed_side_effects": [
+            "local_file_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "collectors.web_clipper_collector:WebClipperCollector",
         "cli_command": "web-clipper",
         "config_namespace": "sources.web_clipper",
@@ -274,6 +373,12 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "display_name": "YouTube",
         "description": "Collect YouTube video metadata and transcripts from URLs, playlists, and local exports.",
         "artifact_types": ["video", "transcript"],
+        "inputs": [
+            "remote_api:youtube",
+            "remote_media:youtube",
+            "local_files:youtube_exports",
+        ],
+        "outputs": ["artifact_queue:video", "artifact_queue:transcript"],
         "capabilities": ["video", "transcripts", "playlists", "exports", "queue", "archive"],
         "config_keys": [
             "sources.youtube.enabled",
@@ -287,6 +392,15 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         ],
         "auth": ["sources.youtube.api_key", "YOUTUBE_API_KEY"],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "network_ingest_queue",
+        "allowed_side_effects": [
+            "network_read",
+            "auth_token_read",
+            "local_file_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "collectors.youtube_connector:YouTubeConnector",
         "cli_command": "connectors run youtube",
         "config_namespace": "sources.youtube",
@@ -299,6 +413,8 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "display_name": "Omi / Personal Transcripts",
         "description": "Collect Omi conversations or local transcript exports while preserving raw sources and speaker/session/device metadata.",
         "artifact_types": ["transcript"],
+        "inputs": ["remote_api:omi", "local_files:omi_exports"],
+        "outputs": ["artifact_queue:transcript"],
         "capabilities": [
             "transcripts",
             "personal_data",
@@ -324,6 +440,15 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         ],
         "auth": ["sources.omi.api_key", "OMI_API_KEY"],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "network_ingest_queue",
+        "allowed_side_effects": [
+            "network_read",
+            "auth_token_read",
+            "local_file_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "collectors.personal_transcript_connector:PersonalTranscriptConnector",
         "cli_command": "connectors run omi",
         "config_namespace": "sources.omi",
@@ -343,6 +468,8 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
             "video",
             "web_clipper",
         ],
+        "inputs": ["local_files:skill_output_envelopes"],
+        "outputs": ["artifact_queue:*"],
         "capabilities": ["skills", "envelopes", "queue", "raw_preservation"],
         "config_keys": [
             "sources.skill_outputs.enabled",
@@ -353,6 +480,13 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         ],
         "auth": [],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "queue_only",
+        "allowed_side_effects": [
+            "local_file_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "collectors.skill_output_connector:SkillOutputConnector",
         "cli_command": "connectors run skill_outputs",
         "config_namespace": "sources.skill_outputs",
@@ -372,6 +506,8 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
             "video",
             "web_clipper",
         ],
+        "inputs": ["operator_prompt", "local_files:allowed_input_roots"],
+        "outputs": ["skill_output_envelopes", "artifact_queue:*"],
         "capabilities": ["skills", "pi", "envelopes", "queue", "raw_preservation"],
         "config_keys": [
             "sources.pi_skills.enabled",
@@ -383,6 +519,15 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         ],
         "auth": ["llm.providers.pi", "llm.providers.pi_openrouter"],
         "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "no_tools_json",
+        "allowed_side_effects": [
+            "llm_api_call",
+            "subprocess_exec",
+            "local_file_read",
+            "local_file_write",
+            "artifact_queue_write",
+        ],
         "entrypoint": "collectors.pi_skill_connector:PiSkillConnector",
         "cli_command": "connectors run pi_skills",
         "config_namespace": "sources.pi_skills",
@@ -520,8 +665,28 @@ def _required_string_tuple(
     *,
     field_name: str,
     origin: str,
+    allow_empty: bool = False,
 ) -> tuple[str, ...]:
+    if value is None:
+        raise ConnectorManifestError(f"{origin}: connector manifest requires {field_name}")
     items = _string_tuple(value)
-    if not items:
+    if not items and not allow_empty:
         raise ConnectorManifestError(f"{origin}: connector manifest requires {field_name}")
     return items
+
+
+def validate_allowed_side_effects(
+    side_effects: Iterable[str],
+    *,
+    origin: str,
+) -> None:
+    for side_effect in side_effects:
+        normalized = str(side_effect).strip().lower().replace("-", "_")
+        if normalized in FORBIDDEN_ALLOWED_SIDE_EFFECTS:
+            raise ConnectorManifestError(
+                f"{origin}: connector manifest cannot allow direct wiki writes"
+            )
+        if "wiki" in normalized and "write" in normalized:
+            raise ConnectorManifestError(
+                f"{origin}: connector manifest cannot allow direct wiki writes"
+            )

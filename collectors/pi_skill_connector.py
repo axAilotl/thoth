@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from core.config import Config, config
+from core.connector_registry import ConnectorManifestError, validate_allowed_side_effects
 from core.llm_interface import LLMInterface
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
@@ -39,6 +40,12 @@ class PiSkillDefinition:
     description: str = ""
     prompt: str = ""
     artifact_types: tuple[str, ...] = field(default_factory=tuple)
+    inputs: tuple[str, ...] = field(default_factory=tuple)
+    outputs: tuple[str, ...] = field(default_factory=tuple)
+    auth: tuple[str, ...] = field(default_factory=tuple)
+    safety_mode: str = ""
+    queue_behavior: str = ""
+    allowed_side_effects: tuple[str, ...] = field(default_factory=tuple)
     source_name: str = DEFAULT_SOURCE_NAME
     input_roots: tuple[Path, ...] = field(default_factory=tuple)
 
@@ -107,6 +114,12 @@ class PiSkillConnector:
             "skill_id": skill.id,
             "description": skill.description,
             "artifact_types": list(skill.artifact_types),
+            "inputs": list(skill.inputs),
+            "outputs": list(skill.outputs),
+            "auth": list(skill.auth),
+            "safety_mode": skill.safety_mode,
+            "queue_behavior": skill.queue_behavior,
+            "allowed_side_effects": list(skill.allowed_side_effects),
             "source_name": skill.source_name,
             "output_dir": str(self._resolve_output_dir(output_dir)),
             "input_paths": [str(path) for path in resolved_inputs],
@@ -115,7 +128,6 @@ class PiSkillConnector:
                 "model": route.model,
                 "command": command,
             },
-            "safety_mode": "no_tools_json",
             "has_prompt": bool(str(prompt or "").strip() or skill.prompt.strip()),
         }
 
@@ -215,13 +227,54 @@ class PiSkillConnector:
                 )
             )
             if not artifact_types:
-                artifact_types = tuple(sorted(SUPPORTED_ARTIFACT_TYPES))
+                raise ValueError(f"Pi skill {skill_id!r} requires artifact_types")
             unsupported = set(artifact_types) - SUPPORTED_ARTIFACT_TYPES
             if unsupported:
                 raise ValueError(
                     f"Pi skill {skill_id!r} declares unsupported artifact types: "
                     f"{', '.join(sorted(unsupported))}"
                 )
+            inputs = _required_string_list(
+                raw_skill,
+                "inputs",
+                skill_id=skill_id,
+                allow_empty=False,
+            )
+            outputs = _required_string_list(
+                raw_skill,
+                "outputs",
+                skill_id=skill_id,
+                allow_empty=False,
+            )
+            auth = _required_string_list(
+                raw_skill,
+                "auth",
+                skill_id=skill_id,
+                allow_empty=True,
+            )
+            safety_mode = _required_string(raw_skill, "safety_mode", skill_id=skill_id)
+            if safety_mode != "no_tools_json":
+                raise ValueError(
+                    f"Pi skill {skill_id!r} safety_mode must be 'no_tools_json'"
+                )
+            queue_behavior = _required_string(
+                raw_skill,
+                "queue_behavior",
+                skill_id=skill_id,
+            )
+            allowed_side_effects = _required_string_list(
+                raw_skill,
+                "allowed_side_effects",
+                skill_id=skill_id,
+                allow_empty=True,
+            )
+            try:
+                validate_allowed_side_effects(
+                    allowed_side_effects,
+                    origin=f"Pi skill {skill_id!r}",
+                )
+            except ConnectorManifestError as exc:
+                raise ValueError(str(exc)) from exc
             input_roots = tuple(
                 self._resolve_root(path)
                 for path in _string_list(raw_skill.get("input_roots"))
@@ -231,6 +284,12 @@ class PiSkillConnector:
                 description=_clean_string(raw_skill.get("description")) or "",
                 prompt=prompt or "",
                 artifact_types=artifact_types,
+                inputs=inputs,
+                outputs=outputs,
+                auth=auth,
+                safety_mode=safety_mode,
+                queue_behavior=queue_behavior,
+                allowed_side_effects=allowed_side_effects,
                 source_name=(
                     _clean_string(raw_skill.get("source_name"))
                     or f"{DEFAULT_SOURCE_NAME}:{skill_id}"
@@ -543,6 +602,36 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(item).strip() for item in value if str(item).strip()]
     return [str(value).strip()] if str(value).strip() else []
+
+
+def _required_string(
+    value: Mapping[str, Any],
+    field_name: str,
+    *,
+    skill_id: str,
+) -> str:
+    text = _clean_string(value.get(field_name))
+    if not text:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    return text
+
+
+def _required_string_list(
+    value: Mapping[str, Any],
+    field_name: str,
+    *,
+    skill_id: str,
+    allow_empty: bool,
+) -> tuple[str, ...]:
+    if field_name not in value:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    raw_items = value.get(field_name)
+    if not isinstance(raw_items, (list, tuple, set)):
+        raise ValueError(f"Pi skill {skill_id!r} {field_name} must be an array")
+    items = tuple(str(item).strip() for item in raw_items if str(item).strip())
+    if not items and not allow_empty:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    return items
 
 
 def _clean_string(value: Any) -> str | None:

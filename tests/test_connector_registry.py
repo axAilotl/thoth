@@ -31,7 +31,11 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
         "pi_skills",
     ]
     assert registry.get("arxiv").artifact_types == ("paper",)
+    assert registry.get("arxiv").inputs == ("remote_api:arxiv",)
+    assert registry.get("arxiv").outputs == ("artifact_queue:paper",)
     assert registry.get("github").queue_capability is True
+    assert registry.get("github").queue_behavior == "queues_artifacts"
+    assert registry.get("skill_outputs").safety_mode == "queue_only"
     assert registry.get("x_api").is_enabled(config) is True
     assert registry.get("web_clipper").is_enabled(config) is False
     assert registry.get("omi").artifact_types == ("transcript",)
@@ -50,10 +54,19 @@ def test_plugin_connector_manifest_is_loaded_after_builtins(tmp_path: Path):
                 "source_name": "meeting_notes",
                 "display_name": "Meeting Notes Export",
                 "artifact_types": ["transcript"],
+                "inputs": ["local_files:meeting_notes_export"],
+                "outputs": ["artifact_queue:transcript"],
                 "capabilities": ["transcripts", "queue"],
                 "config_keys": ["sources.meeting_notes.export_dir"],
                 "auth": [],
                 "queue_capability": True,
+                "queue_behavior": "queues_artifacts",
+                "safety_mode": "local_ingest_queue",
+                "allowed_side_effects": [
+                    "local_file_read",
+                    "raw_file_write",
+                    "artifact_queue_write",
+                ],
                 "entrypoint": "collectors.personal.meeting_notes:MeetingNotesConnector",
                 "cli_command": "connectors run meeting_notes",
                 "config_namespace": "sources.meeting_notes",
@@ -81,6 +94,15 @@ def test_invalid_plugin_connector_manifest_fails_closed(tmp_path: Path):
                 "name": "broken",
                 "source_name": "broken",
                 "artifact_types": ["paper"],
+                "inputs": ["remote_api:broken"],
+                "outputs": ["artifact_queue:paper"],
+                "auth": [],
+                "queue_behavior": "queues_artifacts",
+                "safety_mode": "network_ingest_queue",
+                "allowed_side_effects": [
+                    "network_read",
+                    "artifact_queue_write",
+                ],
                 "entrypoint": "collectors.broken:Broken",
             }
         ),
@@ -90,6 +112,61 @@ def test_invalid_plugin_connector_manifest_fails_closed(tmp_path: Path):
     config.data = {"connectors": {"plugin_dirs": [str(plugin_dir)]}}
 
     with pytest.raises(ConnectorManifestError, match="queue_capability"):
+        load_connector_registry(config, project_root=tmp_path)
+
+
+def test_plugin_connector_manifest_requires_safety_metadata(tmp_path: Path):
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    (plugin_dir / "missing-safety.connector.json").write_text(
+        json.dumps(
+            {
+                "name": "missing_safety",
+                "source_name": "missing_safety",
+                "artifact_types": ["paper"],
+                "inputs": ["remote_api:papers"],
+                "outputs": ["artifact_queue:paper"],
+                "auth": [],
+                "queue_capability": True,
+                "queue_behavior": "queues_artifacts",
+                "allowed_side_effects": ["network_read", "artifact_queue_write"],
+                "entrypoint": "collectors.missing_safety:MissingSafety",
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = Config()
+    config.data = {"connectors": {"plugin_dirs": [str(plugin_dir)]}}
+
+    with pytest.raises(ConnectorManifestError, match="safety_mode"):
+        load_connector_registry(config, project_root=tmp_path)
+
+
+def test_plugin_connector_manifest_rejects_wiki_write_side_effect(tmp_path: Path):
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    (plugin_dir / "unsafe.connector.json").write_text(
+        json.dumps(
+            {
+                "name": "unsafe",
+                "source_name": "unsafe",
+                "artifact_types": ["paper"],
+                "inputs": ["local_files:unsafe"],
+                "outputs": ["artifact_queue:paper"],
+                "auth": [],
+                "queue_capability": True,
+                "queue_behavior": "queues_artifacts",
+                "safety_mode": "local_ingest_queue",
+                "allowed_side_effects": ["direct_wiki_write"],
+                "entrypoint": "collectors.unsafe:Unsafe",
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = Config()
+    config.data = {"connectors": {"plugin_dirs": [str(plugin_dir)]}}
+
+    with pytest.raises(ConnectorManifestError, match="direct wiki writes"):
         load_connector_registry(config, project_root=tmp_path)
 
 
