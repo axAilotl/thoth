@@ -44,6 +44,13 @@ def test_wiki_query_searches_and_writes_back_curated_pages(tmp_path: Path, monke
                 kind="entity",
                 summary="Repository summary",
                 source_paths=("stars/owner_repo_summary.md",),
+                influence_sources=(
+                    {
+                        "label": "S1",
+                        "source_path": "stars/owner_repo_summary.md",
+                        "source_type": "repository",
+                    },
+                ),
                 related_slugs=("owner-repo",),
                 updated_at="2026-04-04T00:00:00Z",
             ),
@@ -83,6 +90,7 @@ def test_wiki_query_searches_and_writes_back_curated_pages(tmp_path: Path, monke
 
         assert len(result.hits) == 1
         assert result.hits[0].slug == "repo-owner-repo"
+        assert result.hits[0].influence_sources[0]["source_path"] == "stars/owner_repo_summary.md"
         assert "body" in result.hits[0].matched_fields or "phrase" in result.hits[0].matched_fields
         review_result = runner.search(
             "agentic workflows",
@@ -110,6 +118,7 @@ def test_wiki_query_searches_and_writes_back_curated_pages(tmp_path: Path, monke
         assert "thoth_type: wiki_query" in page_content
         assert "Curated answer for the wiki loop." in page_content
         assert "repo-owner-repo" in page_content
+        assert "Influence Sources: `stars/owner_repo_summary.md`" in page_content
         assert index_path.read_text(encoding="utf-8").count("query-agentic-workflows.md") == 1
     finally:
         config.data = original

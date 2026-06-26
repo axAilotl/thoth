@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 from collectors.web_clipper_layout import (
     WebClipperSourceContract,
@@ -17,7 +17,12 @@ from collectors.web_clipper_parser import parse_web_clipper_markdown
 from ..config import Config
 from ..metadata_db import MetadataDB, get_metadata_db
 from ..path_layout import PathLayout, build_path_layout
-from ..prompt_security import prompt_security_requires_review
+from ..prompt_security import (
+    THOTH_SECURITY_POLICY_KEY,
+    prompt_security_metadata_for_text,
+    prompt_security_policy_for_metadata,
+    prompt_security_requires_review,
+)
 from ..wiki_io import read_document
 from .models import (
     ArchivistCandidate,
@@ -215,6 +220,11 @@ def materialize_candidate(
         size_bytes=document.size_bytes,
         updated_at=document.updated_at,
         source_id=document.source_id,
+        source_key=document.source_key,
+        source_trust_score=document.source_trust_score,
+        source_trust_reason=document.source_trust_reason,
+        source_security_status=document.source_security_status,
+        source_security_pattern_ids=document.source_security_pattern_ids,
         retrieval_score=retrieval_score,
         retrieval_sources=retrieval_sources,
         full_text_score=full_text_score,
@@ -255,7 +265,16 @@ def _load_or_parse_document(
         and existing.size_bytes == stat.st_size
         and existing.path == path
     ):
-        return existing, True
+        secured_existing = _apply_source_trust_metadata(
+            existing,
+            path=path,
+            suffix=suffix,
+        )
+        if secured_existing is None:
+            return None, False
+        if secured_existing != existing:
+            db.upsert_archivist_corpus_document(secured_existing)
+        return secured_existing, True
 
     source_id = _lookup_source_id(path, layout=layout, db=db)
     if _is_security_excluded_path(path, suffix=suffix, db=db, source_id=source_id):
@@ -294,8 +313,15 @@ def _load_or_parse_document(
         updated_at=updated_at,
         source_id=source_id,
     )
-    db.upsert_archivist_corpus_document(document)
-    return document, False
+    secured_document = _apply_source_trust_metadata(
+        document,
+        path=path,
+        suffix=suffix,
+    )
+    if secured_document is None:
+        return None, False
+    db.upsert_archivist_corpus_document(secured_document)
+    return secured_document, False
 
 
 def _lookup_source_id(path: Path, *, layout: PathLayout, db: MetadataDB) -> str | None:
@@ -336,6 +362,75 @@ def _is_security_excluded_path(
         or ""
     ).strip()
     return bool(artifact_id and db.ingestion_entry_requires_security_review(artifact_id))
+
+
+def _apply_source_trust_metadata(
+    document: ArchivistCorpusDocument,
+    *,
+    path: Path,
+    suffix: str,
+) -> ArchivistCorpusDocument | None:
+    source_label = _source_label_for_document(document)
+    metadata = prompt_security_metadata_for_text(
+        document.content_text,
+        source_label=source_label,
+        scope="context",
+    )
+    frontmatter = _prompt_security_frontmatter(path, suffix=suffix)
+    existing_policy = frontmatter.get(THOTH_SECURITY_POLICY_KEY)
+    if existing_policy:
+        metadata = {
+            **metadata,
+            THOTH_SECURITY_POLICY_KEY: existing_policy,
+        }
+    policy = prompt_security_policy_for_metadata(
+        metadata,
+        source_type=document.source_type,
+        source_label=source_label,
+        source_path=document.scope_relative_path,
+    )
+    if prompt_security_requires_review({THOTH_SECURITY_POLICY_KEY: policy}):
+        return None
+
+    trust_score, trust_reason = _source_trust_for_policy(policy)
+    pattern_ids = tuple(str(item) for item in policy.get("pattern_ids") or ())
+    return replace(
+        document,
+        source_key=_source_key_for_document(document),
+        source_trust_score=trust_score,
+        source_trust_reason=trust_reason,
+        source_security_status=str(policy.get("status") or "allowed"),
+        source_security_pattern_ids=pattern_ids,
+    )
+
+
+def _prompt_security_frontmatter(path: Path, *, suffix: str) -> dict[str, Any]:
+    if suffix not in {".md", ".markdown"}:
+        return {}
+    document = read_document(path)
+    return document.frontmatter if isinstance(document.frontmatter, dict) else {}
+
+
+def _source_key_for_document(document: ArchivistCorpusDocument) -> str:
+    if document.source_id:
+        return f"{document.source_type}:{document.source_id}"
+    return f"file:{document.scope}:{document.scope_relative_path}"
+
+
+def _source_label_for_document(document: ArchivistCorpusDocument) -> str:
+    if document.source_id:
+        return f"{document.source_type}:{document.source_id}"
+    return f"{document.source_type}:{document.scope_relative_path}"
+
+
+def _source_trust_for_policy(policy: Mapping[str, Any]) -> tuple[float, str]:
+    status = str(policy.get("status") or "allowed")
+    reason = str(policy.get("reason") or "no_prompt_security_findings")
+    if status == "override_approved":
+        return 0.9, "prompt_security_override_approved"
+    if reason == "low_risk_wrapped":
+        return 0.65, "prompt_security_low_risk_wrapped"
+    return 1.0, f"prompt_security_{reason}"
 
 
 def _read_text_document(

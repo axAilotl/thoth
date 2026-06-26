@@ -281,6 +281,7 @@ class CompiledWikiUpdater:
             summary=spec.summary,
             aliases=spec.aliases,
             source_paths=spec.source_paths,
+            influence_sources=spec.influence_sources,
             related_slugs=spec.related_slugs,
             language=spec.language,
             translated_from=spec.translated_from,
@@ -357,13 +358,18 @@ class CompiledWikiUpdater:
 
     def _page_spec_for_artifact(self, artifact: KnowledgeArtifact) -> WikiPageSpec:
         title, slug, kind, summary, aliases = self._title_slug_and_summary(artifact)
+        source_paths = self._source_paths_for_artifact(artifact)
         return WikiPageSpec(
             title=title,
             slug=slug,
             kind=kind,
             summary=summary,
             aliases=aliases,
-            source_paths=self._source_paths_for_artifact(artifact),
+            source_paths=source_paths,
+            influence_sources=self._influence_sources_for_artifact(
+                artifact,
+                source_paths=source_paths,
+            ),
             language=self._language_for_artifact(artifact),
             created_at=_now_iso(),
             updated_at=_now_iso(),
@@ -495,6 +501,22 @@ class CompiledWikiUpdater:
                 continue
         deduped = dict.fromkeys(normalized)
         return tuple(deduped.keys())
+
+    def _influence_sources_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        source_paths: tuple[str, ...],
+    ) -> tuple[dict[str, Any], ...]:
+        records: list[dict[str, Any]] = []
+        for source_path in sorted(source_paths):
+            record = {
+                "source_path": source_path,
+                "source_type": artifact.source_type,
+                "artifact_id": artifact.id,
+            }
+            records.append({key: value for key, value in record.items() if value})
+        return tuple(records)
 
     def _metadata_mappings_for_artifact(
         self, artifact: KnowledgeArtifact

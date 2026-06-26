@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import os
 import re
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from .config import Config
 from .path_layout import PathLayout, build_path_layout
@@ -55,6 +55,17 @@ def _frontmatter_sequence(frontmatter: dict, *keys: str) -> tuple[str, ...]:
     return tuple(str(item) for item in value or ())
 
 
+def _frontmatter_mapping_sequence(frontmatter: dict, *keys: str) -> tuple[dict[str, Any], ...]:
+    value = _frontmatter_value(frontmatter, *keys)
+    if value is None:
+        return tuple()
+    if isinstance(value, dict):
+        return (dict(value),)
+    if not isinstance(value, (list, tuple)):
+        return tuple()
+    return tuple(dict(item) for item in value if isinstance(item, dict))
+
+
 @dataclass(frozen=True)
 class WikiQueryHit:
     """Single wiki search match."""
@@ -66,6 +77,7 @@ class WikiQueryHit:
     record_type: str
     kind: str
     source_paths: tuple[str, ...]
+    influence_sources: tuple[dict[str, Any], ...]
     related_slugs: tuple[str, ...]
     matched_fields: tuple[str, ...]
     score: int
@@ -144,6 +156,11 @@ class WikiQueryRunner:
             record_type = str(frontmatter.get("thoth_type") or "wiki_page")
             kind = str(_frontmatter_value(frontmatter, "thoth_kind", "kind") or "topic")
             source_paths = _frontmatter_sequence(frontmatter, "thoth_source_paths", "source_paths")
+            influence_sources = _frontmatter_mapping_sequence(
+                frontmatter,
+                "thoth_influence_sources",
+                "influence_sources",
+            )
             related_slugs = _frontmatter_sequence(frontmatter, "thoth_related_slugs", "related_slugs")
             aliases = _frontmatter_sequence(frontmatter, "thoth_aliases", "aliases")
 
@@ -186,6 +203,7 @@ class WikiQueryRunner:
                     record_type=record_type,
                     kind=kind,
                     source_paths=source_paths,
+                    influence_sources=influence_sources,
                     related_slugs=related_slugs,
                     matched_fields=tuple(dict.fromkeys(matched_fields)),
                     score=score,
@@ -230,6 +248,14 @@ class WikiQueryRunner:
             source_paths=tuple(
                 self._relative_wiki_path(hit.page_path) for hit in selected
             ),
+            influence_sources=tuple(
+                {
+                    "source_path": self._relative_wiki_path(hit.page_path),
+                    "source_type": "wiki_page",
+                    "slug": hit.slug,
+                }
+                for hit in selected
+            ),
             related_slugs=tuple(hit.slug for hit in selected),
             language="en",
             record_type="wiki_query",
@@ -260,6 +286,16 @@ class WikiQueryRunner:
             body_lines.append(f"- [{hit.title}]({rel_link})")
             body_lines.append(f"  - Score: `{hit.score}`")
             body_lines.append(f"  - Matched Fields: `{fields}`")
+            if hit.influence_sources:
+                influence_paths = tuple(
+                    str(record.get("source_path") or "")
+                    for record in hit.influence_sources
+                    if str(record.get("source_path") or "").strip()
+                )
+                if influence_paths:
+                    body_lines.append(
+                        f"  - Influence Sources: `{', '.join(dict.fromkeys(influence_paths))}`"
+                    )
 
         if curated_notes:
             body_lines.extend(["", "## Curated Notes", "", curated_notes.strip(), ""])

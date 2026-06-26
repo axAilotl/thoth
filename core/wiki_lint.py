@@ -418,6 +418,8 @@ class WikiLintRunner:
         for field_name in (
             "thoth_source_paths",
             "source_paths",
+            "thoth_influence_sources",
+            "influence_sources",
             "thoth_related_slugs",
             "related_slugs",
         ):
