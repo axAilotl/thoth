@@ -55,6 +55,17 @@ def test_settings_api_returns_runtime_summary(monkeypatch, tmp_path: Path):
                     {
                         "id": "knowledge-collation",
                         "artifact_types": ["transcript"],
+                        "inputs": ["operator_prompt", "local_files:allowed_input_roots"],
+                        "outputs": ["skill_output_envelopes", "artifact_queue:transcript"],
+                        "auth": ["llm.providers.pi"],
+                        "safety_mode": "no_tools_json",
+                        "queue_behavior": "queues_artifacts",
+                        "allowed_side_effects": [
+                            "llm_api_call",
+                            "local_file_read",
+                            "local_file_write",
+                            "artifact_queue_write",
+                        ],
                     }
                 ],
             },

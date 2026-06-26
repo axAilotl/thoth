@@ -44,6 +44,17 @@ def make_config_data(tmp_path: Path) -> dict:
                         "id": "knowledge-collation",
                         "description": "Collate user data",
                         "artifact_types": ["transcript"],
+                        "inputs": ["operator_prompt", "local_files:allowed_input_roots"],
+                        "outputs": ["skill_output_envelopes", "artifact_queue:transcript"],
+                        "auth": ["llm.providers.pi"],
+                        "safety_mode": "no_tools_json",
+                        "queue_behavior": "queues_artifacts",
+                        "allowed_side_effects": [
+                            "llm_api_call",
+                            "local_file_read",
+                            "local_file_write",
+                            "artifact_queue_write",
+                        ],
                     }
                 ],
             },
@@ -124,6 +135,13 @@ topics:
     assert summary["groups"]["connectors"]["total"] == 9
     assert summary["groups"]["skills"]["total"] == 1
     assert summary["groups"]["skills"]["safety_mode"] == "no_tools_json"
+    assert summary["groups"]["skills"]["items"][0]["inputs"] == [
+        "operator_prompt",
+        "local_files:allowed_input_roots",
+    ]
+    assert summary["groups"]["skills"]["items"][0]["queue_behavior"] == (
+        "queues_artifacts"
+    )
     assert "web_clipper" in summary["groups"]["connectors"]["enabled"]
     x_api_connector = next(
         item
@@ -131,6 +149,9 @@ topics:
         if item["name"] == "x_api"
     )
     assert "sources.x_api.client_id" in x_api_connector["config_keys"]
+    assert x_api_connector["inputs"] == ["remote_api:x_bookmarks"]
+    assert x_api_connector["queue_behavior"] == "queues_artifacts"
+    assert "artifact_queue_write" in x_api_connector["allowed_side_effects"]
     assert x_api_connector["auth_status"]["keys"] == [
         "sources.x_api.client_id",
         "sources.x_api.redirect_uri",
@@ -171,3 +192,13 @@ def test_settings_summary_hides_web_clipper_watch_dirs_when_disabled(tmp_path: P
         if item["name"] == "web_clipper"
     )
     assert web_clipper_connector["enabled"] is False
+
+
+def test_settings_summary_reports_invalid_pi_skill_manifest(tmp_path: Path):
+    config_data = make_config_data(tmp_path)
+    config_data["sources"]["pi_skills"]["skills"][0].pop("allowed_side_effects")
+
+    summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
+
+    assert summary["groups"]["skills"]["total"] == 0
+    assert "requires allowed_side_effects" in summary["groups"]["skills"]["error"]

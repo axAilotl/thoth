@@ -657,6 +657,25 @@
             "video",
             "web_clipper"
           ],
+          "inputs": [
+            "operator_prompt",
+            "local_files:allowed_input_roots"
+          ],
+          "outputs": [
+            "skill_output_envelopes",
+            "artifact_queue:*"
+          ],
+          "auth": [
+            "llm.providers.pi"
+          ],
+          "safety_mode": "no_tools_json",
+          "queue_behavior": "queues_artifacts",
+          "allowed_side_effects": [
+            "llm_api_call",
+            "local_file_read",
+            "local_file_write",
+            "artifact_queue_write"
+          ],
           "source_name": "pi_skill:knowledge-collation",
           "prompt": "Convert the supplied user-owned material into Thoth skill output envelopes. Preserve provenance in payload.custom_metadata where possible. Return only JSON with an artifacts array."
         }

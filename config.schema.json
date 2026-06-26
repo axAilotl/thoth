@@ -432,13 +432,40 @@
                     "type": "array",
                     "items": { "type": "string" }
                   },
+                  "inputs": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "outputs": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "auth": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "safety_mode": { "type": "string" },
+                  "queue_behavior": { "type": "string" },
+                  "allowed_side_effects": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
                   "source_name": { "type": "string" },
                   "input_roots": {
                     "type": "array",
                     "items": { "type": "string" }
                   }
                 },
-                "required": ["id"],
+                "required": [
+                  "id",
+                  "artifact_types",
+                  "inputs",
+                  "outputs",
+                  "auth",
+                  "safety_mode",
+                  "queue_behavior",
+                  "allowed_side_effects"
+                ],
                 "additionalProperties": true
               }
             }

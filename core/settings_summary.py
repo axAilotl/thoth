@@ -8,7 +8,11 @@ from typing import Any, Protocol
 
 from .archivist_topics import load_archivist_topic_registry, resolve_archivist_topics_path
 from .config import Config
-from .connector_registry import load_connector_registry
+from .connector_registry import (
+    ConnectorManifestError,
+    load_connector_registry,
+    validate_allowed_side_effects,
+)
 from .metadata_db import MetadataDB
 from .path_layout import build_path_layout
 
@@ -194,6 +198,25 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
             }
         )
 
+    try:
+        skills = [
+            _summarize_pi_skill_manifest(item)
+            for item in skill_items
+            if item.get("id")
+        ]
+    except (ConnectorManifestError, ValueError) as exc:
+        return {
+            "enabled": bool(source_config.get("enabled", True)),
+            "output_dir": str(output_path),
+            "safety_mode": "no_tools_json",
+            "default_provider": str(source_config.get("default_provider") or "pi"),
+            "default_model": str(source_config.get("default_model") or "archivist_agent"),
+            "routes": routes,
+            "total": 0,
+            "skills": [],
+            "error": str(exc),
+        }
+
     return {
         "enabled": bool(source_config.get("enabled", True)),
         "output_dir": str(output_path),
@@ -201,18 +224,77 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
         "default_provider": str(source_config.get("default_provider") or "pi"),
         "default_model": str(source_config.get("default_model") or "archivist_agent"),
         "routes": routes,
-        "total": len(skill_items),
-        "skills": [
-            {
-                "id": str(item.get("id") or ""),
-                "description": str(item.get("description") or ""),
-                "artifact_types": list(item.get("artifact_types") or []),
-                "source_name": str(item.get("source_name") or ""),
-            }
-            for item in skill_items
-            if item.get("id")
-        ],
+        "total": len(skills),
+        "skills": skills,
     }
+
+
+def _summarize_pi_skill_manifest(item: dict[str, Any]) -> dict[str, Any]:
+    skill_id = str(item.get("id") or "").strip()
+    if not skill_id:
+        raise ValueError("Pi skill definition missing id")
+    artifact_types = _required_manifest_list(item, "artifact_types", skill_id=skill_id)
+    inputs = _required_manifest_list(item, "inputs", skill_id=skill_id)
+    outputs = _required_manifest_list(item, "outputs", skill_id=skill_id)
+    auth = _required_manifest_list(item, "auth", skill_id=skill_id, allow_empty=True)
+    safety_mode = _required_manifest_string(item, "safety_mode", skill_id=skill_id)
+    queue_behavior = _required_manifest_string(item, "queue_behavior", skill_id=skill_id)
+    allowed_side_effects = _required_manifest_list(
+        item,
+        "allowed_side_effects",
+        skill_id=skill_id,
+        allow_empty=True,
+    )
+    try:
+        validate_allowed_side_effects(
+            allowed_side_effects,
+            origin=f"Pi skill {skill_id!r}",
+        )
+    except ConnectorManifestError as exc:
+        raise ValueError(str(exc)) from exc
+    return {
+        "id": skill_id,
+        "description": str(item.get("description") or ""),
+        "artifact_types": list(artifact_types),
+        "inputs": list(inputs),
+        "outputs": list(outputs),
+        "auth": list(auth),
+        "safety_mode": safety_mode,
+        "queue_behavior": queue_behavior,
+        "allowed_side_effects": list(allowed_side_effects),
+        "source_name": str(item.get("source_name") or ""),
+    }
+
+
+def _required_manifest_string(
+    item: dict[str, Any],
+    field_name: str,
+    *,
+    skill_id: str,
+) -> str:
+    text = str(item.get(field_name) or "").strip()
+    if not text:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    return text
+
+
+def _required_manifest_list(
+    item: dict[str, Any],
+    field_name: str,
+    *,
+    skill_id: str,
+    allow_empty: bool = False,
+) -> tuple[str, ...]:
+    if field_name not in item:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    value = item.get(field_name)
+    if isinstance(value, (list, tuple)):
+        values = [str(part).strip() for part in value if str(part).strip()]
+    else:
+        raise ValueError(f"Pi skill {skill_id!r} {field_name} must be an array")
+    if not values and not allow_empty:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    return tuple(values)
 
 
 def _summarize_providers(config: ConfigLike) -> dict[str, Any]:

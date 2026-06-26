@@ -2089,7 +2089,10 @@
             }
             return connectors.map(connector => {
                 const artifacts = (connector.artifact_types || []).join(', ') || 'none';
+                const inputs = (connector.inputs || []).join(', ') || 'none';
+                const outputs = (connector.outputs || []).join(', ') || 'none';
                 const capabilities = (connector.capabilities || []).join(', ') || 'none';
+                const sideEffects = (connector.allowed_side_effects || []).join(', ') || 'none';
                 const configuredKeys = connector.configured_keys || [];
                 const configKeys = connector.config_keys || [];
                 const authStatus = connector.auth_status || {};
@@ -2099,7 +2102,12 @@
                 return [
                     `${connector.name}: ${connector.enabled ? 'enabled' : 'disabled'}`,
                     `  artifacts: ${artifacts}`,
+                    `  inputs: ${inputs}`,
+                    `  outputs: ${outputs}`,
                     `  capabilities: ${capabilities}`,
+                    `  safety: ${connector.safety_mode || 'unknown'}`,
+                    `  queue: ${connector.queue_behavior || (connector.queue_capability ? 'queue capable' : 'direct')}`,
+                    `  side effects: ${sideEffects}`,
                     `  config: ${configuredKeys.length}/${configKeys.length} keys configured`,
                     `  auth: ${authText}`
                 ].join('\n');
