@@ -24,6 +24,7 @@ from .artifacts import (
     WebClipperArtifact,
 )
 from .bookmark_contract import normalize_bookmark_payload, validate_tweet_id
+from .canonical_identity import CanonicalArtifactIdentity, CanonicalIdentityService
 from .config import Config, config
 from .data_models import Tweet
 from .metadata_db import (
@@ -128,6 +129,7 @@ class KnowledgeArtifactRuntime:
         self._pipeline = None
         self._wiki_updater = None
         self._companion_publisher = None
+        self._canonical_identity_service = None
 
     @property
     def pipeline(self):
@@ -156,6 +158,12 @@ class KnowledgeArtifactRuntime:
                 db=self.db,
             )
         return self._companion_publisher
+
+    @property
+    def canonical_identity_service(self) -> CanonicalIdentityService:
+        if self._canonical_identity_service is None:
+            self._canonical_identity_service = CanonicalIdentityService(self.db)
+        return self._canonical_identity_service
 
     def materialize_artifact(self, entry: IngestionQueueEntry) -> KnowledgeArtifact:
         """Convert a queue row into a typed artifact."""
@@ -258,6 +266,10 @@ class KnowledgeArtifactRuntime:
                 raise IngestionRuntimeError(
                     f"Ingestion artifact {entry.artifact_id} requires security review"
                 )
+            canonical_identity = self._canonicalize_artifact(
+                artifact,
+                artifact_type=entry.artifact_type,
+            )
         except Exception as exc:
             if _reviewable_artifact_error(exc):
                 return self._route_entry_to_review(entry, exc, stage="materialize")
@@ -266,6 +278,12 @@ class KnowledgeArtifactRuntime:
 
         try:
             result = await self.dispatch_artifact(artifact)
+            if canonical_identity is not None:
+                result.details.setdefault("canonical_id", canonical_identity.canonical_id)
+                result.details.setdefault(
+                    "canonical_entity_type",
+                    canonical_identity.entity_type,
+                )
             self._sync_wiki_for_artifact(
                 artifact,
                 dispatch_details=result.details,
@@ -313,6 +331,17 @@ class KnowledgeArtifactRuntime:
                 "error": str(exc),
                 "error_type": exc.__class__.__name__,
             },
+        )
+
+    def _canonicalize_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        artifact_type: str,
+    ) -> CanonicalArtifactIdentity | None:
+        return self.canonical_identity_service.canonicalize_artifact(
+            artifact,
+            artifact_type=artifact_type,
         )
 
     async def dispatch_artifact(self, artifact: KnowledgeArtifact) -> IngestionDispatchResult:

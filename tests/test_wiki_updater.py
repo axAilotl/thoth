@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.artifacts import RepositoryArtifact
+from core.artifacts import RepositoryArtifact, TranscriptArtifact
 from core.capture_event_store import (
     ArtifactLink,
     CaptureEvent,
@@ -442,6 +442,53 @@ def test_wiki_updater_emits_deterministic_provenance_and_security_frontmatter(
     assert citations_section.index(
         "[2] [repos/github_owner_repo_README.md]"
     ) < citations_section.index("[3] [stars/owner_repo_summary.md]")
+
+
+def test_wiki_updater_reuses_canonical_slug_for_duplicate_transcripts(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    updater = CompiledWikiUpdater(config, layout=layout)
+
+    first = TranscriptArtifact(
+        id="yt_transcript_abc123_en",
+        source_type="youtube",
+        transcript_id="yt_transcript_abc123_en",
+        video_id="abc123",
+        title="Fixture transcript",
+        raw_transcript="First transcript text.",
+        normalized_metadata={"capture_event_id": "event-a"},
+    )
+    second = TranscriptArtifact(
+        id="manual_transcript_abc123",
+        source_type="youtube",
+        transcript_id="manual_transcript_abc123",
+        video_id="abc123",
+        title="Fixture transcript duplicate",
+        raw_transcript="Second transcript text.",
+        normalized_metadata={"capture_event_id": "event-b"},
+    )
+
+    first_result = updater.update_from_artifact(first)
+    second_result = updater.update_from_artifact(second)
+    pages = sorted((layout.wiki_root / "pages").glob("transcript-*.md"))
+    document = read_document(first_result.page_path)
+
+    assert second_result.page_path == first_result.page_path
+    assert len(pages) == 1
+    assert document.frontmatter["thoth_canonical_id"] == (
+        "transcript:youtube_video_transcript:abc123"
+    )
+    assert document.frontmatter["thoth_artifact_id"] == "yt_transcript_abc123_en"
+    assert document.frontmatter["thoth_artifact_ids"] == [
+        "manual_transcript_abc123",
+        "yt_transcript_abc123_en",
+    ]
+    assert document.frontmatter["thoth_event_ids"] == ["event-a", "event-b"]
+    assert "Canonical ID: `transcript:youtube_video_transcript:abc123`" in document.body
+    assert "manual_transcript_abc123" in document.body
 
 
 def test_wiki_lint_reports_source_file_changes_after_compile(

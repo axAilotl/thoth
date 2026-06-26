@@ -250,6 +250,18 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             captured_at=captured_at,
         )
         artifact = self.materialize_artifact(entry)
+        canonical_identity = self._canonicalize_artifact(
+            artifact,
+            artifact_type=artifact_kind,
+        )
+        if canonical_identity is not None:
+            normalized_payload["normalized_metadata"] = dict(
+                artifact.normalized_metadata
+            )
+            entry = replace(
+                entry,
+                payload_json=_stable_json(normalized_payload),
+            )
         if capabilities is None:
             entry = replace(
                 entry,
@@ -302,6 +314,18 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
                 payload_json=_stable_json(normalized_payload),
             )
             artifact = self.materialize_artifact(entry)
+            canonical_identity = self._canonicalize_artifact(
+                artifact,
+                artifact_type=artifact_kind,
+            )
+            if canonical_identity is not None:
+                normalized_payload["normalized_metadata"] = dict(
+                    artifact.normalized_metadata
+                )
+                entry = replace(
+                    entry,
+                    payload_json=_stable_json(normalized_payload),
+                )
 
         raw_ref_id = self._upsert_raw_ref(raw_ref)
         artifact_link_id = self._upsert_artifact_link(
@@ -310,6 +334,9 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             queue_artifact_id=queue_id,
             artifact_id=artifact.id,
             artifact_type=artifact_kind,
+            canonical_id=canonical_identity.canonical_id
+            if canonical_identity is not None
+            else None,
         )
         stored_entry = self._upsert_queue_entry(entry)
 
@@ -503,9 +530,16 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
         queue_artifact_id: str,
         artifact_id: str,
         artifact_type: str,
+        canonical_id: str | None = None,
     ) -> str | None:
         if self.capture_event_store is None:
             return None
+        metadata = {
+            "canonical_artifact_id": artifact_id,
+            "queue_artifact_id": queue_artifact_id,
+        }
+        if canonical_id:
+            metadata["canonical_id"] = canonical_id
         link = ArtifactLink(
             artifact_link_id=_stable_id(
                 "artifact-link",
@@ -519,10 +553,7 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             raw_ref_id=raw_ref_id,
             artifact_id=queue_artifact_id,
             artifact_type=artifact_type,
-            metadata={
-                "canonical_artifact_id": artifact_id,
-                "queue_artifact_id": queue_artifact_id,
-            },
+            metadata=metadata,
         )
         return self.capture_event_store.upsert_artifact_link(link).artifact_link_id
 

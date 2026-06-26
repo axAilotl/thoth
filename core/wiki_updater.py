@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -20,6 +20,7 @@ from .artifacts import (
     WebClipperArtifact,
 )
 from .capture_event_store import CaptureEventStore
+from .canonical_identity import CanonicalArtifactIdentity, CanonicalIdentityService
 from .wiki_capture_compiler import CaptureWikiCompiler
 from .config import Config
 from .metadata_db import MetadataDB
@@ -83,6 +84,17 @@ def _read_frontmatter(path: Path) -> dict[str, Any]:
         return {}
     payload = yaml.safe_load(content[4:end]) or {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _frontmatter_string_values(
+    frontmatter: Mapping[str, Any],
+    *keys: str,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    for key in keys:
+        if key in frontmatter:
+            values.extend(_string_values(frontmatter[key]))
+    return tuple(dict.fromkeys(values))
 
 
 def _render_frontmatter(data: dict[str, Any]) -> str:
@@ -223,10 +235,17 @@ class CompiledWikiUpdater:
         self.contract = contract or WikiContract(root=self.layout.wiki_root)
         self.db = db or MetadataDB(str(self.layout.database_path))
         self._legacy_pages_pruned = False
+        self._canonical_identity_service = None
         self.scaffold = ensure_wiki_scaffold(
             config,
             project_root=self.layout.vault_root.parent,
         )
+
+    @property
+    def canonical_identity_service(self) -> CanonicalIdentityService:
+        if self._canonical_identity_service is None:
+            self._canonical_identity_service = CanonicalIdentityService(self.db)
+        return self._canonical_identity_service
 
     def supports_artifact(self, artifact: KnowledgeArtifact) -> bool:
         """Return True when an artifact should compile into the wiki layer."""
@@ -276,16 +295,67 @@ class CompiledWikiUpdater:
             raise ValueError(
                 f"Artifact {artifact.source_type}:{artifact.id} requires security review"
             )
-        spec = self._page_spec_for_artifact(artifact)
+        canonical_identity = self._canonical_identity_for_artifact(artifact)
+        spec = self._page_spec_for_artifact(
+            artifact,
+            canonical_identity=canonical_identity,
+        )
+        if canonical_identity and canonical_identity.wiki_slug:
+            spec = replace(spec, slug=canonical_identity.wiki_slug)
         page_path = self.contract.page_path_for(spec)
         existing = _read_frontmatter(page_path)
         created_at = str(existing.get("created_at") or spec.created_at or _now_iso())
         updated_at = _now_iso()
+        source_paths = tuple(
+            dict.fromkeys(
+                (
+                    *_frontmatter_string_values(
+                        existing,
+                        "thoth_source_paths",
+                        "source_paths",
+                    ),
+                    *spec.source_paths,
+                )
+            )
+        )
+        event_ids = tuple(
+            dict.fromkeys(
+                (
+                    *_frontmatter_string_values(existing, "thoth_event_ids"),
+                    *spec.event_ids,
+                )
+            )
+        )
+        artifact_ids = tuple(
+            dict.fromkeys(
+                (
+                    *_frontmatter_string_values(
+                        existing,
+                        "thoth_artifact_ids",
+                        "thoth_artifact_id",
+                    ),
+                    *spec.artifact_ids,
+                    *(tuple([spec.artifact_id]) if spec.artifact_id else tuple()),
+                )
+            )
+        )
+        primary_artifact_id = (
+            canonical_identity.primary_artifact_id
+            if canonical_identity is not None
+            else spec.artifact_id
+        )
+        if primary_artifact_id and primary_artifact_id not in artifact_ids:
+            artifact_ids = (primary_artifact_id, *artifact_ids)
+        existing_influence_sources = existing.get("thoth_influence_sources")
+        if not isinstance(existing_influence_sources, list):
+            existing_influence_sources = existing.get("influence_sources")
+        if not isinstance(existing_influence_sources, list):
+            existing_influence_sources = []
         input_snapshot = source_file_snapshot(
             self.layout,
-            spec.source_paths,
+            source_paths,
             source_type=artifact.source_type,
-            artifact_id=artifact.id,
+            artifact_id=primary_artifact_id or artifact.id,
         )
         previous_manifest = existing.get("thoth_input_manifest")
         if not isinstance(previous_manifest, list):
@@ -299,9 +369,16 @@ class CompiledWikiUpdater:
             okf_type=spec.okf_type,
             summary=spec.summary,
             aliases=spec.aliases,
-            source_paths=spec.source_paths,
+            source_paths=source_paths,
             influence_sources=influence_with_input_hashes(
-                spec.influence_sources,
+                (
+                    *(
+                        item
+                        for item in existing_influence_sources
+                        if isinstance(item, Mapping)
+                    ),
+                    *spec.influence_sources,
+                ),
                 input_snapshot,
             ),
             related_slugs=spec.related_slugs,
@@ -310,9 +387,13 @@ class CompiledWikiUpdater:
             created_at=created_at,
             updated_at=updated_at,
             resource=spec.resource,
-            artifact_id=spec.artifact_id,
+            artifact_id=primary_artifact_id or spec.artifact_id,
+            artifact_ids=artifact_ids,
             source_type=spec.source_type,
-            event_ids=spec.event_ids,
+            canonical_id=spec.canonical_id,
+            canonical_entity_type=spec.canonical_entity_type,
+            canonical_identity_keys=spec.canonical_identity_keys,
+            event_ids=event_ids,
             security_findings=spec.security_findings,
             security_policy=spec.security_policy,
             input_hash=input_snapshot.input_hash,
@@ -331,6 +412,11 @@ class CompiledWikiUpdater:
         content = self._render_page(updated_spec, artifact, dispatch_details=dispatch_details)
         action = "updated" if page_path.exists() else "created"
         _atomic_write_text(page_path, content)
+        if canonical_identity and not canonical_identity.wiki_slug:
+            self.canonical_identity_service.set_wiki_slug(
+                canonical_identity.canonical_id,
+                updated_spec.slug,
+            )
         self.refresh_index()
         append_wiki_log_entry(
             self.scaffold,
@@ -460,7 +546,21 @@ class CompiledWikiUpdater:
         _atomic_write_text(self.contract.index_path, "\n".join(lines) + "\n")
         return self.contract.index_path
 
-    def _page_spec_for_artifact(self, artifact: KnowledgeArtifact) -> WikiPageSpec:
+    def _canonical_identity_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+    ) -> CanonicalArtifactIdentity | None:
+        return self.canonical_identity_service.canonicalize_artifact(
+            artifact,
+            artifact_type=self._artifact_type_for_artifact(artifact),
+        )
+
+    def _page_spec_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        canonical_identity: CanonicalArtifactIdentity | None = None,
+    ) -> WikiPageSpec:
         title, slug, kind, summary, aliases = self._title_slug_and_summary(artifact)
         source_paths = self._source_paths_for_artifact(artifact)
         return WikiPageSpec(
@@ -479,11 +579,36 @@ class CompiledWikiUpdater:
             updated_at=_now_iso(),
             resource=self._resource_for_artifact(artifact),
             artifact_id=artifact.id,
+            artifact_ids=(artifact.id,),
             source_type=artifact.source_type,
+            canonical_id=canonical_identity.canonical_id
+            if canonical_identity is not None
+            else None,
+            canonical_entity_type=canonical_identity.entity_type
+            if canonical_identity is not None
+            else None,
+            canonical_identity_keys=canonical_identity.key_records
+            if canonical_identity is not None
+            else (),
             event_ids=self._event_ids_for_artifact(artifact),
             security_findings=self._security_findings_for_artifact(artifact),
             security_policy=self._security_policy_for_artifact(artifact),
         )
+
+    def _artifact_type_for_artifact(self, artifact: KnowledgeArtifact) -> str:
+        if isinstance(artifact, PaperArtifact):
+            return "paper"
+        if isinstance(artifact, RepositoryArtifact):
+            return "repository"
+        if isinstance(artifact, WebClipperArtifact):
+            return "web_clipper"
+        if isinstance(artifact, VideoArtifact):
+            return "video"
+        if isinstance(artifact, TranscriptArtifact):
+            return "transcript"
+        if isinstance(artifact, TweetArtifact):
+            return "tweet"
+        return "artifact"
 
     def _title_slug_and_summary(
         self, artifact: KnowledgeArtifact
@@ -726,6 +851,13 @@ class CompiledWikiUpdater:
                 f"- Source: `{artifact.source_type}`",
             ]
         )
+        if spec.canonical_id:
+            lines.append(f"- Canonical ID: `{spec.canonical_id}`")
+        if spec.artifact_ids:
+            lines.append(
+                "- Linked Artifact IDs: "
+                + ", ".join(f"`{artifact_id}`" for artifact_id in spec.artifact_ids)
+            )
         if artifact.created_at:
             lines.append(f"- Created At: `{artifact.created_at}`")
         if artifact.processing_status:

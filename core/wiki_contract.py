@@ -145,7 +145,11 @@ class WikiPageSpec:
     updated_at: str | None = None
     resource: str | None = None
     artifact_id: str | None = None
+    artifact_ids: Tuple[str, ...] = field(default_factory=tuple)
     source_type: str | None = None
+    canonical_id: str | None = None
+    canonical_entity_type: str | None = None
+    canonical_identity_keys: Tuple[Any, ...] = field(default_factory=tuple)
     event_ids: Tuple[str, ...] = field(default_factory=tuple)
     source_ids: Tuple[str, ...] = field(default_factory=tuple)
     session_ids: Tuple[str, ...] = field(default_factory=tuple)
@@ -185,10 +189,16 @@ class WikiPageSpec:
             "semantic_evidence_ids",
             _stable_unique_strings(self.semantic_evidence_ids),
         )
+        object.__setattr__(self, "artifact_ids", _stable_unique_strings(self.artifact_ids))
         object.__setattr__(
             self,
             "security_findings",
             _stable_security_findings(self.security_findings),
+        )
+        object.__setattr__(
+            self,
+            "canonical_identity_keys",
+            _stable_security_findings(self.canonical_identity_keys),
         )
         object.__setattr__(
             self,
@@ -225,7 +235,11 @@ class WikiPageSpec:
             "thoth_created_at": self.created_at,
             "thoth_updated_at": self.updated_at,
             "thoth_artifact_id": self.artifact_id,
+            "thoth_artifact_ids": list(self.artifact_ids) or None,
             "thoth_source_type": self.source_type,
+            "thoth_canonical_id": self.canonical_id,
+            "thoth_canonical_entity_type": self.canonical_entity_type,
+            "thoth_canonical_identity_keys": list(self.canonical_identity_keys) or None,
             "thoth_event_ids": list(self.event_ids) or None,
             "thoth_source_ids": list(self.source_ids) or None,
             "thoth_session_ids": list(self.session_ids) or None,

@@ -11,11 +11,14 @@ from collectors.social_collector import SocialCollector
 from collectors.skill_output_connector import SkillOutputConnector
 from collectors.web_clipper_collector import WebClipperCollector
 from collectors.youtube_connector import YouTubeConnector
+from core.connector_capture import ConnectorCaptureQueue
 from core.artifacts import PaperArtifact
 from core.config import Config
+from core.ingestion_runtime import IngestionDispatchResult, KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import PathLayout, build_path_layout
 from core.research_graph import ResearchGraphService
+from core.wiki_io import read_document
 from processors.youtube_processor import YouTubeVideo
 
 
@@ -242,6 +245,93 @@ def test_social_collector_records_github_star_capture_event(
     assert event.privacy == {"classification": "personal"}
     assert Path(raw_ref.path).is_relative_to(layout.raw_root)
     assert db.get_ingestion_entry("gh_123") is not None
+
+
+def test_duplicate_repository_connector_captures_share_canonical_wiki_page(
+    monkeypatch,
+    tmp_path: Path,
+):
+    config, layout, db = _layout_and_db(tmp_path)
+    event_store = _store(layout)
+    queue = ConnectorCaptureQueue(
+        config,
+        layout=layout,
+        db=db,
+        capture_event_store=event_store,
+    )
+
+    with queue.lifecycle() as lifecycle:
+        first = queue.queue_payload(
+            lifecycle,
+            artifact_type="repository",
+            payload={
+                "id": "gh_123",
+                "source_type": "github",
+                "repo_name": "octo/repo",
+                "full_name": "octo/repo",
+                "description": "Useful repo from stars.",
+            },
+            source={"source_name": "github", "source_type": "github"},
+            event={
+                "event_type": "github_star",
+                "native_event_id": "octo/repo",
+                "privacy": {"classification": "personal"},
+            },
+        )
+        second = queue.queue_payload(
+            lifecycle,
+            artifact_type="repository",
+            payload={
+                "id": "manual-octo-repo",
+                "source_type": "github",
+                "repo_name": "octo/repo",
+                "full_name": "octo/repo",
+                "description": "Useful repo from manual import.",
+            },
+            source={"source_name": "manual_repo_import", "source_type": "github"},
+            event={
+                "event_type": "manual_repository_import",
+                "native_event_id": "octo/repo",
+                "privacy": {"classification": "personal"},
+            },
+        )
+
+    runtime = KnowledgeArtifactRuntime(config, layout=layout, db=db)
+
+    async def fake_dispatch(artifact):
+        return IngestionDispatchResult(
+            artifact_id=artifact.id,
+            artifact_type="repository",
+            source=artifact.source_type,
+            status="processed",
+            processed_at="2026-04-04T00:00:00",
+            details={"repo_name": artifact.repo_name},
+        )
+
+    monkeypatch.setattr(runtime, "dispatch_artifact", fake_dispatch)
+    results = asyncio.run(runtime.process_pending_ingestions_once(limit=10))
+
+    pages = sorted((layout.wiki_root / "pages").glob("repo-*.md"))
+    document = read_document(pages[0])
+    link_canonical_ids = {
+        link.metadata.get("canonical_id")
+        for link in event_store.artifact_links.values()
+    }
+
+    assert first.queue_artifact_id == "gh_123"
+    assert second.queue_artifact_id == "manual-octo-repo"
+    assert [result.status for result in results] == ["processed", "processed"]
+    assert len(pages) == 1
+    assert link_canonical_ids == {"repository:native_repo:github:octo:repo"}
+    assert document.frontmatter["thoth_canonical_id"] == (
+        "repository:native_repo:github:octo:repo"
+    )
+    assert document.frontmatter["thoth_artifact_id"] == "gh_123"
+    assert document.frontmatter["thoth_artifact_ids"] == [
+        "gh_123",
+        "manual-octo-repo",
+    ]
+    assert len(document.frontmatter["thoth_event_ids"]) == 2
 
 
 def test_social_collector_records_huggingface_like_capture_event(

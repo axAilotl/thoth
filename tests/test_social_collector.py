@@ -14,6 +14,8 @@ class FakeDB:
     def __init__(self):
         self.entries = []
         self.existing = {}
+        self.canonical_entities = {}
+        self.canonical_keys = {}
 
     def get_ingestion_entry(self, artifact_id):
         return self.existing.get(artifact_id)
@@ -22,6 +24,42 @@ class FakeDB:
         self.entries.append(entry)
         self.existing[entry.artifact_id] = entry
         return True
+
+    def find_canonical_entities_by_identity_keys(self, _entity_type, identity_keys):
+        canonical_ids = {
+            self.canonical_keys[key]
+            for key in identity_keys
+            if key in self.canonical_keys
+        }
+        return [self.canonical_entities[canonical_id] for canonical_id in canonical_ids]
+
+    def upsert_canonical_entity(
+        self,
+        *,
+        canonical_id,
+        entity_type,
+        primary_artifact_id,
+        primary_artifact_type,
+        primary_source_type,
+        display_name,
+        identity_keys,
+        **_kwargs,
+    ):
+        entity = self.canonical_entities.get(canonical_id)
+        if entity is None:
+            entity = SimpleNamespace(
+                canonical_id=canonical_id,
+                entity_type=entity_type,
+                primary_artifact_id=primary_artifact_id,
+                primary_artifact_type=primary_artifact_type,
+                primary_source_type=primary_source_type,
+                display_name=display_name,
+                wiki_slug=None,
+            )
+            self.canonical_entities[canonical_id] = entity
+        for key_record in identity_keys:
+            self.canonical_keys[key_record["identity_key"]] = canonical_id
+        return entity
 
 
 class FakeResponse:

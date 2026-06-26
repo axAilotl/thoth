@@ -15,6 +15,7 @@ from core.artifacts import (
     TweetArtifact,
     WebClipperArtifact,
 )
+from core.canonical_identity import CanonicalIdentityService
 from core.config import config
 from core.ingestion_runtime import (
     BookmarkDispatchResult,
@@ -31,6 +32,7 @@ from core.prompt_security import (
     THOTH_SECURITY_FINDINGS_KEY,
     THOTH_SECURITY_POLICY_KEY,
 )
+from core.wiki_io import read_document
 
 
 @pytest.fixture
@@ -542,6 +544,37 @@ def test_knowledge_artifact_canonical_record_serializes_relationships_and_output
     ]
 
 
+def test_canonical_metadata_people_do_not_replace_artifact_link(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    db = MetadataDB()
+    service = CanonicalIdentityService(db)
+    paper = PaperArtifact(
+        id="2401.12345",
+        source_type="arxiv",
+        title="Canonical Paper",
+        authors=["Ada Lovelace"],
+        arxiv_id="2401.12345",
+    )
+
+    identity = service.canonicalize_artifact(paper, artifact_type="paper")
+    link = db.get_canonical_link_for_artifact(
+        "2401.12345",
+        artifact_type="paper",
+        source_type="arxiv",
+    )
+    person_ids = paper.normalized_metadata["canonical_persons"]
+
+    assert link is not None
+    assert link.canonical_id == identity.canonical_id
+    assert link.entity_type == "paper"
+    assert person_ids == ["person:exact_name:ada-lovelace"]
+    assert db.get_canonical_entity(person_ids[0]).entity_type == "person"
+
+
 def test_process_pending_ingestions_marks_processed(
     tmp_path: Path, monkeypatch, restore_runtime_config
 ):
@@ -577,6 +610,88 @@ def test_process_pending_ingestions_marks_processed(
     assert len(results) == 1
     assert results[0].status == "processed"
     assert db.get_ingestion_entry("repo-queued").status == "processed"
+
+
+def test_process_pending_ingestions_deduplicates_imported_doc_wiki_pages(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    db = MetadataDB()
+    runtime = KnowledgeArtifactRuntime(db=db)
+    layout = runtime.layout
+    clippings = layout.vault_root / "Clippings"
+    clippings.mkdir(parents=True, exist_ok=True)
+    (clippings / "one.md").write_text("# First title\n", encoding="utf-8")
+    (clippings / "two.md").write_text("# Second title\n", encoding="utf-8")
+
+    first_id = "webclip:Clippings/one.md"
+    second_id = "webclip:Clippings/two.md"
+    shared_url = "https://example.test/articles/canonical"
+    for artifact_id, title, rel_path, event_id in (
+        (first_id, "First title", "Clippings/one.md", "event-a"),
+        (second_id, "Second title", "Clippings/two.md", "event-b"),
+    ):
+        assert db.upsert_ingestion_entry(
+            IngestionQueueEntry(
+                artifact_id=artifact_id,
+                artifact_type="web_clipper",
+                source="web_clipper",
+                payload_json=json.dumps(
+                    {
+                        "id": artifact_id,
+                        "source_type": "web_clipper",
+                        "title": title,
+                        "body": f"# {title}\n",
+                        "source_relative_path": rel_path,
+                        "source_url": shared_url,
+                        "normalized_metadata": {"capture_event_id": event_id},
+                    }
+                ),
+                created_at="2026-04-04T00:00:00",
+            )
+        )
+
+    async def fake_dispatch(artifact):
+        return IngestionDispatchResult(
+            artifact_id=artifact.id,
+            artifact_type="web_clipper",
+            source=artifact.source_type,
+            status="processed",
+            processed_at="2026-04-04T00:00:00",
+            details={"source_url": artifact.source_url},
+        )
+
+    monkeypatch.setattr(runtime, "dispatch_artifact", fake_dispatch)
+
+    results = asyncio.run(runtime.process_pending_ingestions_once(limit=10))
+    pages = sorted((layout.wiki_root / "pages").glob("clip-*.md"))
+    document = read_document(pages[0])
+    first_link = db.get_canonical_link_for_artifact(
+        first_id,
+        artifact_type="web_clipper",
+        source_type="web_clipper",
+    )
+    second_link = db.get_canonical_link_for_artifact(
+        second_id,
+        artifact_type="web_clipper",
+        source_type="web_clipper",
+    )
+
+    assert [result.status for result in results] == ["processed", "processed"]
+    assert len(pages) == 1
+    assert first_link is not None
+    assert second_link is not None
+    assert first_link.canonical_id == second_link.canonical_id
+    assert document.frontmatter["thoth_canonical_id"] == first_link.canonical_id
+    assert document.frontmatter["thoth_artifact_id"] == first_id
+    assert document.frontmatter["thoth_artifact_ids"] == [first_id, second_id]
+    assert document.frontmatter["thoth_event_ids"] == ["event-a", "event-b"]
+    assert document.frontmatter["thoth_source_paths"] == [
+        "Clippings/one.md",
+        "Clippings/two.md",
+    ]
 
 
 def test_process_pending_ingestions_routes_materialization_errors_to_review(

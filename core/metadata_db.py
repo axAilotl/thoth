@@ -676,6 +676,38 @@ class ConnectorCheckpointRecord:
 
 
 @dataclass(frozen=True)
+class CanonicalEntityRecord:
+    """A durable canonical entity shared by duplicate artifact ingests."""
+
+    canonical_id: str
+    entity_type: str
+    primary_artifact_id: str
+    primary_artifact_type: str
+    primary_source_type: str
+    display_name: str
+    wiki_slug: Optional[str]
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class CanonicalArtifactLinkRecord:
+    """Link from a source artifact row to its canonical entity."""
+
+    artifact_id: str
+    artifact_type: str
+    source_type: str
+    canonical_id: str
+    entity_type: str
+    match_key: Optional[str]
+    match_reason: Optional[str]
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class ResearchPaperRecord:
     """Normalized paper metadata stored for research graph operations."""
 
@@ -875,6 +907,51 @@ class MetadataDB:
         """)
         self._ensure_ingestion_queue_statuses(conn)
 
+        # Canonical identity tables for duplicate detection across connectors.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS canonical_entities (
+                canonical_id TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                primary_artifact_id TEXT NOT NULL,
+                primary_artifact_type TEXT NOT NULL,
+                primary_source_type TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                wiki_slug TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS canonical_identity_keys (
+                identity_key TEXT PRIMARY KEY,
+                canonical_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                key_type TEXT NOT NULL,
+                key_value TEXT NOT NULL,
+                source_type TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (canonical_id) REFERENCES canonical_entities (canonical_id),
+                UNIQUE(entity_type, key_type, key_value)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS artifact_canonical_links (
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                canonical_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                match_key TEXT,
+                match_reason TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (artifact_id, artifact_type, source_type),
+                FOREIGN KEY (canonical_id) REFERENCES canonical_entities (canonical_id)
+            )
+        """)
+
         # Connector run history and checkpoints for idempotent resumable imports.
         conn.execute(f"""
             CREATE TABLE IF NOT EXISTS connector_checkpoints (
@@ -997,6 +1074,10 @@ class MetadataDB:
             "CREATE INDEX IF NOT EXISTS idx_ingestion_status ON ingestion_queue (status, next_attempt_at)",
             "CREATE INDEX IF NOT EXISTS idx_ingestion_type ON ingestion_queue (artifact_type)",
             "CREATE INDEX IF NOT EXISTS idx_ingestion_priority ON ingestion_queue (priority DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_canonical_entities_type ON canonical_entities (entity_type)",
+            "CREATE INDEX IF NOT EXISTS idx_canonical_keys_entity ON canonical_identity_keys (entity_type, key_type, key_value)",
+            "CREATE INDEX IF NOT EXISTS idx_canonical_keys_canonical ON canonical_identity_keys (canonical_id)",
+            "CREATE INDEX IF NOT EXISTS idx_artifact_canonical_links_canonical ON artifact_canonical_links (canonical_id)",
             "CREATE INDEX IF NOT EXISTS idx_connector_runs_name_started ON connector_runs (connector_name, started_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_connector_runs_status ON connector_runs (status, next_retry_at)",
             "CREATE INDEX IF NOT EXISTS idx_connector_runs_checkpoint ON connector_runs (connector_name, checkpoint_key)",
@@ -1587,6 +1668,296 @@ class MetadataDB:
         for column_name, ddl in column_ddls.items():
             if column_name not in existing:
                 conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {ddl}")
+
+    def _canonical_entity_from_row(self, row: sqlite3.Row) -> CanonicalEntityRecord:
+        return CanonicalEntityRecord(
+            canonical_id=row["canonical_id"],
+            entity_type=row["entity_type"],
+            primary_artifact_id=row["primary_artifact_id"],
+            primary_artifact_type=row["primary_artifact_type"],
+            primary_source_type=row["primary_source_type"],
+            display_name=row["display_name"] or "",
+            wiki_slug=_row_get(row, "wiki_slug"),
+            metadata=json.loads(row["metadata_json"] or "{}"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _canonical_link_from_row(
+        self,
+        row: sqlite3.Row,
+    ) -> CanonicalArtifactLinkRecord:
+        return CanonicalArtifactLinkRecord(
+            artifact_id=row["artifact_id"],
+            artifact_type=row["artifact_type"],
+            source_type=row["source_type"],
+            canonical_id=row["canonical_id"],
+            entity_type=row["entity_type"],
+            match_key=_row_get(row, "match_key"),
+            match_reason=_row_get(row, "match_reason"),
+            metadata=json.loads(row["metadata_json"] or "{}"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def get_canonical_entity(
+        self,
+        canonical_id: str,
+    ) -> Optional[CanonicalEntityRecord]:
+        """Return one canonical entity by ID."""
+        clean_id = str(canonical_id or "").strip()
+        if not clean_id:
+            return None
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM canonical_entities WHERE canonical_id = ?",
+                    (clean_id,),
+                ).fetchone()
+                return self._canonical_entity_from_row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get canonical entity {canonical_id}: {e}")
+            return None
+
+    def find_canonical_entities_by_identity_keys(
+        self,
+        entity_type: str,
+        identity_keys: tuple[str, ...],
+    ) -> list[CanonicalEntityRecord]:
+        """Find canonical entities already claimed by any identity key."""
+        clean_type = str(entity_type or "").strip()
+        keys = tuple(dict.fromkeys(str(key).strip() for key in identity_keys if str(key).strip()))
+        if not clean_type or not keys:
+            return []
+        placeholders = ",".join("?" for _ in keys)
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT e.*
+                    FROM canonical_entities e
+                    JOIN canonical_identity_keys k
+                        ON k.canonical_id = e.canonical_id
+                    WHERE k.entity_type = ?
+                        AND k.identity_key IN ({placeholders})
+                    ORDER BY e.created_at ASC, e.canonical_id ASC
+                    """,
+                    (clean_type, *keys),
+                ).fetchall()
+                return [self._canonical_entity_from_row(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to find canonical entities for {entity_type}: {e}")
+            return []
+
+    def upsert_canonical_entity(
+        self,
+        *,
+        canonical_id: str,
+        entity_type: str,
+        primary_artifact_id: str,
+        primary_artifact_type: str,
+        primary_source_type: str,
+        display_name: str,
+        identity_keys: tuple[Mapping[str, Any], ...],
+        artifact_id: str,
+        artifact_type: str,
+        source_type: str,
+        match_key: str | None,
+        match_reason: str | None,
+        metadata: Mapping[str, Any] | None = None,
+        link_artifact: bool = True,
+    ) -> CanonicalEntityRecord:
+        """Create/update a canonical entity and link the source artifact to it."""
+        clean_canonical_id = str(canonical_id or "").strip()
+        clean_entity_type = str(entity_type or "").strip()
+        clean_artifact_id = str(artifact_id or "").strip()
+        clean_artifact_type = str(artifact_type or "").strip()
+        clean_source_type = str(source_type or "").strip()
+        if not clean_canonical_id:
+            raise ValueError("canonical_id is required")
+        if not clean_entity_type:
+            raise ValueError("entity_type is required")
+        if not clean_artifact_id:
+            raise ValueError("artifact_id is required")
+        if not clean_artifact_type:
+            raise ValueError("artifact_type is required")
+        if not clean_source_type:
+            raise ValueError("source_type is required")
+
+        now_iso = datetime.now().isoformat()
+        metadata_json = json.dumps(dict(metadata or {}), ensure_ascii=False, sort_keys=True)
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO canonical_entities (
+                        canonical_id, entity_type, primary_artifact_id,
+                        primary_artifact_type, primary_source_type, display_name,
+                        metadata_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(canonical_id) DO UPDATE SET
+                        display_name=CASE
+                            WHEN canonical_entities.display_name = ''
+                            THEN excluded.display_name
+                            ELSE canonical_entities.display_name
+                        END,
+                        metadata_json=CASE
+                            WHEN canonical_entities.metadata_json = '{}'
+                            THEN excluded.metadata_json
+                            ELSE canonical_entities.metadata_json
+                        END,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        clean_canonical_id,
+                        clean_entity_type,
+                        str(primary_artifact_id or clean_artifact_id),
+                        str(primary_artifact_type or clean_artifact_type),
+                        str(primary_source_type or clean_source_type),
+                        str(display_name or ""),
+                        metadata_json,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                for key_record in identity_keys:
+                    identity_key = str(key_record.get("identity_key") or "").strip()
+                    key_type = str(key_record.get("key_type") or "").strip()
+                    key_value = str(key_record.get("key_value") or "").strip()
+                    if not identity_key or not key_type or not key_value:
+                        continue
+                    row = conn.execute(
+                        """
+                        SELECT canonical_id
+                        FROM canonical_identity_keys
+                        WHERE identity_key = ?
+                        """,
+                        (identity_key,),
+                    ).fetchone()
+                    if row and row["canonical_id"] != clean_canonical_id:
+                        raise ValueError(
+                            "canonical identity key already belongs to "
+                            f"{row['canonical_id']}: {identity_key}"
+                        )
+                    conn.execute(
+                        """
+                        INSERT INTO canonical_identity_keys (
+                            identity_key, canonical_id, entity_type, key_type,
+                            key_value, source_type, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(identity_key) DO NOTHING
+                        """,
+                        (
+                            identity_key,
+                            clean_canonical_id,
+                            clean_entity_type,
+                            key_type,
+                            key_value,
+                            clean_source_type,
+                            now_iso,
+                        ),
+                    )
+                if link_artifact:
+                    conn.execute(
+                        """
+                        INSERT INTO artifact_canonical_links (
+                            artifact_id, artifact_type, source_type, canonical_id,
+                            entity_type, match_key, match_reason, metadata_json,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(artifact_id, artifact_type, source_type) DO UPDATE SET
+                            canonical_id=excluded.canonical_id,
+                            entity_type=excluded.entity_type,
+                            match_key=excluded.match_key,
+                            match_reason=excluded.match_reason,
+                            metadata_json=excluded.metadata_json,
+                            updated_at=excluded.updated_at
+                        """,
+                        (
+                            clean_artifact_id,
+                            clean_artifact_type,
+                            clean_source_type,
+                            clean_canonical_id,
+                            clean_entity_type,
+                            match_key,
+                            match_reason,
+                            metadata_json,
+                            now_iso,
+                            now_iso,
+                        ),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM canonical_entities WHERE canonical_id = ?",
+                    (clean_canonical_id,),
+                ).fetchone()
+                return self._canonical_entity_from_row(row)
+        except Exception as e:
+            logger.error(f"Failed to upsert canonical entity {canonical_id}: {e}")
+            raise
+
+    def get_canonical_link_for_artifact(
+        self,
+        artifact_id: str,
+        *,
+        artifact_type: str | None = None,
+        source_type: str | None = None,
+    ) -> Optional[CanonicalArtifactLinkRecord]:
+        """Return the canonical link for one artifact, if recorded."""
+        clean_artifact_id = str(artifact_id or "").strip()
+        if not clean_artifact_id:
+            return None
+        where = ["artifact_id = ?"]
+        params: list[Any] = [clean_artifact_id]
+        if artifact_type:
+            where.append("artifact_type = ?")
+            params.append(str(artifact_type))
+        if source_type:
+            where.append("source_type = ?")
+            params.append(str(source_type))
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM artifact_canonical_links WHERE "
+                    + " AND ".join(where)
+                    + " ORDER BY updated_at DESC LIMIT 1",
+                    tuple(params),
+                ).fetchone()
+                return self._canonical_link_from_row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get canonical link for {artifact_id}: {e}")
+            return None
+
+    def set_canonical_wiki_slug(
+        self,
+        canonical_id: str,
+        wiki_slug: str,
+    ) -> CanonicalEntityRecord:
+        """Persist the wiki slug chosen by the first compile for a canonical."""
+        clean_canonical_id = str(canonical_id or "").strip()
+        clean_slug = str(wiki_slug or "").strip()
+        if not clean_canonical_id:
+            raise ValueError("canonical_id is required")
+        if not clean_slug:
+            raise ValueError("wiki_slug is required")
+        now_iso = datetime.now().isoformat()
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    """
+                    UPDATE canonical_entities
+                    SET wiki_slug=COALESCE(wiki_slug, ?),
+                        updated_at=?
+                    WHERE canonical_id = ?
+                    RETURNING *
+                    """,
+                    (clean_slug, now_iso, clean_canonical_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError(f"canonical entity not found: {canonical_id}")
+                return self._canonical_entity_from_row(row)
+        except Exception as e:
+            logger.error(f"Failed to set canonical wiki slug {canonical_id}: {e}")
+            raise
     
     # GraphQL cache index operations
     def upsert_graphql_cache_entry(self, tweet_id: str, cache_path: str) -> bool:
