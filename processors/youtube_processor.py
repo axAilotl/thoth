@@ -347,7 +347,7 @@ class YouTubeProcessor:
                     video_id=video_id,
                     title=f"YouTube Video {video_id}",
                     description="Video information unavailable (API access failed)",
-                    published_at="Unknown",
+                    published_at="",
                     channel_id="Unknown",
                     channel_title="Unknown"
                 )
