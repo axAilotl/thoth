@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, Literal
+from typing import Any, Iterable, Literal, Mapping
 
 from .sensitive_redaction import redact_sensitive_text
 
 
 PromptThreatScope = Literal["all", "context", "strict"]
+THOTH_SECURITY_FINDINGS_KEY = "thoth_security_findings"
+THOTH_SECURITY_FINDING_COUNT_KEY = "thoth_security_finding_count"
+THOTH_SECURITY_PATTERN_IDS_KEY = "thoth_security_pattern_ids"
+THOTH_SECURITY_SCANNED_LENGTH_KEY = "thoth_security_scanned_length"
+THOTH_SECURITY_SANITIZED_LENGTH_KEY = "thoth_security_sanitized_length"
+THOTH_REDACTION_METADATA_KEY = "thoth_redaction_metadata"
+PROMPT_SECURITY_SCANNER = "prompt_security"
 
 
 @dataclass(frozen=True)
@@ -247,6 +254,105 @@ def sanitize_untrusted_text(
     )
 
 
+def prompt_security_metadata_for_text(
+    content: str | None,
+    *,
+    source_label: str,
+    scope: PromptThreatScope = "context",
+) -> dict[str, Any]:
+    """Return non-sensitive prompt-security metadata for persisted source text."""
+    original = content or ""
+    redaction = redact_sensitive_text(original)
+    sanitized, report = sanitize_untrusted_text(redaction.redacted_text, scope=scope)
+    metadata: dict[str, Any] = {}
+    if report.findings or redaction.has_findings:
+        metadata[THOTH_SECURITY_SCANNED_LENGTH_KEY] = len(original)
+        metadata[THOTH_SECURITY_SANITIZED_LENGTH_KEY] = len(sanitized)
+    if report.findings:
+        findings = prompt_threat_findings_to_metadata(
+            report.findings,
+            source_label=source_label,
+        )
+        metadata[THOTH_SECURITY_FINDINGS_KEY] = findings
+        metadata[THOTH_SECURITY_FINDING_COUNT_KEY] = len(findings)
+        metadata[THOTH_SECURITY_PATTERN_IDS_KEY] = [
+            finding["pattern_id"] for finding in findings
+        ]
+    if redaction.has_findings:
+        metadata[THOTH_REDACTION_METADATA_KEY] = redaction.to_metadata()
+    return metadata
+
+
+def prompt_threat_findings_to_metadata(
+    findings: Iterable[PromptThreatFinding],
+    *,
+    source_label: str,
+    status: str = "open",
+) -> list[dict[str, str]]:
+    """Serialize prompt-threat findings without source text or secret values."""
+    label = _safe_label(source_label)
+    records: list[dict[str, str]] = []
+    for finding in findings:
+        records.append(
+            {
+                "scanner": PROMPT_SECURITY_SCANNER,
+                "finding_type": "prompt_security",
+                "pattern_id": finding.pattern_id,
+                "scope": finding.scope,
+                "severity": _severity_for_scope(finding.scope),
+                "status": status,
+                "source_label": label,
+                "fingerprint": _finding_fingerprint(finding, label),
+            }
+        )
+    return records
+
+
+def merge_prompt_security_metadata(
+    existing: Mapping[str, Any] | None,
+    new_metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge prompt-security metadata while preserving distinct finding signals."""
+    merged = dict(existing or {})
+    incoming = dict(new_metadata or {})
+    existing_findings = _security_findings_list(
+        merged.get(THOTH_SECURITY_FINDINGS_KEY)
+    )
+    incoming_findings = _security_findings_list(
+        incoming.get(THOTH_SECURITY_FINDINGS_KEY)
+    )
+    if existing_findings or incoming_findings:
+        by_fingerprint: dict[str, dict[str, Any]] = {}
+        for finding in (*existing_findings, *incoming_findings):
+            fingerprint = str(
+                finding.get("fingerprint")
+                or _generic_finding_fingerprint(finding)
+            )
+            by_fingerprint[fingerprint] = {**finding, "fingerprint": fingerprint}
+        findings = [by_fingerprint[key] for key in sorted(by_fingerprint)]
+        merged[THOTH_SECURITY_FINDINGS_KEY] = findings
+        merged[THOTH_SECURITY_FINDING_COUNT_KEY] = len(findings)
+        merged[THOTH_SECURITY_PATTERN_IDS_KEY] = sorted(
+            {
+                str(finding["pattern_id"])
+                for finding in findings
+                if finding.get("pattern_id")
+            }
+        )
+    for key, value in incoming.items():
+        if key in {
+            THOTH_SECURITY_FINDINGS_KEY,
+            THOTH_SECURITY_FINDING_COUNT_KEY,
+            THOTH_SECURITY_PATTERN_IDS_KEY,
+        }:
+            continue
+        if key == THOTH_REDACTION_METADATA_KEY and key in merged:
+            merged[key] = _merge_redaction_metadata(merged[key], value)
+            continue
+        merged[key] = value
+    return merged
+
+
 def wrap_untrusted_content(
     content: str,
     *,
@@ -317,12 +423,95 @@ def _safe_label(value: str) -> str:
     return "".join(char if char.isalnum() or char in "._:-/" else "_" for char in text)[:120]
 
 
+def _severity_for_scope(scope: str) -> str:
+    if scope in {"all", "strict"}:
+        return "high"
+    if scope == "context":
+        return "medium"
+    return "info"
+
+
+def _finding_fingerprint(finding: PromptThreatFinding, source_label: str) -> str:
+    return f"{PROMPT_SECURITY_SCANNER}:{source_label}:{finding.scope}:{finding.pattern_id}"
+
+
+def _generic_finding_fingerprint(finding: Mapping[str, Any]) -> str:
+    return ":".join(
+        str(
+            finding.get(key)
+            or (PROMPT_SECURITY_SCANNER if key == "scanner" else "unknown")
+        )
+        for key in ("scanner", "source_label", "scope", "pattern_id")
+    )
+
+
+def _security_findings_list(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, list):
+        return ()
+    findings = []
+    for item in value:
+        if isinstance(item, Mapping):
+            findings.append(dict(item))
+    return tuple(findings)
+
+
+def _merge_redaction_metadata(existing: Any, incoming: Any) -> Any:
+    if not isinstance(existing, Mapping):
+        return incoming
+    if not isinstance(incoming, Mapping):
+        return existing
+    categories: dict[str, int] = {}
+    for payload in (existing, incoming):
+        payload_categories = payload.get("categories")
+        if isinstance(payload_categories, Mapping):
+            for category, count in payload_categories.items():
+                categories[str(category)] = categories.get(str(category), 0) + int(count)
+    findings = []
+    seen: set[tuple[str, str, str]] = set()
+    for payload in (existing, incoming):
+        payload_findings = payload.get("findings")
+        if not isinstance(payload_findings, list):
+            continue
+        for finding in payload_findings:
+            if not isinstance(finding, Mapping):
+                continue
+            key = (
+                str(finding.get("category") or ""),
+                str(finding.get("pattern_id") or ""),
+                str(finding.get("placeholder") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(dict(finding))
+    return {
+        **dict(existing),
+        **dict(incoming),
+        "redacted": True,
+        "finding_count": len(findings) if findings else int(
+            existing.get("finding_count") or incoming.get("finding_count") or 0
+        ),
+        "categories": dict(sorted(categories.items())),
+        "findings": findings,
+    }
+
+
 __all__ = [
     "INVISIBLE_PROMPT_CHARS",
     "PromptSecurityReport",
     "PromptThreatFinding",
+    "PROMPT_SECURITY_SCANNER",
+    "THOTH_REDACTION_METADATA_KEY",
+    "THOTH_SECURITY_FINDINGS_KEY",
+    "THOTH_SECURITY_FINDING_COUNT_KEY",
+    "THOTH_SECURITY_PATTERN_IDS_KEY",
+    "THOTH_SECURITY_SCANNED_LENGTH_KEY",
+    "THOTH_SECURITY_SANITIZED_LENGTH_KEY",
     "ensure_no_prompt_threats",
     "first_prompt_threat_message",
+    "merge_prompt_security_metadata",
+    "prompt_security_metadata_for_text",
+    "prompt_threat_findings_to_metadata",
     "sanitize_untrusted_text",
     "scan_prompt_threats",
     "wrap_untrusted_content",

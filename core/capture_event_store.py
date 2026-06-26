@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .postgres_migrations import DEFAULT_CAPTURE_SCHEMA, quote_identifier
+from .prompt_security import (
+    PROMPT_SECURITY_SCANNER,
+    THOTH_REDACTION_METADATA_KEY,
+    THOTH_SECURITY_FINDINGS_KEY,
+    prompt_security_metadata_for_text,
+)
 
 
 JsonObject = dict[str, Any]
@@ -768,6 +774,73 @@ class CaptureEventStore:
             ),
         ).fetchone()
         return _security_finding_from_row(row)
+
+    def upsert_prompt_security_findings(
+        self,
+        *,
+        content: str,
+        source_label: str,
+        event_id: str | None = None,
+        raw_ref_id: str | None = None,
+    ) -> tuple[SecurityFinding, ...]:
+        """Scan source content and persist prompt-security findings."""
+        metadata = prompt_security_metadata_for_text(
+            content,
+            source_label=source_label,
+            scope="context",
+        )
+        return self.upsert_security_findings_from_metadata(
+            metadata,
+            event_id=event_id,
+            raw_ref_id=raw_ref_id,
+        )
+
+    def upsert_security_findings_from_metadata(
+        self,
+        metadata: Mapping[str, Any],
+        *,
+        event_id: str | None = None,
+        raw_ref_id: str | None = None,
+    ) -> tuple[SecurityFinding, ...]:
+        """Persist serialized prompt-security metadata as capture findings."""
+        if not event_id and not raw_ref_id:
+            raise ValueError("security findings require event_id or raw_ref_id")
+        findings = metadata.get(THOTH_SECURITY_FINDINGS_KEY)
+        if not isinstance(findings, list):
+            return ()
+        redaction_metadata = metadata.get(THOTH_REDACTION_METADATA_KEY)
+        persisted: list[SecurityFinding] = []
+        for finding in findings:
+            if not isinstance(finding, Mapping):
+                continue
+            pattern_id = _clean_optional(finding.get("pattern_id"))
+            if not pattern_id:
+                continue
+            details = dict(finding)
+            if isinstance(redaction_metadata, Mapping):
+                details[THOTH_REDACTION_METADATA_KEY] = dict(redaction_metadata)
+            persisted.append(
+                self.upsert_security_finding(
+                    SecurityFinding(
+                        event_id=event_id,
+                        raw_ref_id=raw_ref_id,
+                        finding_type=str(
+                            finding.get("finding_type") or "prompt_security"
+                        ),
+                        severity=str(finding.get("severity") or "info"),
+                        status=str(finding.get("status") or "open"),
+                        scanner=str(
+                            finding.get("scanner") or PROMPT_SECURITY_SCANNER
+                        ),
+                        fingerprint=str(
+                            finding.get("fingerprint")
+                            or f"{PROMPT_SECURITY_SCANNER}:{pattern_id}"
+                        ),
+                        details=details,
+                    )
+                )
+            )
+        return tuple(persisted)
 
     def list_security_findings(self, *, event_id: str | None = None) -> tuple[SecurityFinding, ...]:
         where = ""

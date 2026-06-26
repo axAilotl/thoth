@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -13,6 +14,12 @@ from .connector_registry import connector_policy_status, load_connector_registry
 from .ingestion_runtime import KnowledgeArtifactRuntime
 from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import (
+    THOTH_REDACTION_METADATA_KEY,
+    THOTH_SECURITY_FINDINGS_KEY,
+    THOTH_SECURITY_FINDING_COUNT_KEY,
+    THOTH_SECURITY_PATTERN_IDS_KEY,
+)
 from .research_graph import ResearchGraphService
 from .wiki_io import read_document
 from .wiki_query import WikiQueryRunner
@@ -226,6 +233,7 @@ class AgentSurfaceService:
             "created_at": entry.created_at,
             "processed_at": entry.processed_at,
             "capabilities": _json_list(entry.capabilities_json),
+            "security_metadata": _security_metadata_from_payload(entry.payload_json),
         }
 
     def _run_arxiv_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
@@ -558,12 +566,35 @@ def serialize_agent_payload(value: Any) -> Any:
 def _json_list(value: str | None) -> list[str]:
     if not value:
         return []
-    import json
 
     payload = json.loads(value)
     if not isinstance(payload, list):
         raise AgentSurfaceError("Queue capabilities_json must decode to a list")
     return [str(item) for item in payload]
+
+
+def _security_metadata_from_payload(payload_json: str | None) -> dict[str, Any]:
+    if not payload_json:
+        return {}
+    try:
+        payload = json.loads(payload_json)
+    except Exception:
+        return {}
+    if not isinstance(payload, Mapping):
+        return {}
+    normalized_metadata = payload.get("normalized_metadata")
+    if not isinstance(normalized_metadata, Mapping):
+        return {}
+    return {
+        key: normalized_metadata[key]
+        for key in (
+            THOTH_SECURITY_FINDINGS_KEY,
+            THOTH_SECURITY_FINDING_COUNT_KEY,
+            THOTH_SECURITY_PATTERN_IDS_KEY,
+            THOTH_REDACTION_METADATA_KEY,
+        )
+        if normalized_metadata.get(key)
+    }
 
 
 def _run_async(coro: Any) -> Any:
