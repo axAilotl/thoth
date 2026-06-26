@@ -112,6 +112,35 @@ def test_skill_output_connector_rejects_direct_wiki_write_fields(tmp_path: Path)
     assert db.get_ingestion_entry("bad-skill-output") is None
 
 
+def test_skill_output_connector_rejects_direct_wiki_path_values(tmp_path: Path):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    output_path = tmp_path / "bad-path-output.json"
+    output_path.write_text(
+        json.dumps(
+            {
+                "artifact_type": "transcript",
+                "artifact_id": "bad-skill-output-path",
+                "payload": {
+                    "title": "Bad",
+                    "raw_transcript": "Should not queue.",
+                    "custom_metadata": {
+                        "destination": "wiki/pages/bad.md",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    connector = SkillOutputConnector(config, layout=layout, db=db)
+
+    with pytest.raises(ValueError, match="direct wiki paths"):
+        asyncio.run(connector.collect(output_paths=[output_path]))
+
+    assert db.get_ingestion_entry("bad-skill-output-path") is None
+
+
 def test_skill_output_agent_surface_requires_output_source(tmp_path: Path):
     config = _config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)

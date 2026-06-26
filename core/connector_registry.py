@@ -25,6 +25,19 @@ FORBIDDEN_ALLOWED_SIDE_EFFECTS = {
     "write_wiki",
     "wiki:write",
 }
+FORBIDDEN_DIRECT_WIKI_OUTPUTS = {
+    "compiled_wiki",
+    "compiled_wiki_page",
+    "compiled_wiki_path",
+    "direct_wiki",
+    "page_path",
+    "wiki",
+    "wiki_file",
+    "wiki_output",
+    "wiki_output_path",
+    "wiki_page",
+    "wiki_path",
+}
 
 
 @dataclass(frozen=True)
@@ -116,6 +129,7 @@ class ConnectorManifest:
             field_name="outputs",
             origin=origin,
         )
+        validate_manifest_outputs(outputs, origin=origin)
         capabilities = _string_tuple(value.get("capabilities"))
         config_keys = _string_tuple(value.get("config_keys"))
         auth = _required_string_tuple(
@@ -689,4 +703,31 @@ def validate_allowed_side_effects(
         if "wiki" in normalized and "write" in normalized:
             raise ConnectorManifestError(
                 f"{origin}: connector manifest cannot allow direct wiki writes"
+            )
+
+
+def validate_manifest_outputs(
+    outputs: Iterable[str],
+    *,
+    origin: str,
+) -> None:
+    """Reject connector output contracts that target compiled wiki files directly."""
+    for output in outputs:
+        normalized = str(output).strip().lower().replace("\\", "/").replace("-", "_")
+        if not normalized:
+            continue
+        output_parts = [
+            part for part in normalized.replace(":", "/").split("/") if part
+        ]
+        if normalized in FORBIDDEN_DIRECT_WIKI_OUTPUTS:
+            raise ConnectorManifestError(
+                f"{origin}: connector manifest cannot declare direct wiki outputs"
+            )
+        if any(part in FORBIDDEN_DIRECT_WIKI_OUTPUTS for part in output_parts):
+            raise ConnectorManifestError(
+                f"{origin}: connector manifest cannot declare direct wiki outputs"
+            )
+        if normalized.startswith(("wiki/", "./wiki/", "../wiki/")):
+            raise ConnectorManifestError(
+                f"{origin}: connector manifest cannot declare direct wiki outputs"
             )
