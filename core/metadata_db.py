@@ -193,9 +193,66 @@ def _json_string_tuple(value: str | None) -> tuple[str, ...]:
     return tuple(str(item) for item in payload if str(item).strip())
 
 
+def _clean_string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        values = (value,)
+    elif isinstance(value, (list, tuple, set)):
+        values = tuple(value)
+    else:
+        values = (value,)
+    return tuple(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+
+
 def _clean_optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _clean_embedding_provenance(provenance: Mapping[str, Any]) -> dict[str, Any]:
+    from .archivist_retrieval.models import (
+        EMBEDDING_BLOCKED_PRIVACY_CLASSES,
+        EMBEDDING_BLOCKED_SECURITY_STATUSES,
+    )
+
+    if not isinstance(provenance, Mapping):
+        raise ValueError("embedding provenance is required")
+    source_type = str(provenance.get("source_type") or "").strip()
+    if not source_type:
+        raise ValueError("embedding provenance requires source_type")
+    privacy_class = str(provenance.get("privacy_class") or "unspecified").strip().lower()
+    security_state = str(provenance.get("security_state") or "allowed").strip().lower()
+    if privacy_class in EMBEDDING_BLOCKED_PRIVACY_CLASSES:
+        raise ValueError(
+            f"refusing to store embedding for restricted privacy class: {privacy_class}"
+        )
+    if security_state in EMBEDDING_BLOCKED_SECURITY_STATUSES:
+        raise ValueError(
+            f"refusing to store embedding for quarantined security state: {security_state}"
+        )
+    trust_score = float(provenance.get("trust_score") or 0.0)
+    if trust_score <= 0.0:
+        raise ValueError("refusing to store embedding for untrusted source")
+
+    return {
+        "source_type": source_type,
+        "source_id": str(provenance.get("source_id") or "").strip(),
+        "source_key": str(provenance.get("source_key") or "").strip(),
+        "artifact_id": str(provenance.get("artifact_id") or "").strip(),
+        "event_id": str(provenance.get("event_id") or "").strip(),
+        "trust_tier": str(provenance.get("trust_tier") or "untrusted").strip().lower(),
+        "trust_score": trust_score,
+        "trust_reason": str(provenance.get("trust_reason") or "").strip(),
+        "privacy_class": privacy_class or "unspecified",
+        "retention_class": str(
+            provenance.get("retention_class") or "unspecified"
+        ).strip().lower(),
+        "security_state": security_state or "allowed",
+        "security_pattern_ids": _clean_string_tuple(
+            provenance.get("security_pattern_ids")
+        ),
+    }
 
 
 def _row_get(row: sqlite3.Row, key: str, default: Any = None) -> Any:
@@ -1707,6 +1764,10 @@ class MetadataDB:
                     source_trust_reason TEXT NOT NULL DEFAULT 'prompt_security_allowed',
                     source_security_status TEXT NOT NULL DEFAULT 'allowed',
                     source_security_pattern_ids_json TEXT NOT NULL DEFAULT '[]',
+                    artifact_id TEXT,
+                    event_id TEXT,
+                    privacy_class TEXT NOT NULL DEFAULT 'unspecified',
+                    retention_class TEXT NOT NULL DEFAULT 'unspecified',
                     indexed_at TEXT NOT NULL
                 )
                 """
@@ -1729,6 +1790,16 @@ class MetadataDB:
                 (
                     "source_security_pattern_ids_json",
                     "source_security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'",
+                ),
+                ("artifact_id", "artifact_id TEXT"),
+                ("event_id", "event_id TEXT"),
+                (
+                    "privacy_class",
+                    "privacy_class TEXT NOT NULL DEFAULT 'unspecified'",
+                ),
+                (
+                    "retention_class",
+                    "retention_class TEXT NOT NULL DEFAULT 'unspecified'",
                 ),
             ):
                 if column_name not in existing_columns:
@@ -1762,12 +1833,55 @@ class MetadataDB:
                     provider TEXT NOT NULL,
                     model TEXT NOT NULL,
                     source_hash TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL DEFAULT '',
+                    source_key TEXT NOT NULL DEFAULT '',
+                    artifact_id TEXT NOT NULL DEFAULT '',
+                    event_id TEXT NOT NULL DEFAULT '',
+                    trust_tier TEXT NOT NULL,
+                    trust_score REAL NOT NULL,
+                    trust_reason TEXT NOT NULL DEFAULT '',
+                    privacy_class TEXT NOT NULL DEFAULT 'unspecified',
+                    retention_class TEXT NOT NULL DEFAULT 'unspecified',
+                    security_state TEXT NOT NULL DEFAULT 'allowed',
+                    security_pattern_ids_json TEXT NOT NULL DEFAULT '[]',
                     vector_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (candidate_key, provider, model)
                 )
                 """
             )
+            existing_embedding_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(archivist_corpus_embeddings)")
+            }
+            for column_name, ddl in (
+                ("source_type", "source_type TEXT NOT NULL DEFAULT ''"),
+                ("source_id", "source_id TEXT NOT NULL DEFAULT ''"),
+                ("source_key", "source_key TEXT NOT NULL DEFAULT ''"),
+                ("artifact_id", "artifact_id TEXT NOT NULL DEFAULT ''"),
+                ("event_id", "event_id TEXT NOT NULL DEFAULT ''"),
+                ("trust_tier", "trust_tier TEXT NOT NULL DEFAULT 'trusted'"),
+                ("trust_score", "trust_score REAL NOT NULL DEFAULT 1.0"),
+                ("trust_reason", "trust_reason TEXT NOT NULL DEFAULT 'legacy_unscanned'"),
+                (
+                    "privacy_class",
+                    "privacy_class TEXT NOT NULL DEFAULT 'unspecified'",
+                ),
+                (
+                    "retention_class",
+                    "retention_class TEXT NOT NULL DEFAULT 'unspecified'",
+                ),
+                ("security_state", "security_state TEXT NOT NULL DEFAULT 'allowed'"),
+                (
+                    "security_pattern_ids_json",
+                    "security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'",
+                ),
+            ):
+                if column_name not in existing_embedding_columns:
+                    conn.execute(
+                        f"ALTER TABLE archivist_corpus_embeddings ADD COLUMN {ddl}"
+                    )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_archivist_docs_scope_path ON archivist_corpus_documents (scope, scope_relative_path)"
             )
@@ -1776,6 +1890,12 @@ class MetadataDB:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_archivist_embeddings_model ON archivist_corpus_embeddings (provider, model)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_embeddings_provenance ON archivist_corpus_embeddings (source_type, source_id, artifact_id, event_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_embeddings_trust ON archivist_corpus_embeddings (trust_tier, trust_score, security_state, privacy_class)"
             )
 
     def upsert_archivist_corpus_document(self, document) -> None:
@@ -1806,9 +1926,13 @@ class MetadataDB:
                     source_trust_reason,
                     source_security_status,
                     source_security_pattern_ids_json,
+                    artifact_id,
+                    event_id,
+                    privacy_class,
+                    retention_class,
                     indexed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(candidate_key) DO UPDATE SET
                     path=excluded.path,
                     scope=excluded.scope,
@@ -1828,6 +1952,10 @@ class MetadataDB:
                     source_trust_reason=excluded.source_trust_reason,
                     source_security_status=excluded.source_security_status,
                     source_security_pattern_ids_json=excluded.source_security_pattern_ids_json,
+                    artifact_id=excluded.artifact_id,
+                    event_id=excluded.event_id,
+                    privacy_class=excluded.privacy_class,
+                    retention_class=excluded.retention_class,
                     indexed_at=excluded.indexed_at
                 """,
                 (
@@ -1850,6 +1978,10 @@ class MetadataDB:
                     document.source_trust_reason,
                     document.source_security_status,
                     json.dumps(list(document.source_security_pattern_ids), ensure_ascii=False),
+                    document.artifact_id,
+                    document.event_id,
+                    document.privacy_class,
+                    document.retention_class,
                     indexed_at,
                 ),
             )
@@ -1916,6 +2048,12 @@ class MetadataDB:
                 source_security_pattern_ids=_json_string_tuple(
                     row["source_security_pattern_ids_json"]
                 ),
+                artifact_id=_row_get(row, "artifact_id"),
+                event_id=_row_get(row, "event_id"),
+                privacy_class=_row_get(row, "privacy_class", "unspecified")
+                or "unspecified",
+                retention_class=_row_get(row, "retention_class", "unspecified")
+                or "unspecified",
             )
 
     def list_archivist_corpus_documents(
@@ -1984,6 +2122,12 @@ class MetadataDB:
                     source_security_pattern_ids=_json_string_tuple(
                         row["source_security_pattern_ids_json"]
                     ),
+                    artifact_id=_row_get(row, "artifact_id"),
+                    event_id=_row_get(row, "event_id"),
+                    privacy_class=_row_get(row, "privacy_class", "unspecified")
+                    or "unspecified",
+                    retention_class=_row_get(row, "retention_class", "unspecified")
+                    or "unspecified",
                 )
                 for row in rows
             ]
@@ -2147,6 +2291,12 @@ class MetadataDB:
                     source_security_pattern_ids=_json_string_tuple(
                         row["source_security_pattern_ids_json"]
                     ),
+                    artifact_id=_row_get(row, "artifact_id"),
+                    event_id=_row_get(row, "event_id"),
+                    privacy_class=_row_get(row, "privacy_class", "unspecified")
+                    or "unspecified",
+                    retention_class=_row_get(row, "retention_class", "unspecified")
+                    or "unspecified",
                 )
                 rank_score = float(row["rank_score"]) if row["rank_score"] is not None else 0.0
                 results.append((document, rank_score))
@@ -2159,10 +2309,12 @@ class MetadataDB:
         provider: str,
         model: str,
         source_hash: str,
+        provenance: Mapping[str, Any],
         vector: list[float],
     ) -> None:
         """Insert or update a semantic embedding for a corpus document."""
         self.ensure_archivist_corpus_tables()
+        clean_provenance = _clean_embedding_provenance(provenance)
         with self._get_connection() as conn:
             conn.execute(
                 """
@@ -2171,12 +2323,36 @@ class MetadataDB:
                     provider,
                     model,
                     source_hash,
+                    source_type,
+                    source_id,
+                    source_key,
+                    artifact_id,
+                    event_id,
+                    trust_tier,
+                    trust_score,
+                    trust_reason,
+                    privacy_class,
+                    retention_class,
+                    security_state,
+                    security_pattern_ids_json,
                     vector_json,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(candidate_key, provider, model) DO UPDATE SET
                     source_hash=excluded.source_hash,
+                    source_type=excluded.source_type,
+                    source_id=excluded.source_id,
+                    source_key=excluded.source_key,
+                    artifact_id=excluded.artifact_id,
+                    event_id=excluded.event_id,
+                    trust_tier=excluded.trust_tier,
+                    trust_score=excluded.trust_score,
+                    trust_reason=excluded.trust_reason,
+                    privacy_class=excluded.privacy_class,
+                    retention_class=excluded.retention_class,
+                    security_state=excluded.security_state,
+                    security_pattern_ids_json=excluded.security_pattern_ids_json,
                     vector_json=excluded.vector_json,
                     updated_at=excluded.updated_at
                 """,
@@ -2185,6 +2361,21 @@ class MetadataDB:
                     provider,
                     model,
                     source_hash,
+                    clean_provenance["source_type"],
+                    clean_provenance["source_id"],
+                    clean_provenance["source_key"],
+                    clean_provenance["artifact_id"],
+                    clean_provenance["event_id"],
+                    clean_provenance["trust_tier"],
+                    clean_provenance["trust_score"],
+                    clean_provenance["trust_reason"],
+                    clean_provenance["privacy_class"],
+                    clean_provenance["retention_class"],
+                    clean_provenance["security_state"],
+                    json.dumps(
+                        list(clean_provenance["security_pattern_ids"]),
+                        ensure_ascii=False,
+                    ),
                     json.dumps(vector, ensure_ascii=False),
                     datetime.now().isoformat(),
                 ),
@@ -2196,30 +2387,146 @@ class MetadataDB:
         candidate_keys: tuple[str, ...],
         provider: str,
         model: str,
+        expected_source_hashes: Mapping[str, str] | None = None,
+        source_types: tuple[str, ...] = (),
+        source_ids: tuple[str, ...] = (),
+        source_keys: tuple[str, ...] = (),
+        artifact_ids: tuple[str, ...] = (),
+        event_ids: tuple[str, ...] = (),
+        trust_tiers: tuple[str, ...] = (),
+        min_trust_score: float | None = None,
+        privacy_classes: tuple[str, ...] = (),
+        retention_classes: tuple[str, ...] = (),
+        security_states: tuple[str, ...] = (),
+        exclude_privacy_classes: tuple[str, ...] | None = None,
+        exclude_security_states: tuple[str, ...] | None = None,
+        exclude_stale: bool = True,
     ) -> dict[str, dict[str, Any]]:
-        """Fetch stored embeddings for a provider/model pair."""
+        """Fetch stored embeddings for a provider/model pair with provenance filters."""
+        from .archivist_retrieval.models import (
+            EMBEDDING_BLOCKED_PRIVACY_CLASSES,
+            EMBEDDING_BLOCKED_SECURITY_STATUSES,
+        )
+
         self.ensure_archivist_corpus_tables()
         if not candidate_keys:
             return {}
-        placeholders = ",".join("?" for _ in candidate_keys)
-        params: list[Any] = [provider, model, *candidate_keys]
+        cleaned_candidate_keys = tuple(
+            dict.fromkeys(str(item).strip() for item in candidate_keys if str(item).strip())
+        )
+        if not cleaned_candidate_keys:
+            return {}
+
+        expected_hashes = {
+            str(key): str(value)
+            for key, value in (expected_source_hashes or {}).items()
+            if str(key).strip() and str(value).strip()
+        }
+        exclude_privacy = (
+            tuple(sorted(EMBEDDING_BLOCKED_PRIVACY_CLASSES))
+            if exclude_privacy_classes is None
+            else _clean_string_tuple(exclude_privacy_classes)
+        )
+        exclude_security = (
+            tuple(sorted(EMBEDDING_BLOCKED_SECURITY_STATUSES))
+            if exclude_security_states is None
+            else _clean_string_tuple(exclude_security_states)
+        )
+
+        placeholders = ",".join("?" for _ in cleaned_candidate_keys)
+        where_clauses = [
+            "provider = ?",
+            "model = ?",
+            f"candidate_key IN ({placeholders})",
+        ]
+        params: list[Any] = [provider, model, *cleaned_candidate_keys]
+
+        def add_in_filter(column: str, values: tuple[str, ...]) -> None:
+            cleaned = _clean_string_tuple(values)
+            if not cleaned:
+                return
+            filter_placeholders = ",".join("?" for _ in cleaned)
+            where_clauses.append(f"{column} IN ({filter_placeholders})")
+            params.extend(cleaned)
+
+        def add_not_in_filter(column: str, values: tuple[str, ...]) -> None:
+            cleaned = _clean_string_tuple(values)
+            if not cleaned:
+                return
+            filter_placeholders = ",".join("?" for _ in cleaned)
+            where_clauses.append(f"{column} NOT IN ({filter_placeholders})")
+            params.extend(cleaned)
+
+        add_in_filter("source_type", source_types)
+        add_in_filter("source_id", source_ids)
+        add_in_filter("source_key", source_keys)
+        add_in_filter("artifact_id", artifact_ids)
+        add_in_filter("event_id", event_ids)
+        add_in_filter("trust_tier", trust_tiers)
+        add_in_filter("privacy_class", privacy_classes)
+        add_in_filter("retention_class", retention_classes)
+        add_in_filter("security_state", security_states)
+        add_not_in_filter("privacy_class", exclude_privacy)
+        add_not_in_filter("security_state", exclude_security)
+        if min_trust_score is not None:
+            where_clauses.append("trust_score >= ?")
+            params.append(float(min_trust_score))
+
         with self._get_connection() as conn:
             rows = conn.execute(
                 f"""
-                SELECT candidate_key, source_hash, vector_json, updated_at
+                SELECT
+                    candidate_key,
+                    source_hash,
+                    source_type,
+                    source_id,
+                    source_key,
+                    artifact_id,
+                    event_id,
+                    trust_tier,
+                    trust_score,
+                    trust_reason,
+                    privacy_class,
+                    retention_class,
+                    security_state,
+                    security_pattern_ids_json,
+                    vector_json,
+                    updated_at
                 FROM archivist_corpus_embeddings
-                WHERE provider = ? AND model = ? AND candidate_key IN ({placeholders})
+                WHERE {" AND ".join(where_clauses)}
                 """,
                 tuple(params),
             ).fetchall()
-            return {
-                row["candidate_key"]: {
+            embeddings: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                candidate_key = row["candidate_key"]
+                expected_hash = expected_hashes.get(candidate_key)
+                is_stale = bool(
+                    expected_hash is not None and row["source_hash"] != expected_hash
+                )
+                if exclude_stale and is_stale:
+                    continue
+                embeddings[candidate_key] = {
                     "source_hash": row["source_hash"],
+                    "source_type": row["source_type"],
+                    "source_id": row["source_id"],
+                    "source_key": row["source_key"],
+                    "artifact_id": row["artifact_id"],
+                    "event_id": row["event_id"],
+                    "trust_tier": row["trust_tier"],
+                    "trust_score": float(row["trust_score"]),
+                    "trust_reason": row["trust_reason"],
+                    "privacy_class": row["privacy_class"],
+                    "retention_class": row["retention_class"],
+                    "security_state": row["security_state"],
+                    "security_pattern_ids": _json_string_tuple(
+                        row["security_pattern_ids_json"]
+                    ),
                     "vector": json.loads(row["vector_json"]),
                     "updated_at": row["updated_at"],
+                    "stale": is_stale,
                 }
-                for row in rows
-            }
+            return embeddings
 
     def list_archivist_corpus_embeddings_for_candidate_keys(
         self,
@@ -2236,14 +2543,38 @@ class MetadataDB:
         with self._get_connection() as conn:
             rows = conn.execute(
                 f"""
-                SELECT candidate_key, provider, model, source_hash, updated_at
+                SELECT
+                    candidate_key,
+                    provider,
+                    model,
+                    source_hash,
+                    source_type,
+                    source_id,
+                    source_key,
+                    artifact_id,
+                    event_id,
+                    trust_tier,
+                    trust_score,
+                    trust_reason,
+                    privacy_class,
+                    retention_class,
+                    security_state,
+                    security_pattern_ids_json,
+                    updated_at
                 FROM archivist_corpus_embeddings
                 WHERE candidate_key IN ({placeholders})
                 ORDER BY updated_at DESC, candidate_key, provider, model
                 """,
                 cleaned,
             ).fetchall()
-            return [dict(row) for row in rows]
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                payload = dict(row)
+                payload["security_pattern_ids"] = _json_string_tuple(
+                    row["security_pattern_ids_json"]
+                )
+                results.append(payload)
+            return results
 
     def delete_archivist_corpus_embedding(
         self,

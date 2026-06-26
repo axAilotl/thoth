@@ -274,6 +274,7 @@ def _retention_surface(
         provider="test",
         model="embed",
         source_hash=document.embedding_source_hash(),
+        provenance=document.embedding_provenance(),
         vector=[0.1, 0.2],
     )
 

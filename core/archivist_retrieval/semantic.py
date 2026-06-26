@@ -5,6 +5,7 @@ from __future__ import annotations
 from math import sqrt
 from typing import Sequence
 
+from ..sensitive_redaction import SensitiveRedactionError, redact_sensitive_text
 from .models import ArchivistCorpusDocument
 
 SEMANTIC_DOCUMENT_CHAR_LIMIT = 6000
@@ -28,6 +29,16 @@ async def retrieve_semantic_documents(
 
     if not documents:
         return []
+    embedding_documents = tuple(
+        document for document in documents if _document_embedding_is_allowed(document)
+    )
+    if not embedding_documents:
+        return []
+    if _text_has_sensitive_findings(query.text):
+        raise ArchivistSemanticRetrievalError(
+            "Semantic retrieval query contains sensitive content and cannot be embedded"
+        )
+
     route = llm_interface.resolve_task_route("embedding")
     if route is None:
         raise ArchivistSemanticRetrievalError(
@@ -50,17 +61,24 @@ async def retrieve_semantic_documents(
         )
     query_vector = query_response.vectors[0]
 
-    documents_by_key = {document.candidate_key: document for document in documents}
+    documents_by_key = {
+        document.candidate_key: document for document in embedding_documents
+    }
+    expected_source_hashes = {
+        document.candidate_key: document.embedding_source_hash()
+        for document in embedding_documents
+    }
     stored = db.get_archivist_corpus_embeddings(
         candidate_keys=tuple(documents_by_key.keys()),
         provider=provider_name,
         model=model_id,
+        expected_source_hashes=expected_source_hashes,
     )
 
     missing: list[ArchivistCorpusDocument] = []
-    for document in documents:
+    for document in embedding_documents:
         payload = stored.get(document.candidate_key)
-        if payload is None or payload.get("source_hash") != document.embedding_source_hash():
+        if payload is None:
             missing.append(document)
 
     if missing:
@@ -88,6 +106,7 @@ async def retrieve_semantic_documents(
                     provider=provider_name,
                     model=model_id,
                     source_hash=document.embedding_source_hash(),
+                    provenance=document.embedding_provenance(),
                     vector=list(vector),
                 )
 
@@ -95,10 +114,11 @@ async def retrieve_semantic_documents(
             candidate_keys=tuple(documents_by_key.keys()),
             provider=provider_name,
             model=model_id,
+            expected_source_hashes=expected_source_hashes,
         )
 
     scored: list[tuple[ArchivistCorpusDocument, float]] = []
-    for document in documents:
+    for document in embedding_documents:
         payload = stored.get(document.candidate_key)
         if payload is None:
             continue
@@ -139,6 +159,19 @@ def _embedding_text(document: ArchivistCorpusDocument) -> str:
         ]
     )
     return base.strip()
+
+
+def _document_embedding_is_allowed(document: ArchivistCorpusDocument) -> bool:
+    return document.embedding_is_allowed() and not _text_has_sensitive_findings(
+        _embedding_text(document)
+    )
+
+
+def _text_has_sensitive_findings(value: str) -> bool:
+    try:
+        return redact_sensitive_text(value).has_findings
+    except SensitiveRedactionError:
+        return True
 
 
 def _chunk_documents(
