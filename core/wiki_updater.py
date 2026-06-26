@@ -22,6 +22,12 @@ from .artifacts import (
 from .config import Config
 from .metadata_db import MetadataDB
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import (
+    THOTH_SECURITY_FINDINGS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
+    prompt_security_policy_for_metadata,
+    prompt_security_requires_review,
+)
 from .research_graph import ResearchGraphService
 from .wiki_contract import (
     WikiContract,
@@ -179,6 +185,10 @@ def _security_finding_entries(source_key: str, value: Any) -> tuple[Any, ...]:
     return tuple(entries)
 
 
+def _frontmatter_requires_security_review(frontmatter: Mapping[str, Any]) -> bool:
+    return prompt_security_requires_review(frontmatter)
+
+
 @dataclass(frozen=True)
 class WikiUpdateResult:
     """Summary of a single compiled wiki update."""
@@ -252,6 +262,13 @@ class CompiledWikiUpdater:
             raise ValueError(
                 f"Compiled wiki pages are not supported for {artifact.__class__.__name__}"
             )
+        security_policy = self._security_policy_for_artifact(artifact)
+        if security_policy and prompt_security_requires_review(
+            {THOTH_SECURITY_POLICY_KEY: security_policy}
+        ):
+            raise ValueError(
+                f"Artifact {artifact.source_type}:{artifact.id} requires security review"
+            )
         spec = self._page_spec_for_artifact(artifact)
         page_path = self.contract.page_path_for(spec)
         existing = _read_frontmatter(page_path)
@@ -274,6 +291,7 @@ class CompiledWikiUpdater:
             source_type=spec.source_type,
             event_ids=spec.event_ids,
             security_findings=spec.security_findings,
+            security_policy=spec.security_policy,
         )
         content = self._render_page(updated_spec, artifact, dispatch_details=dispatch_details)
         action = "updated" if page_path.exists() else "created"
@@ -301,6 +319,8 @@ class CompiledWikiUpdater:
                 or page_path.stem
             )
             if is_legacy_tweet_slug(slug):
+                continue
+            if _frontmatter_requires_security_review(frontmatter):
                 continue
             title = str(frontmatter.get("title") or page_path.stem)
             summary = _truncate_summary(
@@ -352,6 +372,7 @@ class CompiledWikiUpdater:
             source_type=artifact.source_type,
             event_ids=self._event_ids_for_artifact(artifact),
             security_findings=self._security_findings_for_artifact(artifact),
+            security_policy=self._security_policy_for_artifact(artifact),
         )
 
     def _title_slug_and_summary(
@@ -507,6 +528,29 @@ class CompiledWikiUpdater:
                 if key in metadata and _has_security_findings(metadata[key]):
                     findings.extend(_security_finding_entries(key, metadata[key]))
         return tuple(findings)
+
+    def _security_policy_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+    ) -> dict[str, Any] | None:
+        source_label = f"{artifact.source_type}:{artifact.id}" if artifact.id else artifact.source_type
+        for metadata in self._metadata_mappings_for_artifact(artifact):
+            policy = metadata.get(THOTH_SECURITY_POLICY_KEY)
+            if isinstance(policy, Mapping):
+                return dict(policy)
+        for metadata in self._metadata_mappings_for_artifact(artifact):
+            if metadata.get(THOTH_SECURITY_FINDINGS_KEY):
+                return prompt_security_policy_for_metadata(
+                    metadata,
+                    source_type=artifact.source_type,
+                    source_label=source_label,
+                    source_path=(
+                        artifact.raw_payload.path
+                        if getattr(artifact, "raw_payload", None)
+                        else None
+                    ),
+                )
+        return None
 
     def _resource_for_artifact(self, artifact: KnowledgeArtifact) -> str | None:
         if isinstance(artifact, PaperArtifact):

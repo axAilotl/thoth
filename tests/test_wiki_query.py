@@ -61,6 +61,22 @@ def test_wiki_query_searches_and_writes_back_curated_pages(tmp_path: Path, monke
             ),
             "# Unrelated Note\n\nNo query term here.",
         )
+        _write_page(
+            contract,
+            WikiPageSpec(
+                title="Quarantined Agentic Workflow",
+                slug="quarantined-agentic-workflow",
+                kind="topic",
+                summary="Agentic workflows that require review",
+                source_paths=("notes/quarantined.md",),
+                updated_at="2026-04-04T00:00:00Z",
+                security_policy={
+                    "status": "needs_review",
+                    "reason": "high_risk_finding",
+                },
+            ),
+            "# Quarantined\n\nThis page discusses agentic workflows.",
+        )
 
         runner = WikiQueryRunner(config, layout=layout, contract=contract)
         result = runner.search("agentic workflows", limit=5)
@@ -68,6 +84,15 @@ def test_wiki_query_searches_and_writes_back_curated_pages(tmp_path: Path, monke
         assert len(result.hits) == 1
         assert result.hits[0].slug == "repo-owner-repo"
         assert "body" in result.hits[0].matched_fields or "phrase" in result.hits[0].matched_fields
+        review_result = runner.search(
+            "agentic workflows",
+            limit=5,
+            include_quarantined=True,
+        )
+        assert {hit.slug for hit in review_result.hits} == {
+            "repo-owner-repo",
+            "quarantined-agentic-workflow",
+        }
 
         write_back = runner.curated_write_back(
             "agentic workflows",

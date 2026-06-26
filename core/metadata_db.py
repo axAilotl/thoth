@@ -7,7 +7,7 @@ import sqlite3
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Mapping, Optional
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -16,10 +16,20 @@ from .config import config
 from .path_layout import build_path_layout
 from .prompt_security import (
     THOTH_REDACTION_METADATA_KEY,
+    THOTH_SECURITY_AUDIT_KEY,
     THOTH_SECURITY_FINDINGS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
     THOTH_SECURITY_SCANNED_LENGTH_KEY,
+    PROMPT_SECURITY_POLICY_ALLOWED,
+    PROMPT_SECURITY_POLICY_BLOCKED,
+    PROMPT_SECURITY_POLICY_NEEDS_REVIEW,
+    PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
+    is_strict_prompt_security_source,
     merge_prompt_security_metadata,
+    merge_prompt_security_policy_metadata,
     prompt_security_metadata_for_text,
+    prompt_security_policy_for_metadata,
+    prompt_security_requires_review,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +48,21 @@ FILES_INDEX_ALLOWED_TYPES = (
     'translation',
 )
 FILES_INDEX_TYPE_CHECK = "', '".join(FILES_INDEX_ALLOWED_TYPES)
+INGESTION_QUEUE_ALLOWED_STATUSES = (
+    'pending',
+    'processing',
+    'processed',
+    'failed',
+    'needs_review',
+    'blocked',
+)
+INGESTION_QUEUE_STATUS_CHECK = "', '".join(INGESTION_QUEUE_ALLOWED_STATUSES)
+INGESTION_QUARANTINE_STATUSES = frozenset(
+    {
+        PROMPT_SECURITY_POLICY_NEEDS_REVIEW,
+        PROMPT_SECURITY_POLICY_BLOCKED,
+    }
+)
 
 
 def _payload_security_metadata(payload: dict[str, Any]) -> dict[str, Any]:
@@ -46,7 +71,12 @@ def _payload_security_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         return {}
     return {
         key: normalized_metadata[key]
-        for key in (THOTH_SECURITY_FINDINGS_KEY, THOTH_REDACTION_METADATA_KEY)
+        for key in (
+            THOTH_SECURITY_FINDINGS_KEY,
+            THOTH_SECURITY_POLICY_KEY,
+            THOTH_SECURITY_AUDIT_KEY,
+            THOTH_REDACTION_METADATA_KEY,
+        )
         if normalized_metadata.get(key)
     }
 
@@ -81,15 +111,21 @@ def _ingestion_payload_with_security_metadata(entry: "IngestionQueueEntry") -> s
     if not isinstance(content, str):
         content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     source_label = f"{entry.artifact_type}:{entry.source}:{entry.artifact_id}"
+    normalized_metadata = payload.get("normalized_metadata")
+    strict_scope = is_strict_prompt_security_source(
+        source_type=entry.source,
+        source_label=source_label,
+        source_path=_payload_source_path(payload),
+        metadata=normalized_metadata if isinstance(normalized_metadata, Mapping) else None,
+    )
     security_metadata = prompt_security_metadata_for_text(
         content,
         source_label=source_label,
-        scope="context",
+        scope="strict" if strict_scope else "context",
     )
     if not security_metadata:
         return entry.payload_json
 
-    normalized_metadata = payload.get("normalized_metadata")
     if not isinstance(normalized_metadata, dict):
         normalized_metadata = {}
     payload["normalized_metadata"] = merge_prompt_security_metadata(
@@ -97,6 +133,192 @@ def _ingestion_payload_with_security_metadata(entry: "IngestionQueueEntry") -> s
         security_metadata,
     )
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _json_payload(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _payload_source_path(payload: Mapping[str, Any]) -> str | None:
+    custom_metadata = payload.get("custom_metadata")
+    normalized_metadata = payload.get("normalized_metadata")
+    candidates: list[Any] = [
+        payload.get("raw_payload_path"),
+        payload.get("source_path"),
+        payload.get("source_relative_path"),
+        payload.get("source_file"),
+    ]
+    if isinstance(custom_metadata, Mapping):
+        candidates.extend(
+            custom_metadata.get(key)
+            for key in (
+                "raw_payload_path",
+                "source_path",
+                "source_relative_path",
+                "skill_output_path",
+            )
+        )
+    if isinstance(normalized_metadata, Mapping):
+        candidates.extend(
+            normalized_metadata.get(key)
+            for key in (
+                "raw_payload_path",
+                "source_path",
+                "source_relative_path",
+                "skill_output_path",
+            )
+        )
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _security_policy_audit_entry(
+    *,
+    action: str,
+    status: str,
+    reason: str,
+    actor: str | None = None,
+    at: str | None = None,
+    previous_status: str | None = None,
+) -> dict[str, str]:
+    entry = {
+        "action": action,
+        "status": status,
+        "reason": reason,
+        "at": at or datetime.now().isoformat(),
+    }
+    if actor:
+        entry["actor"] = actor
+    if previous_status:
+        entry["previous_status"] = previous_status
+    return entry
+
+
+def _finding_fingerprints(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
+    if not isinstance(metadata, Mapping):
+        return ()
+    findings = metadata.get(THOTH_SECURITY_FINDINGS_KEY)
+    if not isinstance(findings, list):
+        return ()
+    values = []
+    for finding in findings:
+        if not isinstance(finding, Mapping):
+            continue
+        fingerprint = (
+            finding.get("fingerprint")
+            or ":".join(
+                str(finding.get(key) or "")
+                for key in ("scanner", "source_label", "scope", "pattern_id")
+            )
+        )
+        if fingerprint:
+            values.append(str(fingerprint))
+    return tuple(sorted(set(values)))
+
+
+def _ingestion_payload_with_security_policy(
+    entry: "IngestionQueueEntry",
+    payload_json: str,
+    *,
+    existing_payload_json: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Attach quarantine policy metadata based on persisted scanner findings."""
+    payload = _json_payload(payload_json)
+    if not payload:
+        return payload_json, {
+            "status": PROMPT_SECURITY_POLICY_ALLOWED,
+            "reason": "invalid_or_empty_payload",
+        }
+
+    normalized_metadata = payload.get("normalized_metadata")
+    if not isinstance(normalized_metadata, dict):
+        normalized_metadata = {}
+
+    existing_payload = _json_payload(existing_payload_json)
+    existing_metadata = existing_payload.get("normalized_metadata")
+    existing_policy = (
+        existing_metadata.get(THOTH_SECURITY_POLICY_KEY)
+        if isinstance(existing_metadata, Mapping)
+        else None
+    )
+    if (
+        isinstance(existing_policy, Mapping)
+        and existing_policy.get("status") == PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED
+        and _finding_fingerprints(normalized_metadata)
+        == _finding_fingerprints(
+            existing_metadata if isinstance(existing_metadata, Mapping) else None
+        )
+    ):
+        normalized_metadata = merge_prompt_security_policy_metadata(
+            normalized_metadata,
+            existing_policy,
+        )
+        existing_audit = (
+            existing_metadata.get(THOTH_SECURITY_AUDIT_KEY)
+            if isinstance(existing_metadata, Mapping)
+            else None
+        )
+        if isinstance(existing_audit, list) and existing_audit:
+            normalized_metadata[THOTH_SECURITY_AUDIT_KEY] = [
+                dict(item) for item in existing_audit if isinstance(item, Mapping)
+            ]
+        payload["normalized_metadata"] = normalized_metadata
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True), dict(existing_policy)
+
+    source_label = f"{entry.artifact_type}:{entry.source}:{entry.artifact_id}"
+    policy = prompt_security_policy_for_metadata(
+        normalized_metadata,
+        source_type=entry.source,
+        source_label=source_label,
+        source_path=_payload_source_path(payload),
+    )
+    audit_entry = None
+    if policy["status"] in INGESTION_QUARANTINE_STATUSES:
+        audit_entry = _security_policy_audit_entry(
+            action="quarantined",
+            status=str(policy["status"]),
+            reason=str(policy["reason"]),
+        )
+
+    if normalized_metadata.get(THOTH_SECURITY_FINDINGS_KEY) or audit_entry:
+        normalized_metadata = merge_prompt_security_policy_metadata(
+            normalized_metadata,
+            policy,
+            audit_entry=audit_entry,
+        )
+        payload["normalized_metadata"] = normalized_metadata
+
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True), policy
+
+
+def _queue_status_for_security_policy(
+    requested_status: str,
+    policy: Mapping[str, Any],
+) -> str:
+    status = str(policy.get("status") or PROMPT_SECURITY_POLICY_ALLOWED)
+    if status == PROMPT_SECURITY_POLICY_BLOCKED:
+        return "blocked"
+    if status == PROMPT_SECURITY_POLICY_NEEDS_REVIEW:
+        return "needs_review"
+    return requested_status
+
+
+def _security_policy_last_error(policy: Mapping[str, Any]) -> str | None:
+    status = str(policy.get("status") or "")
+    if status == PROMPT_SECURITY_POLICY_BLOCKED:
+        return f"security policy blocked: {policy.get('reason')}"
+    if status == PROMPT_SECURITY_POLICY_NEEDS_REVIEW:
+        return f"security review required: {policy.get('reason')}"
+    return None
 
 
 @dataclass
@@ -354,7 +576,7 @@ class MetadataDB:
                 artifact_type TEXT NOT NULL,
                 source TEXT NOT NULL,
                 priority INTEGER DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'processed', 'failed')),
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'processed', 'failed', 'needs_review', 'blocked')),
                 payload_json TEXT NOT NULL,
                 capabilities_json TEXT,
                 attempts INTEGER DEFAULT 0,
@@ -364,6 +586,7 @@ class MetadataDB:
                 processed_at TEXT
             )
         """)
+        self._ensure_ingestion_queue_statuses(conn)
 
         # Ensure new columns exist when upgrading from earlier schema
         try:
@@ -806,6 +1029,75 @@ class MetadataDB:
         """)
         conn.execute("DROP TABLE files_index")
         conn.execute("ALTER TABLE files_index_new RENAME TO files_index")
+
+    def _ensure_ingestion_queue_statuses(self, conn: sqlite3.Connection):
+        """Expand ingestion queue status constraints for quarantine states."""
+        row = conn.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'ingestion_queue'
+            """
+        ).fetchone()
+        current_sql = (row["sql"] or "") if row else ""
+        if all(
+            f"'{allowed_status}'" in current_sql
+            for allowed_status in INGESTION_QUEUE_ALLOWED_STATUSES
+        ):
+            return
+
+        conn.execute("DROP TABLE IF EXISTS ingestion_queue_new")
+        conn.execute(f"""
+            CREATE TABLE ingestion_queue_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                artifact_id TEXT NOT NULL UNIQUE,
+                artifact_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                priority INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('{INGESTION_QUEUE_STATUS_CHECK}')),
+                payload_json TEXT NOT NULL,
+                capabilities_json TEXT,
+                attempts INTEGER DEFAULT 0,
+                last_error TEXT,
+                next_attempt_at TEXT,
+                created_at TEXT NOT NULL,
+                processed_at TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO ingestion_queue_new (
+                id,
+                artifact_id,
+                artifact_type,
+                source,
+                priority,
+                status,
+                payload_json,
+                capabilities_json,
+                attempts,
+                last_error,
+                next_attempt_at,
+                created_at,
+                processed_at
+            )
+            SELECT
+                id,
+                artifact_id,
+                artifact_type,
+                source,
+                priority,
+                status,
+                payload_json,
+                capabilities_json,
+                attempts,
+                last_error,
+                next_attempt_at,
+                created_at,
+                processed_at
+            FROM ingestion_queue
+        """)
+        conn.execute("DROP TABLE ingestion_queue")
+        conn.execute("ALTER TABLE ingestion_queue_new RENAME TO ingestion_queue")
     
     # GraphQL cache index operations
     def upsert_graphql_cache_entry(self, tweet_id: str, cache_path: str) -> bool:
@@ -1811,7 +2103,19 @@ class MetadataDB:
     def upsert_ingestion_entry(self, entry: IngestionQueueEntry) -> bool:
         """Insert or update an ingestion queue entry."""
         try:
+            existing = self.get_ingestion_entry(entry.artifact_id)
             payload_json = _ingestion_payload_with_security_metadata(entry)
+            payload_json, security_policy = _ingestion_payload_with_security_policy(
+                entry,
+                payload_json,
+                existing_payload_json=existing.payload_json if existing else None,
+            )
+            status = _queue_status_for_security_policy(entry.status, security_policy)
+            last_error = (
+                _security_policy_last_error(security_policy)
+                if status in {"needs_review", "blocked"}
+                else entry.last_error
+            )
             with self._get_connection() as conn:
                 conn.execute(
                     """
@@ -1838,11 +2142,11 @@ class MetadataDB:
                         entry.artifact_type,
                         entry.source,
                         entry.priority,
-                        entry.status,
+                        status,
                         payload_json,
                         entry.capabilities_json,
                         entry.attempts,
-                        entry.last_error,
+                        last_error,
                         entry.next_attempt_at or entry.created_at or datetime.now().isoformat(),
                         entry.created_at or datetime.now().isoformat(),
                         entry.processed_at
@@ -1876,15 +2180,15 @@ class MetadataDB:
         """Mark an artifact as processed."""
         try:
             with self._get_connection() as conn:
-                conn.execute(
+                result = conn.execute(
                     """
                     UPDATE ingestion_queue
                     SET status='processed', processed_at=?, last_error=NULL, next_attempt_at=NULL
-                    WHERE artifact_id = ?
+                    WHERE artifact_id = ? AND status NOT IN ('needs_review', 'blocked')
                     """,
                     (datetime.now().isoformat(), artifact_id)
                 )
-                return True
+                return (result.rowcount or 0) > 0
         except Exception as e:
             logger.error(f"Failed to mark ingestion {artifact_id} processed: {e}")
             return False
@@ -1895,6 +2199,8 @@ class MetadataDB:
             entry = self.get_ingestion_entry(artifact_id)
             if not entry:
                 return None
+            if entry.status in {"needs_review", "blocked"}:
+                return entry
 
             attempts = entry.attempts
             delay_seconds = min(3600, 300 * (2 ** max(0, attempts - 1)))
@@ -1923,6 +2229,101 @@ class MetadataDB:
         except Exception as e:
             logger.error(f"Failed to mark ingestion {artifact_id} failed: {e}")
             return None
+
+    def approve_ingestion_security_override(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> Optional[IngestionQueueEntry]:
+        """Move a quarantined ingestion back to pending with audited operator approval."""
+        clean_actor = str(actor or "").strip()
+        clean_reason = str(reason or "").strip()
+        if not clean_actor:
+            raise ValueError("Security override requires actor")
+        if not clean_reason:
+            raise ValueError("Security override requires reason")
+
+        entry = self.get_ingestion_entry(artifact_id)
+        if not entry:
+            return None
+
+        payload = _json_payload(entry.payload_json)
+        normalized_metadata = payload.get("normalized_metadata")
+        if not isinstance(normalized_metadata, dict):
+            normalized_metadata = {}
+        current_policy = prompt_security_policy_for_metadata(
+            normalized_metadata,
+            source_type=entry.source,
+            source_label=f"{entry.artifact_type}:{entry.source}:{entry.artifact_id}",
+            source_path=_payload_source_path(payload),
+        )
+        previous_status = str(current_policy.get("status") or entry.status)
+        if previous_status not in {
+            PROMPT_SECURITY_POLICY_NEEDS_REVIEW,
+            PROMPT_SECURITY_POLICY_BLOCKED,
+            "needs_review",
+            "blocked",
+        }:
+            return entry
+
+        now_iso = datetime.now().isoformat()
+        approved_policy = {
+            **current_policy,
+            "status": PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
+            "reason": "operator_override",
+            "override_actor": clean_actor,
+            "override_reason": clean_reason,
+            "override_at": now_iso,
+        }
+        normalized_metadata = merge_prompt_security_policy_metadata(
+            normalized_metadata,
+            approved_policy,
+            audit_entry=_security_policy_audit_entry(
+                action="override_approved",
+                status=PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
+                reason=clean_reason,
+                actor=clean_actor,
+                at=now_iso,
+                previous_status=previous_status,
+            ),
+        )
+        payload["normalized_metadata"] = normalized_metadata
+        payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE ingestion_queue
+                    SET status='pending',
+                        payload_json=?,
+                        last_error=NULL,
+                        next_attempt_at=?,
+                        processed_at=NULL
+                    WHERE artifact_id = ?
+                    """,
+                    (payload_json, now_iso, artifact_id),
+                )
+            return self.get_ingestion_entry(artifact_id)
+        except Exception as e:
+            logger.error(f"Failed to approve ingestion security override {artifact_id}: {e}")
+            return None
+
+    def ingestion_entry_requires_security_review(self, artifact_id: str) -> bool:
+        """Return True when an ingestion entry must be excluded by default."""
+        entry = self.get_ingestion_entry(artifact_id)
+        if not entry:
+            return False
+        if entry.status in {"needs_review", "blocked"}:
+            return True
+        payload = _json_payload(entry.payload_json)
+        normalized_metadata = payload.get("normalized_metadata")
+        return bool(
+            isinstance(normalized_metadata, Mapping)
+            and prompt_security_requires_review(normalized_metadata)
+        )
 
     def get_ingestion_entry(self, artifact_id: str) -> Optional[IngestionQueueEntry]:
         """Fetch single ingestion queue entry."""

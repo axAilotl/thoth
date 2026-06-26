@@ -126,6 +126,7 @@ class WikiPageSpec:
     source_type: str | None = None
     event_ids: Tuple[str, ...] = field(default_factory=tuple)
     security_findings: Tuple[Any, ...] = field(default_factory=tuple)
+    security_policy: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "aliases", _stable_unique_strings(self.aliases))
@@ -170,6 +171,9 @@ class WikiPageSpec:
             "thoth_source_type": self.source_type,
             "thoth_event_ids": list(self.event_ids) or None,
             "thoth_security_findings": list(self.security_findings) or None,
+            "thoth_security_policy": _stable_metadata_value(self.security_policy)
+            if self.security_policy
+            else None,
             # Legacy aliases retained so existing local readers and hand-authored
             # pages keep working while new metadata has namespaced equivalents.
             "slug": self.slug,

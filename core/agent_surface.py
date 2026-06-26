@@ -16,9 +16,12 @@ from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import (
     THOTH_REDACTION_METADATA_KEY,
+    THOTH_SECURITY_AUDIT_KEY,
     THOTH_SECURITY_FINDINGS_KEY,
     THOTH_SECURITY_FINDING_COUNT_KEY,
     THOTH_SECURITY_PATTERN_IDS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
+    prompt_security_requires_review,
 )
 from .research_graph import ResearchGraphService
 from .wiki_io import read_document
@@ -98,11 +101,20 @@ class AgentSurfaceService:
             "total": len(entries),
         }
 
-    def get_artifact(self, artifact_id: str) -> dict[str, Any]:
+    def get_artifact(
+        self,
+        artifact_id: str,
+        *,
+        include_quarantined: bool = False,
+    ) -> dict[str, Any]:
         """Return canonical artifact data and queue provenance for one artifact."""
         entry = self.db.get_ingestion_entry(artifact_id)
         if not entry:
             raise AgentSurfaceError(f"Artifact not found: {artifact_id}")
+        if not include_quarantined and _entry_requires_security_review(entry):
+            raise AgentSurfaceError(
+                f"Artifact requires security review: {artifact_id}"
+            )
         runtime = KnowledgeArtifactRuntime(self.config, layout=self.layout, db=self.db)
         artifact = runtime.materialize_artifact(entry)
         return {
@@ -111,14 +123,39 @@ class AgentSurfaceService:
             "provenance": artifact.provenance.to_dict() if artifact.provenance else {},
         }
 
-    def get_artifact_provenance(self, artifact_id: str) -> dict[str, Any]:
+    def get_artifact_provenance(
+        self,
+        artifact_id: str,
+        *,
+        include_quarantined: bool = False,
+    ) -> dict[str, Any]:
         """Return provenance only for a queued artifact."""
-        artifact = self.get_artifact(artifact_id)
+        artifact = self.get_artifact(
+            artifact_id,
+            include_quarantined=include_quarantined,
+        )
         return {
             "artifact_id": artifact_id,
             "queue": artifact["queue"],
             "provenance": artifact["provenance"],
         }
+
+    def approve_artifact_security_override(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Approve a quarantined artifact for processing with audit metadata."""
+        entry = self.db.approve_ingestion_security_override(
+            artifact_id,
+            actor=actor,
+            reason=reason,
+        )
+        if not entry:
+            raise AgentSurfaceError(f"Artifact not found: {artifact_id}")
+        return {"queue": self._serialize_ingestion_entry(entry)}
 
     def list_connectors(self) -> dict[str, Any]:
         """Return connector registry metadata."""
@@ -591,10 +628,19 @@ def _security_metadata_from_payload(payload_json: str | None) -> dict[str, Any]:
             THOTH_SECURITY_FINDINGS_KEY,
             THOTH_SECURITY_FINDING_COUNT_KEY,
             THOTH_SECURITY_PATTERN_IDS_KEY,
+            THOTH_SECURITY_POLICY_KEY,
+            THOTH_SECURITY_AUDIT_KEY,
             THOTH_REDACTION_METADATA_KEY,
         )
         if normalized_metadata.get(key)
     }
+
+
+def _entry_requires_security_review(entry: IngestionQueueEntry) -> bool:
+    if entry.status in {"needs_review", "blocked"}:
+        return True
+    metadata = _security_metadata_from_payload(entry.payload_json)
+    return prompt_security_requires_review(metadata)
 
 
 def _run_async(coro: Any) -> Any:

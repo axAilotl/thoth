@@ -11,7 +11,7 @@ from core.config import Config
 from core.mcp_server import ThothMCPServer
 from core.metadata_db import IngestionQueueEntry, MetadataDB
 from core.path_layout import build_path_layout
-from core.prompt_security import THOTH_SECURITY_FINDINGS_KEY
+from core.prompt_security import THOTH_SECURITY_FINDINGS_KEY, THOTH_SECURITY_POLICY_KEY
 from core.wiki_updater import CompiledWikiUpdater
 
 
@@ -112,11 +112,18 @@ def test_agent_surface_lists_queue_security_metadata(tmp_path: Path):
 
     service = AgentSurfaceService(config, layout=layout, db=db)
     listed = service.list_artifacts(limit=10)
-    detail = service.get_artifact("suspicious-paper")
 
     findings = listed["artifacts"][0]["security_metadata"][THOTH_SECURITY_FINDINGS_KEY]
-    detail_findings = detail["queue"]["security_metadata"][THOTH_SECURITY_FINDINGS_KEY]
     assert findings[0]["source_label"] == "paper:arxiv:suspicious-paper"
+    assert listed["artifacts"][0]["status"] == "needs_review"
+    assert listed["artifacts"][0]["security_metadata"][THOTH_SECURITY_POLICY_KEY][
+        "status"
+    ] == "needs_review"
+    with pytest.raises(AgentSurfaceError, match="security review"):
+        service.get_artifact("suspicious-paper")
+
+    detail = service.get_artifact("suspicious-paper", include_quarantined=True)
+    detail_findings = detail["queue"]["security_metadata"][THOTH_SECURITY_FINDINGS_KEY]
     assert findings == detail_findings
 
 

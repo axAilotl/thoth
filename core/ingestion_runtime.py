@@ -28,6 +28,7 @@ from .config import Config, config
 from .data_models import Tweet
 from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import prompt_security_requires_review
 from .translation_companion import EnglishCompanionPublisher, TranslationCompanionResult
 from .wiki_updater import CompiledWikiUpdater
 
@@ -224,7 +225,15 @@ class KnowledgeArtifactRuntime:
         self, entry: IngestionQueueEntry
     ) -> IngestionDispatchResult:
         """Process a single ingestion queue row."""
+        if entry.status in {"needs_review", "blocked"}:
+            raise IngestionRuntimeError(
+                f"Ingestion artifact {entry.artifact_id} requires security review"
+            )
         artifact = self.materialize_artifact(entry)
+        if prompt_security_requires_review(artifact.normalized_metadata):
+            raise IngestionRuntimeError(
+                f"Ingestion artifact {entry.artifact_id} requires security review"
+            )
         self.db.mark_ingestion_processing(entry.artifact_id)
 
         try:
