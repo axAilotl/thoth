@@ -51,7 +51,7 @@ def test_default_archivist_route_prefers_pi_agent_profile():
     pi_openrouter = payload["llm"]["providers"]["pi_openrouter"]
     assert pi_openrouter["enabled"] is True
     assert pi_openrouter["type"] == "pi"
-    assert pi_openrouter["install_if_missing"] is True
+    assert pi_openrouter["install_if_missing"] is False
     assert pi_openrouter["pi_provider"] == "openrouter"
     assert pi_openrouter["api_key_env"] == "OPEN_ROUTER_API_KEY"
     assert pi_openrouter["models"]["archivist_agent"]["id"] == "z-ai/glm-5.2"
