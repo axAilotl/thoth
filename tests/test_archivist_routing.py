@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from core.config import Config
 from core.llm_interface import LLMInterface
 
@@ -32,6 +35,25 @@ def test_archivist_task_route_resolves_from_existing_task_router():
         "anthropic/claude-3-haiku",
         {"id": "anthropic/claude-3-haiku", "max_tokens": 1200},
     )
+
+
+def test_default_archivist_route_prefers_pi_agent_profile():
+    repo_root = Path(__file__).resolve().parents[1]
+    payload = json.loads((repo_root / "config.example.json").read_text())
+
+    pi_provider = payload["llm"]["providers"]["pi"]
+    assert pi_provider["enabled"] is True
+    assert pi_provider["command"] == "pi"
+    assert pi_provider["pi_provider"] == "openrouter"
+    assert pi_provider["api_key_env"] == "OPEN_ROUTER_API_KEY"
+    assert pi_provider["models"]["archivist_agent"]["id"] == "z-ai/glm-5.2"
+
+    archivist_task = payload["llm"]["tasks"]["archivist"]
+    assert archivist_task["enabled"] is True
+    assert archivist_task["fallback"][0] == {
+        "provider": "pi",
+        "model": "archivist_agent",
+    }
 
 
 def test_config_validate_requires_archivist_fallback_when_enabled():

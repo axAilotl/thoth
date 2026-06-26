@@ -18,12 +18,17 @@
             "id": "moonshotai/kimi-k2-0905"
           },
           "archivist": {
-            "id": "anthropic/claude-3-haiku",
-            "max_tokens": 1800,
+            "id": "z-ai/glm-5.2",
+            "max_tokens": 6000,
+            "temperature": 0.2
+          },
+          "archivist_cheap": {
+            "id": "deepseek/deepseek-v4-flash",
+            "max_tokens": 6000,
             "temperature": 0.2
           },
           "vision": {
-            "id": "google/gemini-2.5-flash"
+            "id": "google/gemini-3.1-flash-lite"
           },
           "transcript": {
             "id": "openai/gpt-5-mini"
@@ -48,6 +53,31 @@
           },
           "embedding": {
             "id": "snowflake-arctic-embed2:latest"
+          }
+        }
+      },
+      "pi": {
+        "enabled": true,
+        "command": "pi",
+        "pi_provider": "openrouter",
+        "api_key_env": "OPEN_ROUTER_API_KEY",
+        "timeout_seconds": 300,
+        "models": {
+          "default": {
+            "id": "deepseek/deepseek-v4-flash"
+          },
+          "archivist_agent": {
+            "id": "z-ai/glm-5.2",
+            "max_tokens": 6000,
+            "temperature": 0.2
+          },
+          "archivist_cheap": {
+            "id": "deepseek/deepseek-v4-flash",
+            "max_tokens": 6000,
+            "temperature": 0.2
+          },
+          "vision_agent": {
+            "id": "google/gemini-3.1-flash-lite"
           }
         }
       }
@@ -100,8 +130,12 @@
         ]
       },
       "archivist": {
-        "enabled": false,
+        "enabled": true,
         "fallback": [
+          {
+            "provider": "pi",
+            "model": "archivist_agent"
+          },
           {
             "provider": "openrouter",
             "model": "archivist"

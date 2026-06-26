@@ -1,10 +1,11 @@
 """
 LLM Interface - Abstract interface for different LLM providers
-Supports OpenAI, OpenRouter, Anthropic, and local models
+Supports OpenAI, OpenRouter, Anthropic, local models, and Pi CLI runs
 """
 
 import os
 import logging
+import shutil
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -377,6 +378,119 @@ class LocalProvider(BaseLLMProvider):
             )
 
 
+class PiProvider(BaseLLMProvider):
+    """Local Pi CLI provider for locked-down synthesis runs."""
+
+    def __init__(
+        self,
+        *,
+        command: str = "pi",
+        pi_provider: str | None = None,
+        api_key_env: str | None = None,
+        model: str = "z-ai/glm-5.2",
+        timeout_seconds: float = 300.0,
+        extra_args: List[str] | None = None,
+    ):
+        super().__init__(model=model)
+        resolved_command = shutil.which(command)
+        if not resolved_command and os.path.exists(command):
+            resolved_command = command
+        if not resolved_command:
+            raise ValueError(f"Pi command not found: {command}")
+        self.command = resolved_command
+        self.pi_provider = pi_provider
+        self.api_key_env = api_key_env
+        self.timeout_seconds = float(timeout_seconds)
+        self.extra_args = list(extra_args or [])
+
+    async def generate(self, prompt: str, system_prompt: str = None, **kwargs) -> LLMResponse:
+        cmd = [
+            self.command,
+            "--print",
+            "--mode",
+            "text",
+            "--no-tools",
+            "--no-session",
+            "--no-context-files",
+        ]
+        if self.pi_provider:
+            cmd.extend(["--provider", self.pi_provider])
+        if self.model:
+            cmd.extend(["--model", self.model])
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
+        cmd.extend(self.extra_args)
+        cmd.append(prompt)
+
+        timeout_seconds = float(kwargs.get("timeout_seconds") or self.timeout_seconds)
+        process_env = os.environ.copy()
+        self._bridge_provider_env(process_env)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=process_env,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content="",
+                model=self.model,
+                provider="pi",
+                error=f"Pi generation timed out after {timeout_seconds:g}s",
+            )
+        except Exception as exc:
+            logger.error(f"Pi generation error: {exc}")
+            return LLMResponse(
+                content="",
+                model=self.model,
+                provider="pi",
+                error=str(exc),
+            )
+
+        stdout_text = stdout.decode("utf-8", errors="replace").strip()
+        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+        if process.returncode != 0:
+            return LLMResponse(
+                content="",
+                model=self.model,
+                provider="pi",
+                error=f"Pi exited with status {process.returncode}: {stderr_text}",
+            )
+
+        return LLMResponse(
+            content=stdout_text,
+            model=self.model,
+            provider="pi",
+        )
+
+    async def embed_texts(self, texts: List[str], **kwargs) -> EmbeddingResponse:
+        return EmbeddingResponse(
+            vectors=[],
+            model=self.model,
+            provider="pi",
+            error="Pi provider does not expose embeddings in this runtime",
+        )
+
+    def get_provider_name(self) -> str:
+        return "pi"
+
+    def _bridge_provider_env(self, env: dict[str, str]) -> None:
+        if (self.pi_provider or "").strip().lower() != "openrouter":
+            return
+        if env.get("OPENROUTER_API_KEY"):
+            return
+        if self.api_key_env and env.get(self.api_key_env):
+            env["OPENROUTER_API_KEY"] = env[self.api_key_env]
+            return
+        if env.get("OPEN_ROUTER_API_KEY"):
+            env["OPENROUTER_API_KEY"] = env["OPEN_ROUTER_API_KEY"]
+
+
 class LLMInterface:
     """Main LLM interface that handles provider switching"""
     
@@ -397,7 +511,8 @@ class LLMInterface:
                 'openai': 'OPENAI_API_KEY',
                 'openrouter': 'OPEN_ROUTER_API_KEY',
                 'anthropic': 'ANTHROPIC_API',
-                'local': None
+                'local': None,
+                'pi': None
             }
 
             for name, cfg in provider_cfg.items():
@@ -431,6 +546,15 @@ class LLMInterface:
                     elif name == 'local':
                         base_url = cfg.get('base_url', 'http://localhost:11434/v1')
                         instance = LocalProvider(base_url=base_url, model=default_model or 'llama3.2')
+                    elif name == 'pi':
+                        instance = PiProvider(
+                            command=cfg.get('command', 'pi'),
+                            pi_provider=cfg.get('pi_provider'),
+                            api_key_env=cfg.get('api_key_env'),
+                            model=default_model or 'z-ai/glm-5.2',
+                            timeout_seconds=float(cfg.get('timeout_seconds', 300) or 300),
+                            extra_args=cfg.get('extra_args') or [],
+                        )
                     else:
                         logger.warning(f"Unknown LLM provider '{name}' - skipping")
                         continue

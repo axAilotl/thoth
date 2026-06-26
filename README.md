@@ -168,16 +168,20 @@ What exists now:
 - API routes for direct archivist execution
 - background archivist automation driven by `automation.archivist`
 - task routing support for dedicated `archivist` and `embedding` model routes
+- optional Pi CLI execution for Archivist synthesis, locked to non-interactive no-tool mode
 
 Current archivist workflow:
 
 1. Edit the live local `archivist_topics.yaml`, either in `/settings` or on disk.
 2. Adjust the archivist prompt files in `prompts/` if you want to change synthesis style or sectioning.
-3. Configure the `archivist` task route, and configure `embedding` too if any topic uses semantic or hybrid retrieval.
-4. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
-5. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages.
-6. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
-7. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
+3. Configure the `archivist` task route. The tracked default prefers local `pi` with the `archivist_agent` model alias and falls back to direct OpenRouter.
+4. Configure `embedding` too if any topic uses semantic or hybrid retrieval.
+5. Run `.venv/bin/python thoth.py archivist` for due topics, or `.venv/bin/python thoth.py archivist --topics companion-ai-research --force` for an intentional rerun.
+6. Use `.venv/bin/python thoth.py archivist --benchmark --topics companion-ai-research` when you want retrieval diagnostics without writing wiki pages.
+7. In `/settings`, use `Run Due Topics` for an immediate due-topic pass, or `Force Run` on a topic card when you want that topic to ignore cadence right now.
+8. Use `automation.archivist` in settings when you want background topic compilation a couple times a day with the same task route.
+
+The Pi-backed provider is generation-only inside Thoth. It invokes `pi --print --no-tools --no-session --no-context-files`, so the Archivist gets Pi's model/profile behavior without granting it file editing or shell tools during wiki compilation. For OpenRouter-backed Pi runs, Thoth bridges the existing `OPEN_ROUTER_API_KEY` setting into Pi's expected `OPENROUTER_API_KEY` environment variable.
 
 ## Storage Layout
 
