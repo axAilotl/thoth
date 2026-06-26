@@ -52,6 +52,60 @@ class FakeCaptureSurface:
         assert event_id == "event-1"
         return {**CAPTURE_EVENT, "payload": {"title": "Manual note"}}
 
+    def inspect_retention(self, *, event_id=None, source_id=None, session_id=None, as_of=None):
+        assert event_id == "event-1"
+        assert source_id is None
+        assert session_id is None
+        assert as_of == "2026-01-01T00:00:00Z"
+        return {
+            "as_of": as_of,
+            "targets": [
+                {
+                    "event_id": "event-1",
+                    "target_type": "raw_ref",
+                    "target_id": "raw-1",
+                    "retention_scope": "raw_capture",
+                    "retention_class": "raw-expire",
+                    "privacy_class": "private",
+                    "eligible": True,
+                    "eligibility_reason": "eligible",
+                }
+            ],
+            "total": 1,
+            "eligible": 1,
+            "by_scope": {"raw_capture": {"total": 1, "eligible": 1}},
+        }
+
+    def expire_retention(
+        self,
+        *,
+        event_id,
+        delete_raw=False,
+        delete_distilled=False,
+        dry_run=True,
+        reason=None,
+        actor=None,
+        as_of=None,
+    ):
+        assert event_id == "event-1"
+        assert delete_raw is False
+        assert delete_distilled is True
+        assert dry_run is False
+        assert reason == "distilled expired"
+        assert actor == "operator"
+        assert as_of == "2026-01-01T00:00:00Z"
+        return {
+            "dry_run": False,
+            "delete_raw": False,
+            "delete_distilled": True,
+            "operations": [{"status": "deleted", "retention_scope": "compiled_wiki"}],
+            "audit_records": [{"operation": "retention.expired"}],
+            "total": 1,
+            "by_status": {"deleted": 1},
+            "by_scope": {"compiled_wiki": {"deleted": 1}},
+            "bytes_deleted": 20,
+        }
+
 
 class FakeCaptureContext:
     def __enter__(self):
@@ -91,6 +145,21 @@ def test_capture_api_lists_sources_events_and_detail(monkeypatch):
         sources_response = client.get("/api/capture/sources")
         events_response = client.get("/api/capture/events", params={"limit": 10})
         detail_response = client.get("/api/capture/events/event-1")
+        retention_response = client.get(
+            "/api/capture/retention",
+            params={"event_id": "event-1", "as_of": "2026-01-01T00:00:00Z"},
+        )
+        expire_response = client.post(
+            "/api/capture/events/event-1/expire",
+            json={
+                "delete_raw": False,
+                "delete_distilled": True,
+                "execute": True,
+                "reason": "distilled expired",
+                "actor": "operator",
+                "as_of": "2026-01-01T00:00:00Z",
+            },
+        )
 
     assert sources_response.status_code == 200
     assert sources_response.json()["sources"][0]["source_id"] == "source-1"
@@ -108,3 +177,12 @@ def test_capture_api_lists_sources_events_and_detail(monkeypatch):
     assert detail["event_id"] == "event-1"
     assert detail["payload"] == {"title": "Manual note"}
     assert detail["artifact_ids"] == ["artifact-1"]
+
+    assert retention_response.status_code == 200
+    assert retention_response.json()["targets"][0]["retention_class"] == "raw-expire"
+
+    assert expire_response.status_code == 200
+    expire_payload = expire_response.json()
+    assert expire_payload["delete_raw"] is False
+    assert expire_payload["delete_distilled"] is True
+    assert expire_payload["by_status"] == {"deleted": 1}

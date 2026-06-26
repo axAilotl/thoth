@@ -72,6 +72,7 @@ from .capture_surface import (
     CaptureSurfaceService,
     open_capture_surface,
 )
+from .retention_service import CaptureRetentionService, RetentionServiceError
 from .mcp_server import ThothMCPServer
 from .archivist_runtime import (
     ARCHIVIST_JOB_NAME,
@@ -225,6 +226,8 @@ __all__ = [
     'CaptureSurfaceNotFoundError',
     'CaptureSurfaceService',
     'open_capture_surface',
+    'CaptureRetentionService',
+    'RetentionServiceError',
     'ThothMCPServer',
     'ARCHIVIST_JOB_NAME',
     'ArchivistRuntimeError',

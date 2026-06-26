@@ -17,7 +17,10 @@ from core.capture_event_store import (
 )
 from core.capture_surface import CaptureSurfaceService
 from core.config import config
+from core.archivist_retrieval.models import ArchivistCorpusDocument
+from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
+from core.wiki_io import atomic_write_text, render_frontmatter
 from core.wiki_io import read_document
 from core.wiki_updater import CompiledWikiUpdater
 
@@ -137,6 +140,154 @@ def _configure_runtime_config(tmp_path: Path) -> None:
     config.set("database.path", "meta.db")
 
 
+def _retention_surface(
+    tmp_path: Path,
+) -> tuple[CaptureSurfaceService, CaptureEventStore, MetadataDB, dict[str, Path | str]]:
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    layout.ensure_directories()
+    db = MetadataDB(str(layout.database_path))
+
+    raw_file = layout.raw_root / "capture" / "event-1.json"
+    raw_file.parent.mkdir(parents=True, exist_ok=True)
+    raw_file.write_text('{"raw":"secret"}\n', encoding="utf-8")
+    transcript_file = layout.vault_root / "transcripts" / "session.md"
+    transcript_file.parent.mkdir(parents=True, exist_ok=True)
+    transcript_file.write_text("# Transcript\n\nprivate transcript\n", encoding="utf-8")
+    wiki_page = layout.wiki_root / "pages" / "capture-note.md"
+    atomic_write_text(
+        wiki_page,
+        render_frontmatter(
+            {
+                "thoth_type": "wiki_page",
+                "thoth_slug": "capture-note",
+                "thoth_event_ids": ["event-retention"],
+            }
+        )
+        + "\n# Capture Note\n",
+    )
+
+    store = CaptureEventStore(
+        FakeCaptureConnection(),
+        schema="capture_unit",
+        raw_roots=[layout.raw_root],
+    )
+    source = store.upsert_source(
+        CaptureSource(
+            source_id="source-retention",
+            source_name="retention-source",
+            source_type="manual",
+        )
+    )
+    event = store.upsert_event(
+        CaptureEvent(
+            event_id="event-retention",
+            source_id=source.source_id,
+            event_type="transcript",
+            native_event_id="native-retention",
+            payload={"title": "Retention event"},
+            privacy={"classification": "personal"},
+            retention={"policy": "event-expire"},
+        )
+    )
+    raw_ref = store.upsert_raw_ref(
+        RawArtifactRef.from_file(
+            raw_file,
+            source_id=source.source_id,
+            event_id=event.event_id,
+            raw_roots=[layout.raw_root],
+        )
+    )
+    link = store.upsert_artifact_link(
+        ArtifactLink(
+            event_id=event.event_id,
+            raw_ref_id=raw_ref.raw_ref_id,
+            artifact_id="artifact-transcript",
+            artifact_type="transcript",
+            metadata={
+                "derived_outputs": [
+                    {
+                        "output_type": "transcript",
+                        "path": "transcripts/session.md",
+                    }
+                ]
+            },
+        )
+    )
+    for policy in (
+        RetentionPolicy(
+            target_type="event",
+            target_id=event.event_id,
+            policy_name="event-expire",
+            action="delete",
+            delete_after="2000-01-01T00:00:00Z",
+        ),
+        RetentionPolicy(
+            target_type="raw_ref",
+            target_id=raw_ref.raw_ref_id,
+            policy_name="raw-expire",
+            action="delete",
+            delete_after="2000-01-01T00:00:00Z",
+        ),
+        RetentionPolicy(
+            target_type="artifact_link",
+            target_id=link.artifact_link_id,
+            policy_name="distilled-expire",
+            action="delete",
+            delete_after="2000-01-01T00:00:00Z",
+        ),
+    ):
+        store.upsert_retention_policy(policy)
+
+    db.upsert_llm_cache(
+        "summary-event-retention",
+        "summary",
+        "summary-hash",
+        '{"summary":"private"}',
+        model_provider="test",
+    )
+    db.upsert_transcript_chunk(
+        "artifact-transcript",
+        1,
+        "chunk-hash",
+        '{"chunk":"private"}',
+        "test",
+    )
+    document = ArchivistCorpusDocument(
+        candidate_key="candidate-transcript",
+        path=transcript_file,
+        scope="vault",
+        scope_relative_path="transcripts/session.md",
+        source_type="transcript",
+        file_type="transcript",
+        title="Session transcript",
+        tags=(),
+        content_text="private transcript",
+        source_hash="source-hash",
+        size_bytes=transcript_file.stat().st_size,
+        updated_at="2026-01-01T00:00:00Z",
+        source_id="artifact-transcript",
+    )
+    db.upsert_archivist_corpus_document(document)
+    db.upsert_archivist_corpus_embedding(
+        candidate_key=document.candidate_key,
+        provider="test",
+        model="embed",
+        source_hash=document.embedding_source_hash(),
+        vector=[0.1, 0.2],
+    )
+
+    surface = CaptureSurfaceService(store, layout=layout, db=db)
+    return surface, store, db, {
+        "event_id": event.event_id,
+        "raw_path": raw_file,
+        "transcript_path": transcript_file,
+        "wiki_path": wiki_page,
+        "raw_ref_id": raw_ref.raw_ref_id,
+        "artifact_link_id": link.artifact_link_id,
+    }
+
+
 def test_capture_surface_lists_sources_and_events_with_policy_state(tmp_path: Path):
     surface, _event_id = _surface(tmp_path)
 
@@ -239,5 +390,156 @@ def test_capture_surface_compiles_wiki_pages_with_audited_restricted_include(
         assert document.frontmatter["thoth_capture_audit"]["reason"] == (
             "operator reviewed restricted capture event"
         )
+    finally:
+        config.data = original
+
+
+def test_capture_surface_retention_expires_raw_and_distilled_separately(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = deepcopy(config.data)
+    try:
+        surface, store, db, paths = _retention_surface(tmp_path)
+
+        inspection = surface.inspect_retention(
+            event_id=str(paths["event_id"]),
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+        scopes = {target["retention_scope"] for target in inspection["targets"]}
+        assert {
+            "raw_capture",
+            "transcript_file",
+            "compiled_wiki",
+            "llm_cache",
+            "transcript_cache",
+            "embedding",
+        }.issubset(scopes)
+        assert inspection["eligible"] == inspection["total"]
+        assert {
+            target["target_type"]: target["retention_class"]
+            for target in inspection["targets"]
+        }["raw_ref"] == "raw-expire"
+
+        raw_result = surface.expire_retention(
+            event_id=str(paths["event_id"]),
+            delete_raw=True,
+            delete_distilled=False,
+            dry_run=False,
+            reason="raw retention expired",
+            actor="operator",
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+        assert raw_result["by_scope"]["raw_capture"]["deleted"] == 1
+        assert not Path(paths["raw_path"]).exists()
+        assert Path(paths["transcript_path"]).exists()
+        assert Path(paths["wiki_path"]).exists()
+        assert db.get_transcript_chunk("artifact-transcript", 1) is not None
+        assert db.list_llm_cache_entries_for_contexts(("event-retention",))
+        assert db.get_archivist_corpus_embeddings(
+            candidate_keys=("candidate-transcript",),
+            provider="test",
+            model="embed",
+        )
+        raw_ref = store.get_raw_ref(str(paths["raw_ref_id"]))
+        assert raw_ref is not None
+        assert raw_ref.metadata["retention_deletion"]["content_deleted"] is True
+        assert raw_result["audit_records"][0]["operation"] == "retention.expired"
+
+        distilled_result = surface.expire_retention(
+            event_id=str(paths["event_id"]),
+            delete_raw=False,
+            delete_distilled=True,
+            dry_run=False,
+            reason="distilled retention expired",
+            actor="operator",
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+        assert distilled_result["by_scope"]["transcript_file"]["deleted"] == 1
+        assert distilled_result["by_scope"]["compiled_wiki"]["deleted"] == 1
+        assert distilled_result["by_scope"]["llm_cache"]["deleted"] == 1
+        assert distilled_result["by_scope"]["transcript_cache"]["deleted"] == 1
+        assert distilled_result["by_scope"]["embedding"]["deleted"] == 1
+        assert not Path(paths["transcript_path"]).exists()
+        assert not Path(paths["wiki_path"]).exists()
+        assert db.get_transcript_chunk("artifact-transcript", 1) is None
+        assert not db.list_llm_cache_entries_for_contexts(("event-retention",))
+        assert not db.get_archivist_corpus_embeddings(
+            candidate_keys=("candidate-transcript",),
+            provider="test",
+            model="embed",
+        )
+        link = store.get_artifact_link(str(paths["artifact_link_id"]))
+        assert link is not None
+        assert link.metadata["retention_deletion"]["content_deleted"] is True
+    finally:
+        config.data = original
+
+
+def test_capture_surface_retention_refuses_unsafe_distilled_paths(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = deepcopy(config.data)
+    try:
+        surface, store, _db, paths = _retention_surface(tmp_path)
+        outside = tmp_path / "outside-summary.md"
+        outside.write_text("outside", encoding="utf-8")
+        unsafe_link = store.upsert_artifact_link(
+            ArtifactLink(
+                event_id=str(paths["event_id"]),
+                artifact_id="unsafe-summary",
+                artifact_type="note",
+                metadata={
+                    "derived_outputs": [
+                        {
+                            "output_type": "summary",
+                            "path": str(outside),
+                        }
+                    ]
+                },
+            )
+        )
+        store.upsert_retention_policy(
+            RetentionPolicy(
+                target_type="artifact_link",
+                target_id=unsafe_link.artifact_link_id,
+                policy_name="unsafe-expire",
+                action="delete",
+                delete_after="2000-01-01T00:00:00Z",
+            )
+        )
+
+        inspection = surface.inspect_retention(
+            event_id=str(paths["event_id"]),
+            as_of="2026-01-01T00:00:00Z",
+        )
+        unsafe_targets = [
+            target for target in inspection["targets"] if target.get("path") == str(outside)
+        ]
+
+        assert len(unsafe_targets) == 1
+        assert unsafe_targets[0]["eligible"] is False
+        assert "outside configured retention roots" in unsafe_targets[0][
+            "eligibility_reason"
+        ]
+
+        result = surface.expire_retention(
+            event_id=str(paths["event_id"]),
+            delete_distilled=True,
+            dry_run=False,
+            reason="unsafe path check",
+            actor="operator",
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+        unsafe_operations = [
+            operation for operation in result["operations"] if operation.get("path") == str(outside)
+        ]
+        assert unsafe_operations[0]["status"] == "skipped"
+        assert outside.exists()
     finally:
         config.data = original

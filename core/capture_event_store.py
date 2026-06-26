@@ -664,6 +664,31 @@ class CaptureEventStore:
     def get_raw_ref(self, raw_ref_id: str) -> RawArtifactRef | None:
         return self._fetch_one_raw_ref("raw_ref_id = %s", (_clean_required(raw_ref_id, "raw_ref_id"),))
 
+    def mark_raw_ref_content_deleted(
+        self,
+        raw_ref_id: str,
+        *,
+        metadata: Mapping[str, Any],
+    ) -> RawArtifactRef:
+        """Mark a raw ref as content-deleted without deleting audit metadata."""
+        row = self.conn.execute(
+            f"""
+            UPDATE {_relation(self.schema, "raw_artifact_refs")}
+            SET metadata = COALESCE(metadata, '{{}}'::jsonb) || %s::jsonb,
+                updated_at = now()
+            WHERE raw_ref_id = %s
+            RETURNING raw_ref_id, event_id, source_id, session_id, raw_root, path, sha256,
+                size_bytes, mime_type, immutable, metadata, created_at, updated_at
+            """,
+            (
+                _json_param(metadata),
+                _clean_required(raw_ref_id, "raw_ref_id"),
+            ),
+        ).fetchone()
+        if row is None:
+            raise CaptureEventStoreError(f"raw artifact ref not found: {raw_ref_id}")
+        return _raw_ref_from_row(row)
+
     def list_raw_refs(self, *, event_id: str | None = None) -> tuple[RawArtifactRef, ...]:
         where = ""
         params: tuple[Any, ...] = ()
@@ -733,6 +758,33 @@ class CaptureEventStore:
             "artifact_link_id = %s",
             (_clean_required(artifact_link_id, "artifact_link_id"),),
         )
+
+    def mark_artifact_link_content_deleted(
+        self,
+        artifact_link_id: str,
+        *,
+        metadata: Mapping[str, Any],
+    ) -> ArtifactLink:
+        """Mark linked distilled content as deleted while preserving the link."""
+        row = self.conn.execute(
+            f"""
+            UPDATE {_relation(self.schema, "artifact_links")}
+            SET metadata = COALESCE(metadata, '{{}}'::jsonb) || %s::jsonb,
+                updated_at = now()
+            WHERE artifact_link_id = %s
+            RETURNING artifact_link_id, event_id, raw_ref_id, artifact_id, artifact_type,
+                link_type, metadata, created_at, updated_at
+            """,
+            (
+                _json_param(metadata),
+                _clean_required(artifact_link_id, "artifact_link_id"),
+            ),
+        ).fetchone()
+        if row is None:
+            raise CaptureEventStoreError(
+                f"artifact link not found: {artifact_link_id}"
+            )
+        return _artifact_link_from_row(row)
 
     def upsert_security_finding(self, finding: SecurityFinding) -> SecurityFinding:
         if finding.event_id and finding.fingerprint:

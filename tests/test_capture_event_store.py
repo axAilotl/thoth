@@ -47,6 +47,11 @@ class FakeCaptureConnection:
 
     def execute(self, sql, params=None):
         params = () if params is None else tuple(params)
+        is_update = sql.lstrip().upper().startswith("UPDATE")
+        if is_update and "raw_artifact_refs" in sql:
+            return FakeCursor(self._mark_raw_ref_content_deleted(params))
+        if is_update and "artifact_links" in sql:
+            return FakeCursor(self._mark_artifact_link_content_deleted(params))
         if "INSERT INTO" in sql and "capture_sources" in sql:
             return FakeCursor(self._upsert_source(params))
         if "INSERT INTO" in sql and "capture_sessions" in sql:
@@ -208,6 +213,15 @@ class FakeCaptureConnection:
         }
         return _raw_ref_row(self.raw_refs[raw_ref_id])
 
+    def _mark_raw_ref_content_deleted(self, params):
+        metadata = _json(params[0])
+        raw_ref_id = params[1]
+        if raw_ref_id not in self.raw_refs:
+            return None
+        self.raw_refs[raw_ref_id]["metadata"].update(metadata)
+        self.raw_refs[raw_ref_id]["updated_at"] = "updated"
+        return _raw_ref_row(self.raw_refs[raw_ref_id])
+
     def _upsert_artifact_link(self, params):
         existing_id = next(
             (
@@ -231,6 +245,15 @@ class FakeCaptureConnection:
             "updated_at": "updated",
         }
         return _artifact_link_row(self.artifact_links[link_id])
+
+    def _mark_artifact_link_content_deleted(self, params):
+        metadata = _json(params[0])
+        artifact_link_id = params[1]
+        if artifact_link_id not in self.artifact_links:
+            return None
+        self.artifact_links[artifact_link_id]["metadata"].update(metadata)
+        self.artifact_links[artifact_link_id]["updated_at"] = "updated"
+        return _artifact_link_row(self.artifact_links[artifact_link_id])
 
     def _upsert_security_finding(self, params):
         existing_id = None
