@@ -7,12 +7,22 @@ import pytest
 
 from core.agent_surface import AgentSurfaceError, AgentSurfaceService
 from core.artifacts import PaperArtifact, RepositoryArtifact
+from core.capture_event_store import (
+    ArtifactLink,
+    CaptureEvent,
+    CaptureEventStore,
+    CaptureSource,
+    ProvenanceRecord,
+    RawArtifactRef,
+    SecurityFinding,
+)
 from core.config import Config
 from core.mcp_server import ThothMCPServer
 from core.metadata_db import IngestionQueueEntry, MetadataDB
 from core.path_layout import build_path_layout
 from core.prompt_security import THOTH_SECURITY_FINDINGS_KEY, THOTH_SECURITY_POLICY_KEY
 from core.wiki_updater import CompiledWikiUpdater
+from test_capture_event_store import FakeCaptureConnection
 
 
 def _config(tmp_path: Path) -> Config:
@@ -50,6 +60,7 @@ def test_agent_surface_queries_wiki_with_provenance(tmp_path: Path):
     assert hit["title"] == "owner/agent-repo"
     assert hit["provenance"]["artifact_id"] == "gh_1"
     assert hit["provenance"]["source_type"] == "github"
+    assert hit["citations"][0]["kind"] == "wiki_page"
     assert hit["security"]["status"] == "allowed"
     assert "score" in hit["trust"]
     assert result["capabilities"]["embedding"]["available"] is False
@@ -85,11 +96,16 @@ def test_agent_surface_artifact_lookup_returns_canonical_provenance(tmp_path: Pa
     provenance = service.get_artifact_provenance("paper-queued")
 
     assert listed["artifacts"][0]["artifact_id"] == "paper-queued"
+    assert listed["artifacts"][0]["citations"][0]["kind"] == "artifact"
     assert detail["canonical_record"]["artifact_id"] == "2401.12345"
+    assert detail["citations"][0]["source_path"] == "raw/arxiv/2401.12345.json"
+    assert detail["security"]["status"] == "allowed"
+    assert detail["trust"]["score"] == 1.0
     assert provenance["provenance"]["queue_id"] == "paper-queued"
     assert provenance["provenance"]["raw_payload"]["path"] == (
         "raw/arxiv/2401.12345.json"
     )
+    assert provenance["citations"][0]["artifact_id"] == "paper-queued"
 
 
 def test_agent_surface_lists_queue_security_metadata(tmp_path: Path):
@@ -182,6 +198,7 @@ def test_agent_surface_hybrid_query_searches_artifacts_with_filters(tmp_path: Pa
     hit = result["hits"][0]
     assert hit["result_type"] == "artifact"
     assert hit["provenance"]["artifact_id"] == "safe-repo"
+    assert hit["citations"][0]["artifact_id"] == "safe-repo"
     assert hit["security"]["status"] == "allowed"
     assert hit["trust"]["score"] == 1.0
 
@@ -210,10 +227,14 @@ def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):
         "list_artifacts",
         "get_artifact",
         "get_artifact_provenance",
+        "search_capture_events",
+        "get_capture_event",
+        "inspect_provenance",
         "list_connectors",
-        "run_connector",
         "research_missing_papers",
     }
+    assert "run_connector" not in {tool["name"] for tool in tools}
+    assert "connector_run_plan" not in {tool["name"] for tool in tools}
     db.upsert_ingestion_entry(
         IngestionQueueEntry(
             artifact_id="mcp-paper",
@@ -236,18 +257,11 @@ def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):
     payload = json.loads(response["content"][0]["text"])
     assert payload["total"] == 9
 
-    response = server.call_tool(
-        "run_connector",
-        {"connector_name": "arxiv", "options": {"topics": "agents"}},
-    )
-    payload = json.loads(response["content"][0]["text"])
-    assert payload["status"] == "planned"
-    assert payload["connector"]["name"] == "arxiv"
-
     response = server.call_tool("get_artifact", {"artifact_id": "mcp-paper"})
     payload = json.loads(response["content"][0]["text"])
     assert payload["queue"]["artifact_id"] == "mcp-paper"
     assert payload["canonical_record"]["artifact_id"] == "2601.00001"
+    assert payload["citations"][0]["kind"] == "artifact"
 
     rpc_response = server.handle_request(
         {
@@ -257,6 +271,128 @@ def test_mcp_server_lists_and_calls_core_tools(tmp_path: Path):
         }
     )
     assert rpc_response["result"]["tools"][0]["name"] == "wiki_query"
+
+
+def test_mcp_capture_event_lookup_and_provenance_are_cited_read_only(
+    tmp_path: Path,
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    raw_file = tmp_path / "capture.json"
+    raw_file.write_text('{"title": "MCP capture note"}\n', encoding="utf-8")
+    store = CaptureEventStore(
+        FakeCaptureConnection(),
+        schema="capture_unit",
+        raw_roots=[tmp_path],
+    )
+    source = store.upsert_source(
+        CaptureSource(
+            source_name="manual",
+            source_type="manual",
+            collector="test",
+        )
+    )
+    event = store.upsert_event(
+        CaptureEvent(
+            source_id=source.source_id,
+            event_type="note",
+            native_event_id="note-1",
+            payload={"title": "MCP capture note"},
+            provenance={"tool": "pytest"},
+        )
+    )
+    raw_ref = store.upsert_raw_ref(
+        RawArtifactRef.from_file(
+            raw_file,
+            source_id=source.source_id,
+            event_id=event.event_id,
+            raw_roots=[tmp_path],
+        )
+    )
+    store.upsert_artifact_link(
+        ArtifactLink(
+            event_id=event.event_id,
+            raw_ref_id=raw_ref.raw_ref_id,
+            artifact_id="capture-artifact",
+            artifact_type="note",
+        )
+    )
+    store.upsert_security_finding(
+        SecurityFinding(
+            event_id=event.event_id,
+            raw_ref_id=raw_ref.raw_ref_id,
+            finding_type="prompt_security",
+            severity="high",
+            status="open",
+            fingerprint="capture-finding",
+        )
+    )
+    store.upsert_provenance_record(
+        ProvenanceRecord(
+            target_type="event",
+            target_id=event.event_id,
+            operation="captured",
+            actor="operator",
+            tool="pytest",
+            fingerprint="capture-provenance",
+        )
+    )
+    server = ThothMCPServer(
+        AgentSurfaceService(config, layout=layout, db=db, event_store=store)
+    )
+
+    tool_names = {tool["name"] for tool in server.list_tools()["tools"]}
+
+    assert {"search_capture_events", "get_capture_event", "inspect_provenance"}.issubset(
+        tool_names
+    )
+    assert "run_connector" not in tool_names
+    assert "connector_run_plan" not in tool_names
+
+    response = server.call_tool("search_capture_events", {"query": "MCP capture note"})
+    payload = json.loads(response["content"][0]["text"])
+    assert payload["hits"] == []
+
+    response = server.call_tool(
+        "search_capture_events",
+        {"query": "MCP capture note", "include_quarantined": True},
+    )
+    payload = json.loads(response["content"][0]["text"])
+    hit = payload["hits"][0]
+    assert hit["event_id"] == event.event_id
+    assert hit["security"]["status"] == "needs_review"
+    assert hit["trust"]["score"] == 0.25
+    assert hit["citations"][0]["event_id"] == event.event_id
+
+    with pytest.raises(AgentSurfaceError, match="security review"):
+        server.call_tool("get_capture_event", {"event_id": event.event_id})
+
+    response = server.call_tool(
+        "get_capture_event",
+        {"event_id": event.event_id, "include_quarantined": True},
+    )
+    payload = json.loads(response["content"][0]["text"])
+    assert payload["event_id"] == event.event_id
+    assert payload["security"]["requires_review"] is True
+    assert {citation["kind"] for citation in payload["citations"]} >= {
+        "capture_event",
+        "raw_ref",
+        "artifact_link",
+    }
+
+    response = server.call_tool(
+        "inspect_provenance",
+        {
+            "target_type": "capture_event",
+            "target_id": event.event_id,
+            "include_quarantined": True,
+        },
+    )
+    payload = json.loads(response["content"][0]["text"])
+    assert payload["target_type"] == "capture_event"
+    assert payload["provenance_records"][0]["operation"] == "captured"
+    assert payload["citations"][0]["kind"] == "capture_event"
 
 
 def test_connector_execution_rejects_unallowlisted_connector(tmp_path: Path):

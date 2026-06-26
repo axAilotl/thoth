@@ -10,6 +10,21 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .agent_context import (
+    artifact_citations,
+    artifact_security_state,
+    artifact_trust_state,
+    capture_event_citations,
+    capture_event_requires_security_review,
+    capture_event_security_state,
+    capture_event_trust_state,
+    hybrid_hit_citations,
+)
+from .capture_surface import (
+    CaptureSurfaceError,
+    CaptureSurfaceNotFoundError,
+    CaptureSurfaceService,
+)
 from .config import Config, config
 from .connector_capture import connector_run_context
 from .connector_registry import connector_policy_status, load_connector_registry
@@ -158,10 +173,19 @@ class AgentSurfaceService:
             )
         runtime = KnowledgeArtifactRuntime(self.config, layout=self.layout, db=self.db)
         artifact = runtime.materialize_artifact(entry)
+        canonical_record = artifact.canonical_record()
+        provenance = artifact.provenance.to_dict() if artifact.provenance else {}
         return {
             "queue": self._serialize_ingestion_entry(entry),
-            "canonical_record": artifact.canonical_record(),
-            "provenance": artifact.provenance.to_dict() if artifact.provenance else {},
+            "canonical_record": canonical_record,
+            "provenance": provenance,
+            "security": artifact_security_state(entry),
+            "trust": artifact_trust_state(entry),
+            "citations": artifact_citations(
+                entry,
+                canonical_record=canonical_record,
+                provenance=provenance,
+            ),
         }
 
     def get_artifact_provenance(
@@ -179,7 +203,139 @@ class AgentSurfaceService:
             "artifact_id": artifact_id,
             "queue": artifact["queue"],
             "provenance": artifact["provenance"],
+            "security": artifact["security"],
+            "trust": artifact["trust"],
+            "citations": artifact["citations"],
         }
+
+    def search_capture_events(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        include_quarantined: bool = False,
+        source_types: Any = None,
+        source_ids: Any = None,
+        source_paths: Any = None,
+        event_types: Any = None,
+        tags: Any = None,
+        exclude_tags: Any = None,
+        security_statuses: Any = None,
+        min_trust_score: float | None = None,
+        time_after: str | None = None,
+        time_before: str | None = None,
+    ) -> dict[str, Any]:
+        """Search capture events with cited provenance and trust state."""
+        try:
+            result = self._capture_surface().search_events(
+                query,
+                limit=limit,
+                include_quarantined=include_quarantined,
+                source_types=source_types,
+                source_ids=source_ids,
+                source_paths=source_paths,
+                event_types=event_types,
+                tags=tags,
+                exclude_tags=exclude_tags,
+                security_statuses=security_statuses,
+                min_trust_score=min_trust_score,
+                time_after=time_after,
+                time_before=time_before,
+            )
+        except CaptureSurfaceError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+        for hit in result.get("hits", []):
+            if isinstance(hit, dict):
+                hit["citations"] = hybrid_hit_citations(hit)
+        return result
+
+    def get_capture_event(
+        self,
+        event_id: str,
+        *,
+        include_quarantined: bool = False,
+    ) -> dict[str, Any]:
+        """Return one capture event with metadata, provenance, citations, and trust state."""
+        try:
+            event = self._capture_surface().get_event(event_id)
+        except CaptureSurfaceNotFoundError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+        except CaptureSurfaceError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+        if not include_quarantined and capture_event_requires_security_review(event):
+            raise AgentSurfaceError(f"Capture event requires security review: {event_id}")
+        event["security"] = capture_event_security_state(event)
+        event["trust"] = capture_event_trust_state(event)
+        event["citations"] = capture_event_citations(event)
+        return event
+
+    def inspect_provenance(
+        self,
+        target_type: str,
+        target_id: str,
+        *,
+        include_quarantined: bool = False,
+    ) -> dict[str, Any]:
+        """Inspect artifact or capture-event provenance without taking actions."""
+        normalized_type = str(target_type or "").strip().lower()
+        normalized_id = str(target_id or "").strip()
+        if not normalized_id:
+            raise AgentSurfaceError("target_id is required for provenance inspection")
+
+        if normalized_type in {"artifact", "artifacts", "queue", "ingestion"}:
+            artifact = self.get_artifact(
+                normalized_id,
+                include_quarantined=include_quarantined,
+            )
+            return {
+                "target_type": "artifact",
+                "target_id": normalized_id,
+                "queue": artifact["queue"],
+                "provenance": artifact["provenance"],
+                "security": artifact["security"],
+                "trust": artifact["trust"],
+                "citations": artifact["citations"],
+            }
+
+        if normalized_type in {
+            "capture_event",
+            "capture_events",
+            "event",
+            "events",
+        }:
+            event = self.get_capture_event(
+                normalized_id,
+                include_quarantined=include_quarantined,
+            )
+            return {
+                "target_type": "capture_event",
+                "target_id": normalized_id,
+                "event": {
+                    "event_id": event["event_id"],
+                    "event_type": event["event_type"],
+                    "source_id": event["source_id"],
+                    "session_id": event.get("session_id"),
+                    "native_event_id": event.get("native_event_id"),
+                    "status": event.get("status"),
+                    "occurred_at": event.get("occurred_at"),
+                    "captured_at": event.get("captured_at"),
+                    "event_hash": event.get("event_hash"),
+                },
+                "source": event.get("source"),
+                "session": event.get("session"),
+                "provenance": event.get("provenance", {}),
+                "provenance_records": event.get("provenance_records", []),
+                "raw_refs": event.get("raw_refs", []),
+                "artifacts": event.get("artifacts", []),
+                "security": event["security"],
+                "trust": event["trust"],
+                "citations": event["citations"],
+            }
+
+        raise AgentSurfaceError(
+            "Unsupported provenance target_type: "
+            f"{target_type!r}; expected artifact or capture_event"
+        )
 
     def approve_artifact_security_override(
         self,
@@ -436,6 +592,9 @@ class AgentSurfaceService:
             "processed_at": entry.processed_at,
             "capabilities": _json_list(entry.capabilities_json),
             "security_metadata": _security_metadata_from_payload(entry.payload_json),
+            "security": artifact_security_state(entry),
+            "trust": artifact_trust_state(entry),
+            "citations": artifact_citations(entry),
         }
 
     def _serialize_hybrid_hit(self, hit: HybridSearchHit) -> dict[str, Any]:
@@ -460,7 +619,17 @@ class AgentSurfaceService:
             "provenance": hit.provenance,
             "security": hit.security,
             "trust": hit.trust,
+            "citations": hybrid_hit_citations(hit),
         }
+
+    def _capture_surface(self) -> CaptureSurfaceService:
+        if self.event_store is None:
+            raise AgentSurfaceError("Capture event store is not configured")
+        return CaptureSurfaceService(
+            self.event_store,
+            layout=self.layout,
+            db=self.db,
+        )
 
     def _record_connector_result_outputs(
         self,
@@ -1259,7 +1428,7 @@ def _security_metadata_from_payload(payload_json: str | None) -> dict[str, Any]:
 
 
 def _entry_requires_security_review(entry: IngestionQueueEntry) -> bool:
-    if entry.status in {"needs_review", "blocked"}:
+    if entry.status in {"needs_review", "blocked", "quarantined"}:
         return True
     metadata = _security_metadata_from_payload(entry.payload_json)
     return prompt_security_requires_review(metadata)
