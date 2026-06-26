@@ -11,8 +11,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from core.capture_event_store import CaptureEventStore
+from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config
-from core.metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
+from core.connector_capture import ConnectorCaptureQueue
+from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
 
 
@@ -89,6 +92,7 @@ class _PreparedEnvelope:
     priority: int
     payload: dict[str, Any]
     capabilities: tuple[str, ...]
+    raw_output_path: Path
 
 
 class SkillOutputConnector:
@@ -100,11 +104,20 @@ class SkillOutputConnector:
         *,
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
+        capture_event_store: CaptureEventStore | None = None,
+        collector_name: str = "skill_output_connector",
     ):
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.layout.ensure_directories()
         self.db = db or get_metadata_db()
+        self.collector_name = collector_name
+        self.capture_queue = ConnectorCaptureQueue(
+            self.config,
+            layout=self.layout,
+            db=self.db,
+            capture_event_store=capture_event_store,
+        )
 
     async def collect(
         self,
@@ -146,35 +159,37 @@ class SkillOutputConnector:
             input_files = input_files[: max(0, int(limit))]
 
         records: list[SkillOutputRecord] = []
-        for output_path in input_files:
-            envelope_payloads = await asyncio.to_thread(
-                self._load_envelope_payloads,
-                output_path,
-            )
-            for envelope_payload in envelope_payloads:
-                envelope_source_name = _source_name_from_envelope(
-                    envelope_payload,
-                    default_source_name=resolved_source,
-                )
-                raw_output_path = await asyncio.to_thread(
-                    self._preserve_raw_output,
+        run_id = datetime.now().isoformat()
+        with self.capture_queue.lifecycle() as lifecycle:
+            for output_path in input_files:
+                envelope_payloads = await asyncio.to_thread(
+                    self._load_envelope_payloads,
                     output_path,
-                    envelope_source_name,
                 )
-                envelope = self._prepare_envelope(
-                    envelope_payload,
-                    default_source_name=resolved_source,
-                    raw_output_path=raw_output_path,
-                )
-                self._queue_envelope(envelope)
-                records.append(
-                    SkillOutputRecord(
-                        artifact_id=envelope.artifact_id,
-                        artifact_type=envelope.artifact_type,
-                        source_name=envelope.source_name,
+                for envelope_payload in envelope_payloads:
+                    envelope_source_name = _source_name_from_envelope(
+                        envelope_payload,
+                        default_source_name=resolved_source,
+                    )
+                    raw_output_path = await asyncio.to_thread(
+                        self._preserve_raw_output,
+                        output_path,
+                        envelope_source_name,
+                    )
+                    envelope = self._prepare_envelope(
+                        envelope_payload,
+                        default_source_name=resolved_source,
                         raw_output_path=raw_output_path,
                     )
-                )
+                    self._queue_envelope(lifecycle, envelope, run_id=run_id)
+                    records.append(
+                        SkillOutputRecord(
+                            artifact_id=envelope.artifact_id,
+                            artifact_type=envelope.artifact_type,
+                            source_name=envelope.source_name,
+                            raw_output_path=raw_output_path,
+                        )
+                    )
 
         return SkillOutputResult(
             records=tuple(records),
@@ -330,19 +345,51 @@ class SkillOutputConnector:
             priority=priority,
             payload=payload,
             capabilities=capabilities,
+            raw_output_path=raw_output_path,
         )
 
-    def _queue_envelope(self, envelope: _PreparedEnvelope) -> None:
-        entry = IngestionQueueEntry(
-            artifact_id=envelope.artifact_id,
-            artifact_type=envelope.artifact_type,
-            source=envelope.source_name,
-            payload_json=json.dumps(envelope.payload, ensure_ascii=False),
-            created_at=datetime.now().isoformat(),
-            capabilities_json=json.dumps(list(envelope.capabilities)),
-            priority=envelope.priority,
+    def _queue_envelope(
+        self,
+        lifecycle: CaptureLifecycleService,
+        envelope: _PreparedEnvelope,
+        *,
+        run_id: str,
+    ) -> None:
+        captured_at = datetime.now().isoformat()
+        source_type = (
+            "pi_skill"
+            if envelope.source_name.startswith("pi_skill")
+            else "skill_output"
         )
-        if not self.db.upsert_ingestion_entry(entry):
+        self.capture_queue.queue_payload(
+            lifecycle,
+            artifact_type=envelope.artifact_type,
+            payload=envelope.payload,
+            source={
+                "source_name": envelope.source_name,
+                "source_type": source_type,
+                "collector": self.collector_name,
+                "native_source_id": envelope.source_name,
+                "metadata": {"artifact_type": envelope.artifact_type},
+            },
+            session={
+                "session_type": "skill_output_collect",
+                "native_session_id": f"skill_output:{run_id}",
+                "started_at": run_id,
+                "metadata": {"collector": self.collector_name},
+            },
+            event={
+                "event_type": "skill_output_artifact",
+                "native_event_id": envelope.artifact_id,
+                "captured_at": captured_at,
+                "provenance": {"collector": self.collector_name},
+            },
+            raw_path=envelope.raw_output_path,
+            queue_artifact_id=envelope.artifact_id,
+            priority=envelope.priority,
+            capabilities=envelope.capabilities,
+        )
+        if self.db.get_ingestion_entry(envelope.artifact_id) is None:
             raise RuntimeError(f"Failed to queue skill output artifact: {envelope.artifact_id}")
 
     def _relative_to_vault(self, path: Path | None) -> str | None:

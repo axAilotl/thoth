@@ -22,8 +22,11 @@ from collectors.omi_api_client import (
     normalize_categories,
 )
 from core.artifacts import TranscriptArtifact
+from core.capture_event_store import CaptureEventStore
+from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config
-from core.metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
+from core.connector_capture import ConnectorCaptureQueue
+from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
 
 
@@ -103,11 +106,18 @@ class PersonalTranscriptConnector:
         *,
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
+        capture_event_store: CaptureEventStore | None = None,
     ):
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.layout.ensure_directories()
         self.db = db or get_metadata_db()
+        self.capture_queue = ConnectorCaptureQueue(
+            self.config,
+            layout=self.layout,
+            db=self.db,
+            capture_event_store=capture_event_store,
+        )
 
     async def collect(
         self,
@@ -201,59 +211,66 @@ class PersonalTranscriptConnector:
             )
 
         records: list[PersonalTranscriptRecord] = []
+        run_id = datetime.now().isoformat()
         if resolved_paths or resolved_dirs:
-            input_files = self._resolve_input_files(
-                export_paths=resolved_paths,
-                export_dirs=resolved_dirs,
-                file_patterns=resolved_patterns,
-            )
-            if limit is not None:
-                input_files = input_files[: max(0, int(limit))]
+            with self.capture_queue.lifecycle() as lifecycle:
+                input_files = self._resolve_input_files(
+                    export_paths=resolved_paths,
+                    export_dirs=resolved_dirs,
+                    file_patterns=resolved_patterns,
+                )
+                if limit is not None:
+                    input_files = input_files[: max(0, int(limit))]
 
-            for export_path in input_files:
-                raw_export_path = await asyncio.to_thread(
-                    self._preserve_raw_export,
-                    export_path,
-                    defaults.source_name,
-                )
-                sessions = await asyncio.to_thread(
-                    self._parse_export_file,
-                    export_path,
-                    defaults,
-                )
-                for session in sessions:
-                    records.append(
-                        self._queue_session(
-                            session,
-                            source_name=defaults.source_name,
-                            raw_export_path=raw_export_path,
-                        )
+                for export_path in input_files:
+                    raw_export_path = await asyncio.to_thread(
+                        self._preserve_raw_export,
+                        export_path,
+                        defaults.source_name,
                     )
+                    sessions = await asyncio.to_thread(
+                        self._parse_export_file,
+                        export_path,
+                        defaults,
+                    )
+                    for session in sessions:
+                        records.append(
+                            self._queue_session(
+                                session,
+                                source_name=defaults.source_name,
+                                raw_export_path=raw_export_path,
+                                lifecycle=lifecycle,
+                                run_id=run_id,
+                            )
+                        )
 
         api_conversation_count = 0
         if api_query is not None:
             conversations = await fetch_omi_conversations(api_query)
             api_conversation_count = len(conversations)
-            for index, conversation in enumerate(conversations):
-                raw_export_path = await asyncio.to_thread(
-                    self._preserve_raw_payload,
-                    conversation,
-                    defaults.source_name,
-                    source_label="api",
-                )
-                session = _session_from_mapping(
-                    conversation,
-                    fallback_id="omi-api",
-                    index=index,
-                    defaults=defaults,
-                )
-                records.append(
-                    self._queue_session(
-                        session,
-                        source_name=defaults.source_name,
-                        raw_export_path=raw_export_path,
+            with self.capture_queue.lifecycle() as lifecycle:
+                for index, conversation in enumerate(conversations):
+                    raw_export_path = await asyncio.to_thread(
+                        self._preserve_raw_payload,
+                        conversation,
+                        defaults.source_name,
+                        source_label="api",
                     )
-                )
+                    session = _session_from_mapping(
+                        conversation,
+                        fallback_id="omi-api",
+                        index=index,
+                        defaults=defaults,
+                    )
+                    records.append(
+                        self._queue_session(
+                            session,
+                            source_name=defaults.source_name,
+                            raw_export_path=raw_export_path,
+                            lifecycle=lifecycle,
+                            run_id=run_id,
+                        )
+                    )
 
         return PersonalTranscriptResult(
             records=tuple(records),
@@ -471,16 +488,54 @@ class PersonalTranscriptConnector:
             },
         )
 
-    def _queue_artifact(self, artifact: TranscriptArtifact) -> None:
-        entry = IngestionQueueEntry(
-            artifact_id=artifact.id,
+    def _queue_artifact(
+        self,
+        lifecycle: CaptureLifecycleService,
+        artifact: TranscriptArtifact,
+        *,
+        session: _NormalizedTranscriptSession,
+        source_name: str,
+        raw_export_path: Path,
+        run_id: str,
+    ) -> None:
+        self.capture_queue.queue_artifact(
+            lifecycle,
+            artifact,
             artifact_type="transcript",
-            source=artifact.source_type,
-            payload_json=json.dumps(artifact.to_dict(), ensure_ascii=False),
-            created_at=artifact.ingested_at,
-            capabilities_json=json.dumps(list(artifact.capabilities)),
+            source={
+                "source_name": source_name,
+                "source_type": "personal_transcript",
+                "collector": "personal_transcript_connector",
+                "native_source_id": session.device_id,
+                "metadata": {
+                    "language": session.language,
+                    "speaker": session.speaker,
+                },
+            },
+            session={
+                "session_type": "personal_transcript",
+                "native_session_id": session.session_id,
+                "started_at": session.started_at or run_id,
+                "ended_at": session.ended_at,
+                "metadata": {
+                    "source_name": source_name,
+                    "device_id": session.device_id,
+                    "speaker": session.speaker,
+                    "language": session.language,
+                    "capture_run_id": run_id,
+                },
+            },
+            event={
+                "event_type": "personal_transcript",
+                "native_event_id": session.session_id,
+                "occurred_at": session.started_at,
+                "captured_at": artifact.ingested_at,
+                "privacy": {"classification": "personal"},
+                "provenance": {"collector": "personal_transcript_connector"},
+            },
+            raw_path=raw_export_path,
         )
-        if not self.db.upsert_ingestion_entry(entry):
+        if self.db.get_ingestion_entry(artifact.id) is None:
             raise RuntimeError(f"Failed to queue personal transcript artifact: {artifact.id}")
 
     def _relative_to_vault(self, path: Path | None) -> str | None:
@@ -497,6 +552,8 @@ class PersonalTranscriptConnector:
         *,
         source_name: str,
         raw_export_path: Path,
+        lifecycle: CaptureLifecycleService,
+        run_id: str,
     ) -> PersonalTranscriptRecord:
         transcript_path = self._write_transcript_file(
             session,
@@ -509,7 +566,14 @@ class PersonalTranscriptConnector:
             raw_export_path=raw_export_path,
             transcript_path=transcript_path,
         )
-        self._queue_artifact(transcript_artifact)
+        self._queue_artifact(
+            lifecycle,
+            transcript_artifact,
+            session=session,
+            source_name=source_name,
+            raw_export_path=raw_export_path,
+            run_id=run_id,
+        )
         return PersonalTranscriptRecord(
             artifact_id=transcript_artifact.id,
             session_id=session.session_id,
