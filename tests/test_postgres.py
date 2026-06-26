@@ -137,13 +137,21 @@ def test_capture_event_store_migrations_are_explicit_and_idempotent():
     first = apply_postgres_migrations(conn, schema="capture_unit")
     second = apply_postgres_migrations(conn, schema="capture_unit")
 
-    assert first.applied_versions == (1,)
+    assert first.applied_versions == (1, 2)
     assert first.skipped_versions == ()
     assert second.applied_versions == ()
-    assert second.skipped_versions == (1,)
+    assert second.skipped_versions == (1, 2)
     assert CAPTURE_EVENT_STORE_MIGRATIONS[0].name == "0001_capture_event_store_metadata"
     assert any(
         "CREATE TABLE IF NOT EXISTS capture_event_store_metadata" in statement
+        for statement in migration_statements()
+    )
+    assert any(
+        "CREATE TABLE IF NOT EXISTS capture_events" in statement
+        for statement in migration_statements()
+    )
+    assert any(
+        "CREATE TABLE IF NOT EXISTS raw_artifact_refs" in statement
         for statement in migration_statements()
     )
 
@@ -180,8 +188,8 @@ def test_live_postgres_migrations_are_idempotent():
                     f"SELECT count(*) FROM {quoted_schema}.thoth_schema_migrations"
                 ).fetchone()
 
-            assert first.applied_versions == (1,)
-            assert second.skipped_versions == (1,)
-            assert row[0] == 1
+            assert first.applied_versions == (1, 2)
+            assert second.skipped_versions == (1, 2)
+            assert row[0] == 2
         finally:
             admin_conn.execute(f"DROP SCHEMA IF EXISTS {quoted_schema} CASCADE")
