@@ -589,6 +589,13 @@ class CaptureRetentionService:
                                 if entry.get("model_provider")
                             }
                         ),
+                        "chunk_ids": sorted(
+                            {
+                                str(entry.get("chunk_id"))
+                                for entry in context_entries
+                                if entry.get("chunk_id")
+                            }
+                        ),
                         "updated_at": max(
                             str(entry.get("updated_at") or "")
                             for entry in context_entries

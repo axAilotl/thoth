@@ -488,6 +488,16 @@ class YouTubeProcessor:
                     yaml_lines.append("  failed_chunks:")
                     for idx in failed:
                         yaml_lines.append(f"    - {idx}")
+                chunk_ids = chunk_meta.get('chunk_ids') or []
+                if chunk_ids:
+                    yaml_lines.append("  chunk_ids:")
+                    for chunk_id in chunk_ids:
+                        yaml_lines.append(f"    - {chunk_id}")
+                failed_chunk_ids = chunk_meta.get('failed_chunk_ids') or []
+                if failed_chunk_ids:
+                    yaml_lines.append("  failed_chunk_ids:")
+                    for chunk_id in failed_chunk_ids:
+                        yaml_lines.append(f"    - {chunk_id}")
                 chunk_yaml = "\n".join(yaml_lines) + "\n"
 
             content = f"""---
@@ -533,6 +543,11 @@ processed_at: {datetime.now().isoformat()}
                     content += f"- Processed: {processed_chunks}/{total}\n"
                 if failed_chunks:
                     content += f"- Failed chunks: {failed_chunks}\n"
+                chunk_ids = chunk_meta.get('chunk_ids') or []
+                if chunk_ids:
+                    content += "- Chunk IDs:\n"
+                    for chunk_id in chunk_ids:
+                        content += f"  - `{chunk_id}`\n"
                 content += f"- Fallback used: {'Yes' if fallback_used else 'No'}\n\n"
 
             # Add embedded video

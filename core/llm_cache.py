@@ -135,20 +135,39 @@ class LLMCache:
         # Get cache size
         total_size = sum(f.stat().st_size for f in self.cache_dir.glob("*.json"))
         
-        # Count by task type
+        # Count by task type and provider from cache metadata.
         task_counts = {}
+        model_counts = {}
+        recent_entries = []
         for cache_file in self.cache_dir.glob("*.json"):
             try:
-                task_type = cache_file.stem.split('_')[0]
+                with open(cache_file, 'r', encoding='utf-8') as handle:
+                    payload = json.load(handle)
+                task_type = payload.get('task_type') or cache_file.stem.split('_')[0]
                 task_counts[task_type] = task_counts.get(task_type, 0) + 1
+                model = payload.get('model') or 'unknown'
+                model_counts[model] = model_counts.get(model, 0) + 1
+                recent_entries.append({
+                    'cache_key': cache_file.stem,
+                    'task_type': task_type,
+                    'model': model,
+                    'cached_at': payload.get('cached_at'),
+                    'content_length': payload.get('content_length'),
+                })
             except Exception:
                 pass
-        
+        recent_entries.sort(
+            key=lambda item: item.get('cached_at') or '',
+            reverse=True,
+        )
+
         return {
             **stats,
             'cache_size_bytes': total_size,
             'cache_size_mb': round(total_size / (1024 * 1024), 2),
             'task_type_counts': task_counts,
+            'model_counts': model_counts,
+            'recent_entries': recent_entries[:10],
             'cache_dir': str(self.cache_dir)
         }
 

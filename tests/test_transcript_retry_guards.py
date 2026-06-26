@@ -332,6 +332,70 @@ def test_transcript_llm_logs_source_label_and_output_path(
     assert "youtube_999_example.md" in joined
 
 
+def test_transcript_llm_uses_stable_chunk_ids_and_exposes_cache_stats(
+    tmp_path: Path,
+    monkeypatch,
+    restore_runtime_config,
+):
+    _configure_runtime_paths(tmp_path)
+    config.set("youtube.transcript_chunk_size", 20)
+    metadata_db = MetadataDB(db_path=str(tmp_path / "meta.db"))
+    llm_cache = LLMCache(str(tmp_path / "llm_cache"))
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.pipeline_registry.is_enabled",
+        lambda name: True,
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.get_metadata_db",
+        lambda: metadata_db,
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.llm_cache",
+        llm_cache,
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.LLMInterface",
+        _FakeLLMInterface,
+    )
+    _FakeLLMInterface.calls = 0
+
+    processor = TranscriptLLMProcessor()
+    transcript_text = "line one\nline two\nline three\nline four"
+    first_chunks = processor._chunk_transcript(transcript_text)
+    second_chunks = processor._chunk_transcript(transcript_text)
+
+    assert [chunk.chunk_id for chunk in first_chunks] == [
+        chunk.chunk_id for chunk in second_chunks
+    ]
+
+    result = asyncio.run(
+        processor.process_transcript(transcript_text, context_id="video-stable")
+    )
+
+    chunk_ids = [chunk.chunk_id for chunk in first_chunks]
+    assert _FakeLLMInterface.calls == len(first_chunks)
+    assert result["chunk_metadata"]["chunk_ids"] == chunk_ids
+    assert result["chunk_metadata"]["chunks_processed"] == len(first_chunks)
+    stored = metadata_db.get_transcript_chunk("video-stable", 1)
+    assert stored["chunk_id"] == chunk_ids[0]
+
+    stats = metadata_db.get_transcript_chunk_stats()
+    assert stats["total_contexts"] == 1
+    assert stats["total_chunks"] == len(first_chunks)
+    assert stats["total_successful_chunks"] == len(first_chunks)
+    assert stats["contexts_with_failures"] == 0
+    assert stats["context_details"][0]["chunk_ids"] == chunk_ids
+    assert stats["recent_entries"][0]["chunk_id"] in chunk_ids
+
+    _FakeLLMInterface.calls = 0
+    cached = asyncio.run(
+        processor.process_transcript(transcript_text, context_id="video-stable")
+    )
+
+    assert _FakeLLMInterface.calls == 0
+    assert cached["chunk_metadata"]["chunk_ids"] == chunk_ids
+
+
 def test_youtube_processor_passs_source_context_to_transcript_llm(tmp_path: Path):
     class RecordingTranscriptProcessor:
         def __init__(self):

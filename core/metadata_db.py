@@ -1041,6 +1041,7 @@ class MetadataDB:
             CREATE TABLE IF NOT EXISTS transcript_chunk_cache (
                 context_id TEXT NOT NULL,
                 chunk_index INTEGER NOT NULL,
+                chunk_id TEXT,
                 content_hash TEXT NOT NULL,
                 result_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -1048,6 +1049,10 @@ class MetadataDB:
                 PRIMARY KEY (context_id, chunk_index)
             )
         """)
+        try:
+            conn.execute("ALTER TABLE transcript_chunk_cache ADD COLUMN chunk_id TEXT")
+        except Exception:
+            pass
 
         # Durable automation state for schedulers and probe backoff.
         conn.execute("""
@@ -1085,6 +1090,7 @@ class MetadataDB:
             "CREATE INDEX IF NOT EXISTS idx_connector_run_outputs_artifact ON connector_run_outputs (artifact_id)",
             "CREATE INDEX IF NOT EXISTS idx_connector_checkpoint_outputs_artifact ON connector_checkpoint_outputs (artifact_id)",
             "CREATE INDEX IF NOT EXISTS idx_transcript_chunk_context ON transcript_chunk_cache (context_id)",
+            "CREATE INDEX IF NOT EXISTS idx_transcript_chunk_id ON transcript_chunk_cache (chunk_id)",
             "CREATE INDEX IF NOT EXISTS idx_automation_state_updated_at ON automation_state (updated_at)"
         ]
 
@@ -5205,26 +5211,34 @@ class MetadataDB:
         try:
             with self._get_connection() as conn:
                 rows = conn.execute(
-                    "SELECT context_id, chunk_index, content_hash, result_json, updated_at "
+                    "SELECT context_id, chunk_index, chunk_id, content_hash, result_json, updated_at, model_provider "
                     "FROM transcript_chunk_cache"
                 ).fetchall()
 
                 contexts: Dict[str, Dict[str, Any]] = {}
+                by_provider: Dict[str, int] = {}
+                recent_entries: list[dict[str, Any]] = []
                 for row in rows:
                     context_id = row['context_id']
                     chunk_index = row['chunk_index']
+                    chunk_id = row['chunk_id']
                     updated_at = row['updated_at']
+                    provider = row['model_provider'] or 'unknown'
+                    by_provider[provider] = by_provider.get(provider, 0) + 1
                     context = contexts.setdefault(context_id, {
                         'entries': 0,
                         'chunks_total': 0,
-                        'chunks_processed': 0,
+                        'successful_chunks': set(),
                         'failed_chunks': set(),
+                        'chunk_ids': [],
                         'fallback': False,
                         'last_updated': updated_at
                     })
                     context['entries'] += 1
                     context['last_updated'] = max(context['last_updated'], updated_at)
                     context['chunks_total'] = max(context['chunks_total'], chunk_index or 0)
+                    if chunk_id:
+                        context['chunk_ids'].append(chunk_id)
 
                     data = {}
                     try:
@@ -5235,13 +5249,16 @@ class MetadataDB:
                     if isinstance(data, dict) and data.get('status') == 'failed':
                         context['failed_chunks'].add(chunk_index)
                         context['fallback'] = True
-                        continue
+                    else:
+                        context['successful_chunks'].add(chunk_index)
 
                     if isinstance(data, dict):
                         meta = data.get('chunk_metadata') or {}
                         if meta:
                             context['chunks_total'] = max(context['chunks_total'], meta.get('chunks_total', 0) or context['chunks_total'])
-                            context['chunks_processed'] = max(context['chunks_processed'], meta.get('chunks_processed', 0) or 0)
+                            for item in meta.get('chunk_ids') or ():
+                                if item:
+                                    context['chunk_ids'].append(str(item))
                             failed = meta.get('chunks_failed', 0) or 0
                             if failed:
                                 failed_chunks = meta.get('failed_chunks') or []
@@ -5251,35 +5268,51 @@ class MetadataDB:
                                     context['failed_chunks'].add(chunk_index)
                             if meta.get('fallback_used'):
                                 context['fallback'] = True
+                    recent_entries.append({
+                        'context_id': context_id,
+                        'chunk_index': chunk_index,
+                        'chunk_id': chunk_id,
+                        'content_hash': row['content_hash'],
+                        'model_provider': row['model_provider'],
+                        'updated_at': updated_at,
+                        'status': 'failed' if isinstance(data, dict) and data.get('status') == 'failed' else 'cached',
+                    })
 
                 total_contexts = len(contexts)
                 total_chunks = len(rows)
                 contexts_with_failures = sum(1 for ctx in contexts.values() if ctx['failed_chunks'])
                 contexts_with_fallback = sum(1 for ctx in contexts.values() if ctx['fallback'])
                 total_failed_chunks = sum(len(ctx['failed_chunks']) for ctx in contexts.values())
+                total_successful_chunks = sum(len(ctx['successful_chunks']) for ctx in contexts.values())
 
                 context_details = []
                 for context_id, ctx in contexts.items():
-                    if ctx['failed_chunks'] or ctx['fallback']:
-                        context_details.append({
-                            'context_id': context_id,
-                            'chunks_total': ctx['chunks_total'],
-                            'chunks_processed': ctx['chunks_processed'],
-                            'failed_count': len(ctx['failed_chunks']),
-                            'fallback': ctx['fallback'],
-                            'failed_chunks': sorted(ctx['failed_chunks']),
-                            'last_updated': ctx['last_updated']
-                        })
+                    chunk_ids = sorted(set(ctx['chunk_ids']))
+                    context_details.append({
+                        'context_id': context_id,
+                        'chunks_total': ctx['chunks_total'],
+                        'chunks_processed': len(ctx['successful_chunks']),
+                        'successful_count': len(ctx['successful_chunks']),
+                        'failed_count': len(ctx['failed_chunks']),
+                        'fallback': ctx['fallback'],
+                        'failed_chunks': sorted(ctx['failed_chunks']),
+                        'chunk_ids': chunk_ids,
+                        'last_updated': ctx['last_updated']
+                    })
 
                 context_details.sort(key=lambda item: item['last_updated'], reverse=True)
+                recent_entries.sort(key=lambda item: item['updated_at'], reverse=True)
 
                 return {
                     'total_contexts': total_contexts,
                     'total_chunks': total_chunks,
+                    'total_successful_chunks': total_successful_chunks,
                     'total_failed_chunks': total_failed_chunks,
                     'contexts_with_failures': contexts_with_failures,
                     'contexts_with_fallback': contexts_with_fallback,
-                    'context_details': context_details
+                    'by_provider': by_provider,
+                    'context_details': context_details,
+                    'recent_entries': recent_entries[:10],
                 }
         except Exception as exc:
             logger.error(f"Failed to summarize transcript chunks: {exc}")
@@ -5298,7 +5331,7 @@ class MetadataDB:
             with self._get_connection() as conn:
                 rows = conn.execute(
                     f"""
-                    SELECT context_id, chunk_index, content_hash, updated_at, model_provider
+                    SELECT context_id, chunk_index, chunk_id, content_hash, updated_at, model_provider
                     FROM transcript_chunk_cache
                     WHERE context_id IN ({placeholders})
                     ORDER BY context_id, chunk_index
@@ -5426,12 +5459,13 @@ class MetadataDB:
         try:
             with self._get_connection() as conn:
                 row = conn.execute(
-                    "SELECT content_hash, result_json, model_provider, updated_at FROM transcript_chunk_cache WHERE context_id = ? AND chunk_index = ?",
+                    "SELECT chunk_id, content_hash, result_json, model_provider, updated_at FROM transcript_chunk_cache WHERE context_id = ? AND chunk_index = ?",
                     (context_id, chunk_index)
                 ).fetchone()
                 if not row:
                     return None
                 return {
+                    'chunk_id': row['chunk_id'],
                     'content_hash': row['content_hash'],
                     'result_json': row['result_json'],
                     'model_provider': row['model_provider'],
@@ -5447,22 +5481,32 @@ class MetadataDB:
         chunk_index: int,
         content_hash: str,
         result_json: str,
-        model_provider: Optional[str]
+        model_provider: Optional[str],
+        chunk_id: Optional[str] = None,
     ) -> bool:
         """Persist a transcript chunk result."""
         try:
             with self._get_connection() as conn:
                 conn.execute(
                     """
-                    INSERT INTO transcript_chunk_cache (context_id, chunk_index, content_hash, result_json, updated_at, model_provider)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO transcript_chunk_cache (context_id, chunk_index, chunk_id, content_hash, result_json, updated_at, model_provider)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(context_id, chunk_index) DO UPDATE SET
+                        chunk_id = excluded.chunk_id,
                         content_hash = excluded.content_hash,
                         result_json = excluded.result_json,
                         updated_at = excluded.updated_at,
                         model_provider = excluded.model_provider
                     """,
-                    (context_id, chunk_index, content_hash, result_json, datetime.now().isoformat(), model_provider)
+                    (
+                        context_id,
+                        chunk_index,
+                        chunk_id,
+                        content_hash,
+                        result_json,
+                        datetime.now().isoformat(),
+                        model_provider,
+                    )
                 )
                 return True
         except Exception as exc:
@@ -5481,6 +5525,27 @@ class MetadataDB:
         except Exception as exc:
             logger.debug(f"Failed to clear transcript chunk cache for {context_id}: {exc}")
             return False
+
+    def prune_transcript_chunks(
+        self,
+        context_id: str,
+        *,
+        max_chunk_index: int,
+    ) -> int:
+        """Remove transcript chunk rows outside the current deterministic chunk set."""
+        try:
+            with self._get_connection() as conn:
+                result = conn.execute(
+                    """
+                    DELETE FROM transcript_chunk_cache
+                    WHERE context_id = ? AND chunk_index > ?
+                    """,
+                    (context_id, max_chunk_index),
+                )
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            logger.debug(f"Failed to prune transcript chunk cache for {context_id}: {exc}")
+            return 0
 
 
 # Global metadata database instance

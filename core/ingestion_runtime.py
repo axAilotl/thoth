@@ -24,6 +24,7 @@ from .artifacts import (
     VideoArtifact,
     WebClipperArtifact,
 )
+from .bounded_workers import map_bounded, resolve_worker_concurrency
 from .bookmark_contract import normalize_bookmark_payload, validate_tweet_id
 from .canonical_identity import CanonicalArtifactIdentity, CanonicalIdentityService
 from .config import Config, config
@@ -216,14 +217,39 @@ class KnowledgeArtifactRuntime:
         updater.prune_legacy_tweet_pages()
 
     async def process_pending_ingestions_once(
-        self, *, limit: int | None = None
+        self,
+        *,
+        limit: int | None = None,
+        concurrency: int | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> list[IngestionDispatchResult]:
         """Process all due ingestion rows once."""
         entries = self.db.get_pending_ingestions(limit=limit)
-        results: list[IngestionDispatchResult] = []
-        for entry in entries:
-            results.append(await self.process_ingestion_entry(entry))
-        return results
+        if not entries:
+            return []
+
+        worker_count = (
+            self._ingestion_worker_concurrency()
+            if concurrency is None
+            else resolve_worker_concurrency(
+                concurrency,
+                setting_name="processing.ingestion.concurrent_workers",
+            )
+        )
+        if worker_count <= 1:
+            results: list[IngestionDispatchResult] = []
+            for entry in entries:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                results.append(await self.process_ingestion_entry(entry))
+            return results
+
+        return await map_bounded(
+            entries,
+            self.process_ingestion_entry,
+            concurrency=worker_count,
+            cancel_event=cancel_event,
+        )
 
     async def run_background(
         self,
@@ -235,7 +261,11 @@ class KnowledgeArtifactRuntime:
         """Poll the ingestion queue until shutdown."""
         while not shutdown_event.is_set():
             try:
-                results = await self.process_pending_ingestions_once(limit=batch_size)
+                results = await self.process_pending_ingestions_once(
+                    limit=batch_size,
+                    concurrency=self._ingestion_worker_concurrency(),
+                    cancel_event=shutdown_event,
+                )
                 if not results:
                     await asyncio.wait_for(
                         shutdown_event.wait(), timeout=poll_interval_seconds
@@ -253,6 +283,13 @@ class KnowledgeArtifactRuntime:
                     )
                 except asyncio.TimeoutError:
                     continue
+
+    def _ingestion_worker_concurrency(self) -> int:
+        return resolve_worker_concurrency(
+            self.config.get("processing.ingestion.concurrent_workers", 1),
+            default=1,
+            setting_name="processing.ingestion.concurrent_workers",
+        )
 
     async def process_ingestion_entry(
         self, entry: IngestionQueueEntry

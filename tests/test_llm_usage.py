@@ -119,3 +119,21 @@ def test_llm_cache_hit_records_zero_cost_usage(tmp_path: Path, monkeypatch):
     assert payload["cache_hits"] == 1
     assert payload["total_cost_estimate_usd"] == 0.0
     assert payload["totals_by_task"][0]["task"] == "tags"
+
+
+def test_llm_cache_info_uses_stored_task_and_model_metadata(tmp_path: Path):
+    cache = LLMCache(str(tmp_path / "cache"))
+
+    cache.set(
+        "transcript content",
+        "transcript_fmt",
+        {"text": "formatted", "summary": "summary", "tags": "alpha"},
+        "fake:transcript-model",
+    )
+
+    info = cache.get_cache_info()
+
+    assert info["task_type_counts"] == {"transcript_fmt": 1}
+    assert info["model_counts"] == {"fake:transcript-model": 1}
+    assert info["recent_entries"][0]["task_type"] == "transcript_fmt"
+    assert info["recent_entries"][0]["model"] == "fake:transcript-model"

@@ -276,6 +276,9 @@
     "documents": {
       "concurrent_workers": 3
     },
+    "ingestion": {
+      "concurrent_workers": 1
+    },
     "llm_async": {
       "max_concurrent_requests": 8,
       "max_concurrent_batches": 2,

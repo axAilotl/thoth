@@ -252,6 +252,7 @@ def _retention_surface(
         "chunk-hash",
         '{"chunk":"private"}',
         "test",
+        chunk_id="transcript_0001_capture",
     )
     document = ArchivistCorpusDocument(
         candidate_key="candidate-transcript",
@@ -422,6 +423,14 @@ def test_capture_surface_retention_expires_raw_and_distilled_separately(
             target["target_type"]: target["retention_class"]
             for target in inspection["targets"]
         }["raw_ref"] == "raw-expire"
+        transcript_cache_target = next(
+            target
+            for target in inspection["targets"]
+            if target["target_type"] == "transcript_cache"
+        )
+        assert transcript_cache_target["metadata"]["chunk_ids"] == [
+            "transcript_0001_capture"
+        ]
 
         raw_result = surface.expire_retention(
             event_id=str(paths["event_id"]),

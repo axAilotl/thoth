@@ -1157,6 +1157,10 @@ def cmd_stats(args):
         if chunk_stats and chunk_stats.get("total_contexts"):
             print(f"🎬 Transcript Chunk Cache:")
             print(f"   Contexts tracked: {chunk_stats['total_contexts']:,}")
+            print(f"   Cached chunks: {chunk_stats['total_chunks']:,}")
+            print(
+                f"   Successful chunks: {chunk_stats.get('total_successful_chunks', 0):,}"
+            )
             print(
                 f"   Contexts with failures: {chunk_stats['contexts_with_failures']:,}"
             )
@@ -1164,14 +1168,27 @@ def cmd_stats(args):
                 f"   Contexts with fallback: {chunk_stats['contexts_with_fallback']:,}"
             )
             print(f"   Failed chunks: {chunk_stats['total_failed_chunks']:,}")
+            if chunk_stats.get("by_provider"):
+                print(f"   By provider:")
+                for provider, count in chunk_stats["by_provider"].items():
+                    print(f"     {provider:20} {count:,}")
             details = chunk_stats.get("context_details", [])
             if details:
-                print(f"   Recent failures:")
+                print(f"   Recent contexts:")
                 for detail in details[:5]:
                     print(
                         f"     {detail['context_id']} -> processed {detail['chunks_processed']}/"
                         f"{detail['chunks_total']} chunks, failures: {detail['failed_count']}"
                         f" (fallback: {'Yes' if detail['fallback'] else 'No'})"
+                    )
+            recent_chunks = chunk_stats.get("recent_entries", [])
+            if recent_chunks:
+                print(f"   Recent chunks:")
+                for entry in recent_chunks[:5]:
+                    chunk_id = entry.get("chunk_id") or f"index:{entry.get('chunk_index')}"
+                    print(
+                        f"     {entry['context_id']} {chunk_id} "
+                        f"{entry.get('status', 'cached')} at {entry['updated_at']}"
                     )
 
 

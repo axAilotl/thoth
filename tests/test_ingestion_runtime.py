@@ -612,6 +612,76 @@ def test_process_pending_ingestions_marks_processed(
     assert db.get_ingestion_entry("repo-queued").status == "processed"
 
 
+def test_process_pending_ingestions_respects_concurrency_and_cancel_event(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    db = MetadataDB()
+    runtime = KnowledgeArtifactRuntime(db=db)
+    for index in range(4):
+        assert db.upsert_ingestion_entry(
+            IngestionQueueEntry(
+                artifact_id=f"repo-{index}",
+                artifact_type="repository",
+                source="github",
+                payload_json=json.dumps(
+                    {
+                        "id": f"repo-{index}",
+                        "source_type": "github",
+                        "repo_name": f"owner/repo-{index}",
+                    }
+                ),
+                created_at=f"2026-04-04T00:0{index}:00",
+            )
+        )
+
+    async def run():
+        active = 0
+        max_active = 0
+        started = []
+        release = asyncio.Event()
+        cancel_event = asyncio.Event()
+
+        async def fake_process(entry):
+            nonlocal active, max_active
+            started.append(entry.artifact_id)
+            active += 1
+            max_active = max(max_active, active)
+            if len(started) == 2:
+                cancel_event.set()
+            await release.wait()
+            active -= 1
+            return IngestionDispatchResult(
+                artifact_id=entry.artifact_id,
+                artifact_type=entry.artifact_type,
+                source=entry.source,
+                status="processed",
+                processed_at="2026-04-04T00:00:00",
+            )
+
+        monkeypatch.setattr(runtime, "process_ingestion_entry", fake_process)
+        task = asyncio.create_task(
+            runtime.process_pending_ingestions_once(
+                limit=10,
+                concurrency=2,
+                cancel_event=cancel_event,
+            )
+        )
+        while len(started) < 2:
+            await asyncio.sleep(0)
+        release.set()
+        results = await task
+        return results, started, max_active
+
+    results, started, max_active = asyncio.run(run())
+
+    assert [result.artifact_id for result in results] == ["repo-0", "repo-1"]
+    assert started == ["repo-0", "repo-1"]
+    assert max_active == 2
+
+
 def test_process_pending_ingestions_deduplicates_imported_doc_wiki_pages(
     tmp_path: Path, monkeypatch, restore_runtime_config
 ):
