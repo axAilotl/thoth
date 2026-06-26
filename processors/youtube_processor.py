@@ -365,14 +365,24 @@ class YouTubeProcessor:
 
             # Get transcript if enabled
             if self.enable_transcripts:
-                logger.debug(f"📝 [YT] Try transcript {video_id}")
+                logger.debug(
+                    "📝 [YT] Try transcript for video %s from %s -> %s",
+                    video_id,
+                    log_source,
+                    transcript_file,
+                )
                 transcript_fetch_start = time.time()
                 raw_transcript = await self.get_video_transcript(video_id)
                 metrics['transcript_seconds'] += time.time() - transcript_fetch_start
 
                 formatted_transcript = None
                 if raw_transcript and self.transcript_llm_processor and self.transcript_llm_processor.is_enabled():
-                    logger.debug(f"🤖 [YT] LLM format transcript {video_id}")
+                    logger.debug(
+                        "🤖 [YT] LLM format transcript for video %s from %s -> %s",
+                        video_id,
+                        log_source,
+                        transcript_file,
+                    )
                     logger.info(
                         "Processing transcript with LLM for video %s from %s -> %s",
                         video_id,
@@ -406,9 +416,22 @@ class YouTubeProcessor:
                         formatted_length = len(formatted_transcript)
                         chunk_metadata = None
                     if raw_transcript:
-                        logger.info(f"✅ LLM formatted transcript: {len(raw_transcript)} → {formatted_length} characters")
+                        logger.info(
+                            "✅ LLM formatted transcript for video %s from %s -> %s: %s → %s characters",
+                            video_id,
+                            log_source,
+                            transcript_file,
+                            len(raw_transcript),
+                            formatted_length,
+                        )
                     else:
-                        logger.info(f"✅ LLM generated transcript: {formatted_length} characters")
+                        logger.info(
+                            "✅ LLM generated transcript for video %s from %s -> %s: %s characters",
+                            video_id,
+                            log_source,
+                            transcript_file,
+                            formatted_length,
+                        )
 
                     if chunk_metadata and chunk_metadata.get('chunks_failed'):
                         metrics['transcript_failed'] += chunk_metadata.get('chunks_failed', 0)
@@ -419,7 +442,12 @@ class YouTubeProcessor:
                 else:
                     video.formatted_transcript = None
                     if raw_transcript:
-                        logger.info("Using raw transcript (LLM formatting failed or disabled)")
+                        logger.info(
+                            "Using raw transcript for video %s from %s -> %s (LLM formatting failed or disabled)",
+                            video_id,
+                            log_source,
+                            transcript_file,
+                        )
                         metrics['transcript_failed'] += 1
                         chunk_metadata = {
                             'chunks_total': 0,
@@ -432,7 +460,12 @@ class YouTubeProcessor:
             else:
                 video.chunk_metadata = None
 
-            logger.debug(f"💾 [YT] Write transcript file {transcript_file.name}")
+            logger.debug(
+                "💾 [YT] Write transcript file for video %s from %s -> %s",
+                video_id,
+                log_source,
+                transcript_file,
+            )
             await self._create_transcript_file(video, transcript_file)
 
             logger.info(

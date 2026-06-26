@@ -396,7 +396,10 @@ def test_transcript_llm_uses_stable_chunk_ids_and_exposes_cache_stats(
     assert cached["chunk_metadata"]["chunk_ids"] == chunk_ids
 
 
-def test_youtube_processor_passs_source_context_to_transcript_llm(tmp_path: Path):
+def test_youtube_processor_passs_source_context_to_transcript_llm(
+    tmp_path: Path,
+    caplog,
+):
     class RecordingTranscriptProcessor:
         def __init__(self):
             self.calls = []
@@ -448,9 +451,10 @@ def test_youtube_processor_passs_source_context_to_transcript_llm(tmp_path: Path
     processor.get_video_transcript = fake_get_video_transcript
     processor._create_transcript_file = fake_create_transcript_file
 
-    video, metrics = asyncio.run(
-        processor.process_video("abc123", source_label="tweet 123 by @alice")
-    )
+    with caplog.at_level(logging.INFO, logger="processors.youtube_processor"):
+        video, metrics = asyncio.run(
+            processor.process_video("abc123", source_label="tweet 123 by @alice")
+        )
 
     assert video is not None
     assert metrics["transcript_attempts"] == 1
@@ -460,3 +464,10 @@ def test_youtube_processor_passs_source_context_to_transcript_llm(tmp_path: Path
     assert call["source_label"] == "tweet 123 by @alice / youtube:abc123"
     assert call["output_path"] == processor.transcripts_dir / "youtube_abc123_Example_Title.md"
     assert created_paths == [processor.transcripts_dir / "youtube_abc123_Example_Title.md"]
+
+    joined = "\n".join(record.message for record in caplog.records)
+    assert (
+        "LLM formatted transcript for video abc123 from tweet 123 by @alice -> "
+        in joined
+    )
+    assert "youtube_abc123_Example_Title.md" in joined
