@@ -249,7 +249,8 @@ class KnowledgeArtifactRuntime:
         """Process a single ingestion queue row."""
         if entry.status in INGESTION_REVIEW_STATUSES:
             raise IngestionRuntimeError(
-                f"Ingestion artifact {entry.artifact_id} requires operator review"
+                f"Ingestion artifact {entry.artifact_id} requires security review "
+                "or operator review"
             )
         try:
             artifact = self.materialize_artifact(entry)
