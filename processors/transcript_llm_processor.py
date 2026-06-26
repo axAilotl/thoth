@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 
 from core.config import config
+from core.connector_budgets import ConnectorBudgetError, start_connector_budget_run
 from core.llm_interface import LLMInterface
 from core.llm_cache import llm_cache
 from core.llm_validation import (
@@ -135,6 +136,8 @@ class TranscriptLLMProcessor:
                 source_label=source_label,
                 output_path=output_path,
             )
+            budget = start_connector_budget_run(config, "youtube")
+            budget.add_transcript_text(raw_transcript, label=target_label)
             prompt = config.get('youtube.transcript_processing_prompt', 
                               "Process the following transcript. Combine fragmented sentences into coherent paragraphs, remove all timestamps, and insert newlines between paragraphs where the context shifts. Do not edit the content beyond paragraph formation.\n\nReturn the result strictly as a JSON object with the following fields:\n- \"text\": the processed transcript in plain text paragraphs\n- \"summary\": a concise 2–4 sentence summary of the transcript\n- \"tags\": 3–8 relevant tags, returned as a single comma-separated string with no # symbols and no explanations\n\nReturn ONLY the JSON object, with no preamble or extra text.")
             cache_provider = f"{provider}:{model}" if provider or model else ""
@@ -177,6 +180,8 @@ class TranscriptLLMProcessor:
                     context_id=context_id
                 )
                 
+        except ConnectorBudgetError:
+            raise
         except Exception as e:
             logger.error(f"Error processing transcript: {e}")
             return None

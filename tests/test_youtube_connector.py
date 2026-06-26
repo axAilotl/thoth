@@ -1,8 +1,11 @@
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from collectors.youtube_connector import YouTubeConnector
 from core.config import Config
+from core.connector_budgets import ConnectorBudgetError
 from core.ingestion_runtime import KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
@@ -137,6 +140,25 @@ def test_youtube_connector_accepts_playlist_urls_via_adapter(tmp_path: Path):
 
     assert result.records[0].video_id == "pl123"
     assert db.get_ingestion_entry("yt_video_pl123") is not None
+
+
+def test_youtube_connector_stops_when_export_byte_budget_exceeded(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("connectors.budgets.per_connector.youtube.max_bytes_per_file", 8)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    export_path = tmp_path / "watch-later.html"
+    export_path.write_text(
+        '<a href="https://www.youtube.com/watch?v=abc123">Fixture</a>',
+        encoding="utf-8",
+    )
+    processor = FakeYouTubeProcessor(layout.vault_root / "transcripts")
+    connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
+
+    with pytest.raises(ConnectorBudgetError, match="max_bytes_per_file"):
+        asyncio.run(connector.collect(export_paths=[export_path]))
+
+    assert db.list_ingestion_entries(limit=10) == []
 
 
 def test_youtube_connector_video_archival_is_config_gated(tmp_path: Path, monkeypatch):

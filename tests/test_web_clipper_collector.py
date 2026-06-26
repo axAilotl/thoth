@@ -7,6 +7,7 @@ import pytest
 
 from collectors.web_clipper_collector import WebClipperCollector
 from core.config import Config
+from core.connector_budgets import ConnectorBudgetError
 from core.ingestion_runtime import IngestionRuntimeError, KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
@@ -223,6 +224,24 @@ def test_web_clipper_collector_fails_closed_when_roots_missing(tmp_path: Path):
             layout=layout,
             db=MetadataDB(db_path=str(layout.database_path)),
         )
+
+
+def test_web_clipper_collector_stops_when_file_budget_exceeded(tmp_path: Path):
+    collector, vault_root = make_collector(tmp_path)
+    collector.config.set(
+        "connectors.budgets.per_connector.web_clipper.max_files_per_run",
+        1,
+    )
+
+    note_file = vault_root / "Clippings" / "capture.md"
+    attachment_file = vault_root / "clipper-assets" / "capture_attachment.pdf"
+    _copy_fixture("capture_note.md", note_file)
+    _copy_fixture("capture_attachment.pdf", attachment_file)
+
+    with pytest.raises(ConnectorBudgetError, match="max_files_per_run"):
+        collector.collect()
+
+    assert collector.db.list_ingestion_entries(limit=10) == []
 
 
 def test_web_clipper_collector_rejects_notes_without_frontmatter(tmp_path: Path):

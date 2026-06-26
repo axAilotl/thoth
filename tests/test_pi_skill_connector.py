@@ -7,6 +7,7 @@ import pytest
 
 from core.agent_surface import AgentSurfaceService
 from core.config import Config
+from core.connector_budgets import ConnectorBudgetError
 from core.ingestion_runtime import IngestionRuntimeError, KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
@@ -173,6 +174,26 @@ def test_pi_skills_blocks_remote_install_route(tmp_path: Path):
             execute=True,
             options={"skill": "collect-notes"},
         )
+
+
+def test_pi_skills_execute_stops_when_prompt_token_budget_exceeded(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set(
+        "connectors.budgets.per_connector.pi_skills.max_input_tokens_per_run",
+        1,
+    )
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    with pytest.raises(ConnectorBudgetError, match="max_input_tokens_per_run"):
+        service.run_connector(
+            "pi_skills",
+            execute=True,
+            options={"skill": "collect-notes", "prompt": "Collect this."},
+        )
+
+    assert db.list_ingestion_entries(limit=10) == []
 
 
 def test_pi_skills_missing_manifest_controls_fail_closed(tmp_path: Path):

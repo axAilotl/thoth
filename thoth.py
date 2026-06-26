@@ -1747,7 +1747,7 @@ def cmd_connectors(args):
                 execute=bool(getattr(args, "execute", False)),
                 options=options,
             )
-        except (AgentSurfaceError, KeyError) as exc:
+        except (AgentSurfaceError, KeyError, ValueError, FileNotFoundError) as exc:
             raise SystemExit(str(exc)) from exc
         if getattr(args, "json", False):
             _print_json(payload)

@@ -224,6 +224,41 @@
         "cli_command": "connectors run pi_skills",
         "origin": "builtin"
       }
+    },
+    "budgets": {
+      "defaults": {
+        "max_bytes_per_file": 52428800,
+        "max_bytes_per_run": 262144000,
+        "max_files_per_run": 500,
+        "max_input_tokens_per_run": 500000,
+        "max_output_tokens_per_run": 100000,
+        "max_transcript_chunks_per_run": 64,
+        "transcript_chunk_chars": 75000,
+        "estimated_output_tokens_per_artifact": 512,
+        "input_cost_per_1k_tokens_usd": 0.0,
+        "output_cost_per_1k_tokens_usd": 0.0,
+        "max_estimated_cost_usd": null
+      },
+      "per_connector": {
+        "web_clipper": {
+          "max_files_per_run": 500,
+          "max_bytes_per_run": 262144000
+        },
+        "youtube": {
+          "max_files_per_run": 25,
+          "max_transcript_chunks_per_run": 24
+        },
+        "skill_outputs": {
+          "max_files_per_run": 100,
+          "max_transcript_chunks_per_run": 32
+        },
+        "pi_skills": {
+          "max_files_per_run": 25,
+          "max_input_tokens_per_run": 120000,
+          "max_output_tokens_per_run": 12000,
+          "max_transcript_chunks_per_run": 16
+        }
+      }
     }
   },
   "processing": {

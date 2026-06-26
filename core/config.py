@@ -244,6 +244,13 @@ class Config:
         except Exception as exc:
             errors.append(str(exc))
 
+        try:
+            from .connector_budgets import validate_connector_budget_config
+
+            errors.extend(validate_connector_budget_config(self))
+        except Exception as exc:
+            errors.append(str(exc))
+
         x_api_config = self.get('sources.x_api', {})
         if isinstance(x_api_config, dict) and x_api_config.get('enabled', False):
             required_x_api_keys = ('client_id', 'redirect_uri')
