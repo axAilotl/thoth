@@ -39,7 +39,13 @@ from core import (
     WikiQueryRunner,
 )
 from core.archivist_benchmark import benchmark_archivist_topics
+from core.capture_event_store import CaptureEventStore
 from core.graphql_cache import maybe_cleanup_graphql_cache
+from core.postgres import (
+    PostgresConfigError,
+    open_postgres_connection,
+    resolve_postgres_settings,
+)
 from processors import URLProcessor, CacheLoader, VideoUpdater
 from processors.pipeline_processor import PipelineProcessor
 from processors.async_llm_processor import AsyncLLMProcessor, AsyncProcessingConfig
@@ -2352,9 +2358,14 @@ async def cmd_wiki_query(args):
 async def cmd_wiki_lint(args):
     """Run wiki health checks for contradictions, staleness, and orphans."""
     layout = build_path_layout(config)
-    runner = WikiLintRunner(config, layout=layout)
     stale_after_days = int(getattr(args, "stale_after_days", 30) or 30)
-    report = runner.lint(stale_after_days=stale_after_days)
+    report = _run_wiki_lint_report(layout, stale_after_days=stale_after_days)
+
+    if getattr(args, "json", False):
+        print(json.dumps(_wiki_lint_report_payload(report), indent=2, sort_keys=True))
+        if report.has_errors:
+            raise SystemExit(1)
+        return
 
     print("🧪 Wiki lint report")
     print(f"   Pages checked: {report.pages_checked}")
@@ -2362,9 +2373,75 @@ async def cmd_wiki_lint(args):
     for issue in report.issues:
         location = f" ({issue.page_path})" if issue.page_path else ""
         print(f"   - {issue.severity.upper()} {issue.code}{location}: {issue.message}")
+        for reason in _wiki_lint_provenance_reasons(issue):
+            print(f"     provenance: {reason}")
 
     if report.has_errors:
         raise SystemExit(1)
+
+
+def _run_wiki_lint_report(layout, *, stale_after_days: int):
+    try:
+        settings = resolve_postgres_settings(config)
+    except PostgresConfigError as exc:
+        raise ValueError(str(exc)) from exc
+    if not settings.enabled:
+        return WikiLintRunner(config, layout=layout).lint(
+            stale_after_days=stale_after_days
+        )
+    with open_postgres_connection(settings) as conn:
+        event_store = CaptureEventStore(
+            conn,
+            schema=settings.schema,
+            raw_roots=[layout.raw_root],
+        )
+        return WikiLintRunner(
+            config,
+            layout=layout,
+            event_store=event_store,
+        ).lint(stale_after_days=stale_after_days)
+
+
+def _wiki_lint_report_payload(report):
+    return {
+        "kind": "wiki",
+        "status": "failed" if report.has_errors else "ok",
+        "checked_at": report.checked_at,
+        "summary": {
+            "pages_checked": report.pages_checked,
+            "issue_count": len(report.issues),
+            "error_count": sum(1 for issue in report.issues if issue.severity == "error"),
+            "warning_count": sum(
+                1 for issue in report.issues if issue.severity == "warning"
+            ),
+        },
+        "issues": [
+            {
+                "code": issue.code,
+                "severity": issue.severity,
+                "message": issue.message,
+                "page_path": str(issue.page_path) if issue.page_path else None,
+                "related_paths": [str(path) for path in issue.related_paths],
+                "details": dict(issue.details),
+            }
+            for issue in report.issues
+        ],
+    }
+
+
+def _wiki_lint_provenance_reasons(issue) -> tuple[str, ...]:
+    details = issue.details if isinstance(issue.details, dict) else {}
+    changes = details.get("changes") or []
+    reasons: list[str] = []
+    for change in changes[:5]:
+        if not isinstance(change, dict):
+            continue
+        reason = str(change.get("reason") or "").strip()
+        if reason:
+            reasons.append(reason)
+    if len(changes) > 5:
+        reasons.append(f"{len(changes) - 5} additional input change(s)")
+    return tuple(reasons)
 
 
 async def cmd_okf(args):
@@ -2984,6 +3061,7 @@ Examples:
         help="Run wiki health checks",
     )
     wiki_lint_group.add_argument("--stale-after-days", type=int, default=30)
+    wiki_lint_group.add_argument("--json", action="store_true")
 
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a tweet and all its artifacts")
@@ -3495,6 +3573,7 @@ Examples:
         default=30,
         help="Warn when wiki pages have not been updated within this many days",
     )
+    wiki_lint_parser.add_argument("--json", action="store_true")
 
     okf_parser = subparsers.add_parser(
         "okf",

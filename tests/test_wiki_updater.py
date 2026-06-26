@@ -403,18 +403,20 @@ def test_wiki_updater_emits_deterministic_provenance_and_security_frontmatter(
         "repos/github_owner_repo_README.md",
         "stars/owner_repo_summary.md",
     ]
-    assert document.frontmatter["thoth_influence_sources"] == [
-        {
-            "artifact_id": "gh_1",
-            "source_path": "repos/github_owner_repo_README.md",
-            "source_type": "github",
-        },
-        {
-            "artifact_id": "gh_1",
-            "source_path": "stars/owner_repo_summary.md",
-            "source_type": "github",
-        },
+    influence_sources = document.frontmatter["thoth_influence_sources"]
+    assert [item["source_path"] for item in influence_sources] == [
+        "repos/github_owner_repo_README.md",
+        "stars/owner_repo_summary.md",
     ]
+    assert all(item["artifact_id"] == "gh_1" for item in influence_sources)
+    assert all(item["source_type"] == "github" for item in influence_sources)
+    assert all(item["sha256"] for item in influence_sources)
+    assert document.frontmatter["thoth_input_hash"]
+    assert [item["source_path"] for item in document.frontmatter["thoth_input_manifest"]] == [
+        "repos/github_owner_repo_README.md",
+        "stars/owner_repo_summary.md",
+    ]
+    assert document.frontmatter["thoth_change_provenance"]["reason"] == "initial_compile"
     assert document.frontmatter["thoth_event_ids"] == ["event-a", "event-b"]
     assert document.frontmatter["thoth_security_findings"] == [
         {"category": "api_key", "pattern_id": "generic", "source": "redaction"},
@@ -435,6 +437,49 @@ def test_wiki_updater_emits_deterministic_provenance_and_security_frontmatter(
     assert citations_section.index(
         "[2] [repos/github_owner_repo_README.md]"
     ) < citations_section.index("[3] [stars/owner_repo_summary.md]")
+
+
+def test_wiki_lint_reports_source_file_changes_after_compile(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    stars_dir = layout.vault_root / "stars"
+    repos_dir = layout.vault_root / "repos"
+    stars_dir.mkdir(parents=True, exist_ok=True)
+    repos_dir.mkdir(parents=True, exist_ok=True)
+    (stars_dir / "owner_repo_summary.md").write_text("# summary\n", encoding="utf-8")
+    readme_path = repos_dir / "github_owner_repo_README.md"
+    readme_path.write_text("# readme\n", encoding="utf-8")
+
+    CompiledWikiUpdater(config, layout=layout).update_from_artifact(
+        RepositoryArtifact(
+            id="gh_1",
+            source_type="github",
+            repo_name="owner/repo",
+            description="Repository summary",
+            stars=12,
+            language="python",
+        ),
+        dispatch_details={"repo_name": "owner/repo"},
+    )
+
+    readme_path.write_text("# changed readme\n", encoding="utf-8")
+    report = WikiLintRunner(config, layout=layout).lint(stale_after_days=999999)
+
+    stale_issue = next(
+        issue for issue in report.issues if issue.code == "stale-page-inputs"
+    )
+    assert stale_issue.severity == "warning"
+    assert stale_issue.details["recorded_input_hash"] != stale_issue.details[
+        "current_input_hash"
+    ]
+    assert any(
+        "Source file repos/github_owner_repo_README.md hash changed."
+        == change["reason"]
+        for change in stale_issue.details["changes"]
+    )
 
 
 def test_wiki_updater_compiles_capture_event_rollup_pages_with_filters(
@@ -470,6 +515,16 @@ def test_wiki_updater_compiles_capture_event_rollup_pages_with_filters(
     assert document.frontmatter["thoth_source_paths"] == [
         "raw/capture/public.json"
     ]
+    assert document.frontmatter["thoth_input_hash"]
+    input_kinds = {
+        item["input_kind"]
+        for item in document.frontmatter["thoth_input_manifest"]
+    }
+    assert input_kinds == {"capture_event", "raw_ref"}
+    assert any(
+        item["event_id"] == "event-public"
+        for item in document.frontmatter["thoth_influence_sources"]
+    )
     assert document.frontmatter["thoth_security_findings"] == [
         {
             "event_id": "event-public",
@@ -497,6 +552,53 @@ def test_wiki_updater_compiles_capture_event_rollup_pages_with_filters(
 
     report = WikiLintRunner(config, layout=layout).lint(stale_after_days=999999)
     assert not report.has_errors
+
+
+def test_wiki_lint_reports_capture_event_changes_after_compile(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    store = _capture_store_with_public_and_restricted_events(layout)
+
+    CompiledWikiUpdater(config, layout=layout).update_from_capture_events(store)
+    store.upsert_event(
+        CaptureEvent(
+            event_id="event-public",
+            source_id="source-public",
+            session_id="session-public",
+            event_type="note",
+            native_event_id="note-public",
+            occurred_at="2026-04-04T10:15:00Z",
+            captured_at="2026-04-04T10:16:00Z",
+            payload={
+                "title": "Public capture note updated",
+                "normalized_metadata": {
+                    "people": [{"id": "ada", "name": "Ada Lovelace"}],
+                    "projects": [{"id": "thoth", "name": "Thoth"}],
+                },
+            },
+            privacy={"classification": "public"},
+        )
+    )
+
+    report = WikiLintRunner(
+        config,
+        layout=layout,
+        event_store=store,
+    ).lint(stale_after_days=999999)
+
+    stale_issue = next(
+        issue
+        for issue in report.issues
+        if issue.code == "stale-page-inputs"
+        and issue.page_path.name == "capture-daily-2026-04-04.md"
+    )
+    assert any(
+        "Capture event event-public hash changed." == change["reason"]
+        for change in stale_issue.details["changes"]
+    )
 
 
 def test_wiki_updater_requires_audit_reason_for_restricted_capture_events(

@@ -7,10 +7,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .capture_event_store import CaptureEventStore
 from .config import Config
 from .metadata_db import MetadataDB
 from .okf import OKFLintIssue, OKFLintReport, OKFLintRunner
 from .path_layout import build_path_layout
+from .postgres import (
+    PostgresConfigError,
+    open_postgres_connection,
+    resolve_postgres_settings,
+)
 from .wiki_contract import build_wiki_contract
 from .wiki_lint import WikiLintIssue, WikiLintReport, WikiLintRunner
 
@@ -59,11 +65,29 @@ def run_admin_lint(
             _okf_lint_payload(report),
         )
     if normalized_kind == "wiki":
-        report = WikiLintRunner(
-            runtime_config,
-            layout=layout,
-            contract=contract,
-        ).lint()
+        try:
+            settings = resolve_postgres_settings(runtime_config)
+        except PostgresConfigError as exc:
+            raise ValueError(str(exc)) from exc
+        if settings.enabled:
+            with open_postgres_connection(settings) as conn:
+                event_store = CaptureEventStore(
+                    conn,
+                    schema=settings.schema,
+                    raw_roots=[layout.raw_root],
+                )
+                report = WikiLintRunner(
+                    runtime_config,
+                    layout=layout,
+                    contract=contract,
+                    event_store=event_store,
+                ).lint()
+        else:
+            report = WikiLintRunner(
+                runtime_config,
+                layout=layout,
+                contract=contract,
+            ).lint()
         return _persist_admin_lint_report(
             layout,
             normalized_kind,
@@ -133,6 +157,7 @@ def _serialize_wiki_lint_issue(issue: WikiLintIssue) -> dict[str, Any]:
         "message": issue.message,
         "page_path": str(issue.page_path) if issue.page_path else None,
         "related_paths": [str(path) for path in issue.related_paths],
+        "details": issue.details,
     }
 
 

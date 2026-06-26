@@ -22,6 +22,11 @@ from .llm_interface import LLMInterface
 from .metadata_db import MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import wrap_untrusted_content
+from .wiki_change_provenance import (
+    change_provenance,
+    influence_with_input_hashes,
+    source_file_snapshot,
+)
 from .wiki_contract import WikiContract, WikiPageSpec, build_wiki_contract
 from .wiki_io import atomic_write_text, read_document, render_frontmatter, truncate_summary
 from .wiki_scaffold import append_wiki_log_entry, ensure_wiki_scaffold
@@ -352,16 +357,41 @@ class ArchivistCompiler:
             (existing.frontmatter.get("created_at") if existing else None)
             or self._now_iso()
         )
+        source_paths = self._source_paths_for_candidates(candidates)
+        input_snapshot = source_file_snapshot(self.layout, source_paths)
+        previous_manifest = None
+        previous_hash = None
+        if existing is not None:
+            previous_hash = existing.frontmatter.get("thoth_input_hash") or existing.frontmatter.get(
+                "input_hash"
+            )
+            previous_manifest = existing.frontmatter.get("thoth_input_manifest")
+            if not isinstance(previous_manifest, list):
+                previous_manifest = existing.frontmatter.get("input_manifest")
+        if not isinstance(previous_manifest, list):
+            previous_manifest = []
+        updated_at = self._now_iso()
         spec = WikiPageSpec(
             title=topic.title,
             slug=page_path.stem,
             kind="topic",
             summary=self._summary_from_body(body, fallback=topic.description or topic.title),
-            source_paths=self._source_paths_for_candidates(candidates),
-            influence_sources=self._influence_sources_for_candidates(candidates),
+            source_paths=source_paths,
+            influence_sources=influence_with_input_hashes(
+                self._influence_sources_for_candidates(candidates),
+                input_snapshot,
+            ),
             language="en",
             created_at=created_at,
-            updated_at=self._now_iso(),
+            updated_at=updated_at,
+            input_hash=input_snapshot.input_hash,
+            input_manifest=input_snapshot.input_manifest,
+            change_provenance=change_provenance(
+                previous_hash=str(previous_hash) if previous_hash else None,
+                previous_manifest=previous_manifest,
+                current_snapshot=input_snapshot,
+                compiled_at=updated_at,
+            ),
         )
         frontmatter = render_frontmatter(self.contract.frontmatter_for(spec)).rstrip()
         source_lines = self._render_sources_section(candidates, page_path=page_path)

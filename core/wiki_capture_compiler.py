@@ -21,6 +21,11 @@ from .capture_event_store import (
 )
 from .path_layout import PathLayout
 from .prompt_security import prompt_security_requires_review
+from .wiki_change_provenance import (
+    capture_influence_sources,
+    capture_records_snapshot,
+    change_provenance,
+)
 from .wiki_contract import WikiContract, WikiPageSpec, normalize_wiki_slug
 from .wiki_io import atomic_write_text, read_frontmatter, render_frontmatter
 
@@ -660,6 +665,7 @@ class CaptureWikiCompiler:
         audit_reason: str | None,
     ) -> CaptureWikiPageResult:
         source_paths = self._source_paths_for_capture_records(group.records)
+        input_snapshot = capture_records_snapshot(group.records, layout=self.layout)
         event_ids = tuple(record.event.event_id for record in group.records)
         source_ids = tuple(record.event.source_id for record in group.records)
         session_ids = tuple(
@@ -678,14 +684,19 @@ class CaptureWikiCompiler:
                 "reason": _clean_text(audit_reason),
                 "compiled_at": _now_iso(),
             }
+        updated_at = _now_iso()
         spec = WikiPageSpec(
             title=group.title,
             slug=group.slug,
             kind=group.kind,
             summary=summary,
             source_paths=source_paths,
+            influence_sources=capture_influence_sources(
+                group.records,
+                input_snapshot,
+            ),
             created_at=_now_iso(),
-            updated_at=_now_iso(),
+            updated_at=updated_at,
             resource=group.resource,
             event_ids=event_ids,
             source_ids=source_ids,
@@ -695,10 +706,17 @@ class CaptureWikiCompiler:
             capture_event_count=len(group.records),
             capture_audit=audit_metadata,
             security_findings=_security_findings_for_capture_records(group.records),
+            input_hash=input_snapshot.input_hash,
+            input_manifest=input_snapshot.input_manifest,
         )
         page_path = self.contract.page_path_for(spec)
         existing = read_frontmatter(page_path) if page_path.exists() else {}
         created_at = str(existing.get("created_at") or spec.created_at or _now_iso())
+        previous_manifest = existing.get("thoth_input_manifest")
+        if not isinstance(previous_manifest, list):
+            previous_manifest = existing.get("input_manifest")
+        if not isinstance(previous_manifest, list):
+            previous_manifest = []
         updated_spec = WikiPageSpec(
             title=spec.title,
             slug=spec.slug,
@@ -706,11 +724,12 @@ class CaptureWikiCompiler:
             summary=spec.summary,
             aliases=spec.aliases,
             source_paths=spec.source_paths,
+            influence_sources=spec.influence_sources,
             related_slugs=spec.related_slugs,
             language=spec.language,
             translated_from=spec.translated_from,
             created_at=created_at,
-            updated_at=_now_iso(),
+            updated_at=updated_at,
             resource=spec.resource,
             event_ids=spec.event_ids,
             source_ids=spec.source_ids,
@@ -720,6 +739,18 @@ class CaptureWikiCompiler:
             capture_event_count=spec.capture_event_count,
             capture_audit=spec.capture_audit,
             security_findings=spec.security_findings,
+            input_hash=spec.input_hash,
+            input_manifest=spec.input_manifest,
+            change_provenance=change_provenance(
+                previous_hash=(
+                    str(existing.get("thoth_input_hash") or existing.get("input_hash"))
+                    if existing.get("thoth_input_hash") or existing.get("input_hash")
+                    else None
+                ),
+                previous_manifest=previous_manifest,
+                current_snapshot=input_snapshot,
+                compiled_at=updated_at,
+            ),
         )
         content = self._render_capture_page(updated_spec, group)
         action = "updated" if page_path.exists() else "created"

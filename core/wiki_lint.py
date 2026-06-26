@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import re
@@ -11,8 +11,14 @@ from typing import Any, Mapping
 
 import yaml
 
+from .capture_event_store import CaptureEventStore
 from .config import Config
 from .path_layout import PathLayout, build_path_layout
+from .wiki_change_provenance import (
+    capture_event_store_snapshot,
+    diff_input_manifests,
+    source_file_snapshot,
+)
 from .wiki_contract import (
     OKF_VERSION,
     WikiContract,
@@ -70,6 +76,22 @@ def _frontmatter_sequence(frontmatter: dict, *keys: str) -> tuple[str, ...]:
     if isinstance(value, Mapping):
         return tuple()
     return tuple(str(item) for item in value or ())
+
+
+def _frontmatter_mapping_sequence(
+    frontmatter: dict,
+    *keys: str,
+) -> tuple[dict[str, Any], ...]:
+    value = _frontmatter_value(frontmatter, *keys)
+    if value is None:
+        return tuple()
+    if isinstance(value, Mapping) or isinstance(value, str):
+        return tuple()
+    records: list[dict[str, Any]] = []
+    for item in value or ():
+        if isinstance(item, Mapping):
+            records.append(dict(item))
+    return tuple(records)
 
 
 def _is_non_empty_string(value: Any) -> bool:
@@ -166,6 +188,7 @@ class WikiLintIssue:
     message: str
     page_path: Path | None = None
     related_paths: tuple[Path, ...] = ()
+    details: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -215,6 +238,9 @@ class _WikiPageRecord:
     source_type: str | None
     event_ids: tuple[str, ...]
     capture_page_type: str | None
+    input_hash: str | None
+    input_manifest: tuple[dict[str, Any], ...]
+    change_provenance: dict[str, Any] | None
     body_links: tuple[str, ...]
 
 
@@ -227,12 +253,14 @@ class WikiLintRunner:
         *,
         layout: PathLayout | None = None,
         contract: WikiContract | None = None,
+        event_store: CaptureEventStore | None = None,
     ):
         self.config = config
         self.layout = layout or build_path_layout(config)
         self.layout.ensure_directories()
         self.scaffold = ensure_wiki_scaffold(config)
         self.contract = contract or build_wiki_contract(config)
+        self.event_store = event_store
 
     def lint(self, *, stale_after_days: int = 30) -> WikiLintReport:
         """Lint the wiki layer and return a structured report."""
@@ -266,6 +294,7 @@ class WikiLintRunner:
             issues.extend(self._lint_generated_metadata(record))
             issues.extend(self._lint_source_section(record))
             issues.extend(self._lint_citations(record))
+            issues.extend(self._lint_input_provenance(record))
 
             if record.slug:
                 slug_claims[record.slug].append(record)
@@ -432,6 +461,8 @@ class WikiLintRunner:
             "thoth_event_ids",
             "thoth_source_ids",
             "thoth_session_ids",
+            "thoth_input_manifest",
+            "input_manifest",
         ):
             if field_name in record.frontmatter and not _is_sequence_value(
                 record.frontmatter[field_name]
@@ -742,6 +773,61 @@ class WikiLintRunner:
 
         return []
 
+    def _lint_input_provenance(self, record: _WikiPageRecord) -> list[WikiLintIssue]:
+        if not record.input_hash and not record.input_manifest:
+            return []
+
+        if record.event_ids and (
+            record.capture_page_type
+            or any(
+                item.get("input_kind") in {"capture_event", "raw_ref"}
+                for item in record.input_manifest
+            )
+        ):
+            snapshot = capture_event_store_snapshot(
+                self.event_store,
+                record.event_ids,
+                layout=self.layout,
+            )
+        else:
+            snapshot = source_file_snapshot(
+                self.layout,
+                record.source_paths,
+                source_type=record.source_type,
+                artifact_id=record.artifact_id,
+            )
+
+        recorded_hash = record.input_hash
+        if recorded_hash == snapshot.input_hash:
+            return []
+
+        changes = diff_input_manifests(record.input_manifest, snapshot.input_manifest)
+        change_payloads = [change.to_dict() for change in changes]
+        if change_payloads:
+            reason = change_payloads[0]["reason"]
+            if len(change_payloads) > 1:
+                reason = f"{reason} (+{len(change_payloads) - 1} more)"
+        elif recorded_hash:
+            reason = "Recorded input hash differs from the current input hash."
+        else:
+            reason = "Page has input provenance but no recorded input hash."
+
+        return [
+            WikiLintIssue(
+                code="stale-page-inputs",
+                severity="warning",
+                message=f"Compiled wiki inputs changed since the page was last written: {reason}",
+                page_path=record.path,
+                details={
+                    "recorded_input_hash": recorded_hash,
+                    "current_input_hash": snapshot.input_hash,
+                    "recorded_input_count": len(record.input_manifest),
+                    "current_input_count": len(snapshot.input_manifest),
+                    "changes": change_payloads,
+                },
+            )
+        ]
+
     def _load_pages(self) -> _WikiPageLoadResult:
         records: list[_WikiPageRecord] = []
         issues: list[WikiLintIssue] = []
@@ -821,6 +907,22 @@ class WikiLintRunner:
                         str(frontmatter["thoth_capture_page_type"]).strip()
                         if "thoth_capture_page_type" in frontmatter
                         and frontmatter["thoth_capture_page_type"] is not None
+                        else None
+                    ),
+                    input_hash=(
+                        str(frontmatter["thoth_input_hash"]).strip()
+                        if "thoth_input_hash" in frontmatter
+                        and frontmatter["thoth_input_hash"] is not None
+                        else None
+                    ),
+                    input_manifest=_frontmatter_mapping_sequence(
+                        frontmatter,
+                        "thoth_input_manifest",
+                        "input_manifest",
+                    ),
+                    change_provenance=(
+                        dict(frontmatter["thoth_change_provenance"])
+                        if isinstance(frontmatter.get("thoth_change_provenance"), Mapping)
                         else None
                     ),
                     body_links=_extract_markdown_links(document.body),

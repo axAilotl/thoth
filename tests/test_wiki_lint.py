@@ -1,11 +1,14 @@
 from copy import deepcopy
 from pathlib import Path
 
+from core.admin_lint import run_admin_lint
+from core.artifacts import RepositoryArtifact
 from core.config import config
 from core.path_layout import build_path_layout
 from core.wiki_contract import WikiPageSpec, build_wiki_contract
 from core.wiki_io import atomic_write_text, render_frontmatter
 from core.wiki_lint import WikiLintRunner
+from core.wiki_updater import CompiledWikiUpdater
 
 
 def make_config(tmp_path: Path):
@@ -271,5 +274,54 @@ def test_wiki_lint_reports_invalid_frontmatter(tmp_path: Path, monkeypatch):
 
         assert report.pages_checked == 1
         assert {issue.code for issue in report.issues} == {"invalid-frontmatter"}
+    finally:
+        config.data = original
+
+
+def test_admin_wiki_lint_serializes_stale_input_provenance(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = make_config(tmp_path)
+    try:
+        layout = build_path_layout(config, project_root=tmp_path)
+        stars_dir = layout.vault_root / "stars"
+        repos_dir = layout.vault_root / "repos"
+        stars_dir.mkdir(parents=True, exist_ok=True)
+        repos_dir.mkdir(parents=True, exist_ok=True)
+        (stars_dir / "owner_repo_summary.md").write_text("# summary\n", encoding="utf-8")
+        readme_path = repos_dir / "github_owner_repo_README.md"
+        readme_path.write_text("# readme\n", encoding="utf-8")
+
+        CompiledWikiUpdater(config, layout=layout).update_from_artifact(
+            RepositoryArtifact(
+                id="gh_1",
+                source_type="github",
+                repo_name="owner/repo",
+                description="Repository summary",
+                stars=12,
+                language="python",
+            ),
+            dispatch_details={"repo_name": "owner/repo"},
+        )
+        readme_path.write_text("# changed readme\n", encoding="utf-8")
+
+        payload = run_admin_lint(
+            config.data,
+            project_root=tmp_path,
+            lint_kind="wiki",
+        )
+
+        stale_issue = next(
+            issue for issue in payload["issues"] if issue["code"] == "stale-page-inputs"
+        )
+        assert Path(payload["report_path"]).exists()
+        assert stale_issue["details"]["recorded_input_hash"] != stale_issue["details"][
+            "current_input_hash"
+        ]
+        assert any(
+            change["reason"] == "Source file repos/github_owner_repo_README.md hash changed."
+            for change in stale_issue["details"]["changes"]
+        )
     finally:
         config.data = original

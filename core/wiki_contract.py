@@ -155,6 +155,9 @@ class WikiPageSpec:
     capture_audit: Mapping[str, Any] | None = None
     security_findings: Tuple[Any, ...] = field(default_factory=tuple)
     security_policy: Mapping[str, Any] | None = None
+    input_hash: str | None = None
+    input_manifest: Tuple[Any, ...] = field(default_factory=tuple)
+    change_provenance: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "aliases", _stable_unique_strings(self.aliases))
@@ -173,6 +176,11 @@ class WikiPageSpec:
             self,
             "security_findings",
             _stable_security_findings(self.security_findings),
+        )
+        object.__setattr__(
+            self,
+            "input_manifest",
+            _stable_security_findings(self.input_manifest),
         )
 
     def frontmatter(self) -> Dict[str, Any]:
@@ -217,6 +225,11 @@ class WikiPageSpec:
             "thoth_security_findings": list(self.security_findings) or None,
             "thoth_security_policy": _stable_metadata_value(self.security_policy)
             if self.security_policy
+            else None,
+            "thoth_input_hash": self.input_hash,
+            "thoth_input_manifest": list(self.input_manifest) or None,
+            "thoth_change_provenance": _stable_metadata_value(self.change_provenance)
+            if self.change_provenance
             else None,
             # Legacy aliases retained so existing local readers and hand-authored
             # pages keep working while new metadata has namespaced equivalents.
@@ -305,6 +318,18 @@ class WikiContract:
             }
             if forbidden:
                 raise ValueError("Wiki page influence_sources cannot include source content")
+        if spec.input_hash and not spec.input_hash.strip():
+            raise ValueError("Wiki page input_hash cannot be empty")
+        for input_record in spec.input_manifest:
+            if not isinstance(input_record, Mapping):
+                raise ValueError("Wiki page input_manifest entries must be objects")
+            forbidden = {
+                key
+                for key in input_record
+                if any(marker in str(key).lower() for marker in ("content", "excerpt", "secret"))
+            }
+            if forbidden:
+                raise ValueError("Wiki page input_manifest cannot include source content")
         for related_slug in spec.related_slugs:
             self.validate_slug(related_slug)
 
