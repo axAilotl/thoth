@@ -11,14 +11,15 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 from .artifacts import PaperArtifact
-from .config import Config
+from .capture_event_store import CaptureEventStore
+from .config import Config, config as runtime_config
 from .metadata_db import (
-    IngestionQueueEntry,
     MetadataDB,
     ResearchPaperEdge,
     ResearchPaperRecord,
     get_metadata_db,
 )
+from .path_layout import PathLayout, build_path_layout
 from .wiki_contract import normalize_wiki_slug
 
 
@@ -68,9 +69,22 @@ class ResearchGraphService:
         db: MetadataDB | None = None,
         *,
         metadata_provider: "ResearchMetadataProvider | None" = None,
+        config: Config | None = None,
+        layout: PathLayout | None = None,
+        capture_event_store: CaptureEventStore | None = None,
     ):
+        self.config = config or runtime_config
+        self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
         self.metadata_provider = metadata_provider
+        from .connector_capture import ConnectorCaptureQueue
+
+        self.capture_queue = ConnectorCaptureQueue(
+            self.config,
+            layout=self.layout,
+            db=self.db,
+            capture_event_store=capture_event_store,
+        )
 
     def record_paper_artifact(
         self,
@@ -187,25 +201,83 @@ class ResearchGraphService:
         )
         queued: list[str] = []
         skipped: list[str] = []
-        for candidate in report["high_confidence"]:
-            artifact = paper_artifact_from_missing_candidate(candidate)
-            queue_id = f"research_graph:{candidate['paper_id']}"
-            if self.db.get_ingestion_entry(queue_id):
-                skipped.append(queue_id)
-                continue
-            entry = IngestionQueueEntry(
-                artifact_id=queue_id,
-                artifact_type="paper",
-                source="research_graph",
-                payload_json=json.dumps(artifact.to_dict(), ensure_ascii=False),
-                capabilities_json=json.dumps(list(artifact.capabilities)),
-                created_at=datetime.now().isoformat(),
-                priority=int(candidate["referenced_by_count"]),
-            )
-            if not self.db.upsert_ingestion_entry(entry):
-                raise RuntimeError(f"Failed to queue missing paper candidate: {queue_id}")
-            queued.append(queue_id)
+        run_id = datetime.now().isoformat()
+        with self.capture_queue.lifecycle() as lifecycle:
+            for candidate in report["high_confidence"]:
+                artifact = paper_artifact_from_missing_candidate(candidate)
+                queue_id = f"research_graph:{candidate['paper_id']}"
+                if self.db.get_ingestion_entry(queue_id):
+                    skipped.append(queue_id)
+                    continue
+                self._queue_missing_paper_candidate(
+                    artifact,
+                    candidate=candidate,
+                    queue_id=queue_id,
+                    lifecycle=lifecycle,
+                    run_id=run_id,
+                )
+                queued.append(queue_id)
         return {"queued": queued, "skipped": skipped, "report": report}
+
+    def _queue_missing_paper_candidate(
+        self,
+        artifact: PaperArtifact,
+        *,
+        candidate: Mapping[str, Any],
+        queue_id: str,
+        lifecycle,
+        run_id: str,
+    ) -> None:
+        raw_path = None
+        if lifecycle.capture_event_store is not None:
+            from .connector_capture import write_connector_raw_json
+
+            raw_path = write_connector_raw_json(
+                self.layout,
+                connector_name="research_graph",
+                subdir="missing_papers",
+                native_id=str(candidate.get("paper_id") or queue_id),
+                payload=dict(candidate),
+                captured_at=artifact.ingested_at,
+            )
+
+        self.capture_queue.queue_payload(
+            lifecycle,
+            artifact_type="paper",
+            payload=artifact.to_dict(),
+            source={
+                "source_name": "research_graph",
+                "source_type": "research_graph",
+                "collector": "research_graph",
+                "native_source_id": str(candidate.get("paper_id") or queue_id),
+                "base_uri": "research_graph://missing-papers",
+                "metadata": {
+                    "candidate_status": candidate.get("status"),
+                    "referenced_by_count": candidate.get("referenced_by_count"),
+                },
+            },
+            session={
+                "session_type": "research_graph_missing_papers",
+                "native_session_id": f"research_graph:{run_id}",
+                "started_at": run_id,
+                "metadata": {
+                    "min_references": candidate.get("min_references"),
+                },
+            },
+            event={
+                "event_type": "research_graph_missing_paper",
+                "native_event_id": str(candidate.get("paper_id") or queue_id),
+                "captured_at": artifact.ingested_at,
+                "privacy": {"classification": "public"},
+                "provenance": {"collector": "research_graph"},
+            },
+            raw_path=raw_path,
+            queue_artifact_id=queue_id,
+            priority=int(candidate["referenced_by_count"]),
+            capabilities=artifact.capabilities,
+        )
+        if self.db.get_ingestion_entry(queue_id) is None:
+            raise RuntimeError(f"Failed to queue missing paper candidate: {queue_id}")
 
     def paper_context(self, artifact_or_paper_id: PaperArtifact | str) -> dict[str, Any]:
         """Return graph context for wiki/API consumers."""

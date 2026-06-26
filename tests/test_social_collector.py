@@ -20,6 +20,7 @@ class FakeDB:
 
     def upsert_ingestion_entry(self, entry):
         self.entries.append(entry)
+        self.existing[entry.artifact_id] = entry
         return True
 
 

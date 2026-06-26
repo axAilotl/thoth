@@ -8,6 +8,7 @@ only. It is intentionally narrow and fail-closed.
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +17,9 @@ from typing import Any, Mapping
 import httpx
 
 from .bookmark_contract import normalize_bookmark_payload, validate_tweet_id
+from .capture_event_store import CaptureEventStore
 from .config import Config
+from .metadata_db import MetadataDB, get_metadata_db
 from .non_live_state import validate_non_live_interval_hours
 from .path_layout import build_path_layout
 from .x_api_auth import (
@@ -477,6 +480,8 @@ async def sync_x_api_bookmarks(
     config: Config,
     *,
     layout=None,
+    db: MetadataDB | None = None,
+    capture_event_store: CaptureEventStore | None = None,
     max_results: int = X_API_BOOKMARKS_MAX_RESULTS,
     max_pages: int | None = None,
     resume_from_checkpoint: bool = True,
@@ -512,74 +517,102 @@ async def sync_x_api_bookmarks(
     stopped_at_known_id = False
     last_sync_timestamp = _iso_utc()
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        while True:
-            if max_pages is not None and pages_fetched >= max_pages:
-                break
+    should_capture_events = _should_capture_bookmark_events(
+        config,
+        capture_event_store=capture_event_store,
+    )
+    capture_queue = (
+        _build_connector_capture_queue(
+            config,
+            layout=resolved_layout,
+            db=db or get_metadata_db(),
+            capture_event_store=capture_event_store,
+        )
+        if should_capture_events
+        else None
+    )
+    capture_context = (
+        capture_queue.lifecycle() if capture_queue is not None else nullcontext(None)
+    )
 
-            page_payload = await _fetch_bookmark_page(
-                client=client,
-                access_token=str(bundle["access_token"]),
-                user_id=user_id,
-                pagination_token=pagination_token,
-                max_results=max_results,
-            )
-            pages_fetched += 1
-
-            page_data = page_payload.get("data") or []
-            if not isinstance(page_data, list):
-                raise XApiBookmarkSyncError("X API bookmark lookup data must be a list")
-            includes = page_payload.get("includes")
-            if includes is not None and not isinstance(includes, dict):
-                raise XApiBookmarkSyncError("X API bookmark lookup includes must be an object")
-            meta = page_payload.get("meta")
-            if meta is not None and not isinstance(meta, dict):
-                raise XApiBookmarkSyncError("X API bookmark lookup meta must be an object")
-
-            unseen_ids: list[str] = []
-            for tweet in page_data:
-                if not isinstance(tweet, dict):
-                    raise XApiBookmarkSyncError(
-                        "X API bookmark lookup returned a non-object tweet"
-                    )
-                tweet_id = validate_tweet_id(tweet.get("id"))
-                if tweet_id in seen_ids:
-                    stopped_at_known_id = True
+    with capture_context as lifecycle:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while True:
+                if max_pages is not None and pages_fetched >= max_pages:
                     break
-                payload = normalize_bookmark_payload(
-                    {
-                        "tweet_id": tweet_id,
-                        "tweet_data": _build_tweet_data(tweet, includes=includes),
-                        "timestamp": _bookmark_timestamp(tweet),
-                        "source": X_API_BOOKMARKS_SOURCE,
-                    },
-                    default_source=X_API_BOOKMARKS_SOURCE,
-                    default_timestamp=_now_utc(),
+
+                page_payload = await _fetch_bookmark_page(
+                    client=client,
+                    access_token=str(bundle["access_token"]),
+                    user_id=user_id,
+                    pagination_token=pagination_token,
+                    max_results=max_results,
                 )
-                payloads.append(payload)
-                seen_ids.add(tweet_id)
-                unseen_ids.append(tweet_id)
+                pages_fetched += 1
 
-            next_token = None
-            if isinstance(meta, dict):
-                raw_next_token = meta.get("next_token")
-                if raw_next_token is not None:
-                    next_token = str(raw_next_token).strip() or None
+                page_data = page_payload.get("data") or []
+                if not isinstance(page_data, list):
+                    raise XApiBookmarkSyncError("X API bookmark lookup data must be a list")
+                includes = page_payload.get("includes")
+                if includes is not None and not isinstance(includes, dict):
+                    raise XApiBookmarkSyncError("X API bookmark lookup includes must be an object")
+                meta = page_payload.get("meta")
+                if meta is not None and not isinstance(meta, dict):
+                    raise XApiBookmarkSyncError("X API bookmark lookup meta must be an object")
 
-            seen_order = list(_merge_seen_ids(tuple(seen_order), unseen_ids))
-            checkpoint_payload = XApiBookmarkSyncCheckpoint(
-                user_id=user_id,
-                seen_bookmark_ids=tuple(seen_order),
-                pagination_token=None if stopped_at_known_id else next_token,
-                last_synced_at=last_sync_timestamp,
-                last_synced_bookmark_id=unseen_ids[-1] if unseen_ids else None,
-                last_result_count=len(page_data),
-            )
-            store_x_api_bookmark_sync_checkpoint(resolved_layout, checkpoint_payload)
+                unseen_ids: list[str] = []
+                for tweet in page_data:
+                    if not isinstance(tweet, dict):
+                        raise XApiBookmarkSyncError(
+                            "X API bookmark lookup returned a non-object tweet"
+                        )
+                    tweet_id = validate_tweet_id(tweet.get("id"))
+                    if tweet_id in seen_ids:
+                        stopped_at_known_id = True
+                        break
+                    payload = normalize_bookmark_payload(
+                        {
+                            "tweet_id": tweet_id,
+                            "tweet_data": _build_tweet_data(tweet, includes=includes),
+                            "timestamp": _bookmark_timestamp(tweet),
+                            "source": X_API_BOOKMARKS_SOURCE,
+                        },
+                        default_source=X_API_BOOKMARKS_SOURCE,
+                        default_timestamp=_now_utc(),
+                    )
+                    payloads.append(payload)
+                    if capture_queue is not None and lifecycle is not None:
+                        _queue_x_api_bookmark_capture(
+                            capture_queue,
+                            lifecycle,
+                            layout=resolved_layout,
+                            payload=payload,
+                            user_id=user_id,
+                            run_id=last_sync_timestamp,
+                        )
+                    seen_ids.add(tweet_id)
+                    unseen_ids.append(tweet_id)
 
-            if stopped_at_known_id or not next_token:
-                break
-            pagination_token = next_token
+                next_token = None
+                if isinstance(meta, dict):
+                    raw_next_token = meta.get("next_token")
+                    if raw_next_token is not None:
+                        next_token = str(raw_next_token).strip() or None
+
+                seen_order = list(_merge_seen_ids(tuple(seen_order), unseen_ids))
+                checkpoint_payload = XApiBookmarkSyncCheckpoint(
+                    user_id=user_id,
+                    seen_bookmark_ids=tuple(seen_order),
+                    pagination_token=None if stopped_at_known_id else next_token,
+                    last_synced_at=last_sync_timestamp,
+                    last_synced_bookmark_id=unseen_ids[-1] if unseen_ids else None,
+                    last_result_count=len(page_data),
+                )
+                store_x_api_bookmark_sync_checkpoint(resolved_layout, checkpoint_payload)
+
+                if stopped_at_known_id or not next_token:
+                    break
+                pagination_token = next_token
 
     return {
         "status": "ok",
@@ -596,6 +629,8 @@ async def run_x_api_bookmark_backfill(
     config: Config,
     *,
     layout=None,
+    db: MetadataDB | None = None,
+    capture_event_store: CaptureEventStore | None = None,
     max_results: int | None = None,
     max_pages: int | None = None,
     resume_from_checkpoint: bool | None = None,
@@ -608,6 +643,8 @@ async def run_x_api_bookmark_backfill(
     return await sync_x_api_bookmarks(
         config,
         layout=resolved_layout,
+        db=db,
+        capture_event_store=capture_event_store,
         max_results=(
             sync_config.max_results if max_results is None else max_results
         ),
@@ -618,3 +655,83 @@ async def run_x_api_bookmark_backfill(
             else resume_from_checkpoint
         ),
     )
+
+
+def _queue_x_api_bookmark_capture(
+    capture_queue,
+    lifecycle,
+    *,
+    layout,
+    payload: Mapping[str, Any],
+    user_id: str,
+    run_id: str,
+) -> None:
+    from .connector_capture import write_connector_raw_json
+
+    tweet_id = validate_tweet_id(payload.get("tweet_id"))
+    raw_path = write_connector_raw_json(
+        layout,
+        connector_name="x_api",
+        subdir="bookmarks",
+        native_id=tweet_id,
+        payload=dict(payload),
+        captured_at=str(payload.get("timestamp") or run_id),
+    )
+    capture_queue.queue_payload(
+        lifecycle,
+        artifact_type="tweet",
+        payload=payload,
+        source={
+            "source_name": X_API_BOOKMARKS_SOURCE,
+            "source_type": "twitter",
+            "collector": "x_api_bookmark_sync",
+            "account": user_id,
+            "native_source_id": user_id,
+            "base_uri": X_API_BOOKMARKS_URL.format(user_id=user_id),
+        },
+        session={
+            "session_type": "x_api_bookmark_sync",
+            "native_session_id": f"x_api_bookmark_sync:{user_id}:{run_id}",
+            "started_at": run_id,
+            "metadata": {"user_id": user_id},
+        },
+        event={
+            "event_type": "x_api_bookmark",
+            "native_event_id": tweet_id,
+            "occurred_at": payload.get("timestamp"),
+            "captured_at": payload.get("timestamp") or run_id,
+            "privacy": {"classification": "personal"},
+            "provenance": {"collector": "x_api_bookmark_sync"},
+        },
+        raw_path=raw_path,
+        queue_artifact_id=tweet_id,
+    )
+
+
+def _build_connector_capture_queue(
+    config: Config,
+    *,
+    layout,
+    db: MetadataDB,
+    capture_event_store: CaptureEventStore | None,
+):
+    from .connector_capture import ConnectorCaptureQueue
+
+    return ConnectorCaptureQueue(
+        config,
+        layout=layout,
+        db=db,
+        capture_event_store=capture_event_store,
+    )
+
+
+def _should_capture_bookmark_events(
+    config: Config,
+    *,
+    capture_event_store: CaptureEventStore | None,
+) -> bool:
+    if capture_event_store is not None:
+        return True
+    from .postgres import resolve_postgres_settings
+
+    return resolve_postgres_settings(config).enabled
