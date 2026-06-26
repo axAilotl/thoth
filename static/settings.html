@@ -1569,6 +1569,60 @@
             <div class="card">
                 <div class="card-header">
                     <div>
+                        <h2 class="card-title">Capture &amp; Compile Health</h2>
+                        <p class="card-description">Operational state from capture stores, queues, wiki lint, and compiler metadata</p>
+                    </div>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-sources">-</div>
+                        <div class="stat-label">Sources</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-events">-</div>
+                        <div class="stat-label">Events</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-queues">-</div>
+                        <div class="stat-label">Queued Items</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-stale-pages">-</div>
+                        <div class="stat-label">Stale Pages</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-compiler-runs">-</div>
+                        <div class="stat-label">Compiler Records</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-stuck">-</div>
+                        <div class="stat-label">Stuck Work</div>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 16px;">
+                    <label>Source Health</label>
+                    <div id="health-source-table" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Recent Sessions</label>
+                    <div id="health-sessions-table" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Compiler Runs</label>
+                    <div id="health-compiler-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Stuck Work</label>
+                    <div id="health-stuck-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Errors</label>
+                    <textarea id="health-errors" rows="4" readonly></textarea>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div>
                         <h2 class="card-title">Runtime Health</h2>
                         <p class="card-description">Non-secret status from the active merged configuration</p>
                     </div>
@@ -2419,6 +2473,189 @@
                     `total: ${redactions.total || 0}`,
                     formatCountMap(redactions.by_category || {})
                 ].join('\n')
+            );
+        }
+
+        function renderHealthSources(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No capture sources are recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th>Status</th>
+                            <th>Events</th>
+                            <th>Sessions</th>
+                            <th>Last Event</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.source_name || row.source_id || '')}<br><span class="stat-label">${escapeHtml(row.source_type || '')}</span></td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.event_count ?? 0)}</td>
+                                <td>${escapeHtml(row.session_count ?? 0)}<br><span class="stat-label">open ${escapeHtml(row.open_session_count ?? 0)}</span></td>
+                                <td>${escapeHtml(formatOptionalDate(row.last_event_at))}</td>
+                                <td>${escapeHtml(row.reason || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderHealthSessions(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No capture sessions are recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Session</th>
+                            <th>Source</th>
+                            <th>Status</th>
+                            <th>Events</th>
+                            <th>Started</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.session_id || '')}<br><span class="stat-label">${escapeHtml(row.session_type || '')}</span></td>
+                                <td>${escapeHtml(row.source_name || row.source_id || '')}</td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.event_count ?? 0)}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.started_at))}</td>
+                                <td>${escapeHtml(row.reason || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderHealthCompiler(status) {
+            const archivistRuns = status?.compiler_runs?.archivist?.recent || [];
+            const capturePages = status?.compiler_runs?.capture_wiki?.recent_pages || [];
+            const rows = [
+                ...archivistRuns.map(row => ({
+                    kind: 'archivist',
+                    id: row.topic_id,
+                    status: row.status,
+                    last: row.last_run_at || row.force_requested_at,
+                    count: row.last_candidate_count ?? 0,
+                    reason: row.reason || row.force_reason || ''
+                })),
+                ...capturePages.map(row => ({
+                    kind: `capture:${row.page_type || ''}`,
+                    id: row.slug || row.page_path,
+                    status: row.change_reason || 'compiled',
+                    last: row.updated_at,
+                    count: row.event_count ?? 0,
+                    reason: row.audit?.reason || ''
+                }))
+            ];
+            if (rows.length === 0) {
+                return '<div class="security-empty">No compiler run metadata is recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Compiler</th>
+                            <th>Record</th>
+                            <th>Status</th>
+                            <th>Count</th>
+                            <th>Last</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.kind || '')}</td>
+                                <td>${escapeHtml(row.id || '')}</td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.count ?? 0)}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.last))}</td>
+                                <td>${escapeHtml(row.reason || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderHealthStuck(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No stuck work is recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Kind</th>
+                            <th>ID</th>
+                            <th>Status</th>
+                            <th>Source</th>
+                            <th>Updated</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.kind || '')}</td>
+                                <td>${escapeHtml(row.id || '')}</td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.source || row.artifact_type || '')}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.updated_at))}</td>
+                                <td>${escapeHtml(row.reason || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderAdminStatusDashboard(status) {
+            const sourceHealth = status?.source_health || {};
+            const events = status?.event_counts || {};
+            const queues = status?.queue_counts || {};
+            const stalePages = status?.stale_pages || {};
+            const compilerRuns = status?.compiler_runs || {};
+            const stuck = status?.stuck_work || {};
+            const bookmarkTotal = queues.bookmark_queue?.total || 0;
+            const ingestionTotal = queues.ingestion_queue?.total || 0;
+            const archivistCount = compilerRuns.archivist?.topic_count || 0;
+            const captureCompileCount = compilerRuns.capture_wiki?.compiled_page_count || 0;
+
+            setTextValue('health-sources', `${sourceHealth.active || 0}/${sourceHealth.total || 0}`);
+            setTextValue('health-events', events.total ?? 0);
+            setTextValue('health-queues', bookmarkTotal + ingestionTotal);
+            setTextValue('health-stale-pages', stalePages.total ?? 0);
+            setTextValue('health-compiler-runs', archivistCount + captureCompileCount);
+            setTextValue('health-stuck', stuck.total ?? 0);
+            setHtmlValue('health-source-table', renderHealthSources(sourceHealth.sources || []));
+            setHtmlValue('health-sessions-table', renderHealthSessions(status?.recent_sessions?.sessions || []));
+            setHtmlValue('health-compiler-list', renderHealthCompiler(status || {}));
+            setHtmlValue('health-stuck-list', renderHealthStuck(stuck.items || []));
+
+            const errorLines = (status?.errors || []).map(item => {
+                return `${item.section || 'status'}: ${item.reason || 'unknown error'}`;
+            });
+            if (queues.ingestion_queue?.error) {
+                errorLines.push(`ingestion_queue: ${queues.ingestion_queue.error}`);
+            }
+            setFieldValue(
+                'health-errors',
+                errorLines.length > 0 ? errorLines.join('\n') : 'No dashboard errors reported'
             );
         }
 
@@ -3548,6 +3785,7 @@
         async function refreshStats() {
             try {
                 const response = await fetch(`${API_BASE}/api/stats`);
+                if (!response.ok) throw new Error('Failed to load stats');
                 const stats = await response.json();
                 document.getElementById('stat-bookmarks').textContent = stats.realtime_counts?.total || stats.total_bookmarks || 0;
                 document.getElementById('stat-queue').textContent = stats.realtime_counts?.processed || 0;
@@ -3555,6 +3793,16 @@
                 document.getElementById('stat-processed').textContent = stats.queue_counts?.processed || 0;
             } catch (e) {
                 console.error('Failed to load stats:', e);
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/status`);
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.detail || 'Failed to load admin status');
+                renderAdminStatusDashboard(payload);
+            } catch (e) {
+                console.error('Failed to load admin status:', e);
+                setFieldValue('health-errors', `Admin status failed: ${e.message}`);
             }
         }
 

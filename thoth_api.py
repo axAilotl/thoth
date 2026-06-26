@@ -74,6 +74,7 @@ from core.bookmark_ingest import (
     merge_realtime_bookmark_record,
 )
 from core.admin_lint import admin_lint_report_path, run_admin_lint
+from core.admin_status import build_admin_status_dashboard
 from core.config import Config
 from core.ingestion_runtime import get_knowledge_artifact_runtime
 from core.metadata_db import MetadataDB, get_metadata_db, BookmarkQueueEntry
@@ -1063,6 +1064,19 @@ async def get_settings():
         }
     except Exception as e:
         logger.error(f"Error loading settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/status")
+async def get_admin_status():
+    """Return operational capture/compile health dashboard data."""
+    try:
+        return build_admin_status_dashboard(
+            load_runtime_settings(),
+            project_root=BASE_CONFIG_PATH.parent,
+        )
+    except Exception as e:
+        logger.error(f"Error loading admin status dashboard: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

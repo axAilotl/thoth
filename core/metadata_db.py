@@ -4259,6 +4259,63 @@ class MetadataDB:
             logger.error(f"Failed to list ingestion entries: {e}")
             return []
 
+    def get_ingestion_queue_counts(self) -> Dict[str, Any]:
+        """Return operational counts for the generalized ingestion queue."""
+        empty_status_counts = {
+            status: 0 for status in INGESTION_QUEUE_ALLOWED_STATUSES
+        }
+        try:
+            with self._get_connection() as conn:
+                status_rows = conn.execute(
+                    "SELECT status, COUNT(*) AS count FROM ingestion_queue GROUP BY status"
+                ).fetchall()
+                type_rows = conn.execute(
+                    """
+                    SELECT artifact_type, status, COUNT(*) AS count
+                    FROM ingestion_queue
+                    GROUP BY artifact_type, status
+                    ORDER BY artifact_type, status
+                    """
+                ).fetchall()
+                source_rows = conn.execute(
+                    """
+                    SELECT source, status, COUNT(*) AS count
+                    FROM ingestion_queue
+                    GROUP BY source, status
+                    ORDER BY source, status
+                    """
+                ).fetchall()
+        except Exception as e:
+            logger.error(f"Failed to get ingestion queue counts: {e}")
+            return {
+                "by_status": empty_status_counts,
+                "by_artifact_type": {},
+                "by_source": {},
+                "total": 0,
+                "error": str(e),
+            }
+
+        by_status = dict(empty_status_counts)
+        for row in status_rows:
+            by_status[str(row["status"])] = int(row["count"] or 0)
+
+        by_artifact_type: dict[str, dict[str, int]] = {}
+        for row in type_rows:
+            bucket = by_artifact_type.setdefault(str(row["artifact_type"]), {})
+            bucket[str(row["status"])] = int(row["count"] or 0)
+
+        by_source: dict[str, dict[str, int]] = {}
+        for row in source_rows:
+            bucket = by_source.setdefault(str(row["source"]), {})
+            bucket[str(row["status"])] = int(row["count"] or 0)
+
+        return {
+            "by_status": by_status,
+            "by_artifact_type": by_artifact_type,
+            "by_source": by_source,
+            "total": sum(by_status.values()),
+        }
+
     def list_ingestion_review_entries(
         self,
         *,
