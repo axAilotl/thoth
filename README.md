@@ -233,6 +233,39 @@ Key rules:
 
 ## Development
 
+### Local Postgres pgvector
+
+SQLite remains the default local metadata store. For development or integration tests that need Postgres with pgvector, start the local Docker stack:
+
+```bash
+docker compose -f compose.dev.yml up -d postgres
+```
+
+The stack uses local-only demo credentials, creates both `thoth` and `thoth_test`, and enables the `vector` extension in each database. Copy `.env.example` to `.env` or export the DSNs directly:
+
+```bash
+export THOTH_POSTGRES_DSN=postgresql://thoth:thoth_dev@localhost:5432/thoth
+export THOTH_TEST_POSTGRES_DSN=postgresql://thoth:thoth_dev@localhost:5432/thoth_test
+```
+
+If port 5432 is already in use, set `THOTH_POSTGRES_PORT` before starting compose and update both DSNs to match the chosen host port:
+
+```bash
+THOTH_POSTGRES_PORT=55432 docker compose -f compose.dev.yml up -d postgres
+```
+
+Stop the stack without deleting data:
+
+```bash
+docker compose -f compose.dev.yml down
+```
+
+Remove the local database volume when you want a clean dev database:
+
+```bash
+docker compose -f compose.dev.yml down -v
+```
+
 Validation:
 
 ```bash
