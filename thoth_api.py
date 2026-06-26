@@ -1100,10 +1100,10 @@ async def run_settings_lint(lint_kind: str):
 async def download_settings_lint(lint_kind: str):
     """Download the most recent persisted operator lint report."""
     normalized_kind = str(lint_kind or "").strip().lower()
-    if normalized_kind not in {"okf", "wiki", "security"}:
+    if normalized_kind not in {"legacy-artifacts", "okf", "wiki", "security"}:
         raise HTTPException(
             status_code=400,
-            detail="lint kind must be one of: okf, wiki, security",
+            detail="lint kind must be one of: legacy-artifacts, okf, wiki, security",
         )
     try:
         report_path = admin_lint_report_path(

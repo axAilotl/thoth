@@ -35,8 +35,10 @@ from core import (
     SemanticMemoryReviewError,
     SemanticMemoryReviewNotFoundError,
     SemanticMemoryReviewService,
+    LegacyArtifactLintRunner,
     WikiLintRunner,
     WikiQueryRunner,
+    legacy_artifact_lint_report_payload,
 )
 from core.archivist_benchmark import benchmark_archivist_topics
 from core.capture_event_store import CaptureEventStore
@@ -2540,6 +2542,62 @@ def _wiki_lint_provenance_reasons(issue) -> tuple[str, ...]:
     return tuple(reasons)
 
 
+def cmd_legacy_artifacts(args):
+    """Run read-only migration lint for pre-event-backbone artifacts."""
+    if args.legacy_artifacts_action != "lint":
+        raise ValueError("Unknown legacy artifacts action")
+
+    layout = build_path_layout(config)
+    report = _run_legacy_artifact_lint_report(
+        layout,
+        limit=getattr(args, "limit", None),
+        include_artifacts=not bool(getattr(args, "no_artifacts", False)),
+        include_wiki=not bool(getattr(args, "no_wiki", False)),
+    )
+    payload = legacy_artifact_lint_report_payload(report)
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        if report.has_errors:
+            raise SystemExit(1)
+        return
+
+    print("Legacy artifact lint report")
+    print(f"   Artifacts checked: {report.artifacts_checked}")
+    print(f"   Wiki pages checked: {report.wiki_pages_checked}")
+    print(f"   Issues found: {len(report.issues)}")
+    print(f"   Migration actions: {len(report.migration_actions)}")
+    for issue in report.issues:
+        if issue.subject_type == "wiki_page":
+            location = str(issue.page_path) if issue.page_path else "-"
+        else:
+            location = (
+                f"{issue.artifact_type}:{issue.artifact_id}"
+                if issue.artifact_type and issue.artifact_id
+                else issue.artifact_id or "-"
+            )
+        print(f"   - {issue.severity.upper()} {issue.code} ({location}): {issue.message}")
+    if report.migration_actions:
+        print("   Suggested migration actions are report-only; no artifacts were changed.")
+
+    if report.has_errors:
+        raise SystemExit(1)
+
+
+def _run_legacy_artifact_lint_report(
+    layout,
+    *,
+    limit: int | None,
+    include_artifacts: bool,
+    include_wiki: bool,
+):
+    return LegacyArtifactLintRunner(config, layout=layout).lint(
+        limit=limit,
+        include_artifacts=include_artifacts,
+        include_wiki=include_wiki,
+    )
+
+
 async def cmd_okf(args):
     """Run OKF bundle commands."""
     if args.okf_action != "lint":
@@ -3746,6 +3804,41 @@ Examples:
         description="Validate the compiled wiki as an OKF v0.1 bundle",
     )
 
+    legacy_artifacts_parser = subparsers.add_parser(
+        "legacy-artifacts",
+        help="Audit pre-event-backbone artifacts and wiki pages",
+    )
+    legacy_artifacts_subparsers = legacy_artifacts_parser.add_subparsers(
+        dest="legacy_artifacts_action",
+        help="Legacy artifact actions",
+    )
+    legacy_artifacts_subparsers.required = True
+    legacy_artifacts_lint_parser = legacy_artifacts_subparsers.add_parser(
+        "lint",
+        help="Report artifacts and wiki pages missing event-backbone metadata",
+        description=(
+            "Report old artifacts and wiki pages missing canonical IDs, raw refs, "
+            "prompt-threat metadata, or capture event links. This command is read-only."
+        ),
+    )
+    legacy_artifacts_lint_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of artifact queue rows to inspect",
+    )
+    legacy_artifacts_lint_parser.add_argument(
+        "--no-artifacts",
+        action="store_true",
+        help="Skip artifact queue checks",
+    )
+    legacy_artifacts_lint_parser.add_argument(
+        "--no-wiki",
+        action="store_true",
+        help="Skip wiki page checks",
+    )
+    legacy_artifacts_lint_parser.add_argument("--json", action="store_true")
+
     ingest_queue_parser = subparsers.add_parser(
         "ingest-queue",
         help="Process pending generalized ingestion queue entries",
@@ -3766,6 +3859,7 @@ Examples:
         "artifacts",
         "capture",
         "connectors",
+        "legacy-artifacts",
         "memory",
         "query",
         "research",
@@ -3799,6 +3893,7 @@ Examples:
             "wiki-lint",
             "okf",
             "ingest-queue",
+            "legacy-artifacts",
             "db",
         }
         if args.command not in offline_safe:  # Block only network-heavy commands
@@ -3813,6 +3908,7 @@ Examples:
         "artifacts",
         "capture",
         "connectors",
+        "legacy-artifacts",
         "memory",
         "query",
         "research",
@@ -3882,6 +3978,8 @@ Examples:
             asyncio.run(cmd_wiki_lint(args))
         elif args.command == "okf":
             asyncio.run(cmd_okf(args))
+        elif args.command == "legacy-artifacts":
+            cmd_legacy_artifacts(args)
         elif args.command == "ingest-queue":
             asyncio.run(cmd_ingest_queue(args))
     except KeyboardInterrupt:

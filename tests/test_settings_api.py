@@ -178,7 +178,9 @@ def test_settings_lint_endpoints_persist_downloadable_reports(
     with TestClient(thoth_api.app) as client:
         okf_response = client.post("/api/settings/lint/okf")
         security_response = client.post("/api/settings/lint/security")
+        legacy_response = client.post("/api/settings/lint/legacy-artifacts")
         security_download = client.get("/api/settings/lint/security/download")
+        legacy_download = client.get("/api/settings/lint/legacy-artifacts/download")
 
     assert okf_response.status_code == 200
     okf_payload = okf_response.json()
@@ -197,3 +199,11 @@ def test_settings_lint_endpoints_persist_downloadable_reports(
 
     assert security_download.status_code == 200
     assert security_download.json()["kind"] == "security"
+
+    assert legacy_response.status_code == 200
+    legacy_payload = legacy_response.json()
+    assert legacy_payload["kind"] == "legacy-artifacts"
+    assert legacy_payload["download_url"] == "/api/settings/lint/legacy-artifacts/download"
+    assert Path(legacy_payload["report_path"]).exists()
+    assert legacy_download.status_code == 200
+    assert legacy_download.json()["kind"] == "legacy-artifacts"

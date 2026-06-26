@@ -12,6 +12,11 @@ from .config import Config
 from .metadata_db import MetadataDB
 from .okf import OKFLintIssue, OKFLintReport, OKFLintRunner
 from .path_layout import build_path_layout
+from .legacy_artifact_lint import (
+    LegacyArtifactLintReport,
+    LegacyArtifactLintRunner,
+    legacy_artifact_lint_report_payload,
+)
 from .postgres import (
     PostgresConfigError,
     open_postgres_connection,
@@ -20,7 +25,7 @@ from .postgres import (
 from .wiki_contract import build_wiki_contract
 from .wiki_lint import WikiLintIssue, WikiLintReport, WikiLintRunner
 
-LINT_KINDS = frozenset({"okf", "wiki", "security"})
+LINT_KINDS = frozenset({"okf", "wiki", "security", "legacy-artifacts"})
 
 
 def admin_lint_report_path(
@@ -93,6 +98,17 @@ def run_admin_lint(
             normalized_kind,
             _wiki_lint_payload(report),
         )
+    if normalized_kind == "legacy-artifacts":
+        report = LegacyArtifactLintRunner(
+            runtime_config,
+            layout=layout,
+            contract=contract,
+        ).lint()
+        return _persist_admin_lint_report(
+            layout,
+            normalized_kind,
+            _legacy_artifact_lint_payload(report),
+        )
 
     summary = MetadataDB(str(layout.database_path)).get_ingestion_security_summary(
         limit=100
@@ -118,7 +134,7 @@ def _runtime_config_and_layout(
 def _normalize_lint_kind(lint_kind: str) -> str:
     normalized_kind = str(lint_kind or "").strip().lower()
     if normalized_kind not in LINT_KINDS:
-        raise ValueError("lint kind must be one of: okf, wiki, security")
+        raise ValueError("lint kind must be one of: legacy-artifacts, okf, security, wiki")
     return normalized_kind
 
 
@@ -253,3 +269,9 @@ def _security_lint_payload(summary: dict[str, Any]) -> dict[str, Any]:
         "redactions": summary.get("redactions", {"total": 0, "by_category": {}}),
         "quarantined_artifacts": summary.get("quarantined_artifacts", []),
     }
+
+
+def _legacy_artifact_lint_payload(
+    report: LegacyArtifactLintReport,
+) -> dict[str, Any]:
+    return legacy_artifact_lint_report_payload(report)

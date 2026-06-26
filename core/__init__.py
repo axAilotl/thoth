@@ -129,6 +129,13 @@ from .wiki_contract import (
 )
 from .wiki_io import WikiDocument, atomic_write_text, read_document, read_frontmatter, render_frontmatter, truncate_summary
 from .wiki_lint import WikiLintIssue, WikiLintReport, WikiLintRunner
+from .legacy_artifact_lint import (
+    LegacyArtifactLintIssue,
+    LegacyArtifactLintReport,
+    LegacyArtifactLintRunner,
+    LegacyArtifactMigrationAction,
+    legacy_artifact_lint_report_payload,
+)
 from .okf import OKFLintIssue, OKFLintReport, OKFLintRunner
 from .connector_registry import (
     ConnectorManifest,
@@ -301,6 +308,11 @@ __all__ = [
     'WikiLintIssue',
     'WikiLintReport',
     'WikiLintRunner',
+    'LegacyArtifactLintIssue',
+    'LegacyArtifactLintReport',
+    'LegacyArtifactLintRunner',
+    'LegacyArtifactMigrationAction',
+    'legacy_artifact_lint_report_payload',
     'OKFLintIssue',
     'OKFLintReport',
     'OKFLintRunner',

@@ -94,6 +94,20 @@ def test_wiki_compile_semantic_command_is_wired():
     assert "Compile confirmed or promoted semantic memory facts" in result.stdout
 
 
+def test_legacy_artifacts_lint_command_is_wired():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, "thoth.py", "legacy-artifacts", "lint", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Report old artifacts and wiki pages" in result.stdout
+
+
 def test_wiki_compile_semantic_cli_reports_pages(monkeypatch, capsys):
     import thoth
 
