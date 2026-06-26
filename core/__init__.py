@@ -142,6 +142,12 @@ from .semantic_memory import (
     SemanticMemoryTransitionError,
     SemanticMemoryValidationError,
 )
+from .semantic_memory_review import (
+    SEMANTIC_MEMORY_REVIEW_METADATA_KEY,
+    SemanticMemoryReviewError,
+    SemanticMemoryReviewNotFoundError,
+    SemanticMemoryReviewService,
+)
 from .hybrid_search import (
     HybridSearchFilters,
     HybridSearchHit,
@@ -295,6 +301,10 @@ __all__ = [
     'SemanticMemoryStore',
     'SemanticMemoryTransitionError',
     'SemanticMemoryValidationError',
+    'SEMANTIC_MEMORY_REVIEW_METADATA_KEY',
+    'SemanticMemoryReviewError',
+    'SemanticMemoryReviewNotFoundError',
+    'SemanticMemoryReviewService',
     'HybridSearchFilters',
     'HybridSearchHit',
     'HybridSearchResult',

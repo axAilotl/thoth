@@ -13,6 +13,10 @@ from core.semantic_memory import (
     SemanticMemoryTransitionError,
     SemanticMemoryValidationError,
 )
+from core.semantic_memory_review import (
+    SEMANTIC_MEMORY_REVIEW_METADATA_KEY,
+    SemanticMemoryReviewService,
+)
 
 
 def make_store(
@@ -159,6 +163,132 @@ def test_semantic_memory_enforces_states_and_immutable_types(tmp_path: Path):
 
     with pytest.raises(SemanticMemoryTransitionError):
         store.transition_candidate(superseded.candidate_id, "confirmed")
+
+
+def test_semantic_memory_review_service_records_auditable_actions(tmp_path: Path):
+    store = make_store(tmp_path)
+    candidate = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-review-1",
+            candidate_type="preference",
+            text="Ada prefers written planning notes.",
+            subject="Ada",
+            predicate="prefers",
+            object_value="written planning notes",
+            entity_id="person:ada",
+            write_provenance={"writer": "extractor"},
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-review-1",
+                evidence_id="evidence-review-1",
+                source_path="notes/planning.md",
+                evidence_text="Ada asked for written planning notes.",
+            ),
+        ),
+    )
+    rejected = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-review-reject",
+            candidate_type="claim",
+            text="Ada prefers noisy meetings.",
+        )
+    )
+    replacement = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-review-replacement",
+            candidate_type="preference",
+            text="Ada prefers async written planning.",
+        )
+    )
+    old = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-review-old",
+            candidate_type="preference",
+            text="Ada prefers planning notes.",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-review-old",
+                evidence_id="evidence-review-old",
+                source_path="notes/old.md",
+            ),
+        ),
+    )
+
+    service = SemanticMemoryReviewService(store=store)
+    listed = service.list_candidates(status="proposed", entity_id="person:ada")
+    assert listed["total"] == 1
+    assert listed["candidates"][0]["candidate_id"] == candidate.candidate_id
+    assert listed["candidates"][0]["evidence_count"] == 1
+
+    detail = service.get_candidate(candidate.candidate_id)
+    assert detail["candidate"]["write_provenance"] == {"writer": "extractor"}
+    assert detail["evidence"][0]["evidence_text"] == (
+        "Ada asked for written planning notes."
+    )
+
+    confirmed = service.confirm_candidate(
+        candidate.candidate_id,
+        actor="operator",
+        reason="source reviewed",
+        reviewed_at="2026-06-26T12:00:00",
+        metadata={"ticket": "thoth-zps.3"},
+    )
+    confirmed_candidate = confirmed["candidate"]
+    assert confirmed_candidate["status"] == "confirmed"
+    review_metadata = confirmed_candidate["metadata"][
+        SEMANTIC_MEMORY_REVIEW_METADATA_KEY
+    ]
+    assert review_metadata["action"] == "confirm"
+    assert review_metadata["actor"] == "operator"
+    assert review_metadata["metadata"] == {"ticket": "thoth-zps.3"}
+    transition = confirmed_candidate["write_provenance"]["last_status_transition"]
+    assert transition["from"] == "proposed"
+    assert transition["to"] == "confirmed"
+    assert transition["write_provenance"][SEMANTIC_MEMORY_REVIEW_METADATA_KEY][
+        "reason"
+    ] == "source reviewed"
+    assert confirmed_candidate["write_provenance"]["status_transitions"] == [
+        transition
+    ]
+    assert confirmed["evidence"][0]["evidence_id"] == "evidence-review-1"
+
+    promoted = service.promote_candidate(
+        candidate.candidate_id,
+        actor="operator",
+        reason="confirmed by review",
+        reviewed_at="2026-06-26T12:05:00",
+    )
+    assert promoted["candidate"]["status"] == "promoted"
+    transitions = promoted["candidate"]["write_provenance"]["status_transitions"]
+    assert [item["to"] for item in transitions] == ["confirmed", "promoted"]
+    assert (
+        promoted["candidate"]["metadata"][SEMANTIC_MEMORY_REVIEW_METADATA_KEY][
+            "action"
+        ]
+        == "promote"
+    )
+
+    rejected_payload = service.reject_candidate(
+        rejected.candidate_id,
+        actor="operator",
+        reason="not supported",
+        reviewed_at="2026-06-26T12:10:00",
+    )
+    assert rejected_payload["candidate"]["status"] == "rejected"
+
+    superseded_payload = service.supersede_candidate(
+        old.candidate_id,
+        superseded_by_candidate_id=replacement.candidate_id,
+        actor="operator",
+        reason="better wording",
+        reviewed_at="2026-06-26T12:15:00",
+    )
+    superseded_candidate = superseded_payload["candidate"]
+    assert superseded_candidate["status"] == "superseded"
+    assert superseded_candidate["superseded_by_candidate_id"] == replacement.candidate_id
+    assert superseded_payload["evidence"][0]["evidence_id"] == "evidence-review-old"
 
 
 def test_semantic_memory_promotion_requires_repeated_evidence(tmp_path: Path):

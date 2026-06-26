@@ -23,7 +23,14 @@ def test_removed_playwright_commands_are_rejected():
 def test_web_clipper_commands_are_still_wired():
     repo_root = Path(__file__).resolve().parents[1]
 
-    for command in ("web-clipper", "ingest-queue", "okf", "connectors", "capture"):
+    for command in (
+        "web-clipper",
+        "ingest-queue",
+        "okf",
+        "connectors",
+        "capture",
+        "memory",
+    ):
         result = subprocess.run(
             [sys.executable, "thoth.py", command, "--help"],
             cwd=repo_root,
@@ -240,3 +247,161 @@ def test_capture_cli_lists_events_and_event_detail(monkeypatch, capsys):
     assert expire_payload["delete_raw"] is True
     assert expire_payload["delete_distilled"] is False
     assert expire_payload["by_status"] == {"deleted": 1}
+
+
+class FakeMemoryReviewService:
+    def __init__(self):
+        self.calls = []
+
+    def list_candidates(self, **kwargs):
+        self.calls.append(("list", kwargs))
+        return {
+            "candidates": [
+                {
+                    "candidate_id": "candidate-memory-1",
+                    "candidate_type": "preference",
+                    "status": "proposed",
+                    "entity_id": "person:ada",
+                    "entity_name": "Ada",
+                    "entity_type": "person",
+                    "text": "Ada prefers written notes.",
+                    "evidence_count": 1,
+                }
+            ],
+            "total": 1,
+            "filters": kwargs,
+        }
+
+    def get_candidate(self, candidate_id):
+        self.calls.append(("detail", candidate_id))
+        return self._detail("proposed")
+
+    def confirm_candidate(self, candidate_id, **kwargs):
+        self.calls.append(("confirm", candidate_id, kwargs))
+        return self._detail("confirmed")
+
+    def reject_candidate(self, candidate_id, **kwargs):
+        self.calls.append(("reject", candidate_id, kwargs))
+        return self._detail("rejected")
+
+    def supersede_candidate(self, candidate_id, *, superseded_by_candidate_id, **kwargs):
+        self.calls.append(
+            ("supersede", candidate_id, superseded_by_candidate_id, kwargs)
+        )
+        return self._detail("superseded", superseded_by_candidate_id)
+
+    def promote_candidate(self, candidate_id, **kwargs):
+        self.calls.append(("promote", candidate_id, kwargs))
+        return self._detail("promoted")
+
+    def _detail(self, status, superseded_by_candidate_id=None):
+        return {
+            "candidate": {
+                "candidate_id": "candidate-memory-1",
+                "candidate_type": "preference",
+                "status": status,
+                "text": "Ada prefers written notes.",
+                "superseded_by_candidate_id": superseded_by_candidate_id,
+                "metadata": {},
+                "write_provenance": {},
+                "evidence_count": 1,
+            },
+            "evidence": [
+                {
+                    "evidence_id": "evidence-memory-1",
+                    "candidate_id": "candidate-memory-1",
+                    "source_path": "notes.md",
+                    "evidence_text": "Ada asked for notes.",
+                }
+            ],
+            "total_evidence": 1,
+        }
+
+
+def _memory_args(action, **overrides):
+    values = {
+        "memory_action": "candidates",
+        "candidate_action": action,
+        "candidate_id": "candidate-memory-1",
+        "candidate_type": None,
+        "status": None,
+        "entity_id": None,
+        "entity_type": None,
+        "artifact_id": None,
+        "artifact_type": None,
+        "capture_event_id": None,
+        "limit": None,
+        "actor": None,
+        "reason": None,
+        "reviewed_at": None,
+        "metadata_json": None,
+        "superseded_by_candidate_id": None,
+        "json": True,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_memory_candidate_cli_lists_details_and_reviews(monkeypatch, capsys):
+    import thoth
+
+    fake_service = FakeMemoryReviewService()
+    monkeypatch.setattr(thoth, "SemanticMemoryReviewService", lambda: fake_service)
+
+    thoth.cmd_memory(
+        _memory_args(
+            "list",
+            status="proposed",
+            limit=5,
+            json=False,
+        )
+    )
+    list_output = capsys.readouterr().out
+    assert "Semantic memory candidates: 1" in list_output
+    assert "candidate-memory-1" in list_output
+    assert fake_service.calls[-1] == (
+        "list",
+        {
+            "candidate_type": None,
+            "status": "proposed",
+            "entity_id": None,
+            "entity_type": None,
+            "artifact_id": None,
+            "artifact_type": None,
+            "capture_event_id": None,
+            "limit": 5,
+        },
+    )
+
+    thoth.cmd_memory(_memory_args("detail"))
+    detail_payload = json.loads(capsys.readouterr().out)
+    assert detail_payload["evidence"][0]["evidence_text"] == "Ada asked for notes."
+
+    thoth.cmd_memory(
+        _memory_args(
+            "confirm",
+            actor="operator",
+            reason="reviewed",
+            reviewed_at="2026-06-26T12:00:00",
+            metadata_json='{"ticket":"thoth-zps.3"}',
+        )
+    )
+    confirm_payload = json.loads(capsys.readouterr().out)
+    assert confirm_payload["candidate"]["status"] == "confirmed"
+    assert fake_service.calls[-1][2]["metadata"] == {"ticket": "thoth-zps.3"}
+
+    thoth.cmd_memory(_memory_args("reject", reason="unsupported"))
+    assert json.loads(capsys.readouterr().out)["candidate"]["status"] == "rejected"
+
+    thoth.cmd_memory(
+        _memory_args(
+            "supersede",
+            superseded_by_candidate_id="candidate-memory-2",
+        )
+    )
+    supersede_payload = json.loads(capsys.readouterr().out)
+    assert supersede_payload["candidate"]["status"] == "superseded"
+    assert fake_service.calls[-1][2] == "candidate-memory-2"
+
+    thoth.cmd_memory(_memory_args("promote"))
+    assert json.loads(capsys.readouterr().out)["candidate"]["status"] == "promoted"

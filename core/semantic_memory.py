@@ -448,9 +448,18 @@ class SemanticMemoryStore:
                 next_metadata[SEMANTIC_MEMORY_PROMOTION_METADATA_KEY] = (
                     promotion_decision.to_metadata()
                 )
+            existing_transition_history = existing.write_provenance.get(
+                "status_transitions"
+            )
+            if not isinstance(existing_transition_history, list):
+                existing_transition_history = []
             next_provenance = {
                 **existing.write_provenance,
                 "last_status_transition": transition_record,
+                "status_transitions": [
+                    *existing_transition_history,
+                    transition_record,
+                ],
             }
             conn.execute(
                 """

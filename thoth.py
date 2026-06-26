@@ -31,6 +31,10 @@ from core import (
     open_capture_surface,
     OKFLintRunner,
     ResearchGraphService,
+    SemanticMemoryError,
+    SemanticMemoryReviewError,
+    SemanticMemoryReviewNotFoundError,
+    SemanticMemoryReviewService,
     WikiLintRunner,
     WikiQueryRunner,
 )
@@ -1850,6 +1854,19 @@ def _read_json_file_arg(path: str | None, *, field_name: str) -> dict[str, Any] 
     return payload
 
 
+def _memory_review_kwargs(args) -> dict[str, Any]:
+    metadata = _read_json_arg(
+        getattr(args, "metadata_json", None),
+        field_name="metadata-json",
+    )
+    return {
+        "actor": getattr(args, "actor", None),
+        "reason": getattr(args, "reason", None),
+        "reviewed_at": getattr(args, "reviewed_at", None),
+        "metadata": metadata,
+    }
+
+
 def cmd_capture(args):
     """Inspect capture events and manually ingest artifacts."""
     try:
@@ -2063,6 +2080,77 @@ def cmd_query(args):
             f"- {hit['title']} [{identifier}] "
             f"type={hit['result_type']} score={hit['score']} artifact={artifact}"
         )
+
+
+def cmd_memory(args):
+    """Review semantic memory candidates."""
+    if args.memory_action != "candidates":
+        raise ValueError("Unknown memory action")
+
+    service = SemanticMemoryReviewService()
+    try:
+        if args.candidate_action == "list":
+            payload = service.list_candidates(
+                candidate_type=getattr(args, "candidate_type", None),
+                status=getattr(args, "status", None),
+                entity_id=getattr(args, "entity_id", None),
+                entity_type=getattr(args, "entity_type", None),
+                artifact_id=getattr(args, "artifact_id", None),
+                artifact_type=getattr(args, "artifact_type", None),
+                capture_event_id=getattr(args, "capture_event_id", None),
+                limit=getattr(args, "limit", None),
+            )
+        elif args.candidate_action == "detail":
+            payload = service.get_candidate(args.candidate_id)
+        elif args.candidate_action == "confirm":
+            payload = service.confirm_candidate(
+                args.candidate_id,
+                **_memory_review_kwargs(args),
+            )
+        elif args.candidate_action == "reject":
+            payload = service.reject_candidate(
+                args.candidate_id,
+                **_memory_review_kwargs(args),
+            )
+        elif args.candidate_action == "supersede":
+            payload = service.supersede_candidate(
+                args.candidate_id,
+                superseded_by_candidate_id=args.superseded_by_candidate_id,
+                **_memory_review_kwargs(args),
+            )
+        elif args.candidate_action == "promote":
+            payload = service.promote_candidate(
+                args.candidate_id,
+                **_memory_review_kwargs(args),
+            )
+        else:
+            raise ValueError("Unknown memory candidate action")
+    except (
+        SemanticMemoryError,
+        SemanticMemoryReviewError,
+        SemanticMemoryReviewNotFoundError,
+        ValueError,
+    ) as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if getattr(args, "json", False) or args.candidate_action != "list":
+        _print_json(payload)
+        return
+
+    print(f"Semantic memory candidates: {payload['total']}")
+    for candidate in payload["candidates"]:
+        entity = (
+            candidate.get("entity_id")
+            or candidate.get("entity_name")
+            or candidate.get("entity_type")
+            or "-"
+        )
+        print(
+            f"- {candidate['candidate_id']} "
+            f"type={candidate['candidate_type']} status={candidate['status']} "
+            f"entity={entity} evidence={candidate['evidence_count']}"
+        )
+        print(f"  {candidate['text']}")
 
 
 async def cmd_wiki(args):
@@ -2806,6 +2894,76 @@ Examples:
     query_wiki_parser.add_argument("--time-before", type=str, default=None)
     query_wiki_parser.add_argument("--json", action="store_true")
 
+    memory_parser = subparsers.add_parser(
+        "memory",
+        help="Review semantic memory candidates",
+    )
+    memory_subparsers = memory_parser.add_subparsers(
+        dest="memory_action",
+        help="Memory actions",
+    )
+    memory_subparsers.required = True
+    memory_candidates_parser = memory_subparsers.add_parser(
+        "candidates",
+        help="List, inspect, and review semantic memory candidates",
+    )
+    candidate_subparsers = memory_candidates_parser.add_subparsers(
+        dest="candidate_action",
+        help="Candidate review actions",
+    )
+    candidate_subparsers.required = True
+    memory_list_parser = candidate_subparsers.add_parser(
+        "list",
+        help="List semantic memory candidates",
+    )
+    memory_list_parser.add_argument("--type", dest="candidate_type", default=None)
+    memory_list_parser.add_argument("--status", default=None)
+    memory_list_parser.add_argument("--entity-id", default=None)
+    memory_list_parser.add_argument("--entity-type", default=None)
+    memory_list_parser.add_argument("--artifact-id", default=None)
+    memory_list_parser.add_argument("--artifact-type", default=None)
+    memory_list_parser.add_argument("--capture-event-id", default=None)
+    memory_list_parser.add_argument("--limit", type=int, default=None)
+    memory_list_parser.add_argument("--json", action="store_true")
+    memory_detail_parser = candidate_subparsers.add_parser(
+        "detail",
+        help="Show candidate detail with evidence",
+    )
+    memory_detail_parser.add_argument("candidate_id")
+    memory_detail_parser.add_argument("--json", action="store_true")
+
+    memory_review_parsers = []
+    for action_name in ("confirm", "reject", "promote"):
+        review_parser = candidate_subparsers.add_parser(
+            action_name,
+            help=f"{action_name.title()} a semantic memory candidate",
+        )
+        review_parser.add_argument("candidate_id")
+        review_parser.add_argument("--json", action="store_true")
+        memory_review_parsers.append(review_parser)
+    memory_supersede_parser = candidate_subparsers.add_parser(
+        "supersede",
+        help="Mark a semantic memory candidate as superseded",
+    )
+    memory_supersede_parser.add_argument("candidate_id")
+    memory_supersede_parser.add_argument(
+        "--by",
+        dest="superseded_by_candidate_id",
+        required=True,
+        help="Replacement candidate ID",
+    )
+    memory_supersede_parser.add_argument("--json", action="store_true")
+    memory_review_parsers.append(memory_supersede_parser)
+    for review_parser in memory_review_parsers:
+        review_parser.add_argument("--actor", default=None)
+        review_parser.add_argument("--reason", default=None)
+        review_parser.add_argument("--reviewed-at", default=None)
+        review_parser.add_argument(
+            "--metadata-json",
+            default=None,
+            help="Additional review audit metadata as a JSON object",
+        )
+
     wiki_parser = subparsers.add_parser(
         "wiki",
         help="Stable wiki command group",
@@ -3369,7 +3527,14 @@ Examples:
     # Setup logging
     setup_logging(args.verbose)
 
-    validation_exempt = {"artifacts", "capture", "connectors", "query", "research"}
+    validation_exempt = {
+        "artifacts",
+        "capture",
+        "connectors",
+        "memory",
+        "query",
+        "research",
+    }
 
     # Validate configuration (allow offline-safe commands even if invalid)
     if args.command not in validation_exempt and not config.validate_and_warn():
@@ -3379,6 +3544,7 @@ Examples:
             "artifacts",
             "capture",
             "ingest",
+            "memory",
             "query",
             "wiki",
             "process",
@@ -3408,7 +3574,14 @@ Examples:
     if not args.command:
         args.command = "stats"
 
-    scaffold_exempt = {"artifacts", "capture", "connectors", "query", "research"}
+    scaffold_exempt = {
+        "artifacts",
+        "capture",
+        "connectors",
+        "memory",
+        "query",
+        "research",
+    }
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
 
@@ -3440,6 +3613,8 @@ Examples:
             asyncio.run(cmd_ingest(args))
         elif args.command == "query":
             cmd_query(args)
+        elif args.command == "memory":
+            cmd_memory(args)
         elif args.command == "wiki":
             asyncio.run(cmd_wiki(args))
         elif args.command == "delete":

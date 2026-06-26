@@ -62,6 +62,10 @@ from core import (
     run_archivist_topics,
     save_archivist_registry_text,
     ResearchGraphService,
+    SemanticMemoryError,
+    SemanticMemoryReviewError,
+    SemanticMemoryReviewNotFoundError,
+    SemanticMemoryReviewService,
     open_capture_surface,
 )
 from core.bookmark_ingest import (
@@ -771,6 +775,21 @@ class CaptureRetentionExpireRequest(BaseModel):
     as_of: Optional[str] = None
 
 
+class SemanticMemoryReviewRequest(BaseModel):
+    """Request payload for semantic memory candidate review actions."""
+
+    actor: Optional[str] = None
+    reason: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SemanticMemorySupersedeRequest(SemanticMemoryReviewRequest):
+    """Request payload for superseding one candidate with another."""
+
+    superseded_by_candidate_id: str
+
+
 class BookmarkStatusRequest(BaseModel):
     """Request body for bookmark status lookups."""
 
@@ -1160,6 +1179,26 @@ def open_api_capture_surface():
     )
 
 
+def open_api_semantic_memory_review_service() -> SemanticMemoryReviewService:
+    """Open the semantic memory review service using API runtime configuration."""
+    runtime_config = Config()
+    runtime_config.data = load_runtime_settings()
+    layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+    return SemanticMemoryReviewService(db=MetadataDB(str(layout.database_path)))
+
+
+def semantic_memory_review_kwargs(
+    request: SemanticMemoryReviewRequest,
+) -> dict[str, Any]:
+    """Convert a review request body into service keyword arguments."""
+    return {
+        "actor": request.actor,
+        "reason": request.reason,
+        "reviewed_at": request.reviewed_at,
+        "metadata": request.metadata,
+    }
+
+
 @app.get("/api/capture/sources")
 def get_capture_sources():
     """List configured capture sources."""
@@ -1276,6 +1315,137 @@ def ingest_capture_event(request: CaptureIngestRequest):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.error(f"Error manually ingesting capture artifact: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/memory/candidates")
+def list_semantic_memory_candidates(
+    candidate_type: Optional[str] = Query(default=None, alias="type"),
+    status: Optional[str] = Query(default=None),
+    entity_id: Optional[str] = Query(default=None),
+    entity_type: Optional[str] = Query(default=None),
+    artifact_id: Optional[str] = Query(default=None),
+    artifact_type: Optional[str] = Query(default=None),
+    capture_event_id: Optional[str] = Query(default=None),
+    limit: Optional[int] = Query(default=None, gt=0),
+):
+    """List semantic memory candidates for operator review."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.list_candidates(
+            candidate_type=candidate_type,
+            status=status,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            capture_event_id=capture_event_id,
+            limit=limit,
+        )
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing semantic memory candidates: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/memory/candidates/{candidate_id}")
+def get_semantic_memory_candidate(candidate_id: str):
+    """Return semantic memory candidate detail and evidence."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.get_candidate(candidate_id)
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error reading semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/candidates/{candidate_id}/confirm")
+def confirm_semantic_memory_candidate(
+    candidate_id: str,
+    request: SemanticMemoryReviewRequest,
+):
+    """Confirm a semantic memory candidate with review audit metadata."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.confirm_candidate(
+            candidate_id,
+            **semantic_memory_review_kwargs(request),
+        )
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error confirming semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/candidates/{candidate_id}/reject")
+def reject_semantic_memory_candidate(
+    candidate_id: str,
+    request: SemanticMemoryReviewRequest,
+):
+    """Reject a semantic memory candidate with review audit metadata."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.reject_candidate(
+            candidate_id,
+            **semantic_memory_review_kwargs(request),
+        )
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error rejecting semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/candidates/{candidate_id}/supersede")
+def supersede_semantic_memory_candidate(
+    candidate_id: str,
+    request: SemanticMemorySupersedeRequest,
+):
+    """Supersede a semantic memory candidate with review audit metadata."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.supersede_candidate(
+            candidate_id,
+            superseded_by_candidate_id=request.superseded_by_candidate_id,
+            **semantic_memory_review_kwargs(request),
+        )
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error superseding semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/candidates/{candidate_id}/promote")
+def promote_semantic_memory_candidate(
+    candidate_id: str,
+    request: SemanticMemoryReviewRequest,
+):
+    """Promote a semantic memory candidate through the evidence gate."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.promote_candidate(
+            candidate_id,
+            **semantic_memory_review_kwargs(request),
+        )
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error promoting semantic memory candidate {candidate_id}: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
