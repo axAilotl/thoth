@@ -1720,6 +1720,8 @@ def cmd_connectors(args):
             "playlist_urls": getattr(args, "playlist_url", None),
             "export_paths": getattr(args, "export_path", None),
             "export_dirs": getattr(args, "export_dir", None),
+            "import_paths": getattr(args, "import_path", None),
+            "import_dirs": getattr(args, "import_dir", None),
             "output_paths": getattr(args, "output_path", None),
             "output_dirs": getattr(args, "output_dir", None),
             "file_patterns": getattr(args, "file_pattern", None),
@@ -3394,6 +3396,18 @@ Examples:
         action="append",
         default=None,
         help="Local export directory; repeat for multiple directories",
+    )
+    connectors_run_parser.add_argument(
+        "--import-path",
+        action="append",
+        default=None,
+        help="Imported markdown file; repeat for multiple files",
+    )
+    connectors_run_parser.add_argument(
+        "--import-dir",
+        action="append",
+        default=None,
+        help="Imported markdown directory; repeat for multiple directories",
     )
     connectors_run_parser.add_argument(
         "--output-path",

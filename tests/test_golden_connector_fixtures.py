@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from collectors.imported_markdown_connector import ImportedMarkdownConnector
 from collectors.personal_transcript_connector import PersonalTranscriptConnector
 from collectors.skill_output_connector import SkillOutputConnector
 from collectors.web_clipper_collector import WebClipperCollector
@@ -134,7 +135,7 @@ def test_golden_connector_manifest_inventory_is_stable_and_local():
     manifest = _load_manifest()
 
     assert manifest["schema_version"] == 1
-    assert manifest["event_assertions"]["status"] == "future_facing"
+    assert manifest["event_assertions"]["status"] == "active"
 
     fixtures = manifest["fixtures"]
     assert {item["source_class"] for item in fixtures} == EXPECTED_SOURCE_CLASSES
@@ -397,12 +398,36 @@ def test_golden_repository_and_arxiv_fixtures_materialize_with_provenance(
         assert f"Source: `{source}`" in page_text
 
 
-def test_imported_markdown_fixture_is_parseable_but_not_queued_by_current_code():
+def test_imported_markdown_fixture_preserves_raw_and_queues_capture_only(
+    tmp_path: Path,
+):
+    config, layout, db = _runtime(tmp_path)
     path = FIXTURE_ROOT / "imported_markdown" / "manual_note.md"
     text = path.read_text(encoding="utf-8")
+    connector = ImportedMarkdownConnector(config, layout=layout, db=db)
 
     parsed = parse_web_clipper_markdown(text, source_path=path)
+    result = asyncio.run(connector.collect(import_paths=[path]))
 
     assert parsed.raw_content == text
     assert parsed.title == "Imported Markdown Golden Note"
     assert parsed.frontmatter["source"] == "manual_import"
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.artifact_id == "manual-imported-markdown-golden-note"
+    assert record.raw_markdown_path.read_bytes() == path.read_bytes()
+
+    entry = db.get_ingestion_entry("manual-imported-markdown-golden-note")
+    assert entry is not None
+    assert entry.artifact_type == "markdown"
+    assert entry.status == "needs_review"
+    assert "unsupported artifact type" in (entry.last_error or "")
+    payload = json.loads(entry.payload_json)
+    assert payload["title"] == "Imported Markdown Golden Note"
+    assert payload["raw_content"] == text
+    assert payload["custom_metadata"]["raw_payload_path"].startswith(
+        "raw/imported_markdown/manual-import/manual-note-"
+    )
+
+    pages_dir = layout.wiki_root / "pages"
+    assert not pages_dir.exists() or not list(pages_dir.glob("*imported-markdown*"))

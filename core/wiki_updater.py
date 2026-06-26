@@ -12,6 +12,7 @@ import yaml
 
 from .artifacts import (
     KnowledgeArtifact,
+    MarkdownArtifact,
     PaperArtifact,
     RepositoryArtifact,
     TranscriptArtifact,
@@ -249,7 +250,7 @@ class CompiledWikiUpdater:
 
     def supports_artifact(self, artifact: KnowledgeArtifact) -> bool:
         """Return True when an artifact should compile into the wiki layer."""
-        return not isinstance(artifact, TweetArtifact)
+        return not isinstance(artifact, (MarkdownArtifact, TweetArtifact))
 
     def prune_legacy_tweet_pages(self) -> tuple[Path, ...]:
         """Delete legacy generated tweet pages from the wiki pages directory."""

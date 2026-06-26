@@ -530,8 +530,28 @@ class PersonalTranscriptConnector:
                 "native_event_id": session.session_id,
                 "occurred_at": session.started_at,
                 "captured_at": artifact.ingested_at,
-                "privacy": {"classification": "personal"},
-                "provenance": {"collector": "personal_transcript_connector"},
+                "privacy": {
+                    "classification": "personal",
+                    "privacy_class": "personal",
+                    "subject_ref": session.speaker or session.device_id or "",
+                },
+                "retention": {
+                    "retention_class": "personal_export",
+                    "policy": "personal_export",
+                    "action": "retain",
+                    "scope": [
+                        "raw_capture",
+                        "artifact_queue",
+                        "transcript_file",
+                    ],
+                },
+                "provenance": {
+                    "collector": "personal_transcript_connector",
+                    "capture_run_id": run_id,
+                    "raw_preserved": True,
+                    "security_policy": "prompt_security_scan_on_queue",
+                    "source_trust_reason": "personal_export_import",
+                },
             },
             raw_path=raw_export_path,
         )

@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from collectors.arxiv_collector import ArXivCollector
+from collectors.imported_markdown_connector import ImportedMarkdownConnector
 from collectors.personal_transcript_connector import PersonalTranscriptConnector
 from collectors.pi_skill_connector import PiSkillConnector
 from collectors.social_collector import SocialCollector
@@ -514,6 +515,14 @@ def test_skill_output_connector_records_raw_envelope_capture_event(tmp_path: Pat
     assert source.source_type == "skill_output"
     assert event.event_type == "skill_output_artifact"
     assert event.native_event_id == "skill-note"
+    assert event.privacy == {
+        "classification": "operator_supplied",
+        "privacy_class": "operator_supplied",
+    }
+    assert event.retention["retention_class"] == "skill_output"
+    assert event.provenance["capture_run_id"]
+    assert event.provenance["security_policy"] == "prompt_security_scan_on_queue"
+    assert next(iter(event_store.sessions.values())).metadata["capture_run_id"]
     assert raw_ref.path == str(result.records[0].raw_output_path.resolve())
     assert link.artifact_id == "skill-note"
 
@@ -635,7 +644,69 @@ def test_personal_transcript_connector_records_omi_session_capture(
     assert source.source_name == "omi"
     assert source.source_type == "personal_transcript"
     assert session.native_session_id == "session-1"
+    assert session.metadata["capture_run_id"]
     assert event.native_event_id == "session-1"
-    assert event.privacy == {"classification": "personal"}
+    assert event.privacy["classification"] == "personal"
+    assert event.privacy["privacy_class"] == "personal"
+    assert event.retention["retention_class"] == "personal_export"
+    assert event.provenance["security_policy"] == "prompt_security_scan_on_queue"
     assert raw_ref.path == str(result.records[0].raw_export_path.resolve())
     assert link.artifact_id == "omi_transcript_session-1"
+
+
+def test_imported_markdown_connector_records_capture_event_metadata(
+    tmp_path: Path,
+):
+    config, layout, db = _layout_and_db(tmp_path)
+    event_store = _store(layout)
+    import_path = tmp_path / "manual-note.md"
+    import_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Imported Markdown Note",
+                "source: manual_import",
+                'created: "2026-04-04T13:00:00Z"',
+                "tags:",
+                "  - imported-markdown",
+                "---",
+                "",
+                "# Imported Markdown Note",
+                "",
+                "Capture this markdown note.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    connector = ImportedMarkdownConnector(
+        config,
+        layout=layout,
+        db=db,
+        capture_event_store=event_store,
+    )
+
+    result = asyncio.run(connector.collect(import_paths=[import_path]))
+
+    assert result.records[0].artifact_id == "manual-imported-markdown-note"
+    source = next(iter(event_store.sources.values()))
+    session = next(iter(event_store.sessions.values()))
+    event = next(iter(event_store.events.values()))
+    raw_ref = next(iter(event_store.raw_refs.values()))
+    link = next(iter(event_store.artifact_links.values()))
+    assert source.source_name == "manual_import"
+    assert source.source_type == "imported_markdown"
+    assert session.session_type == "imported_markdown_import"
+    assert session.metadata["capture_run_id"]
+    assert event.event_type == "imported_markdown_note"
+    assert event.native_event_id == str(import_path.resolve())
+    assert event.privacy["classification"] == "personal"
+    assert event.retention["retention_class"] == "imported_markdown"
+    assert event.provenance["security_policy"] == "prompt_security_scan_on_queue"
+    assert raw_ref.path == str(result.records[0].raw_markdown_path.resolve())
+    assert Path(raw_ref.path).is_relative_to(layout.raw_root)
+    assert link.artifact_id == "manual-imported-markdown-note"
+    entry = db.get_ingestion_entry("manual-imported-markdown-note")
+    assert entry is not None
+    payload = json.loads(entry.payload_json)
+    assert payload["normalized_metadata"]["capture_event_id"] == event.event_id

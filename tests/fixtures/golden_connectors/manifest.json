@@ -2,8 +2,8 @@
   "schema_version": 1,
   "description": "Small deterministic local-only golden fixtures for primary connector/source classes.",
   "event_assertions": {
-    "status": "future_facing",
-    "reason": "The Postgres capture event backbone is not implemented yet; current tests validate raw preservation, queue payloads, wiki compilation where supported, and provenance."
+    "status": "active",
+    "reason": "Connector tests validate raw preservation, queue payloads, capture event links where supported, wiki compilation where supported, and provenance."
   },
   "fixtures": [
     {
@@ -108,7 +108,7 @@
         "artifact_id": "manual-imported-markdown-golden-note",
         "native_id": "manual_note.md",
         "wiki_supported": false,
-        "current_behavior": "fixture_only_until_imported_markdown_connector_exists"
+        "current_behavior": "queues_capture_only_markdown_artifact"
       }
     }
   ]

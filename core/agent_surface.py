@@ -579,6 +579,9 @@ class AgentSurfaceService:
             "last30days-skill": self._run_skill_outputs_connector,
             "pi_skills": self._run_pi_skills_connector,
             "pi_skill": self._run_pi_skills_connector,
+            "imported_markdown": self._run_imported_markdown_connector,
+            "markdown_import": self._run_imported_markdown_connector,
+            "manual_import": self._run_imported_markdown_connector,
         }
         handler = handlers.get(manifest.name) or handlers.get(connector_name)
         if handler is None:
@@ -1076,6 +1079,53 @@ class AgentSurfaceService:
         )
         return result.to_dict()
 
+    def _run_imported_markdown_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        from collectors.imported_markdown_connector import ImportedMarkdownConnector
+
+        connector = ImportedMarkdownConnector(self.config, layout=self.layout, db=self.db)
+        configured = self.config.get("sources.imported_markdown", {}) or {}
+        import_paths = _string_list(
+            options.get("import_paths")
+            or options.get("import_path")
+            or options.get("input_paths")
+            or options.get("input_path")
+            or options.get("export_paths")
+            or options.get("export_path")
+        ) or _string_list(
+            configured.get("import_paths")
+            or configured.get("import_path")
+            or configured.get("paths")
+        )
+        import_dirs = _string_list(
+            options.get("import_dirs")
+            or options.get("import_dir")
+            or options.get("input_dirs")
+            or options.get("input_dir")
+            or options.get("export_dirs")
+            or options.get("export_dir")
+        ) or _string_list(
+            configured.get("import_dirs")
+            or configured.get("import_dir")
+            or configured.get("dirs")
+        )
+        if not import_paths and not import_dirs:
+            raise AgentSurfaceError(
+                "imported_markdown connector requires import_paths or import_dirs"
+            )
+        result = _run_async(
+            connector.collect(
+                import_paths=import_paths,
+                import_dirs=import_dirs,
+                file_patterns=_string_list(
+                    options.get("file_patterns") or options.get("file_pattern")
+                )
+                or _string_list(configured.get("file_patterns")),
+                source_name=options.get("source_name") or configured.get("source_name"),
+                limit=_optional_int(options.get("limit")),
+            )
+        )
+        return result.to_dict()
+
     def _plan_pi_skills_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
         from collectors.pi_skill_connector import PiSkillConnector
 
@@ -1288,6 +1338,10 @@ def _connector_input_paths(options: Mapping[str, Any]) -> list[str]:
         if key_text not in {
             "input_path",
             "input_paths",
+            "import_path",
+            "import_paths",
+            "import_dir",
+            "import_dirs",
             "output_path",
             "output_paths",
             "export_path",

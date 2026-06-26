@@ -628,6 +628,37 @@ BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
         "config_namespace": "sources.pi_skills",
         "default_enabled": True,
     },
+    {
+        "name": "imported_markdown",
+        "source_name": "imported_markdown",
+        "source_aliases": ["markdown_import", "manual_import"],
+        "display_name": "Imported Markdown",
+        "description": "Import local markdown files as capture-only artifacts while preserving raw sources.",
+        "artifact_types": ["markdown"],
+        "inputs": ["local_files:markdown_imports"],
+        "outputs": ["artifact_queue:markdown"],
+        "capabilities": ["markdown", "frontmatter", "queue", "raw_preservation"],
+        "config_keys": [
+            "sources.imported_markdown.enabled",
+            "sources.imported_markdown.import_paths",
+            "sources.imported_markdown.import_dirs",
+            "sources.imported_markdown.file_patterns",
+            "sources.imported_markdown.source_name",
+        ],
+        "auth": [],
+        "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "local_ingest_queue",
+        "allowed_side_effects": [
+            "local_file_read",
+            "raw_file_write",
+            "artifact_queue_write",
+        ],
+        "entrypoint": "collectors.imported_markdown_connector:ImportedMarkdownConnector",
+        "cli_command": "connectors run imported_markdown",
+        "config_namespace": "sources.imported_markdown",
+        "default_enabled": True,
+    },
 )
 
 

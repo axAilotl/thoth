@@ -216,6 +216,7 @@
       "youtube",
       "omi",
       "skill_outputs",
+      "imported_markdown",
       "pi_skills"
     ],
     "pins": {
@@ -251,6 +252,10 @@
         "skill_outputs": {
           "max_files_per_run": 100,
           "max_transcript_chunks_per_run": 32
+        },
+        "imported_markdown": {
+          "max_files_per_run": 250,
+          "max_bytes_per_run": 262144000
         },
         "pi_skills": {
           "max_files_per_run": 25,
@@ -701,6 +706,16 @@
         "*.jsonl"
       ],
       "source_name": "external_skill"
+    },
+    "imported_markdown": {
+      "enabled": true,
+      "import_paths": [],
+      "import_dirs": [],
+      "file_patterns": [
+        "*.md",
+        "*.markdown"
+      ],
+      "source_name": "imported_markdown"
     },
     "pi_skills": {
       "enabled": true,

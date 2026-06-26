@@ -482,6 +482,26 @@
           },
           "additionalProperties": true
         },
+        "imported_markdown": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "import_paths": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "import_dirs": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "file_patterns": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "source_name": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
         "pi_skills": {
           "type": "object",
           "properties": {

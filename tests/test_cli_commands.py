@@ -158,6 +158,7 @@ def test_connectors_list_command_reads_registry_metadata():
         "skill_outputs",
         "pi_skills",
     ]
+    assert "imported_markdown" in names
 
 
 def test_query_wiki_json_uses_agent_safe_response_model():

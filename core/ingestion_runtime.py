@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 from .artifacts import (
     KnowledgeArtifact,
+    MarkdownArtifact,
     PaperArtifact,
     RepositoryArtifact,
     TranscriptArtifact,
@@ -180,6 +181,8 @@ class KnowledgeArtifactRuntime:
             artifact = RepositoryArtifact.from_queue_payload(payload)
         elif artifact_type == "web_clipper":
             artifact = WebClipperArtifact.from_queue_payload(payload)
+        elif artifact_type == "markdown":
+            artifact = MarkdownArtifact.from_queue_payload(payload)
         elif artifact_type == "video":
             artifact = VideoArtifact.from_queue_payload(payload)
         elif artifact_type == "transcript":
@@ -354,6 +357,8 @@ class KnowledgeArtifactRuntime:
             return await self._process_repository_artifact(artifact)
         if isinstance(artifact, WebClipperArtifact):
             return await self._process_web_clipper_artifact(artifact)
+        if isinstance(artifact, MarkdownArtifact):
+            return await self._process_markdown_artifact(artifact)
         if isinstance(artifact, VideoArtifact):
             return await self._process_video_artifact(artifact)
         if isinstance(artifact, TranscriptArtifact):
@@ -687,6 +692,24 @@ class KnowledgeArtifactRuntime:
                 "source_url": artifact.source_url,
                 "source_language": artifact.source_language,
                 "file_type": artifact.file_type,
+            },
+        )
+
+    async def _process_markdown_artifact(
+        self, artifact: MarkdownArtifact
+    ) -> IngestionDispatchResult:
+        """Record imported markdown as capture-only evidence."""
+        return IngestionDispatchResult(
+            artifact_id=artifact.id,
+            artifact_type="markdown",
+            source=artifact.source_type,
+            status="skipped",
+            processed_at=_now_iso(),
+            details={
+                "reason": "capture_only",
+                "title": artifact.title,
+                "source_path": artifact.source_path,
+                "source_relative_path": artifact.source_relative_path,
             },
         )
 
