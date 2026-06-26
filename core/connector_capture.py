@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
@@ -126,3 +130,56 @@ class ConnectorCaptureQueue:
 def connector_raw_roots(layout: PathLayout) -> tuple[Path, ...]:
     """Roots under which connectors may record immutable raw references."""
     return (layout.raw_root, layout.library_root, layout.vault_root)
+
+
+def write_connector_raw_json(
+    layout: PathLayout,
+    *,
+    connector_name: str,
+    native_id: str,
+    payload: Any,
+    subdir: str | None = None,
+    captured_at: str | None = None,
+) -> Path:
+    """Persist immutable connector source JSON under the configured raw root."""
+    root = layout.raw_root.resolve()
+    directory = root / _safe_raw_path_part(connector_name)
+    if subdir:
+        directory = directory / _safe_raw_path_part(subdir)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    payload_digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode(
+            "utf-8"
+        )
+    ).hexdigest()[:12]
+    raw_path = directory / f"{_safe_raw_path_part(native_id)}-{payload_digest}.json"
+    resolved_path = raw_path.resolve()
+    try:
+        resolved_path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"raw connector path escaped configured raw root: {raw_path}") from exc
+
+    envelope = {
+        "connector": connector_name,
+        "native_id": native_id,
+        "captured_at": captured_at or datetime.now().isoformat(),
+        "payload": payload,
+    }
+    if not raw_path.exists():
+        raw_path.write_text(
+            json.dumps(envelope, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    return raw_path
+
+
+def _safe_raw_path_part(value: str) -> str:
+    text = str(value or "").strip().replace("\\", "_").replace("/", "_")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("._-")
+    if not safe:
+        safe = "artifact"
+    if len(safe) <= 96:
+        return safe
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    return f"{safe[:83].rstrip('._-')}-{digest}"

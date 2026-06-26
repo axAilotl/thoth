@@ -18,6 +18,7 @@ class FakeDB:
 
     def upsert_ingestion_entry(self, entry):
         self.entries.append(entry)
+        self.existing[entry.artifact_id] = entry
         return True
 
 
@@ -68,7 +69,8 @@ def test_arxiv_rss_scan_uses_category_feed_and_derives_pdf(monkeypatch):
 
     def fake_parse(url):
         called_urls.append(url)
-        return SimpleNamespace(entries=[make_feed_entry("2604.00002", include_pdf_link=False)])
+        arxiv_id = "2604.00002" if url.endswith("cs.AI") else "2604.00003"
+        return SimpleNamespace(entries=[make_feed_entry(arxiv_id, include_pdf_link=False)])
 
     monkeypatch.setattr("collectors.arxiv_collector.feedparser.parse", fake_parse)
 

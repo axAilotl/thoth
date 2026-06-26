@@ -1,16 +1,21 @@
 import asyncio
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+from collectors.arxiv_collector import ArXivCollector
 from collectors.personal_transcript_connector import PersonalTranscriptConnector
 from collectors.pi_skill_connector import PiSkillConnector
+from collectors.social_collector import SocialCollector
 from collectors.skill_output_connector import SkillOutputConnector
 from collectors.web_clipper_collector import WebClipperCollector
 from collectors.youtube_connector import YouTubeConnector
+from core.artifacts import PaperArtifact
 from core.config import Config
 from core.metadata_db import MetadataDB
 from core.path_layout import PathLayout, build_path_layout
+from core.research_graph import ResearchGraphService
 from processors.youtube_processor import YouTubeVideo
 
 
@@ -71,6 +76,43 @@ def _store(layout: PathLayout) -> RecordingCaptureEventStore:
     )
 
 
+def _arxiv_feed_entry(arxiv_id: str):
+    return SimpleNamespace(
+        id=f"https://arxiv.org/abs/{arxiv_id}",
+        link=f"https://arxiv.org/abs/{arxiv_id}",
+        title="Capture Events for Research Connectors",
+        authors=[SimpleNamespace(name="Ada")],
+        summary="A paper about capture events.",
+        links=[
+            SimpleNamespace(
+                href=f"https://arxiv.org/pdf/{arxiv_id}.pdf",
+                type="application/pdf",
+            )
+        ],
+        published="2026-04-01T00:00:00Z",
+    )
+
+
+def _paper(
+    paper_id: str,
+    *,
+    title: str,
+    references=None,
+) -> PaperArtifact:
+    return PaperArtifact(
+        id=paper_id,
+        source_type="arxiv",
+        raw_content=json.dumps({"id": paper_id, "references": references or []}),
+        title=title,
+        authors=["Ada Lovelace"],
+        arxiv_id=paper_id,
+        pdf_url=f"https://arxiv.org/pdf/{paper_id}.pdf",
+        references=references or [],
+        source_provider="arxiv",
+        ingested_at="2026-04-04T00:00:00",
+    )
+
+
 def test_web_clipper_connector_records_capture_event_links(tmp_path: Path):
     config, layout, db = _layout_and_db(tmp_path)
     config.set("sources.web_clipper.note_dirs", ["Clippings"])
@@ -111,6 +153,184 @@ def test_web_clipper_connector_records_capture_event_links(tmp_path: Path):
     assert link.event_id == event.event_id
     assert link.artifact_id == "webclip:Clippings/capture.md"
     assert db.get_ingestion_entry("webclip:Clippings/capture.md") is not None
+
+
+def test_arxiv_collector_records_capture_event_and_raw_feed_entry(
+    monkeypatch,
+    tmp_path: Path,
+):
+    config, layout, db = _layout_and_db(tmp_path)
+    event_store = _store(layout)
+
+    monkeypatch.setattr(
+        "collectors.arxiv_collector.feedparser.parse",
+        lambda _url: SimpleNamespace(entries=[_arxiv_feed_entry("2604.00001")]),
+    )
+    collector = ArXivCollector(
+        db=db,
+        config=config,
+        layout=layout,
+        capture_event_store=event_store,
+    )
+
+    discovered = collector.discover_papers(["capture events"], max_results=1)
+
+    assert discovered[0].id == "2604.00001"
+    source = next(iter(event_store.sources.values()))
+    session = next(iter(event_store.sessions.values()))
+    event = next(iter(event_store.events.values()))
+    raw_ref = next(iter(event_store.raw_refs.values()))
+    link = next(iter(event_store.artifact_links.values()))
+    assert source.source_name == "arxiv"
+    assert source.source_type == "arxiv"
+    assert session.session_type == "arxiv_discovery"
+    assert event.event_type == "arxiv_paper_discovered"
+    assert event.native_event_id == "2604.00001"
+    assert event.privacy == {"classification": "public"}
+    assert Path(raw_ref.path).is_relative_to(layout.raw_root)
+    assert link.artifact_id == "2604.00001"
+    assert db.get_ingestion_entry("2604.00001") is not None
+
+
+def test_social_collector_records_github_star_capture_event(
+    monkeypatch,
+    tmp_path: Path,
+):
+    config, layout, db = _layout_and_db(tmp_path)
+    event_store = _store(layout)
+    monkeypatch.setenv("GITHUB_API", "token-123")
+
+    collector = SocialCollector(
+        db=db,
+        config=config,
+        layout=layout,
+        capture_event_store=event_store,
+    )
+
+    def fake_get(_url, headers=None, params=None, timeout=None):
+        return SimpleNamespace(
+            status_code=200,
+            text="[]",
+            json=lambda: [
+                {
+                    "id": 123,
+                    "full_name": "octo/repo",
+                    "description": "Useful repo",
+                    "stargazers_count": 42,
+                    "language": "Python",
+                    "topics": ["agents"],
+                    "updated_at": "2026-04-03T00:00:00Z",
+                    "html_url": "https://github.com/octo/repo",
+                }
+            ],
+        )
+
+    collector.session = SimpleNamespace(get=fake_get)
+
+    discovered = collector.discover_github_stars(None, limit=1)
+
+    assert discovered[0].id == "gh_123"
+    source = next(iter(event_store.sources.values()))
+    session = next(iter(event_store.sessions.values()))
+    event = next(iter(event_store.events.values()))
+    raw_ref = next(iter(event_store.raw_refs.values()))
+    assert source.source_name == "github"
+    assert source.source_type == "github"
+    assert session.session_type == "github_scan"
+    assert event.event_type == "github_star"
+    assert event.native_event_id == "octo/repo"
+    assert event.privacy == {"classification": "personal"}
+    assert Path(raw_ref.path).is_relative_to(layout.raw_root)
+    assert db.get_ingestion_entry("gh_123") is not None
+
+
+def test_social_collector_records_huggingface_like_capture_event(
+    monkeypatch,
+    tmp_path: Path,
+):
+    config, layout, db = _layout_and_db(tmp_path)
+    config.set("sources.huggingface.username", "example-user")
+    event_store = _store(layout)
+
+    fake_module = SimpleNamespace(
+        list_liked_repos=lambda user, token=None: SimpleNamespace(
+            models=["org/model-a"],
+            datasets=[],
+            spaces=[],
+        ),
+        repo_info=lambda repo_id, repo_type=None, token=None: SimpleNamespace(
+            id=repo_id,
+            description="Model description",
+            likes=10,
+            pipeline_tag="text-generation",
+            library_name="transformers",
+            tags=["model", "ai"],
+            created_at=None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_module)
+    collector = SocialCollector(
+        db=db,
+        config=config,
+        layout=layout,
+        capture_event_store=event_store,
+    )
+
+    discovered = collector.discover_hf_likes(None, limit=1)
+
+    assert discovered[0].id == "hf_model_org_model-a"
+    source = next(iter(event_store.sources.values()))
+    session = next(iter(event_store.sessions.values()))
+    event = next(iter(event_store.events.values()))
+    raw_ref = next(iter(event_store.raw_refs.values()))
+    assert source.source_name == "huggingface"
+    assert source.source_type == "huggingface"
+    assert session.session_type == "huggingface_scan"
+    assert event.event_type == "huggingface_like"
+    assert event.native_event_id == "org/model-a"
+    assert event.privacy == {"classification": "public"}
+    assert Path(raw_ref.path).is_relative_to(layout.raw_root)
+    assert db.get_ingestion_entry("hf_model_org_model-a") is not None
+
+
+def test_research_graph_missing_paper_queue_records_capture_event(tmp_path: Path):
+    config, layout, db = _layout_and_db(tmp_path)
+    event_store = _store(layout)
+    service = ResearchGraphService(
+        db,
+        config=config,
+        layout=layout,
+        capture_event_store=event_store,
+    )
+    shared_reference = {
+        "title": "Shared Missing Paper",
+        "arxiv_id": "2501.12345",
+        "pdf_url": "https://arxiv.org/pdf/2501.12345.pdf",
+    }
+
+    service.record_paper_artifact(
+        _paper("2401.00001", title="First Paper", references=[shared_reference]),
+        queue_missing=False,
+    )
+    service.record_paper_artifact(
+        _paper("2401.00002", title="Second Paper", references=[shared_reference]),
+        queue_missing=False,
+    )
+    queued = service.queue_high_confidence_missing_papers(min_references=2)
+
+    assert queued["queued"] == ["research_graph:arxiv:2501.12345"]
+    source = next(iter(event_store.sources.values()))
+    session = next(iter(event_store.sessions.values()))
+    event = next(iter(event_store.events.values()))
+    raw_ref = next(iter(event_store.raw_refs.values()))
+    assert source.source_name == "research_graph"
+    assert source.source_type == "research_graph"
+    assert session.session_type == "research_graph_missing_papers"
+    assert event.event_type == "research_graph_missing_paper"
+    assert event.native_event_id == "arxiv:2501.12345"
+    assert event.privacy == {"classification": "public"}
+    assert Path(raw_ref.path).is_relative_to(layout.raw_root)
+    assert db.get_ingestion_entry("research_graph:arxiv:2501.12345") is not None
 
 
 class FakeYouTubeProcessor:

@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from core.config import Config
+from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
 from core.x_api_auth import store_x_api_token_bundle
 from core.x_api_bookmark_sync import (
@@ -13,6 +14,36 @@ from core.x_api_bookmark_sync import (
     load_x_api_bookmark_sync_checkpoint,
     sync_x_api_bookmarks,
 )
+
+
+class RecordingCaptureEventStore:
+    def __init__(self, *, raw_roots):
+        self.raw_roots = tuple(raw_roots)
+        self.sources = {}
+        self.sessions = {}
+        self.events = {}
+        self.raw_refs = {}
+        self.artifact_links = {}
+
+    def upsert_source(self, source):
+        self.sources[source.source_id] = source
+        return source
+
+    def upsert_session(self, session):
+        self.sessions[session.session_id] = session
+        return session
+
+    def upsert_event(self, event):
+        self.events[event.event_id] = event
+        return event
+
+    def upsert_raw_ref(self, raw_ref):
+        self.raw_refs[raw_ref.raw_ref_id] = raw_ref
+        return raw_ref
+
+    def upsert_artifact_link(self, link):
+        self.artifact_links[link.artifact_link_id] = link
+        return link
 
 
 def make_config(tmp_path: Path) -> Config:
@@ -261,3 +292,75 @@ def test_sync_x_api_bookmarks_uses_pagination_token_and_resumes_checkpoint(
     assert client.requests[0][2]["max_results"] == "100"
     assert result["checkpoint"]["pagination_token"] == "page-3"
     assert result["checkpoint"]["seen_bookmark_ids"][-1] == "500"
+
+
+def test_sync_x_api_bookmarks_records_capture_event_when_store_supplied(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    write_token_bundle(layout)
+    db = MetadataDB(str(layout.database_path))
+    event_store = RecordingCaptureEventStore(
+        raw_roots=(layout.raw_root, layout.library_root, layout.vault_root)
+    )
+
+    responses = [
+        FakeResponse(
+            200,
+            {
+                "data": [
+                    {
+                        "id": "700",
+                        "text": "capture bookmark",
+                        "created_at": "2026-04-04T12:30:00.000Z",
+                        "author_id": "9",
+                        "conversation_id": "700",
+                    }
+                ],
+                "includes": {
+                    "users": [
+                        {"id": "9", "username": "alice", "name": "Alice"}
+                    ]
+                },
+                "meta": {"result_count": 1},
+            },
+        )
+    ]
+
+    import core.x_api_bookmark_sync as x_api_bookmark_sync
+
+    client = FakeAsyncClient(responses)
+    monkeypatch.setattr(
+        x_api_bookmark_sync.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: client,
+    )
+
+    result = pytest.importorskip("asyncio").run(
+        sync_x_api_bookmarks(
+            config,
+            layout=layout,
+            db=db,
+            capture_event_store=event_store,
+            max_pages=1,
+        )
+    )
+
+    assert result["payloads"][0]["tweet_id"] == "700"
+    source = next(iter(event_store.sources.values()))
+    session = next(iter(event_store.sessions.values()))
+    event = next(iter(event_store.events.values()))
+    raw_ref = next(iter(event_store.raw_refs.values()))
+    link = next(iter(event_store.artifact_links.values()))
+    assert source.source_name == "x_api_backfill"
+    assert source.source_type == "twitter"
+    assert session.session_type == "x_api_bookmark_sync"
+    assert event.event_type == "x_api_bookmark"
+    assert event.native_event_id == "700"
+    assert event.privacy == {"classification": "personal"}
+    assert Path(raw_ref.path).is_relative_to(layout.raw_root)
+    assert link.artifact_id == "700"
+    assert db.get_ingestion_entry("700") is not None
