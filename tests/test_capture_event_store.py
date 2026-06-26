@@ -398,8 +398,12 @@ class FakeCaptureConnection:
         if "finding_id = %s" in sql:
             rows = [row for row in rows if row["finding_id"] == params[0]]
             return FakeCursor(_security_finding_row(rows[0]) if rows else None)
+        param_index = 0
         if "event_id = %s" in sql:
-            rows = [row for row in rows if row["event_id"] == params[0]]
+            rows = [row for row in rows if row["event_id"] == params[param_index]]
+            param_index += 1
+        if "raw_ref_id = %s" in sql:
+            rows = [row for row in rows if row["raw_ref_id"] == params[param_index]]
         return FakeCursor(rows=[_security_finding_row(row) for row in rows])
 
     def _select_privacy_annotations(self, sql, params):
@@ -743,6 +747,14 @@ def test_capture_event_store_upserts_lists_and_fetches_with_stable_ids(tmp_path:
             fingerprint="finding-1",
         )
     )
+    raw_ref_finding = store.upsert_security_finding(
+        SecurityFinding(
+            raw_ref_id=raw_ref.raw_ref_id,
+            finding_type="prompt_injection",
+            severity="medium",
+            fingerprint="raw-ref-finding-1",
+        )
+    )
     privacy = store.upsert_privacy_annotation(
         PrivacyAnnotation(
             event_id=event.event_id,
@@ -817,6 +829,7 @@ def test_capture_event_store_upserts_lists_and_fetches_with_stable_ids(tmp_path:
     assert store.get_raw_ref(raw_ref.raw_ref_id) == same_raw_ref
     assert store.get_artifact_link(link.artifact_link_id) == same_link
     assert store.get_security_finding(finding.finding_id) == same_finding
+    assert store.get_security_finding(raw_ref_finding.finding_id) == raw_ref_finding
     assert store.get_privacy_annotation(privacy.privacy_id) == same_privacy
     assert store.get_retention_policy(retention.retention_id) == same_retention
     assert store.get_provenance_record(provenance.provenance_id) == same_provenance
@@ -826,6 +839,9 @@ def test_capture_event_store_upserts_lists_and_fetches_with_stable_ids(tmp_path:
     assert store.list_raw_refs(event_id=event.event_id) == (same_raw_ref,)
     assert store.list_artifact_links(event_id=event.event_id) == (same_link,)
     assert store.list_security_findings(event_id=event.event_id) == (same_finding,)
+    assert store.list_security_findings(raw_ref_id=raw_ref.raw_ref_id) == (
+        raw_ref_finding,
+    )
     assert store.list_privacy_annotations(event_id=event.event_id) == (same_privacy,)
     assert store.list_retention_policies(target_type="event", target_id=event.event_id) == (
         same_retention,

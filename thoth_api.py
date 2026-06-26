@@ -9,7 +9,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple, Callable, Mapping
+from typing import Dict, Any, Optional, List, Tuple, Callable, Mapping, Union
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +29,8 @@ from core import (
     ArchivistAdminError,
     ArchivistCompilerError,
     ArchivistRuntimeError,
+    CaptureSurfaceError,
+    CaptureSurfaceNotFoundError,
     Tweet,
     ARCHIVIST_JOB_NAME,
     build_archivist_admin_payload,
@@ -60,6 +62,7 @@ from core import (
     run_archivist_topics,
     save_archivist_registry_text,
     ResearchGraphService,
+    open_capture_surface,
 )
 from core.bookmark_ingest import (
     build_bookmark_queue_payload,
@@ -742,6 +745,20 @@ class ConnectorRunRequest(BaseModel):
     options: Dict[str, Any] = Field(default_factory=dict)
 
 
+class CaptureIngestRequest(BaseModel):
+    """Request payload for manually capturing an artifact."""
+
+    artifact_type: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    source: Union[str, Dict[str, Any]] = "manual"
+    session: Optional[Dict[str, Any]] = None
+    event: Optional[Dict[str, Any]] = None
+    raw_path: Optional[str] = None
+    queue_artifact_id: Optional[str] = None
+    priority: int = 0
+    capabilities: List[str] = Field(default_factory=list)
+
+
 class BookmarkStatusRequest(BaseModel):
     """Request body for bookmark status lookups."""
 
@@ -1075,6 +1092,90 @@ async def update_env_vars(env_updates: Dict[str, str]):
     except Exception as e:
         logger.error(f"Error updating env vars: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def open_api_capture_surface():
+    """Open the capture event surface using API runtime configuration."""
+    runtime_config = Config()
+    runtime_config.data = load_runtime_settings()
+    layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+    return open_capture_surface(
+        runtime_config,
+        layout=layout,
+        db=MetadataDB(str(layout.database_path)),
+    )
+
+
+@app.get("/api/capture/sources")
+def get_capture_sources():
+    """List configured capture sources."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.list_sources()
+    except CaptureSurfaceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing capture sources: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/capture/events")
+def list_capture_events(
+    source_id: Optional[str] = Query(default=None),
+    session_id: Optional[str] = Query(default=None),
+    limit: Optional[int] = Query(default=None, gt=0),
+):
+    """List capture events with provenance, raw refs, and policy state."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.list_events(
+                source_id=source_id,
+                session_id=session_id,
+                limit=limit,
+            )
+    except (CaptureSurfaceError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing capture events: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/capture/events/{event_id}")
+def get_capture_event(event_id: str):
+    """Return capture event detail with attached capture metadata."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.get_event(event_id)
+    except CaptureSurfaceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except CaptureSurfaceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error reading capture event {event_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/capture/ingest")
+def ingest_capture_event(request: CaptureIngestRequest):
+    """Manually capture an artifact through the shared lifecycle service."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.ingest_manual(
+                artifact_type=request.artifact_type,
+                payload=request.payload,
+                source=request.source,
+                session=request.session,
+                event=request.event,
+                raw_path=request.raw_path,
+                queue_artifact_id=request.queue_artifact_id,
+                priority=request.priority,
+                capabilities=request.capabilities,
+            )
+    except (CaptureSurfaceError, ValueError, FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error manually ingesting capture artifact: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/connectors/{connector_name}/run")

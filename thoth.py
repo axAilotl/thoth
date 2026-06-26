@@ -20,11 +20,14 @@ from core import (
     AgentSurfaceError,
     AgentSurfaceService,
     ArchivistCompiler,
+    CaptureSurfaceError,
+    CaptureSurfaceNotFoundError,
     Tweet,
     config,
     build_path_layout,
     ensure_wiki_scaffold,
     load_connector_registry,
+    open_capture_surface,
     OKFLintRunner,
     ResearchGraphService,
     WikiLintRunner,
@@ -1790,6 +1793,111 @@ def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def _read_json_arg(value: str | None, *, field_name: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field_name} must be valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return payload
+
+
+def _read_json_file_arg(path: str | None, *, field_name: str) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field_name} file must contain valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{field_name} file must contain a JSON object")
+    return payload
+
+
+def cmd_capture(args):
+    """Inspect capture events and manually ingest artifacts."""
+    try:
+        with open_capture_surface(config) as surface:
+            if args.capture_action == "sources":
+                payload = surface.list_sources()
+            elif args.capture_action == "events":
+                payload = surface.list_events(
+                    source_id=getattr(args, "source_id", None),
+                    session_id=getattr(args, "session_id", None),
+                    limit=getattr(args, "limit", None),
+                )
+            elif args.capture_action == "event":
+                payload = surface.get_event(args.event_id)
+            elif args.capture_action == "ingest":
+                payload_obj = _read_json_arg(
+                    getattr(args, "payload_json", None),
+                    field_name="payload-json",
+                )
+                if payload_obj is None:
+                    payload_obj = _read_json_file_arg(
+                        getattr(args, "payload_file", None),
+                        field_name="payload-file",
+                    )
+                if payload_obj is None:
+                    raise ValueError("--payload-json or --payload-file is required")
+                source_obj = _read_json_arg(
+                    getattr(args, "source_json", None),
+                    field_name="source-json",
+                )
+                event_obj = _read_json_arg(
+                    getattr(args, "event_json", None),
+                    field_name="event-json",
+                )
+                session_obj = _read_json_arg(
+                    getattr(args, "session_json", None),
+                    field_name="session-json",
+                )
+                payload = surface.ingest_manual(
+                    artifact_type=args.artifact_type,
+                    payload=payload_obj,
+                    source=source_obj if source_obj is not None else args.source,
+                    session=session_obj,
+                    event=event_obj,
+                    raw_path=getattr(args, "raw_path", None),
+                    queue_artifact_id=getattr(args, "queue_artifact_id", None),
+                    priority=getattr(args, "priority", 0),
+                    capabilities=getattr(args, "capability", None),
+                )
+            else:
+                raise ValueError("Unknown capture action")
+    except CaptureSurfaceNotFoundError as exc:
+        raise SystemExit(str(exc)) from exc
+    except (CaptureSurfaceError, ValueError, FileNotFoundError, OSError) as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if getattr(args, "json", False) or args.capture_action in {"event", "ingest"}:
+        _print_json(payload)
+        return
+
+    if args.capture_action == "sources":
+        print(f"Capture sources: {payload['total']}")
+        for source in payload["sources"]:
+            print(
+                f"- {source['source_name']} ({source['source_type']}) "
+                f"id={source['source_id']} status={source['status']}"
+            )
+        return
+
+    print(f"Capture events: {payload['total']}")
+    for event in payload["events"]:
+        security = event["security_state"]["state"]
+        privacy = event.get("privacy_class") or "-"
+        retention = event.get("retention_class") or "-"
+        print(
+            f"- {event['event_id']} source={event['source_id']} "
+            f"session={event.get('session_id') or '-'} type={event['event_type']} "
+            f"privacy={privacy} retention={retention} security={security}"
+        )
+
+
 def cmd_artifacts(args):
     """Inspect artifact queue records and provenance."""
     from core.metadata_db import get_metadata_db
@@ -2402,6 +2510,59 @@ Examples:
     # Stats command
     stats_parser = subparsers.add_parser("stats", help="Show statistics")
 
+    capture_parser = subparsers.add_parser(
+        "capture",
+        help="Inspect and ingest capture events",
+    )
+    capture_subparsers = capture_parser.add_subparsers(
+        dest="capture_action",
+        help="Capture actions",
+    )
+    capture_subparsers.required = True
+    capture_sources_parser = capture_subparsers.add_parser(
+        "sources",
+        help="List capture sources",
+    )
+    capture_sources_parser.add_argument("--json", action="store_true")
+    capture_events_parser = capture_subparsers.add_parser(
+        "events",
+        help="List capture events",
+    )
+    capture_events_parser.add_argument("--source-id", type=str, default=None)
+    capture_events_parser.add_argument("--session-id", type=str, default=None)
+    capture_events_parser.add_argument("--limit", type=int, default=None)
+    capture_events_parser.add_argument("--json", action="store_true")
+    capture_event_parser = capture_subparsers.add_parser(
+        "event",
+        help="Show capture event detail",
+    )
+    capture_event_parser.add_argument("event_id")
+    capture_event_parser.add_argument("--json", action="store_true")
+    capture_ingest_parser = capture_subparsers.add_parser(
+        "ingest",
+        help="Manually capture an artifact through the lifecycle service",
+    )
+    capture_ingest_parser.add_argument("--artifact-type", required=True)
+    capture_ingest_parser.add_argument("--source", default="manual")
+    capture_ingest_parser.add_argument("--source-json", default=None)
+    capture_payload_group = capture_ingest_parser.add_mutually_exclusive_group(
+        required=True
+    )
+    capture_payload_group.add_argument("--payload-json", default=None)
+    capture_payload_group.add_argument("--payload-file", default=None)
+    capture_ingest_parser.add_argument("--session-json", default=None)
+    capture_ingest_parser.add_argument("--event-json", default=None)
+    capture_ingest_parser.add_argument("--raw-path", default=None)
+    capture_ingest_parser.add_argument("--queue-artifact-id", default=None)
+    capture_ingest_parser.add_argument("--priority", type=int, default=0)
+    capture_ingest_parser.add_argument(
+        "--capability",
+        action="append",
+        default=None,
+        help="Capability to attach to the queue entry; repeat for multiple values",
+    )
+    capture_ingest_parser.add_argument("--json", action="store_true")
+
     artifacts_parser = subparsers.add_parser(
         "artifacts",
         help="Inspect artifacts and provenance",
@@ -3000,7 +3161,7 @@ Examples:
     # Setup logging
     setup_logging(args.verbose)
 
-    validation_exempt = {"artifacts", "connectors", "query", "research"}
+    validation_exempt = {"artifacts", "capture", "connectors", "query", "research"}
 
     # Validate configuration (allow offline-safe commands even if invalid)
     if args.command not in validation_exempt and not config.validate_and_warn():
@@ -3008,6 +3169,7 @@ Examples:
         offline_safe = {
             "stats",
             "artifacts",
+            "capture",
             "ingest",
             "query",
             "wiki",
@@ -3038,7 +3200,7 @@ Examples:
     if not args.command:
         args.command = "stats"
 
-    scaffold_exempt = {"artifacts", "connectors", "research"}
+    scaffold_exempt = {"artifacts", "capture", "connectors", "research"}
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
 
@@ -3062,6 +3224,8 @@ Examples:
             asyncio.run(cmd_twitter_transcripts(args))
         elif args.command == "stats":
             cmd_stats(args)
+        elif args.command == "capture":
+            cmd_capture(args)
         elif args.command == "artifacts":
             cmd_artifacts(args)
         elif args.command == "ingest":
