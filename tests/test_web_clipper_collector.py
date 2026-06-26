@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -6,9 +7,15 @@ import pytest
 
 from collectors.web_clipper_collector import WebClipperCollector
 from core.config import Config
-from core.ingestion_runtime import KnowledgeArtifactRuntime
+from core.ingestion_runtime import IngestionRuntimeError, KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
+from core.prompt_security import (
+    PROMPT_SECURITY_POLICY_NEEDS_REVIEW,
+    THOTH_SECURITY_PATTERN_IDS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
+)
+from tests.security_hostile_fixtures import hostile_text
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "web_clipper"
 
@@ -163,6 +170,46 @@ def test_web_clipper_collector_queues_notes_for_shared_runtime(
     wiki_content = wiki_page.read_text(encoding="utf-8")
     assert "captured note" in wiki_content
     assert "Clippings/capture.md" in wiki_content
+
+
+def test_web_clipper_collector_quarantines_hostile_fixture(tmp_path: Path):
+    collector, vault_root = make_collector(tmp_path)
+
+    note_file = vault_root / "Clippings" / "hostile-hidden-html.md"
+    note_file.write_text(
+        "---\n"
+        "title: Hostile Hidden HTML\n"
+        "url: https://example.com/hostile-hidden-html\n"
+        "lang: en\n"
+        "---\n"
+        "\n"
+        "# Hostile Hidden HTML\n\n"
+        f"{hostile_text('hidden_html')}\n",
+        encoding="utf-8",
+    )
+
+    discovered = collector.collect()
+
+    assert len(discovered) == 1
+    entry = collector.db.get_ingestion_entry(
+        "webclip:Clippings/hostile-hidden-html.md"
+    )
+    assert entry is not None
+    assert entry.status == "needs_review"
+
+    payload = json.loads(entry.payload_json)
+    metadata = payload["normalized_metadata"]
+    assert "hidden_html_payload" in metadata[THOTH_SECURITY_PATTERN_IDS_KEY]
+    assert metadata[THOTH_SECURITY_POLICY_KEY]["status"] == (
+        PROMPT_SECURITY_POLICY_NEEDS_REVIEW
+    )
+
+    runtime = KnowledgeArtifactRuntime(layout=collector.layout, db=collector.db)
+    with pytest.raises(IngestionRuntimeError, match="security review"):
+        asyncio.run(runtime.process_ingestion_entry(entry))
+    assert not (
+        collector.layout.wiki_root / "pages" / "clip-hostile-hidden-html.md"
+    ).exists()
 
 
 def test_web_clipper_collector_fails_closed_when_roots_missing(tmp_path: Path):

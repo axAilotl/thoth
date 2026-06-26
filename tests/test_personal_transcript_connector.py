@@ -7,9 +7,15 @@ import pytest
 from collectors.personal_transcript_connector import PersonalTranscriptConnector
 from core.agent_surface import AgentSurfaceError, AgentSurfaceService
 from core.config import Config
-from core.ingestion_runtime import KnowledgeArtifactRuntime
+from core.ingestion_runtime import IngestionRuntimeError, KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
+from core.prompt_security import (
+    PROMPT_SECURITY_POLICY_NEEDS_REVIEW,
+    THOTH_SECURITY_PATTERN_IDS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
+)
+from tests.security_hostile_fixtures import hostile_text
 
 
 def _config(tmp_path: Path) -> Config:
@@ -95,6 +101,60 @@ def test_personal_transcript_connector_preserves_and_queues_omi_export(tmp_path:
     assert "Session ID: `session-1`" in wiki_text
     assert "Device ID: `omi-device-1`" in wiki_text
     assert "Speaker: Ada" in wiki_text
+
+
+def test_personal_transcript_connector_quarantines_hostile_fixture(tmp_path: Path):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    export_path = tmp_path / "omi-hostile-export.json"
+    export_path.write_text(
+        json.dumps(
+            {
+                "sessions": [
+                    {
+                        "id": "hostile-session",
+                        "title": "Hostile multilingual transcript",
+                        "device_id": "omi-device-1",
+                        "started_at": "2026-04-04T10:00:00Z",
+                        "segments": [
+                            {
+                                "timestamp": "2026-04-04T10:00:00Z",
+                                "speaker": "Ada",
+                                "text": hostile_text("multilingual_injection"),
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    connector = PersonalTranscriptConnector(config, layout=layout, db=db)
+
+    result = asyncio.run(connector.collect(export_paths=[export_path]))
+
+    assert result.records[0].session_id == "hostile-session"
+    entry = db.get_ingestion_entry("omi_transcript_hostile-session")
+    assert entry is not None
+    assert entry.status == "needs_review"
+
+    payload = json.loads(entry.payload_json)
+    metadata = payload["normalized_metadata"]
+    assert (
+        "multilingual_instruction_override"
+        in metadata[THOTH_SECURITY_PATTERN_IDS_KEY]
+    )
+    assert metadata[THOTH_SECURITY_POLICY_KEY]["status"] == (
+        PROMPT_SECURITY_POLICY_NEEDS_REVIEW
+    )
+
+    runtime = KnowledgeArtifactRuntime(config, layout=layout, db=db)
+    with pytest.raises(IngestionRuntimeError, match="security review"):
+        asyncio.run(runtime.process_ingestion_entry(entry))
+    assert not (
+        layout.wiki_root / "pages" / "transcript-omi-transcript-hostile-session.md"
+    ).exists()
 
 
 def test_personal_transcript_connector_fails_closed_without_exports(tmp_path: Path):

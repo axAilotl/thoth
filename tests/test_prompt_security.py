@@ -16,6 +16,11 @@ from core.prompt_security import (
     scan_prompt_threats,
     wrap_untrusted_content,
 )
+from tests.security_hostile_fixtures import hostile_fixture_corpus
+
+
+def _fixture_id(fixture):
+    return str(fixture["id"])
 
 
 def test_prompt_threat_scanner_detects_injection_and_invisible_unicode():
@@ -33,6 +38,32 @@ def test_prompt_threat_scanner_detects_injection_and_invisible_unicode():
     assert "\u202e" not in sanitized
     assert report.original_length == len(content)
     assert report.sanitized_length == len(sanitized)
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    hostile_fixture_corpus(),
+    ids=_fixture_id,
+)
+def test_prompt_security_scanner_covers_hostile_fixture_corpus(fixture):
+    findings = scan_prompt_threats(fixture["text"], scope=fixture["scope"])
+    pattern_ids = {finding.pattern_id for finding in findings}
+
+    assert set(fixture["expected_pattern_ids"]).issubset(pattern_ids)
+
+    metadata = prompt_security_metadata_for_text(
+        fixture["text"],
+        source_label=fixture["source_label"],
+        scope=fixture["scope"],
+    )
+    policy = prompt_security_policy_for_metadata(
+        metadata,
+        source_type=fixture["source_type"],
+        source_label=fixture["source_label"],
+        source_path=fixture["source_path"],
+    )
+
+    assert policy["status"] == fixture["expected_policy_status"]
 
 
 def test_prompt_security_metadata_omits_source_text_and_secret_values():

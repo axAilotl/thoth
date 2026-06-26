@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,8 +7,15 @@ import pytest
 
 from core.agent_surface import AgentSurfaceService
 from core.config import Config
+from core.ingestion_runtime import IngestionRuntimeError, KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
+from core.prompt_security import (
+    PROMPT_SECURITY_POLICY_BLOCKED,
+    THOTH_SECURITY_PATTERN_IDS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
+)
+from tests.security_hostile_fixtures import hostile_text
 
 
 def _config(tmp_path: Path) -> Config:
@@ -256,6 +264,71 @@ def test_pi_skills_execute_queues_valid_skill_output(monkeypatch, tmp_path: Path
     assert queued_payload["custom_metadata"]["skill_source_name"] == (
         "pi_skill:collect-notes"
     )
+
+
+def test_pi_skills_execute_quarantines_hostile_promptware_output(
+    monkeypatch, tmp_path: Path
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+
+    class FakeLLMInterface:
+        def __init__(self, _config):
+            self.providers = {"pi": object()}
+
+        async def generate(self, *args, **kwargs):
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "transcript",
+                                "artifact_id": "pi-skill-c2",
+                                "payload": {
+                                    "title": "Pi Skill C2 Fixture",
+                                    "raw_transcript": hostile_text("promptware_c2"),
+                                    "processed_transcript": hostile_text("promptware_c2"),
+                                },
+                            }
+                        ]
+                    }
+                ),
+                error=None,
+            )
+
+    monkeypatch.setattr(
+        "collectors.pi_skill_connector.LLMInterface",
+        FakeLLMInterface,
+    )
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    payload = service.run_connector(
+        "pi_skills",
+        execute=True,
+        options={"skill": "collect-notes", "prompt": "Collect this."},
+    )
+
+    assert payload["status"] == "completed"
+    assert payload["result"]["queued_count"] == 1
+    entry = db.get_ingestion_entry("pi-skill-c2")
+    assert entry is not None
+    assert entry.status == "blocked"
+
+    queued_payload = json.loads(entry.payload_json)
+    metadata = queued_payload["normalized_metadata"]
+    assert {"agent_config_persistence", "c2_beacon", "c2_promptware"}.issubset(
+        set(metadata[THOTH_SECURITY_PATTERN_IDS_KEY])
+    )
+    assert (
+        metadata[THOTH_SECURITY_POLICY_KEY]["status"]
+        == PROMPT_SECURITY_POLICY_BLOCKED
+    )
+
+    runtime = KnowledgeArtifactRuntime(config, layout=layout, db=db)
+    with pytest.raises(IngestionRuntimeError, match="security review"):
+        asyncio.run(runtime.process_ingestion_entry(entry))
+    assert not (layout.wiki_root / "pages" / "transcript-pi-skill-c2.md").exists()
 
 
 def test_pi_skills_rejects_direct_wiki_write_fields(monkeypatch, tmp_path: Path):
