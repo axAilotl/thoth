@@ -3038,7 +3038,7 @@ Examples:
     if not args.command:
         args.command = "stats"
 
-    scaffold_exempt = {"artifacts", "connectors", "research"}
+    scaffold_exempt = {"artifacts", "connectors", "query", "research"}
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
 

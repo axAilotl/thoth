@@ -11,9 +11,13 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from ..prompt_security import (
     THOTH_REDACTION_METADATA_KEY,
     THOTH_SECURITY_FINDINGS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
     THOTH_SECURITY_SCANNED_LENGTH_KEY,
+    is_strict_prompt_security_source,
     merge_prompt_security_metadata,
+    merge_prompt_security_policy_metadata,
     prompt_security_metadata_for_text,
+    prompt_security_policy_for_metadata,
 )
 
 
@@ -287,6 +291,10 @@ def _has_security_metadata(value: Mapping[str, Any] | None) -> bool:
     )
 
 
+def _has_security_policy(value: Mapping[str, Any] | None) -> bool:
+    return bool(isinstance(value, Mapping) and value.get(THOTH_SECURITY_POLICY_KEY))
+
+
 @dataclass
 class KnowledgeArtifact:
     """Base class for all ingestible knowledge entities."""
@@ -423,18 +431,39 @@ class KnowledgeArtifact:
         return data
 
     def _ensure_prompt_security_metadata(self) -> None:
-        if _has_security_metadata(self.normalized_metadata):
-            return
         source_label = f"{self.source_type}:{self.id}" if self.id else self.source_type
-        security_metadata = prompt_security_metadata_for_text(
-            self.raw_content,
-            source_label=source_label or "artifact",
-            scope="context",
-        )
-        if security_metadata:
-            self.normalized_metadata = merge_prompt_security_metadata(
+        if not _has_security_metadata(self.normalized_metadata):
+            source_path = self.raw_payload.path if self.raw_payload else None
+            strict_scope = is_strict_prompt_security_source(
+                source_type=self.source_type,
+                source_label=source_label or "artifact",
+                source_path=source_path,
+                metadata=self.normalized_metadata,
+            )
+            security_metadata = prompt_security_metadata_for_text(
+                self.raw_content,
+                source_label=source_label or "artifact",
+                scope="strict" if strict_scope else "context",
+            )
+            if security_metadata:
+                self.normalized_metadata = merge_prompt_security_metadata(
+                    self.normalized_metadata,
+                    security_metadata,
+                )
+        if (
+            self.normalized_metadata.get(THOTH_SECURITY_FINDINGS_KEY)
+            and not _has_security_policy(self.normalized_metadata)
+        ):
+            source_path = self.raw_payload.path if self.raw_payload else None
+            policy = prompt_security_policy_for_metadata(
                 self.normalized_metadata,
-                security_metadata,
+                source_type=self.source_type,
+                source_label=source_label or "artifact",
+                source_path=source_path,
+            )
+            self.normalized_metadata = merge_prompt_security_policy_metadata(
+                self.normalized_metadata,
+                policy,
             )
 
     def apply_queue_context(

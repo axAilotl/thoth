@@ -17,6 +17,7 @@ from collectors.web_clipper_parser import parse_web_clipper_markdown
 from ..config import Config
 from ..metadata_db import MetadataDB, get_metadata_db
 from ..path_layout import PathLayout, build_path_layout
+from ..prompt_security import prompt_security_requires_review
 from ..wiki_io import read_document
 from .models import (
     ArchivistCandidate,
@@ -257,6 +258,8 @@ def _load_or_parse_document(
         return existing, True
 
     source_id = _lookup_source_id(path, layout=layout, db=db)
+    if _is_security_excluded_path(path, suffix=suffix, db=db, source_id=source_id):
+        return None, False
     if suffix in SUPPORTED_TEXT_EXTENSIONS:
         title, content_text, tags, source_type, file_type, source_hash = _read_text_document(
             path,
@@ -310,6 +313,29 @@ def _lookup_source_id(path: Path, *, layout: PathLayout, db: MetadataDB) -> str 
             return entry.source_id
 
     return None
+
+
+def _is_security_excluded_path(
+    path: Path,
+    *,
+    suffix: str,
+    db: MetadataDB,
+    source_id: str | None,
+) -> bool:
+    if source_id and db.ingestion_entry_requires_security_review(source_id):
+        return True
+    if suffix not in {".md", ".markdown"}:
+        return False
+    document = read_document(path)
+    frontmatter = document.frontmatter if isinstance(document.frontmatter, dict) else {}
+    if prompt_security_requires_review(frontmatter):
+        return True
+    artifact_id = str(
+        frontmatter.get("thoth_artifact_id")
+        or frontmatter.get("artifact_id")
+        or ""
+    ).strip()
+    return bool(artifact_id and db.ingestion_entry_requires_security_review(artifact_id))
 
 
 def _read_text_document(

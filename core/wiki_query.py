@@ -11,6 +11,7 @@ from typing import Iterable, Sequence
 
 from .config import Config
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import prompt_security_requires_review
 from .wiki_contract import (
     WikiContract,
     WikiPageSpec,
@@ -19,7 +20,11 @@ from .wiki_contract import (
     normalize_wiki_slug,
 )
 from .wiki_io import atomic_write_text, read_document, render_frontmatter, truncate_summary
-from .wiki_scaffold import append_wiki_log_entry, ensure_wiki_scaffold
+from .wiki_scaffold import (
+    append_wiki_log_entry,
+    build_wiki_scaffold,
+    ensure_wiki_scaffold,
+)
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
@@ -99,11 +104,23 @@ class WikiQueryRunner:
     ):
         self.config = config
         self.layout = layout or build_path_layout(config)
-        self.layout.ensure_directories()
-        self.scaffold = ensure_wiki_scaffold(config)
-        self.contract = contract or build_wiki_contract(config)
+        self.project_root = self.layout.vault_root.parent
+        self.scaffold = build_wiki_scaffold(
+            config,
+            project_root=self.project_root,
+        )
+        self.contract = contract or build_wiki_contract(
+            config,
+            project_root=self.project_root,
+        )
 
-    def search(self, query: str, *, limit: int = 10) -> WikiQueryResult:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        include_quarantined: bool = False,
+    ) -> WikiQueryResult:
         """Search compiled wiki pages using deterministic text matching."""
         if limit <= 0:
             raise ValueError("Wiki query limit must be positive")
@@ -117,6 +134,8 @@ class WikiQueryRunner:
             title = str(frontmatter.get("title") or page_path.stem)
             slug = str(_frontmatter_value(frontmatter, "thoth_slug", "slug") or page_path.stem)
             if is_legacy_tweet_slug(slug):
+                continue
+            if not include_quarantined and prompt_security_requires_review(frontmatter):
                 continue
             summary = str(
                 _frontmatter_value(frontmatter, "description", "thoth_summary", "summary")
@@ -245,6 +264,10 @@ class WikiQueryRunner:
         if curated_notes:
             body_lines.extend(["", "## Curated Notes", "", curated_notes.strip(), ""])
 
+        self.scaffold = ensure_wiki_scaffold(
+            self.config,
+            project_root=self.project_root,
+        )
         atomic_write_text(page_path, "\n".join(body_lines) + "\n")
 
         from .wiki_updater import CompiledWikiUpdater
