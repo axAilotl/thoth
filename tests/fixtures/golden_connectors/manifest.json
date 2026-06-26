@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "description": "Small deterministic local-only golden fixtures for primary connector/source classes.",
+  "event_assertions": {
+    "status": "future_facing",
+    "reason": "The Postgres capture event backbone is not implemented yet; current tests validate raw preservation, queue payloads, wiki compilation where supported, and provenance."
+  },
+  "fixtures": [
+    {
+      "id": "omi_personal_transcript",
+      "source_class": "omi",
+      "artifact_type": "transcript",
+      "path": "omi/export.json",
+      "media_type": "application/json",
+      "sha256": "442b0c839bcf9ebf9abe70a557b2332a34d60c11c0edc000a5f2d1a467abf4ca",
+      "expected": {
+        "artifact_id": "omi_transcript_golden-omi-session",
+        "native_id": "golden-omi-session",
+        "wiki_supported": true
+      }
+    },
+    {
+      "id": "youtube_watch_later",
+      "source_class": "youtube",
+      "artifact_type": "video",
+      "path": "youtube/watch_later.html",
+      "media_type": "text/html",
+      "sha256": "32462cc04ae1b3b7fd58b76ffe69c0357a9ae2a06381ee2be13d1fda3ab2c561",
+      "expected": {
+        "artifact_id": "yt_video_goldenYt01",
+        "native_id": "goldenYt01",
+        "wiki_supported": true
+      }
+    },
+    {
+      "id": "github_repository",
+      "source_class": "github",
+      "artifact_type": "repository",
+      "path": "github/repository.json",
+      "media_type": "application/json",
+      "sha256": "cbbf38cb87c6d5279b4a6f5ebf74363efea4f5a84ffddd90283ef0ae4d854f28",
+      "expected": {
+        "artifact_id": "thoth-fixtures/golden-repo",
+        "native_id": "thoth-fixtures/golden-repo",
+        "wiki_supported": true
+      }
+    },
+    {
+      "id": "huggingface_repository",
+      "source_class": "huggingface",
+      "artifact_type": "repository",
+      "path": "huggingface/repository.json",
+      "media_type": "application/json",
+      "sha256": "51cf6814b1b69b896afd3174d05f2f7d626366c4b69129b15d3a9de5ed5ec9d9",
+      "expected": {
+        "artifact_id": "thoth-fixtures/golden-model",
+        "native_id": "thoth-fixtures/golden-model",
+        "wiki_supported": true
+      }
+    },
+    {
+      "id": "arxiv_paper",
+      "source_class": "arxiv",
+      "artifact_type": "paper",
+      "path": "arxiv/paper.json",
+      "media_type": "application/json",
+      "sha256": "0c158290996e1d02081bc49619d77ce2d96ad3e37d362bcdc7cfb8ac72f249df",
+      "expected": {
+        "artifact_id": "2604.00001",
+        "native_id": "2604.00001",
+        "wiki_supported": true
+      }
+    },
+    {
+      "id": "web_clipper_note",
+      "source_class": "web_clip",
+      "artifact_type": "web_clipper",
+      "path": "web_clips/capture_note.md",
+      "media_type": "text/markdown",
+      "sha256": "f676991cfe38ce2dfe541f2449f84d0e9311e1d9e5caacf84b14d7ba937aecc2",
+      "expected": {
+        "artifact_id": "webclip:Clippings/capture_note.md",
+        "native_id": "Clippings/capture_note.md",
+        "wiki_supported": true
+      }
+    },
+    {
+      "id": "pi_skill_output",
+      "source_class": "pi_skill_output",
+      "artifact_type": "transcript",
+      "path": "pi_skill_outputs/output.json",
+      "media_type": "application/json",
+      "sha256": "e351b72be254720a2ea3366407185d99144d7ef643e5b72a14cb4edee1f80aa8",
+      "expected": {
+        "artifact_id": "pi-golden-note",
+        "native_id": "pi-golden-note",
+        "wiki_supported": true
+      }
+    },
+    {
+      "id": "imported_markdown_note",
+      "source_class": "imported_markdown",
+      "artifact_type": "markdown",
+      "path": "imported_markdown/manual_note.md",
+      "media_type": "text/markdown",
+      "sha256": "674f6ca5fd219521fd3ff9714f1eccbfc688d6d22f884c4df4d035be55a068bd",
+      "expected": {
+        "artifact_id": "manual-imported-markdown-golden-note",
+        "native_id": "manual_note.md",
+        "wiki_supported": false,
+        "current_behavior": "fixture_only_until_imported_markdown_connector_exists"
+      }
+    }
+  ]
+}
