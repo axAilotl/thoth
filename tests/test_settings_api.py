@@ -104,12 +104,19 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert payload["runtime"]["groups"]["connectors"]["total"] == 9
-    assert payload["runtime"]["groups"]["skills"]["total"] == 1
-    assert payload["runtime"]["groups"]["storage"]["raw_root"] == (
+    assert payload["runtime"]["groups"]["sources_and_skills"]["connectors"]["total"] == 9
+    assert payload["runtime"]["groups"]["sources_and_skills"]["skills"]["total"] == 1
+    assert payload["runtime"]["groups"]["advanced"]["storage"]["raw_root"] == (
         str(tmp_path / "vault" / "raw")
     )
-    assert payload["runtime"]["groups"]["wiki"]["okf_target"] == "v0.1"
+    assert payload["runtime"]["groups"]["wiki_and_archivist"]["okf_target"] == "v0.1"
+    assert payload["runtime"]["groups"]["overview"]["what_happened"] == [
+        "0/0 providers enabled",
+        "8/9 sources enabled",
+        "1 Pi skills configured",
+        "1 archivist topics loaded",
+    ]
+    assert "security" in payload["runtime"]["groups"]
     assert payload["config_files"] == {
         "base": str(tmp_path / "config.example.json"),
         "local": str(tmp_path / "config.json"),
