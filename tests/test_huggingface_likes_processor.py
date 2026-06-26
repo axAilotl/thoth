@@ -138,6 +138,26 @@ def test_huggingface_resume_generates_missing_summary_from_cached_readme(
     assert created[0][0] == "# cached readme\nuseful content"
 
 
+def test_huggingface_processor_allows_repo_processing_without_username(
+    tmp_path: Path,
+    monkeypatch,
+    restore_runtime_config,
+):
+    _configure_runtime_paths(tmp_path)
+    config.set("sources.huggingface.username", "")
+    monkeypatch.delenv("HF_USER", raising=False)
+    _install_fake_hf_module(monkeypatch)
+    metadata_db = MetadataDB(db_path=str(tmp_path / "meta.db"))
+
+    processor = HuggingFaceLikesProcessor(
+        vault_path=str(tmp_path / "vault"),
+        metadata_db=metadata_db,
+        cache_dir=tmp_path / "hf_cache",
+    )
+
+    assert processor.hf_user in (None, "")
+
+
 def test_huggingface_prefilters_cached_repo_before_repo_info(
     tmp_path: Path,
     monkeypatch,

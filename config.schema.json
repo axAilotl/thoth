@@ -322,6 +322,22 @@
               "type": "array",
               "items": { "type": "string" }
             },
+            "api_enabled": { "type": "boolean" },
+            "api_key": { "type": "string" },
+            "api_key_env": { "type": "string" },
+            "base_url": { "type": "string" },
+            "api_limit": { "type": "integer", "minimum": 1 },
+            "api_page_size": { "type": "integer", "minimum": 1 },
+            "include_transcript": { "type": "boolean" },
+            "start_date": { "type": "string" },
+            "end_date": { "type": "string" },
+            "categories": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "folder_id": { "type": "string" },
+            "starred": { "type": ["boolean", "null"] },
+            "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
             "source_name": { "type": "string" },
             "device_id": { "type": "string" },
             "speaker": { "type": "string" },

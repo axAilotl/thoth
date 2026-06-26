@@ -7,12 +7,20 @@ import csv
 import hashlib
 import io
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from collectors.omi_api_client import (
+    OMI_DEFAULT_BASE_URL,
+    OMI_DEFAULT_PAGE_SIZE,
+    OmiConversationQuery,
+    fetch_omi_conversations,
+    normalize_categories,
+)
 from core.artifacts import TranscriptArtifact
 from core.config import Config, config
 from core.metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
@@ -41,6 +49,7 @@ class PersonalTranscriptResult:
     records: tuple[PersonalTranscriptRecord, ...] = field(default_factory=tuple)
     export_paths: tuple[str, ...] = field(default_factory=tuple)
     export_dirs: tuple[str, ...] = field(default_factory=tuple)
+    api_conversation_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +67,7 @@ class PersonalTranscriptResult:
             "queued_count": sum(1 for record in self.records if record.queued),
             "export_paths": list(self.export_paths),
             "export_dirs": list(self.export_dirs),
+            "api_conversation_count": self.api_conversation_count,
         }
 
 
@@ -105,6 +115,18 @@ class PersonalTranscriptConnector:
         export_paths: Iterable[str | Path] | None = None,
         export_dirs: Iterable[str | Path] | None = None,
         file_patterns: Iterable[str] | None = None,
+        api_key: str | None = None,
+        api_key_env: str | None = None,
+        api_base_url: str | None = None,
+        api_limit: int | None = None,
+        api_page_size: int | None = None,
+        include_transcript: bool | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        categories: Iterable[str] | str | None = None,
+        folder_id: str | None = None,
+        starred: bool | None = None,
+        timeout_seconds: float | None = None,
         source_name: str | None = None,
         device_id: str | None = None,
         speaker: str | None = None,
@@ -138,51 +160,98 @@ class PersonalTranscriptConnector:
             or _string_list(configured.get("file_patterns"))
             or DEFAULT_FILE_PATTERNS
         )
-        if not resolved_paths and not resolved_dirs:
-            raise ValueError(
-                "Personal transcript ingestion requires export_paths or export_dirs"
-            )
-
-        input_files = self._resolve_input_files(
-            export_paths=resolved_paths,
-            export_dirs=resolved_dirs,
-            file_patterns=resolved_patterns,
+        api_requested = _omi_api_requested(
+            has_local_sources=bool(resolved_paths or resolved_dirs),
+            configured=configured,
+            api_key=api_key,
+            api_key_env=api_key_env,
+            api_base_url=api_base_url,
+            api_limit=api_limit,
+            api_page_size=api_page_size,
+            include_transcript=include_transcript,
+            start_date=start_date,
+            end_date=end_date,
+            categories=categories,
+            folder_id=folder_id,
+            starred=starred,
+            timeout_seconds=timeout_seconds,
         )
-        if limit is not None:
-            input_files = input_files[: max(0, int(limit))]
+        api_query = (
+            _resolve_omi_api_query(
+                configured,
+                api_key=api_key,
+                api_key_env=api_key_env,
+                api_base_url=api_base_url,
+                api_limit=api_limit if api_limit is not None else limit,
+                api_page_size=api_page_size,
+                include_transcript=include_transcript,
+                start_date=start_date,
+                end_date=end_date,
+                categories=categories,
+                folder_id=folder_id,
+                starred=starred,
+                timeout_seconds=timeout_seconds,
+            )
+            if api_requested
+            else None
+        )
+        if not resolved_paths and not resolved_dirs and api_query is None:
+            raise ValueError(
+                "Personal transcript ingestion requires export_paths, export_dirs, or an Omi API key"
+            )
 
         records: list[PersonalTranscriptRecord] = []
-        for export_path in input_files:
-            raw_export_path = await asyncio.to_thread(
-                self._preserve_raw_export,
-                export_path,
-                defaults.source_name,
+        if resolved_paths or resolved_dirs:
+            input_files = self._resolve_input_files(
+                export_paths=resolved_paths,
+                export_dirs=resolved_dirs,
+                file_patterns=resolved_patterns,
             )
-            sessions = await asyncio.to_thread(
-                self._parse_export_file,
-                export_path,
-                defaults,
-            )
-            for session in sessions:
-                transcript_path = self._write_transcript_file(
-                    session,
-                    source_name=defaults.source_name,
-                    raw_export_path=raw_export_path,
+            if limit is not None:
+                input_files = input_files[: max(0, int(limit))]
+
+            for export_path in input_files:
+                raw_export_path = await asyncio.to_thread(
+                    self._preserve_raw_export,
+                    export_path,
+                    defaults.source_name,
                 )
-                transcript_artifact = self._build_transcript_artifact(
-                    session,
-                    source_name=defaults.source_name,
-                    raw_export_path=raw_export_path,
-                    transcript_path=transcript_path,
+                sessions = await asyncio.to_thread(
+                    self._parse_export_file,
+                    export_path,
+                    defaults,
                 )
-                self._queue_artifact(transcript_artifact)
+                for session in sessions:
+                    records.append(
+                        self._queue_session(
+                            session,
+                            source_name=defaults.source_name,
+                            raw_export_path=raw_export_path,
+                        )
+                    )
+
+        api_conversation_count = 0
+        if api_query is not None:
+            conversations = await fetch_omi_conversations(api_query)
+            api_conversation_count = len(conversations)
+            for index, conversation in enumerate(conversations):
+                raw_export_path = await asyncio.to_thread(
+                    self._preserve_raw_payload,
+                    conversation,
+                    defaults.source_name,
+                    source_label="api",
+                )
+                session = _session_from_mapping(
+                    conversation,
+                    fallback_id="omi-api",
+                    index=index,
+                    defaults=defaults,
+                )
                 records.append(
-                    PersonalTranscriptRecord(
-                        artifact_id=transcript_artifact.id,
-                        session_id=session.session_id,
+                    self._queue_session(
+                        session,
                         source_name=defaults.source_name,
                         raw_export_path=raw_export_path,
-                        transcript_path=transcript_path,
                     )
                 )
 
@@ -190,6 +259,7 @@ class PersonalTranscriptConnector:
             records=tuple(records),
             export_paths=tuple(str(path) for path in resolved_paths),
             export_dirs=tuple(str(path) for path in resolved_dirs),
+            api_conversation_count=api_conversation_count,
         )
 
     def _resolve_input_files(
@@ -241,6 +311,35 @@ class PersonalTranscriptConnector:
             pass
         if not raw_path.exists():
             shutil.copy2(export_path, raw_path)
+        return raw_path
+
+    def _preserve_raw_payload(
+        self,
+        payload: Mapping[str, Any],
+        source_name: str,
+        *,
+        source_label: str,
+    ) -> Path:
+        raw_root = self.layout.raw_root / "personal_transcripts" / _safe_slug(source_name)
+        raw_root.mkdir(parents=True, exist_ok=True)
+        encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode(
+            "utf-8"
+        )
+        digest = hashlib.sha256(encoded).hexdigest()[:12]
+        session_id = _safe_slug(
+            _first_string(
+                payload,
+                "id",
+                "session_id",
+                "sessionId",
+                "conversation_id",
+                "memory_id",
+            )
+            or "conversation"
+        )
+        raw_path = raw_root / f"{_safe_slug(source_label)}_{session_id}-{digest}.json"
+        if not raw_path.exists():
+            raw_path.write_bytes(encoded + b"\n")
         return raw_path
 
     def _parse_export_file(
@@ -392,6 +491,33 @@ class PersonalTranscriptConnector:
         except ValueError:
             return str(path)
 
+    def _queue_session(
+        self,
+        session: _NormalizedTranscriptSession,
+        *,
+        source_name: str,
+        raw_export_path: Path,
+    ) -> PersonalTranscriptRecord:
+        transcript_path = self._write_transcript_file(
+            session,
+            source_name=source_name,
+            raw_export_path=raw_export_path,
+        )
+        transcript_artifact = self._build_transcript_artifact(
+            session,
+            source_name=source_name,
+            raw_export_path=raw_export_path,
+            transcript_path=transcript_path,
+        )
+        self._queue_artifact(transcript_artifact)
+        return PersonalTranscriptRecord(
+            artifact_id=transcript_artifact.id,
+            session_id=session.session_id,
+            source_name=source_name,
+            raw_export_path=raw_export_path,
+            transcript_path=transcript_path,
+        )
+
 
 def _sessions_from_json(
     payload: Any,
@@ -423,6 +549,110 @@ def _sessions_from_json(
             defaults=defaults,
         )
     raise ValueError("Personal transcript JSON export must contain an object or array")
+
+
+def _resolve_omi_api_query(
+    configured: Mapping[str, Any],
+    *,
+    api_key: str | None,
+    api_key_env: str | None,
+    api_base_url: str | None,
+    api_limit: int | None,
+    api_page_size: int | None,
+    include_transcript: bool | None,
+    start_date: str | None,
+    end_date: str | None,
+    categories: Iterable[str] | str | None,
+    folder_id: str | None,
+    starred: bool | None,
+    timeout_seconds: float | None,
+) -> OmiConversationQuery | None:
+    env_name = _clean_string(api_key_env or configured.get("api_key_env")) or "OMI_API_KEY"
+    resolved_key = _clean_string(api_key or configured.get("api_key") or os.getenv(env_name))
+    if not resolved_key:
+        return None
+
+    limit = _positive_int(
+        api_limit
+        if api_limit is not None
+        else configured.get("api_limit", configured.get("limit", OMI_DEFAULT_PAGE_SIZE)),
+        field_name="sources.omi.api_limit",
+    )
+    page_size = _positive_int(
+        api_page_size
+        if api_page_size is not None
+        else configured.get("api_page_size", min(limit, OMI_DEFAULT_PAGE_SIZE)),
+        field_name="sources.omi.api_page_size",
+    )
+    include = (
+        bool(include_transcript)
+        if include_transcript is not None
+        else _bool_setting(configured.get("include_transcript"), default=True)
+    )
+    resolved_starred = (
+        starred
+        if starred is not None
+        else _optional_bool_setting(configured.get("starred"))
+    )
+    return OmiConversationQuery(
+        api_key=resolved_key,
+        base_url=_clean_string(api_base_url or configured.get("base_url"))
+        or OMI_DEFAULT_BASE_URL,
+        limit=limit,
+        page_size=page_size,
+        include_transcript=include,
+        start_date=_clean_string(start_date or configured.get("start_date")),
+        end_date=_clean_string(end_date or configured.get("end_date")),
+        categories=normalize_categories(categories or configured.get("categories")),
+        folder_id=_clean_string(folder_id or configured.get("folder_id")),
+        starred=resolved_starred,
+        timeout_seconds=_positive_float(
+            timeout_seconds
+            if timeout_seconds is not None
+            else configured.get("timeout_seconds", 30.0),
+            field_name="sources.omi.timeout_seconds",
+        ),
+    )
+
+
+def _omi_api_requested(
+    *,
+    has_local_sources: bool,
+    configured: Mapping[str, Any],
+    api_key: str | None,
+    api_key_env: str | None,
+    api_base_url: str | None,
+    api_limit: int | None,
+    api_page_size: int | None,
+    include_transcript: bool | None,
+    start_date: str | None,
+    end_date: str | None,
+    categories: Iterable[str] | str | None,
+    folder_id: str | None,
+    starred: bool | None,
+    timeout_seconds: float | None,
+) -> bool:
+    if not has_local_sources:
+        return True
+    if _bool_setting(configured.get("api_enabled"), default=False):
+        return True
+    return any(
+        value not in (None, "", [], ())
+        for value in (
+            api_key,
+            api_key_env,
+            api_base_url,
+            api_limit,
+            api_page_size,
+            include_transcript,
+            start_date,
+            end_date,
+            categories,
+            folder_id,
+            starred,
+            timeout_seconds,
+        )
+    )
 
 
 def _sessions_from_records(
@@ -486,7 +716,15 @@ def _session_from_mapping(
         or defaults.session_id
         or f"{fallback_id}-{index + 1}"
     )
-    segments = _first_sequence(record, "segments", "messages", "utterances", "entries")
+    structured = record.get("structured") if isinstance(record.get("structured"), Mapping) else {}
+    segments = _first_sequence(
+        record,
+        "transcript_segments",
+        "segments",
+        "messages",
+        "utterances",
+        "entries",
+    )
     speaker_values: list[str] = []
     if segments:
         transcript = _render_segment_lines(segments, speaker_values=speaker_values)
@@ -502,7 +740,11 @@ def _session_from_mapping(
     if not transcript:
         raise ValueError(f"Personal transcript session {session_id} has no transcript text")
 
-    title = _first_string(record, "title", "name", "topic") or f"Personal transcript {session_id}"
+    title = (
+        _first_string(record, "title", "name", "topic")
+        or _first_string(structured, "title")
+        or f"Personal transcript {session_id}"
+    )
     speaker = (
         _first_string(record, "speaker", "speaker_name", "person")
         or defaults.speaker
@@ -513,6 +755,7 @@ def _session_from_mapping(
         "device_id",
         "deviceId",
         "device",
+        "source",
         "source_device",
     ) or defaults.device_id
     started_at = _first_string(
@@ -526,12 +769,18 @@ def _session_from_mapping(
     )
     ended_at = _first_string(record, "ended_at", "end_time", "finished_at")
     tags = _string_list(record.get("tags"))
+    category = _first_string(record, "category") or _first_string(structured, "category")
+    if category:
+        tags.append(category)
     tags.extend([_safe_slug(defaults.source_name), "personal-transcript"])
     return _NormalizedTranscriptSession(
         session_id=session_id,
         title=title,
         raw_transcript=transcript,
-        summary=_first_string(record, "summary", "description", "overview"),
+        summary=(
+            _first_string(record, "summary", "description", "overview")
+            or _first_string(structured, "overview")
+        ),
         speaker=speaker,
         device_id=device_id,
         started_at=started_at,
@@ -673,6 +922,44 @@ def _string_list(value: Any) -> list[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
+def _positive_int(value: Any, *, field_name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+    if parsed < 1:
+        raise ValueError(f"{field_name} must be at least 1")
+    return parsed
+
+
+def _positive_float(value: Any, *, field_name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number") from exc
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be positive")
+    return parsed
+
+
+def _bool_setting(value: Any, *, default: bool) -> bool:
+    parsed = _optional_bool_setting(value)
+    return default if parsed is None else parsed
+
+
+def _optional_bool_setting(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    raise ValueError("boolean settings must be true or false")
+
+
 def _clean_string(value: Any) -> str | None:
     if value is None:
         return None
@@ -746,6 +1033,7 @@ def _looks_like_session(record: Mapping[str, Any]) -> bool:
         key in record
         for key in (
             "segments",
+            "transcript_segments",
             "messages",
             "utterances",
             "entries",

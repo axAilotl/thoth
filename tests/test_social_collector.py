@@ -67,6 +67,42 @@ def test_github_discovery_uses_authenticated_endpoint_without_username(monkeypat
     assert db.entries[0].source == "github"
 
 
+def test_github_discovery_allows_public_user_stars_without_token(monkeypatch):
+    db = FakeDB()
+    collector = SocialCollector(db=db)
+    called = []
+
+    monkeypatch.delenv("GITHUB_API", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        called.append((url, headers, params))
+        return FakeResponse(
+            200,
+            [
+                {
+                    "id": 456,
+                    "full_name": "public/repo",
+                    "description": "Public star",
+                    "stargazers_count": 7,
+                    "language": "Python",
+                    "topics": ["knowledge"],
+                    "updated_at": "2026-04-04T00:00:00Z",
+                }
+            ],
+        )
+
+    collector.session = SimpleNamespace(get=fake_get)
+
+    discovered = collector.discover_github_stars("example-user", limit=5)
+
+    assert len(discovered) == 1
+    assert called[0][0] == "https://api.github.com/users/example-user/starred"
+    assert "Authorization" not in called[0][1]
+    assert discovered[0].repo_name == "public/repo"
+    assert db.entries[0].source == "github"
+
+
 def test_huggingface_discovery_uses_repo_info_enrichment(monkeypatch):
     db = FakeDB()
     collector = SocialCollector(db=db)

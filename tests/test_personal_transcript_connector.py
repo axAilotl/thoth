@@ -103,7 +103,7 @@ def test_personal_transcript_connector_fails_closed_without_exports(tmp_path: Pa
     db = MetadataDB(str(layout.database_path))
     connector = PersonalTranscriptConnector(config, layout=layout, db=db)
 
-    with pytest.raises(ValueError, match="requires export_paths or export_dirs"):
+    with pytest.raises(ValueError, match="requires export_paths, export_dirs, or an Omi API key"):
         asyncio.run(connector.collect())
 
 
@@ -113,5 +113,105 @@ def test_omi_agent_surface_requires_export_source(tmp_path: Path):
     db = MetadataDB(str(layout.database_path))
     service = AgentSurfaceService(config, layout=layout, db=db)
 
-    with pytest.raises(AgentSurfaceError, match="requires export_paths or export_dirs"):
+    with pytest.raises(AgentSurfaceError, match="requires export_paths, export_dirs, or an Omi API key"):
         service.run_connector("omi", execute=True)
+
+
+def test_personal_transcript_connector_collects_omi_api_conversations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = _config(tmp_path)
+    config.set("sources.omi.api_key", "omi_dev_test-key")
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    seen_queries = []
+
+    async def fake_fetch(query):
+        seen_queries.append(query)
+        return [
+            {
+                "id": "conv_123",
+                "started_at": "2026-05-01T10:00:00Z",
+                "finished_at": "2026-05-01T10:15:00Z",
+                "language": "en",
+                "source": "external_integration",
+                "structured": {
+                    "title": "API transcript import",
+                    "overview": "Discussed importing Omi conversations into Thoth.",
+                    "category": "work",
+                },
+                "transcript_segments": [
+                    {
+                        "speaker": "SPEAKER_00",
+                        "start": 0.0,
+                        "text": "We should preserve raw API payloads.",
+                    },
+                    {
+                        "speaker": "SPEAKER_01",
+                        "start": 4.2,
+                        "text": "Then queue normalized transcript artifacts.",
+                    },
+                ],
+            }
+        ]
+
+    monkeypatch.setattr(
+        "collectors.personal_transcript_connector.fetch_omi_conversations",
+        fake_fetch,
+    )
+    connector = PersonalTranscriptConnector(config, layout=layout, db=db)
+
+    result = asyncio.run(connector.collect(limit=1))
+
+    assert seen_queries[0].api_key == "omi_dev_test-key"
+    assert seen_queries[0].limit == 1
+    assert seen_queries[0].include_transcript is True
+    assert result.api_conversation_count == 1
+    assert result.records[0].session_id == "conv_123"
+    assert result.records[0].raw_export_path.parent == (
+        layout.raw_root / "personal_transcripts" / "omi"
+    )
+    assert result.records[0].raw_export_path.name.startswith("api_conv-123-")
+
+    entry = db.get_ingestion_entry("omi_transcript_conv-123")
+    assert entry is not None
+    payload = json.loads(entry.payload_json)
+    assert payload["title"] == "API transcript import"
+    assert payload["summary"] == "Discussed importing Omi conversations into Thoth."
+    assert payload["device_id"] == "external_integration"
+    assert "SPEAKER_00:" in payload["raw_transcript"]
+    assert payload["custom_metadata"]["raw_payload_path"].startswith(
+        "raw/personal_transcripts/omi/api_conv-123-"
+    )
+
+
+def test_omi_agent_surface_runs_api_source_from_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    monkeypatch.setenv("OMI_API_KEY", "omi_dev_env-key")
+
+    async def fake_fetch(query):
+        assert query.api_key == "omi_dev_env-key"
+        return [
+            {
+                "id": "conv_env",
+                "title": "Environment backed import",
+                "transcript_segments": [{"speaker": "Ada", "text": "Import from Omi API."}],
+            }
+        ]
+
+    monkeypatch.setattr(
+        "collectors.personal_transcript_connector.fetch_omi_conversations",
+        fake_fetch,
+    )
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    result = service.run_connector("omi", execute=True, options={"limit": 1})
+
+    assert result["result"]["api_conversation_count"] == 1
+    assert result["result"]["queued_count"] == 1

@@ -109,3 +109,21 @@ def test_github_resume_generates_missing_summary_from_cached_readme(
     assert summary_file.exists()
     assert created
     assert created[0][0] == "# cached readme\nuseful content"
+
+
+def test_github_processor_allows_public_readme_without_token(
+    tmp_path: Path,
+    monkeypatch,
+    restore_runtime_config,
+):
+    _configure_runtime_paths(tmp_path)
+    monkeypatch.delenv("GITHUB_API", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    metadata_db = MetadataDB(db_path=str(tmp_path / "meta.db"))
+
+    processor = GitHubStarsProcessor(
+        vault_path=str(tmp_path / "vault"),
+        metadata_db=metadata_db,
+    )
+
+    assert "Authorization" not in processor.session.headers

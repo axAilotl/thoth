@@ -501,7 +501,10 @@ class KnowledgeArtifactRuntime:
         if repo_source == "github":
             from processors.github_stars_processor import GitHubRepo, GitHubStarsProcessor
 
-            processor = GitHubStarsProcessor(vault_path=str(self.layout.vault_root))
+            processor = GitHubStarsProcessor(
+                vault_path=str(self.layout.vault_root),
+                metadata_db=self.db,
+            )
             repo = GitHubRepo.from_api_response(raw_payload)
             processed = await processor._process_single_repo(repo, resume=True)
             return IngestionDispatchResult(
@@ -522,7 +525,11 @@ class KnowledgeArtifactRuntime:
                 HuggingFaceRepo,
             )
 
-            processor = HuggingFaceLikesProcessor(vault_path=str(self.layout.vault_root))
+            processor = HuggingFaceLikesProcessor(
+                vault_path=str(self.layout.vault_root),
+                metadata_db=self.db,
+                cache_dir=self.layout.cache_root / "huggingface_hub",
+            )
             repo = HuggingFaceRepo(
                 id=str(raw_payload.get("id") or artifact.repo_name or artifact.id),
                 name=str(raw_payload.get("name") or artifact.repo_name or artifact.id).split("/")[-1],

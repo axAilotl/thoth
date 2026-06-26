@@ -106,16 +106,16 @@ class GitHubStarsProcessor:
             or os.getenv('GITHUB_API')
             or os.getenv('GITHUB_TOKEN')
         )
-        if not self.github_token:
-            raise ValueError("GITHUB_API, GITHUB_TOKEN, or sources.github.token is required")
-        
+
         # Setup session with GitHub API headers
         self.session = requests.Session()
-        self.session.headers.update({
+        headers = {
             'Accept': 'application/vnd.github+json',
-            'Authorization': f'Bearer {self.github_token}',
             'X-GitHub-Api-Version': '2022-11-28'
-        })
+        }
+        if self.github_token:
+            headers['Authorization'] = f'Bearer {self.github_token}'
+        self.session.headers.update(headers)
         
         # Initialize LLM interface for summaries
         self.llm_interface = None

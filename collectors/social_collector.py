@@ -27,23 +27,30 @@ class SocialCollector:
         self.session = requests.Session()
 
     def discover_github_stars(
-        self, username: Optional[str] = None, limit: int = 50
+        self,
+        username: Optional[str] = None,
+        limit: int = 50,
+        token: Optional[str] = None,
     ) -> List[RepositoryArtifact]:
         """Fetch starred GitHub repositories and queue new artifacts."""
         token = (
-            config.get("sources.github.token")
+            token
+            or config.get("sources.github.token")
             or os.getenv("GITHUB_API")
             or os.getenv("GITHUB_TOKEN")
         )
-        if not token:
-            logger.warning("GitHub token not configured, skipping stars collection.")
+        if not token and not username:
+            logger.warning(
+                "GitHub token not configured, skipping authenticated stars collection."
+            )
             return []
 
         headers = {
-            "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
         discovered = []
         page = 1

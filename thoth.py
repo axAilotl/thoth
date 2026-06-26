@@ -1714,6 +1714,16 @@ def cmd_connectors(args):
             "speaker": getattr(args, "speaker", None),
             "session_id": getattr(args, "session_id", None),
             "language": getattr(args, "language", None),
+            "api_key_env": getattr(args, "api_key_env", None),
+            "api_base_url": getattr(args, "api_base_url", None),
+            "api_limit": getattr(args, "api_limit", None),
+            "api_page_size": getattr(args, "api_page_size", None),
+            "include_transcript": getattr(args, "include_transcript", None),
+            "start_date": getattr(args, "start_date", None),
+            "end_date": getattr(args, "end_date", None),
+            "folder_id": getattr(args, "folder_id", None),
+            "starred": getattr(args, "starred", None),
+            "timeout_seconds": getattr(args, "timeout_seconds", None),
             "archive_video": getattr(args, "archive_video", None),
             "no_resume": getattr(args, "no_resume", False),
         }
@@ -1741,7 +1751,13 @@ def cmd_connectors(args):
         )
         if payload.get("result"):
             result = payload["result"]
-            for key in ("queued_count", "scanned_count", "changed_count", "staged_count"):
+            for key in (
+                "queued_count",
+                "scanned_count",
+                "changed_count",
+                "staged_count",
+                "api_conversation_count",
+            ):
                 if key in result:
                     print(f"   {key}: {result[key]}")
         return
@@ -2719,6 +2735,66 @@ Examples:
         type=str,
         default=None,
         help="Default language code for personal transcript imports",
+    )
+    connectors_run_parser.add_argument(
+        "--api-key-env",
+        type=str,
+        default=None,
+        help="Environment variable containing a connector API key",
+    )
+    connectors_run_parser.add_argument(
+        "--api-base-url",
+        type=str,
+        default=None,
+        help="Override connector API base URL when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--api-limit",
+        type=int,
+        default=None,
+        help="Maximum API records to collect when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--api-page-size",
+        type=int,
+        default=None,
+        help="API page size when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--include-transcript",
+        choices=("true", "false"),
+        default=None,
+        help="Include full transcripts when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        help="Connector API start date filter when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--end-date",
+        type=str,
+        default=None,
+        help="Connector API end date filter when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--folder-id",
+        type=str,
+        default=None,
+        help="Connector folder id filter when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--starred",
+        choices=("true", "false"),
+        default=None,
+        help="Connector starred filter when supported",
+    )
+    connectors_run_parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=None,
+        help="Connector API timeout when supported",
     )
     connectors_run_parser.add_argument(
         "--archive-video",

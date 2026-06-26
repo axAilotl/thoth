@@ -265,9 +265,10 @@ class AgentSurfaceService:
             or os.getenv("GITHUB_API")
             or os.getenv("GITHUB_TOKEN")
         )
-        if not token:
+        username = _optional_text(options.get("github_user") or options.get("username"))
+        if not token and not username:
             raise AgentSurfaceError(
-                "github connector requires sources.github.token, GITHUB_API, or GITHUB_TOKEN"
+                "github connector requires a username for public stars, or sources.github.token, GITHUB_API, or GITHUB_TOKEN"
             )
 
         from collectors.social_collector import SocialCollector
@@ -277,8 +278,11 @@ class AgentSurfaceService:
             options.get("limit"),
             default=int(self.config.get("sources.github.limit", 50) or 50),
         )
-        username = _optional_text(options.get("github_user") or options.get("username"))
-        artifacts = collector.discover_github_stars(username=username, limit=limit)
+        artifacts = collector.discover_github_stars(
+            username=username,
+            limit=limit,
+            token=token,
+        )
         return {
             "username": username or "authenticated account",
             "queued": _artifact_summaries(artifacts),
@@ -401,9 +405,15 @@ class AgentSurfaceService:
         export_dirs = _string_list(
             options.get("export_dirs") or options.get("export_dir")
         ) or _string_list(configured.get("export_dirs") or configured.get("export_dir"))
-        if not export_paths and not export_dirs:
+        api_key_env = options.get("api_key_env") or configured.get("api_key_env")
+        api_key_available = bool(
+            options.get("api_key")
+            or configured.get("api_key")
+            or os.getenv(str(api_key_env or "OMI_API_KEY"))
+        )
+        if not export_paths and not export_dirs and not api_key_available:
             raise AgentSurfaceError(
-                "omi connector requires export_paths or export_dirs"
+                "omi connector requires export_paths, export_dirs, or an Omi API key"
             )
         result = _run_async(
             connector.collect(
@@ -419,6 +429,19 @@ class AgentSurfaceService:
                 session_id=options.get("session_id") or configured.get("session_id"),
                 language=options.get("language") or configured.get("language"),
                 limit=_optional_int(options.get("limit")),
+                api_key=options.get("api_key"),
+                api_key_env=api_key_env,
+                api_base_url=options.get("api_base_url") or configured.get("base_url"),
+                api_limit=_optional_int(options.get("api_limit")),
+                api_page_size=_optional_int(options.get("api_page_size")),
+                include_transcript=_optional_bool(options.get("include_transcript")),
+                start_date=options.get("start_date") or configured.get("start_date"),
+                end_date=options.get("end_date") or configured.get("end_date"),
+                categories=options.get("categories") or configured.get("categories"),
+                folder_id=options.get("folder_id") or configured.get("folder_id"),
+                starred=_optional_bool(options.get("starred")),
+                timeout_seconds=options.get("timeout_seconds")
+                or configured.get("timeout_seconds"),
             )
         )
         return result.to_dict()
@@ -514,6 +537,19 @@ def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    raise AgentSurfaceError("Boolean connector options must be true or false")
 
 
 def _positive_int(value: Any, *, default: int) -> int:

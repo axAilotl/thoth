@@ -158,8 +158,6 @@ class HuggingFaceLikesProcessor:
         
         # Get HuggingFace username
         self.hf_user = config.get('sources.huggingface.username') or os.getenv('HF_USER')
-        if not self.hf_user:
-            raise ValueError("HF_USER or sources.huggingface.username is required")
 
         self.hf_token = (
             config.get('sources.huggingface.token')
@@ -197,6 +195,8 @@ class HuggingFaceLikesProcessor:
         stats = ProcessingStats()
         
         try:
+            if not self.hf_user:
+                raise ValueError("HF_USER or sources.huggingface.username is required")
             # Fetch lightweight liked repository references first so resume checks can
             # skip most work before issuing per-repo metadata requests.
             logger.info(f"📡 Fetching liked repositories for user: {self.hf_user}")
