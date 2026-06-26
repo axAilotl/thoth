@@ -9,11 +9,18 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 
 from core.config import config
 from core.llm_interface import LLMInterface
 from core.llm_cache import llm_cache
+from core.llm_validation import (
+    LLMJSONField,
+    LLMOutputValidationError,
+    parse_llm_json_response,
+    validate_comma_separated_tags,
+    validate_llm_json_object,
+)
 from core.metadata_db import get_metadata_db
 from core.pipeline_registry import PipelineStage, pipeline_registry, register_pipeline_stages
 from core.prompt_security import wrap_untrusted_content
@@ -47,6 +54,19 @@ PIPELINE_STAGES = (
 
 
 register_pipeline_stages(*PIPELINE_STAGES)
+
+
+TRANSCRIPT_RESPONSE_FIELDS = (
+    LLMJSONField("text", str, allow_empty=False, max_length=200000),
+    LLMJSONField("summary", str, allow_empty=False, max_length=5000),
+    LLMJSONField(
+        "tags",
+        str,
+        allow_empty=False,
+        max_length=1000,
+        validator=validate_comma_separated_tags,
+    ),
+)
 
 
 class TranscriptLLMProcessor:
@@ -185,7 +205,13 @@ class TranscriptLLMProcessor:
         try:
             # Try cache first
             cached = llm_cache.get(transcript_text, 'transcript_fmt', cache_provider)
-            if cached and all(k in cached for k in ['text', 'summary', 'tags']):
+            cached = self._validate_cached_chunk_payload(
+                cached,
+                source="LLM cache",
+                target_label=target_label,
+                chunk_index=chunk_index,
+            )
+            if cached:
                 logger.debug(
                     "Transcript LLM cache HIT for %s chunk %s",
                     target_label,
@@ -236,34 +262,11 @@ class TranscriptLLMProcessor:
             
             if response and not response.error and response.content:
                 try:
-                    raw = response.content.strip()
-                    # Try direct JSON first
-                    try:
-                        result = json.loads(raw)
-                    except json.JSONDecodeError:
-                        # Extract JSON object from noisy response (code fences, preambles)
-                        cleaned = self._extract_json_object(raw)
-                        result = json.loads(cleaned) if cleaned else None
-                    
-                    # Validate the JSON structure
-                    if not result or not all(key in result for key in ['text', 'summary', 'tags']):
-                        logger.error(
-                            "Invalid JSON response for %s chunk %s: missing required fields",
-                            target_label,
-                            chunk_index if chunk_index is not None else 1,
-                        )
-                        # Minimal fallback: wrap raw response as text if parse failed
-                        # This avoids dropping the chunk entirely
-                        result = {
-                            'text': raw if len(raw) < 100000 else raw[:99990],
-                            'summary': '',
-                            'tags': ''
-                        }
-                        chunk_info['fallback_used'] = True
-                        chunk_info['chunks_failed'] = 1
-                        if chunk_index is not None:
-                            chunk_info['failed_chunks'] = [chunk_index]
-                        self._record_chunk_failure(context_id, chunk_index, chunk_hash, cache_provider, 'invalid_json')
+                    result = self._parse_transcript_response(
+                        response.content,
+                        target_label=target_label,
+                        chunk_index=chunk_index,
+                    )
 
                     # Cache formatted chunk
                     try:
@@ -292,19 +295,24 @@ class TranscriptLLMProcessor:
                         except Exception:
                             pass
                     return result
-                except json.JSONDecodeError as e:
+                except LLMOutputValidationError as e:
                     logger.error(
-                        "Failed to parse JSON response for %s chunk %s: %s",
+                        "Invalid transcript LLM response for %s chunk %s: %s",
                         target_label,
                         chunk_index if chunk_index is not None else 1,
                         e,
                     )
-                    logger.debug(f"Raw response for {target_label}: {response.content}")
                     chunk_info['fallback_used'] = True
                     chunk_info['chunks_failed'] = 1
                     if chunk_index is not None:
                         chunk_info['failed_chunks'] = [chunk_index]
-                    self._record_chunk_failure(context_id, chunk_index, chunk_hash, cache_provider, 'json_decode_error')
+                    self._record_chunk_failure(
+                        context_id,
+                        chunk_index,
+                        chunk_hash,
+                        cache_provider,
+                        f'validation_error: {e}',
+                    )
                     return None
             else:
                 error_msg = response.error if response else "No response received"
@@ -520,10 +528,59 @@ class TranscriptLLMProcessor:
         except Exception:
             return None
 
-        if not isinstance(data, dict) or not all(k in data for k in ('text', 'summary', 'tags')):
+        data = self._validate_cached_chunk_payload(
+            data,
+            source="transcript chunk cache",
+            target_label="transcript",
+            chunk_index=None,
+        )
+        if not data:
             return None
 
         return data
+
+    def _parse_transcript_response(
+        self,
+        content: str,
+        *,
+        target_label: str,
+        chunk_index: Optional[int],
+    ) -> Dict[str, str]:
+        """Parse a fresh transcript-formatting response from the LLM."""
+        return parse_llm_json_response(
+            content,
+            fields=TRANSCRIPT_RESPONSE_FIELDS,
+            object_name=f"transcript LLM response for {target_label} chunk {chunk_index or 1}",
+            reject_extra_fields=True,
+        )
+
+    def _validate_cached_chunk_payload(
+        self,
+        payload: object,
+        *,
+        source: str,
+        target_label: str,
+        chunk_index: Optional[int],
+    ) -> Optional[Dict[str, str]]:
+        """Validate cached LLM transcript payloads before trusting them."""
+        if not payload:
+            return None
+        try:
+            return validate_llm_json_object(
+                payload,
+                fields=TRANSCRIPT_RESPONSE_FIELDS,
+                object_name=f"{source} payload for {target_label} chunk {chunk_index or 1}",
+                reject_extra_fields=False,
+            )
+        except LLMOutputValidationError as exc:
+            logger.warning(
+                "Ignoring invalid %s transcript payload for %s chunk %s: %s",
+                source,
+                target_label,
+                chunk_index if chunk_index is not None else 1,
+                exc,
+            )
+            return None
 
     def _normalize_cached_chunk_result(
         self,
@@ -713,32 +770,6 @@ class TranscriptLLMProcessor:
             return "transcript"
         return " | ".join(parts)
 
-    def _extract_json_object(self, text: str) -> Optional[str]:
-        """Best-effort extraction of a JSON object from an LLM response.
-        Strips code fences and grabs the outermost JSON braces.
-        Applies minor fixes for trailing commas.
-        """
-        try:
-            # Strip common code fences
-            if text.startswith('```'):
-                text = text.strip('`')
-                # Remove potential language tag like ```json
-                first_newline = text.find('\n')
-                if first_newline != -1:
-                    text = text[first_newline+1:]
-            # Find outermost braces
-            start = text.find('{')
-            end = text.rfind('}')
-            if start == -1 or end == -1 or end <= start:
-                return None
-            candidate = text[start:end+1]
-            # Fix common JSON issues: trailing commas before } or ]
-            import re
-            candidate = re.sub(r',\s*([}\]])', r'\1', candidate)
-            return candidate
-        except Exception:
-            return None
-    
     def is_enabled(self) -> bool:
         """Check if transcript processing is enabled"""
         return self.enabled and self.llm_interface is not None

@@ -7,7 +7,7 @@ from core.artifacts import WebClipperArtifact
 from core.config import Config, config
 from core.llm_interface import LLMResponse
 from core.path_layout import build_path_layout
-from core.translation_companion import EnglishCompanionPublisher
+from core.translation_companion import EnglishCompanionPublisher, TranslationRuntimeError
 
 
 @pytest.fixture
@@ -46,6 +46,15 @@ class FakeTranslationLLM:
         assert "Source language: es" in prompt
         return LLMResponse(
             content='{"title":"Example note","body":"Translated body with **markdown**."}',
+            model="mock-model",
+            provider="anthropic",
+        )
+
+
+class InvalidTranslationLLM(FakeTranslationLLM):
+    async def generate(self, prompt: str, system_prompt: str | None = None, **kwargs):
+        return LLMResponse(
+            content='{"title":["Example"],"body":"Translated body."}',
             model="mock-model",
             provider="anthropic",
         )
@@ -113,6 +122,43 @@ async def test_translation_companion_publishes_english_note(
     assert "Translated body with **markdown**." in output_path.read_text(encoding="utf-8")
     assert source_note.read_text(encoding="utf-8").startswith("---\n")
     assert publisher.db.get_file_entry(str(output_path.relative_to(layout.vault_root))).file_type == "translation"
+
+
+@pytest.mark.anyio
+async def test_translation_companion_rejects_schema_mismatch_before_write(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    source_note = layout.vault_root / "Clippings" / "capture.md"
+    source_note.parent.mkdir(parents=True, exist_ok=True)
+    source_note.write_text("---\ntitle: ejemplo\nlang: es\n---\n\nContenido.\n", encoding="utf-8")
+    artifact = WebClipperArtifact(
+        id="webclip:Clippings/capture.md",
+        source_type="web_clipper",
+        raw_content=source_note.read_text(encoding="utf-8"),
+        ingested_at="2026-04-04T00:00:00Z",
+        source_path=str(source_note),
+        source_relative_path="Clippings/capture.md",
+        file_type="note",
+        title="ejemplo",
+        frontmatter={"title": "ejemplo", "lang": "es"},
+        body="Contenido.\n",
+        source_checksum="abc123",
+        source_size_bytes=source_note.stat().st_size,
+        source_language="es",
+    )
+    publisher = EnglishCompanionPublisher(
+        config,
+        layout=layout,
+        llm_interface=InvalidTranslationLLM(),
+    )
+
+    with pytest.raises(TranslationRuntimeError, match="validation failed"):
+        await publisher.publish_web_clipper_artifact(artifact)
+
+    assert not (layout.vault_root / "translations" / "Clippings" / "capture.en.md").exists()
 
 
 @pytest.mark.anyio
