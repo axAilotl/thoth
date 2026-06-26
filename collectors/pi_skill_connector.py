@@ -14,6 +14,7 @@ from core.config import Config, config
 from core.llm_interface import LLMInterface
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
+from core.prompt_security import wrap_untrusted_content
 
 from .skill_output_connector import (
     FORBIDDEN_WIKI_WRITE_KEYS,
@@ -397,7 +398,11 @@ class PiSkillConnector:
                     "",
                     f"Input file: {path}",
                     f"Truncated: {'yes' if truncated else 'no'}",
-                    text,
+                    wrap_untrusted_content(
+                        text,
+                        label=f"pi_skill_input:{skill.id}:{path.name}",
+                        scope="context",
+                    ),
                 ]
             )
         return "\n".join(sections).strip()

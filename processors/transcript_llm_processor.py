@@ -16,6 +16,7 @@ from core.llm_interface import LLMInterface
 from core.llm_cache import llm_cache
 from core.metadata_db import get_metadata_db
 from core.pipeline_registry import PipelineStage, pipeline_registry, register_pipeline_stages
+from core.prompt_security import wrap_untrusted_content
 
 logger = logging.getLogger(__name__)
 
@@ -218,8 +219,13 @@ class TranscriptLLMProcessor:
                     chunks_total=1,
                 )
 
+            wrapped_transcript = wrap_untrusted_content(
+                transcript_text,
+                label=f"{target_label}:chunk:{chunk_index or 1}",
+                scope="context",
+            )
             response = await self.llm_interface.generate(
-                prompt=transcript_text,
+                prompt=wrapped_transcript,
                 system_prompt=prompt,
                 provider=provider,
                 model=model,

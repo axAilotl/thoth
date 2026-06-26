@@ -17,6 +17,7 @@ from .config import Config
 from .llm_interface import LLMInterface
 from .metadata_db import FileMetadata, MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import wrap_untrusted_content
 
 DEFAULT_TRANSLATION_SYSTEM_PROMPT = (
     "You translate markdown source documents into English.\n"
@@ -340,11 +341,16 @@ class EnglishCompanionPublisher:
 
         source_title = artifact.title or Path(artifact.source_path or artifact.id).stem
         source_body = artifact.body or artifact.raw_content or ""
+        wrapped_source = wrap_untrusted_content(
+            source_body,
+            label=f"translation:{artifact.id}",
+            scope="context",
+        )
         prompt = (
             f"Source language: {source_language}\n"
             f"Target language: en\n"
             f"Source title: {source_title}\n"
-            f"Source markdown:\n\n{source_body}"
+            f"Source markdown:\n\n{wrapped_source}"
         )
 
         response = await self.llm_interface.generate(

@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import asyncio
 
+from .prompt_security import wrap_untrusted_content
+
 logger = logging.getLogger(__name__)
 
 
@@ -740,8 +742,13 @@ class LLMInterface:
         system_prompt = self.config.get('prompts', {}).get('tags', 
             "You are a tagging system. Generate 4-10 relevant tags for the given content. Return only comma-separated tags, no explanations.")
         
+        wrapped_content = wrap_untrusted_content(
+            content,
+            label="tag_generation_source",
+            scope="context",
+        )
         response = await self.generate(
-            prompt=f"Generate tags for this content:\n\n{content}",
+            prompt=f"Generate tags for this content:\n\n{wrapped_content}",
             system_prompt=system_prompt,
             provider=provider,
             model=model_id,
@@ -777,8 +784,13 @@ class LLMInterface:
             system_prompt = summary_prompts.get('tweet',
                 "You are a content summarization system. Provide a concise 1-2 sentence summary of this content.")
         
+        wrapped_content = wrap_untrusted_content(
+            content,
+            label=f"{content_type}_summary_source",
+            scope="context",
+        )
         response = await self.generate(
-            prompt=f"Summarize this {content_type}:\n\n{content}",
+            prompt=f"Summarize this {content_type}:\n\n{wrapped_content}",
             system_prompt=system_prompt,
             provider=provider,
             model=model_id,

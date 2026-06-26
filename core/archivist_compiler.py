@@ -20,6 +20,7 @@ from .config import Config
 from .llm_interface import LLMInterface
 from .metadata_db import MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import wrap_untrusted_content
 from .wiki_contract import WikiContract, WikiPageSpec, build_wiki_contract
 from .wiki_io import atomic_write_text, read_document, render_frontmatter, truncate_summary
 from .wiki_scaffold import append_wiki_log_entry, ensure_wiki_scaffold
@@ -308,7 +309,11 @@ class ArchivistCompiler:
                     f"- Updated At: {candidate.updated_at}",
                     f"- Source ID: {candidate.source_id or 'n/a'}",
                     "- Excerpt:",
-                    excerpt,
+                    wrap_untrusted_content(
+                        excerpt,
+                        label=f"archivist:{candidate.source_type}:S{index}",
+                        scope="context",
+                    ),
                     "",
                 ]
             )
