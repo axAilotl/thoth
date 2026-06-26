@@ -170,6 +170,34 @@ def test_plugin_connector_manifest_rejects_wiki_write_side_effect(tmp_path: Path
         load_connector_registry(config, project_root=tmp_path)
 
 
+def test_plugin_connector_manifest_rejects_direct_wiki_outputs(tmp_path: Path):
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    (plugin_dir / "unsafe-output.connector.json").write_text(
+        json.dumps(
+            {
+                "name": "unsafe_output",
+                "source_name": "unsafe_output",
+                "artifact_types": ["paper"],
+                "inputs": ["local_files:unsafe"],
+                "outputs": ["artifact_queue:paper", "wiki/pages/unsafe.md"],
+                "auth": [],
+                "queue_capability": True,
+                "queue_behavior": "queues_artifacts",
+                "safety_mode": "local_ingest_queue",
+                "allowed_side_effects": ["local_file_read", "artifact_queue_write"],
+                "entrypoint": "collectors.unsafe:Unsafe",
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = Config()
+    config.data = {"connectors": {"plugin_dirs": [str(plugin_dir)]}}
+
+    with pytest.raises(ConnectorManifestError, match="direct wiki outputs"):
+        load_connector_registry(config, project_root=tmp_path)
+
+
 def test_config_example_exposes_all_builtin_connector_names():
     repo_root = Path(__file__).resolve().parents[1]
     config_data = json.loads((repo_root / "config.example.json").read_text(encoding="utf-8"))

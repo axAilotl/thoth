@@ -11,16 +11,20 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from core.config import Config, config
-from core.connector_registry import ConnectorManifestError, validate_allowed_side_effects
+from core.connector_registry import (
+    ConnectorManifestError,
+    validate_allowed_side_effects,
+    validate_manifest_outputs,
+)
 from core.llm_interface import LLMInterface
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
 from core.prompt_security import wrap_untrusted_content
 
 from .skill_output_connector import (
-    FORBIDDEN_WIKI_WRITE_KEYS,
     SUPPORTED_ARTIFACT_TYPES,
     SkillOutputConnector,
+    reject_direct_wiki_write_claims,
 )
 
 
@@ -246,6 +250,10 @@ class PiSkillConnector:
                 skill_id=skill_id,
                 allow_empty=False,
             )
+            try:
+                validate_manifest_outputs(outputs, origin=f"Pi skill {skill_id!r}")
+            except ConnectorManifestError as exc:
+                raise ValueError(str(exc)) from exc
             auth = _required_string_list(
                 raw_skill,
                 "auth",
@@ -375,9 +383,16 @@ class PiSkillConnector:
         if raw_value:
             path = Path(raw_value).expanduser()
             if path.is_absolute():
-                return path
-            return Path.cwd() / path
-        return self.layout.system_root / "skill_outputs" / "pi"
+                resolved = path
+            else:
+                resolved = Path.cwd() / path
+        else:
+            resolved = self.layout.system_root / "skill_outputs" / "pi"
+        if _is_relative_to(resolved.resolve(), self.layout.wiki_root):
+            raise ValueError(
+                f"Pi skill output_dir cannot target direct wiki paths: {resolved}"
+            )
+        return resolved
 
     def _resolve_root(self, value: str | Path) -> Path:
         path = Path(value).expanduser()
@@ -518,7 +533,10 @@ class PiSkillConnector:
         for envelope in envelopes:
             if not isinstance(envelope, Mapping):
                 raise ValueError("Pi skill output envelopes must be objects")
-            _reject_wiki_write_fields(envelope)
+            reject_direct_wiki_write_claims(
+                envelope,
+                wiki_root=self.layout.wiki_root,
+            )
             artifact_type = _clean_string(
                 envelope.get("artifact_type") or envelope.get("type")
             )
@@ -533,7 +551,10 @@ class PiSkillConnector:
                 )
             payload_value = envelope.get("payload")
             if isinstance(payload_value, Mapping):
-                _reject_wiki_write_fields(payload_value)
+                reject_direct_wiki_write_claims(
+                    payload_value,
+                    wiki_root=self.layout.wiki_root,
+                )
 
 
 def _parse_pi_output(text: str) -> tuple[Any, str]:
@@ -574,15 +595,6 @@ def _envelope_payloads(payload: Any) -> list[Any]:
     if isinstance(payload, list):
         return payload
     return []
-
-
-def _reject_wiki_write_fields(payload: Mapping[str, Any]) -> None:
-    forbidden = sorted(str(key) for key in set(payload.keys()) & FORBIDDEN_WIKI_WRITE_KEYS)
-    if forbidden:
-        raise ValueError(
-            "Pi skill output cannot declare direct wiki write fields: "
-            + ", ".join(forbidden)
-        )
 
 
 def _read_text_file(path: Path) -> str:

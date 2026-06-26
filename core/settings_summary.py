@@ -12,6 +12,7 @@ from .connector_registry import (
     ConnectorManifestError,
     load_connector_registry,
     validate_allowed_side_effects,
+    validate_manifest_outputs,
 )
 from .metadata_db import MetadataDB
 from .path_layout import build_path_layout
@@ -236,6 +237,10 @@ def _summarize_pi_skill_manifest(item: dict[str, Any]) -> dict[str, Any]:
     artifact_types = _required_manifest_list(item, "artifact_types", skill_id=skill_id)
     inputs = _required_manifest_list(item, "inputs", skill_id=skill_id)
     outputs = _required_manifest_list(item, "outputs", skill_id=skill_id)
+    try:
+        validate_manifest_outputs(outputs, origin=f"Pi skill {skill_id!r}")
+    except ConnectorManifestError as exc:
+        raise ValueError(str(exc)) from exc
     auth = _required_manifest_list(item, "auth", skill_id=skill_id, allow_empty=True)
     safety_mode = _required_manifest_string(item, "safety_mode", skill_id=skill_id)
     queue_behavior = _required_manifest_string(item, "queue_behavior", skill_id=skill_id)

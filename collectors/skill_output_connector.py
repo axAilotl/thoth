@@ -285,8 +285,8 @@ class SkillOutputConnector:
         else:
             raise ValueError("Skill output envelope payload must be an object")
 
-        _reject_wiki_write_fields(envelope)
-        _reject_wiki_write_fields(payload)
+        reject_direct_wiki_write_claims(envelope, wiki_root=self.layout.wiki_root)
+        reject_direct_wiki_write_claims(payload, wiki_root=self.layout.wiki_root)
 
         raw_output_ref = self._relative_to_vault(raw_output_path)
         artifact_id = _clean_string(envelope.get("artifact_id") or payload.get("id"))
@@ -365,7 +365,12 @@ def _envelope_payloads_from_json(payload: Any) -> list[Any]:
     raise ValueError("Skill output JSON must contain an object or array")
 
 
-def _reject_wiki_write_fields(value: Any) -> None:
+def reject_direct_wiki_write_claims(
+    value: Any,
+    *,
+    wiki_root: Path | None = None,
+) -> None:
+    """Reject envelope claims that try to steer output into compiled wiki paths."""
     if isinstance(value, Mapping):
         forbidden = sorted(FORBIDDEN_WIKI_WRITE_KEYS.intersection(value.keys()))
         if forbidden:
@@ -374,10 +379,44 @@ def _reject_wiki_write_fields(value: Any) -> None:
                 + ", ".join(forbidden)
             )
         for nested in value.values():
-            _reject_wiki_write_fields(nested)
+            reject_direct_wiki_write_claims(nested, wiki_root=wiki_root)
     elif isinstance(value, list):
         for item in value:
-            _reject_wiki_write_fields(item)
+            reject_direct_wiki_write_claims(item, wiki_root=wiki_root)
+    elif isinstance(value, str) and _looks_like_direct_wiki_path(
+        value,
+        wiki_root=wiki_root,
+    ):
+        raise ValueError(
+            "Skill outputs cannot target direct wiki paths: " + value.strip()
+        )
+
+
+def _looks_like_direct_wiki_path(value: str, *, wiki_root: Path | None) -> bool:
+    text = value.strip().strip("'\"")
+    if not text:
+        return False
+    lowered = text.lower().replace("\\", "/")
+    if lowered.startswith(("http://", "https://")):
+        return False
+    for prefix in ("local_file:", "file://", "file:", "path:", "output:", "target:"):
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix) :].lstrip()
+            break
+    if lowered.startswith(("wiki/", "./wiki/", "../wiki/")):
+        return True
+    if "/wiki/" in lowered:
+        return True
+    if wiki_root is None:
+        return False
+    candidate = Path(text).expanduser()
+    if not candidate.is_absolute():
+        return False
+    try:
+        candidate.resolve().relative_to(wiki_root.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _source_name_from_envelope(

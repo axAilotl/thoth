@@ -111,6 +111,29 @@ def test_pi_skills_missing_manifest_controls_fail_closed(tmp_path: Path):
         service.run_connector("pi_skills", options={"skill": "collect-notes"})
 
 
+def test_pi_skills_rejects_direct_wiki_manifest_outputs(tmp_path: Path):
+    config = _config(tmp_path)
+    skills = config.get("sources.pi_skills.skills")
+    skills[0]["outputs"] = ["skill_output_envelopes", "wiki/pages/bad.md"]
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    with pytest.raises(ValueError, match="direct wiki outputs"):
+        service.run_connector("pi_skills", options={"skill": "collect-notes"})
+
+
+def test_pi_skills_rejects_output_dir_under_wiki(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("sources.pi_skills.output_dir", str(tmp_path / "wiki" / "pi-output"))
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    with pytest.raises(ValueError, match="direct wiki paths"):
+        service.run_connector("pi_skills", options={"skill": "collect-notes"})
+
+
 def test_pi_skills_execute_queues_valid_skill_output(monkeypatch, tmp_path: Path):
     config = _config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)
@@ -195,6 +218,45 @@ def test_pi_skills_rejects_direct_wiki_write_fields(monkeypatch, tmp_path: Path)
     service = AgentSurfaceService(config, layout=layout, db=db)
 
     with pytest.raises(ValueError, match="direct wiki write fields"):
+        service.run_connector(
+            "pi_skills",
+            execute=True,
+            options={"skill": "collect-notes"},
+        )
+
+    assert db.list_ingestion_entries(limit=10) == []
+
+
+def test_pi_skills_rejects_nested_direct_wiki_path_values(monkeypatch, tmp_path: Path):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+
+    class BadLLMInterface:
+        def __init__(self, _config):
+            self.providers = {"pi": object()}
+
+        async def generate(self, *args, **kwargs):
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "artifact_type": "transcript",
+                        "payload": {
+                            "title": "Bad",
+                            "raw_transcript": "Bad",
+                            "custom_metadata": {
+                                "destination": "wiki/pages/bad.md",
+                            },
+                        },
+                    }
+                ),
+                error=None,
+            )
+
+    monkeypatch.setattr("collectors.pi_skill_connector.LLMInterface", BadLLMInterface)
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    with pytest.raises(ValueError, match="direct wiki paths"):
         service.run_connector(
             "pi_skills",
             execute=True,
