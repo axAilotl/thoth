@@ -14,6 +14,10 @@ from typing import Any, Iterable, Mapping
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config
+from core.connector_budgets import (
+    start_connector_budget_run,
+    transcript_text_from_payload,
+)
 from core.connector_capture import ConnectorCaptureQueue
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
@@ -65,6 +69,7 @@ class SkillOutputResult:
     records: tuple[SkillOutputRecord, ...] = field(default_factory=tuple)
     output_paths: tuple[str, ...] = field(default_factory=tuple)
     output_dirs: tuple[str, ...] = field(default_factory=tuple)
+    budget: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +86,7 @@ class SkillOutputResult:
             "queued_count": sum(1 for record in self.records if record.queued),
             "output_paths": list(self.output_paths),
             "output_dirs": list(self.output_dirs),
+            "budget": self.budget,
         }
 
 
@@ -158,14 +164,33 @@ class SkillOutputConnector:
         if limit is not None:
             input_files = input_files[: max(0, int(limit))]
 
+        budget = start_connector_budget_run(self.config, "skill_outputs")
+        budget.add_files(input_files)
+        payload_batches: list[tuple[Path, list[Any]]] = []
+        envelope_count = 0
+        for output_path in input_files:
+            envelope_payloads = await asyncio.to_thread(
+                self._load_envelope_payloads,
+                output_path,
+            )
+            payload_batches.append((output_path, envelope_payloads))
+            envelope_count += len(envelope_payloads)
+            for index, envelope_payload in enumerate(envelope_payloads, 1):
+                self._add_transcript_budget(
+                    budget,
+                    envelope_payload,
+                    label=f"{output_path}:{index}",
+                )
+        budget.add_estimated_output_artifacts(
+            envelope_count,
+            label="skill output envelopes",
+        )
+        budget_summary = budget.summary()
+
         records: list[SkillOutputRecord] = []
         run_id = datetime.now().isoformat()
         with self.capture_queue.lifecycle() as lifecycle:
-            for output_path in input_files:
-                envelope_payloads = await asyncio.to_thread(
-                    self._load_envelope_payloads,
-                    output_path,
-                )
+            for output_path, envelope_payloads in payload_batches:
                 for envelope_payload in envelope_payloads:
                     envelope_source_name = _source_name_from_envelope(
                         envelope_payload,
@@ -195,7 +220,28 @@ class SkillOutputConnector:
             records=tuple(records),
             output_paths=tuple(str(path) for path in resolved_paths),
             output_dirs=tuple(str(path) for path in resolved_dirs),
+            budget=budget_summary,
         )
+
+    def _add_transcript_budget(
+        self,
+        budget: Any,
+        envelope_payload: Any,
+        *,
+        label: str,
+    ) -> None:
+        if not isinstance(envelope_payload, Mapping):
+            return
+        artifact_type = _clean_string(
+            envelope_payload.get("artifact_type") or envelope_payload.get("type")
+        )
+        if (artifact_type or "").lower() != "transcript":
+            return
+        payload_value = envelope_payload.get("payload")
+        payload = payload_value if isinstance(payload_value, Mapping) else envelope_payload
+        transcript_text = transcript_text_from_payload(payload)
+        if transcript_text:
+            budget.add_transcript_text(transcript_text, label=label)
 
     def _resolve_input_files(
         self,

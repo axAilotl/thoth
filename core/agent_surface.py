@@ -405,6 +405,7 @@ class AgentSurfaceService:
                 }
                 for record in queued
             ],
+            "budget": collector.last_budget_usage,
         }
 
     def _run_x_api_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:

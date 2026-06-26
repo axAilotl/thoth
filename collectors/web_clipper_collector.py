@@ -18,6 +18,7 @@ from typing import List, Optional
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config
+from core.connector_budgets import start_connector_budget_run
 from core.connector_capture import ConnectorCaptureQueue
 from core.artifacts.web_clipper import WebClipperArtifact
 from core.metadata_db import (
@@ -82,6 +83,7 @@ class WebClipperCollector:
             db=self.db,
             capture_event_store=capture_event_store,
         )
+        self.last_budget_usage: dict[str, object] = {}
 
         self._validate_roots()
 
@@ -89,27 +91,31 @@ class WebClipperCollector:
         """Scan the configured allowlist and upsert file metadata."""
         discovered: List[WebClipperFileRecord] = []
         run_id = datetime.now().isoformat()
+        targets: list[tuple[Path, Path, str]] = []
+
+        for root in self.contract.note_dirs:
+            targets.extend(self._discover_root(root, expected_type="note"))
+
+        for root in self.contract.attachment_dirs:
+            targets.extend(self._discover_root(root, expected_type="attachment"))
+
+        budget = start_connector_budget_run(self.config, "web_clipper")
+        budget.add_files([path for path, _root, _file_type in targets])
+        self.last_budget_usage = budget.summary()
 
         with self.capture_queue.lifecycle() as lifecycle:
-            for root in self.contract.note_dirs:
-                discovered.extend(
-                    self._scan_root(
-                        root,
-                        expected_type="note",
-                        lifecycle=lifecycle,
-                        run_id=run_id,
+            for path, root, file_type in targets:
+                if file_type == "note":
+                    discovered.append(
+                        self._index_note_file(
+                            path,
+                            root=root,
+                            lifecycle=lifecycle,
+                            run_id=run_id,
+                        )
                     )
-                )
-
-            for root in self.contract.attachment_dirs:
-                discovered.extend(
-                    self._scan_root(
-                        root,
-                        expected_type="attachment",
-                        lifecycle=lifecycle,
-                        run_id=run_id,
-                    )
-                )
+                elif file_type == "attachment":
+                    discovered.append(self._index_attachment_file(path, root=root))
 
         return discovered
 
@@ -122,15 +128,13 @@ class WebClipperCollector:
             if not root.is_dir():
                 raise ValueError(f"Web Clipper source directory is not a directory: {root}")
 
-    def _scan_root(
+    def _discover_root(
         self,
         root: Path,
         *,
         expected_type: str,
-        lifecycle: CaptureLifecycleService,
-        run_id: str,
-    ) -> List[WebClipperFileRecord]:
-        discovered: List[WebClipperFileRecord] = []
+    ) -> list[tuple[Path, Path, str]]:
+        discovered: list[tuple[Path, Path, str]] = []
         for path in sorted(root.rglob("*"), key=lambda value: str(value)):
             if not path.is_file():
                 continue
@@ -140,19 +144,7 @@ class WebClipperCollector:
                 logger.debug("Skipping unsupported Web Clipper file: %s", path)
                 continue
 
-            if file_type == "note":
-                discovered.append(
-                    self._index_note_file(
-                        path,
-                        root=root,
-                        lifecycle=lifecycle,
-                        run_id=run_id,
-                    )
-                )
-            elif file_type == "attachment":
-                discovered.append(self._index_attachment_file(path, root=root))
-            else:
-                logger.debug("Skipping unsupported Web Clipper file: %s", path)
+            discovered.append((path, root, file_type))
 
         return discovered
 

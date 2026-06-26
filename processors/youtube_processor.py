@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from core.data_models import ProcessingStats
 from core.config import config
+from core.connector_budgets import ConnectorBudgetError
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 
 logger = logging.getLogger(__name__)
@@ -442,6 +443,8 @@ class YouTubeProcessor:
             )
             return video, metrics
 
+        except ConnectorBudgetError:
+            raise
         except Exception as e:
             logger.error(f"Error processing video {video_id} for {source_label or 'unattributed source'}: {e}")
             metrics['transcript_failed'] += 1

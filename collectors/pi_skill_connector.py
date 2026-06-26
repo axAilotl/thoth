@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from core.config import Config, config
+from core.connector_budgets import (
+    ConnectorBudgetTracker,
+    start_connector_budget_run,
+    transcript_text_from_payload,
+)
 from core.connector_registry import (
     ConnectorManifestError,
     validate_allowed_side_effects,
@@ -72,6 +77,7 @@ class PiSkillRunResult:
     provider: str
     model: str | None
     skill_output: dict[str, Any]
+    budget: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +87,7 @@ class PiSkillRunResult:
             "model": self.model,
             "skill_output": self.skill_output,
             "queued_count": self.skill_output.get("queued_count", 0),
+            "budget": self.budget,
         }
 
 
@@ -116,6 +123,15 @@ class PiSkillConnector:
         command = self._command_preview(route)
         route_identity = self._command_identity(route)
         resolved_inputs = self._resolve_input_paths(input_paths, skill=skill, limit=limit)
+        budget = start_connector_budget_run(self.config, "pi_skills")
+        budget.add_files(resolved_inputs, count_input_tokens=False)
+        prompt_text = "\n".join(
+            part
+            for part in (skill.prompt, str(prompt or "").strip())
+            if part
+        )
+        if prompt_text:
+            budget.add_input_text(prompt_text, label=f"pi skill plan {skill.id}")
         return {
             "skill_id": skill.id,
             "allowlist": self._skill_allowlist_status(skill.id),
@@ -147,6 +163,7 @@ class PiSkillConnector:
                 for item in routes
             ],
             "has_prompt": bool(str(prompt or "").strip() or skill.prompt.strip()),
+            "budget": budget.summary(),
         }
 
     async def collect(
@@ -172,9 +189,14 @@ class PiSkillConnector:
             prompt,
             resolved_inputs,
         )
+        budget = start_connector_budget_run(self.config, "pi_skills")
+        budget.add_files(resolved_inputs, count_input_tokens=False)
+        budget.add_input_text(run_prompt, label=f"pi skill prompt {skill.id}")
         raw_output, route = await self._generate_with_routes(run_prompt, routes)
         parsed, output_format = _parse_pi_output(raw_output)
         self._validate_payload(parsed, allowed_artifact_types=set(skill.artifact_types))
+        budget.add_output_text(raw_output, label=f"pi skill output {skill.id}")
+        self._add_payload_budget(budget, parsed, label=f"pi skill output {skill.id}")
         output_path = await asyncio.to_thread(
             self._write_output,
             parsed,
@@ -199,7 +221,32 @@ class PiSkillConnector:
             provider=route.provider,
             model=route.model,
             skill_output=skill_output_result.to_dict(),
+            budget=budget.summary(),
         )
+
+    def _add_payload_budget(
+        self,
+        budget: ConnectorBudgetTracker,
+        payload: Any,
+        *,
+        label: str,
+    ) -> None:
+        envelopes = _envelope_payloads(payload)
+        for index, envelope in enumerate(envelopes, 1):
+            if not isinstance(envelope, Mapping):
+                continue
+            artifact_type = _clean_string(
+                envelope.get("artifact_type") or envelope.get("type")
+            )
+            if (artifact_type or "").lower() != "transcript":
+                continue
+            payload_value = envelope.get("payload")
+            transcript_payload = (
+                payload_value if isinstance(payload_value, Mapping) else envelope
+            )
+            transcript_text = transcript_text_from_payload(transcript_payload)
+            if transcript_text:
+                budget.add_transcript_text(transcript_text, label=f"{label}:{index}")
 
     def _configured(self) -> Mapping[str, Any]:
         value = self.config.get("sources.pi_skills", {}) or {}

@@ -16,6 +16,7 @@ from core.artifacts import TranscriptArtifact, VideoArtifact
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config
+from core.connector_budgets import ConnectorBudgetTracker, start_connector_budget_run
 from core.connector_capture import ConnectorCaptureQueue
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
@@ -51,6 +52,7 @@ class YouTubeConnectorResult:
     skipped_urls: tuple[str, ...] = field(default_factory=tuple)
     playlist_urls: tuple[str, ...] = field(default_factory=tuple)
     export_paths: tuple[str, ...] = field(default_factory=tuple)
+    budget: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +77,7 @@ class YouTubeConnectorResult:
             "skipped_urls": list(self.skipped_urls),
             "playlist_urls": list(self.playlist_urls),
             "export_paths": list(self.export_paths),
+            "budget": self.budget,
         }
 
 
@@ -116,6 +119,15 @@ class YouTubeConnector:
         explicit_urls = _string_list(urls)
         playlist_inputs = _string_list(playlist_urls)
         export_inputs = [Path(path).expanduser() for path in _string_list(export_paths)]
+        budget = start_connector_budget_run(self.config, "youtube")
+        budget.add_files(export_inputs)
+        if explicit_urls:
+            budget.add_input_text("\n".join(explicit_urls), label="youtube urls")
+        if playlist_inputs:
+            budget.add_input_text(
+                "\n".join(playlist_inputs),
+                label="youtube playlist urls",
+            )
 
         discovered_urls: list[str] = []
         discovered_urls.extend(explicit_urls)
@@ -127,6 +139,10 @@ class YouTubeConnector:
         unique_urls = _dedupe(discovered_urls)
         if limit is not None:
             unique_urls = unique_urls[: max(1, int(limit))]
+        budget.add_estimated_output_artifacts(
+            len(unique_urls) * 2,
+            label="youtube video and transcript artifacts",
+        )
 
         records: list[YouTubeConnectorRecord] = []
         skipped: list[str] = []
@@ -142,6 +158,7 @@ class YouTubeConnector:
                 archive_video=archive_video,
                 resume=resume,
                 run_id=run_id,
+                budget=budget,
             )
             records.append(record)
 
@@ -150,6 +167,7 @@ class YouTubeConnector:
             skipped_urls=tuple(skipped),
             playlist_urls=tuple(playlist_inputs),
             export_paths=tuple(str(path) for path in export_inputs),
+            budget=budget.summary(),
         )
 
     async def _collect_video(
@@ -160,6 +178,7 @@ class YouTubeConnector:
         archive_video: bool | None,
         resume: bool,
         run_id: str,
+        budget: ConnectorBudgetTracker,
     ) -> YouTubeConnectorRecord:
         video, _metrics = await self.processor.process_video(
             video_id,
@@ -169,6 +188,13 @@ class YouTubeConnector:
         )
         if video is None:
             video = self._video_from_existing_or_stub(video_id, source_url)
+
+        transcript_text = video.transcript or video.formatted_transcript or ""
+        if transcript_text:
+            budget.add_transcript_text(
+                transcript_text,
+                label=f"youtube transcript {video_id}",
+            )
 
         archive_path = None
         if self._archive_enabled(archive_video):
@@ -180,6 +206,10 @@ class YouTubeConnector:
             source_url=source_url,
             transcript_path=transcript_path,
             archive_path=archive_path,
+        )
+        budget.add_bytes(
+            raw_payload_path.stat().st_size,
+            label=f"youtube raw payload {video_id}",
         )
         raw_payload_ref = self._relative_to_vault(raw_payload_path)
         transcript_ref = self._relative_to_vault(transcript_path) if transcript_path else None

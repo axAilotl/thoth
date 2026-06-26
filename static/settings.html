@@ -2263,6 +2263,7 @@
                 const authText = authStatus.keys?.length
                     ? `${authStatus.configured?.length || 0}/${authStatus.keys.length} auth keys configured`
                     : 'no auth required';
+                const budgetText = formatConnectorBudgetSummary(connector.budgets || {});
                 return [
                     `${connector.name}: ${connector.enabled ? 'enabled' : 'disabled'}`,
                     `  artifacts: ${artifacts}`,
@@ -2272,10 +2273,27 @@
                     `  safety: ${connector.safety_mode || 'unknown'}`,
                     `  queue: ${connector.queue_behavior || (connector.queue_capability ? 'queue capable' : 'direct')}`,
                     `  side effects: ${sideEffects}`,
+                    `  budget: ${budgetText}`,
                     `  config: ${configuredKeys.length}/${configKeys.length} keys configured`,
                     `  auth: ${authText}`
                 ].join('\n');
             }).join('\n\n');
+        }
+
+        function formatConnectorBudgetSummary(budgets) {
+            if (budgets?.error) return `ERROR: ${budgets.error}`;
+            const limits = budgets?.limits || {};
+            const cost = budgets?.cost || {};
+            const maxCost = cost.max_estimated_cost == null ? 'unlimited' : `$${cost.max_estimated_cost}`;
+            return [
+                `files<=${limits.max_files_per_run ?? 'unlimited'}`,
+                `file_bytes<=${limits.max_bytes_per_file ?? 'unlimited'}`,
+                `run_bytes<=${limits.max_bytes_per_run ?? 'unlimited'}`,
+                `input_tokens<=${limits.max_input_tokens_per_run ?? 'unlimited'}`,
+                `output_tokens<=${limits.max_output_tokens_per_run ?? 'unlimited'}`,
+                `transcript_chunks<=${limits.max_transcript_chunks_per_run ?? 'unlimited'}`,
+                `cost<=${maxCost}`
+            ].join(', ');
         }
 
         function formatSecurityRuntimeSummary(security) {

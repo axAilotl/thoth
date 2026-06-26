@@ -2,6 +2,25 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "thoth.config",
   "type": "object",
+  "definitions": {
+    "connectorBudget": {
+      "type": "object",
+      "properties": {
+        "max_bytes_per_file": { "type": ["integer", "null"], "minimum": 1 },
+        "max_bytes_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_files_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_input_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_output_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_transcript_chunks_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "transcript_chunk_chars": { "type": "integer", "minimum": 1 },
+        "estimated_output_tokens_per_artifact": { "type": "integer", "minimum": 0 },
+        "input_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+        "output_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+        "max_estimated_cost_usd": { "type": ["number", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
     "llm": {
       "type": "object",
@@ -231,6 +250,32 @@
             },
             "additionalProperties": true
           }
+        },
+        "budgets": {
+          "type": "object",
+          "properties": {
+            "defaults": { "$ref": "#/definitions/connectorBudget" },
+            "per_connector": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/definitions/connectorBudget" }
+            },
+            "connectors": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/definitions/connectorBudget" }
+            },
+            "max_bytes_per_file": { "type": ["integer", "null"], "minimum": 1 },
+            "max_bytes_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "max_files_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "max_input_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "max_output_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "max_transcript_chunks_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "transcript_chunk_chars": { "type": "integer", "minimum": 1 },
+            "estimated_output_tokens_per_artifact": { "type": "integer", "minimum": 0 },
+            "input_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+            "output_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+            "max_estimated_cost_usd": { "type": ["number", "null"], "minimum": 0 }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

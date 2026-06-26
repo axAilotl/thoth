@@ -7,6 +7,7 @@ import pytest
 from collectors.skill_output_connector import SkillOutputConnector
 from core.agent_surface import AgentSurfaceError, AgentSurfaceService
 from core.config import Config
+from core.connector_budgets import ConnectorBudgetError
 from core.ingestion_runtime import KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
@@ -139,6 +140,39 @@ def test_skill_output_connector_rejects_direct_wiki_path_values(tmp_path: Path):
         asyncio.run(connector.collect(output_paths=[output_path]))
 
     assert db.get_ingestion_entry("bad-skill-output-path") is None
+
+
+def test_skill_output_connector_stops_when_transcript_chunk_budget_exceeded(
+    tmp_path: Path,
+):
+    config = _config(tmp_path)
+    config.set(
+        "connectors.budgets.per_connector.skill_outputs.max_transcript_chunks_per_run",
+        1,
+    )
+    config.set("connectors.budgets.per_connector.skill_outputs.transcript_chunk_chars", 10)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    output_path = tmp_path / "chunky-output.json"
+    output_path.write_text(
+        json.dumps(
+            {
+                "artifact_type": "transcript",
+                "artifact_id": "chunky-skill-output",
+                "payload": {
+                    "title": "Chunky",
+                    "raw_transcript": "x" * 25,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    connector = SkillOutputConnector(config, layout=layout, db=db)
+
+    with pytest.raises(ConnectorBudgetError, match="max_transcript_chunks_per_run"):
+        asyncio.run(connector.collect(output_paths=[output_path]))
+
+    assert db.get_ingestion_entry("chunky-skill-output") is None
 
 
 def test_skill_output_agent_surface_requires_output_source(tmp_path: Path):

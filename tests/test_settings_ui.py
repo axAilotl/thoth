@@ -79,6 +79,7 @@ def test_settings_ui_exposes_archivist_web_clipper_and_translation_controls():
         "function renderProviderModels(name, provider)",
         "function updateTaskModelDropdown(task)",
         "function formatConnectorRuntimeSummary(group)",
+        "function formatConnectorBudgetSummary(budgets)",
         "function formatSecurityRuntimeSummary(security)",
         "function renderSecurityDashboard(security)",
         "async function runSettingsLint(kind)",

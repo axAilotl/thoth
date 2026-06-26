@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
 
+from .connector_budgets import resolve_connector_budget
+
 
 class ConfigLike(Protocol):
     def get(self, key: str, default: Any = None) -> Any:
@@ -104,6 +106,7 @@ class ConnectorManifest:
         }
         if config is not None:
             payload["policy"] = connector_policy_status(self, config)
+            payload["budgets"] = resolve_connector_budget(config, self.name).to_dict()
         return payload
 
     @classmethod

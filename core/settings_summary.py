@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from .archivist_topics import load_archivist_topic_registry, resolve_archivist_topics_path
 from .config import Config
+from .connector_budgets import resolve_connector_budget
 from .connector_registry import (
     ConnectorManifestError,
     load_connector_registry,
@@ -138,7 +139,10 @@ def _summarize_connectors(config: ConfigLike, *, project_root: Path) -> dict[str
         registry = load_connector_registry(config, project_root=project_root)
     except Exception as exc:
         return {"error": str(exc), "connectors": [], "total": 0}
-    summary = registry.to_dict(config=config)
+    try:
+        summary = registry.to_dict(config=config)
+    except Exception as exc:
+        return {"error": str(exc), "connectors": [], "total": 0}
     for connector in summary["connectors"]:
         config_keys = list(connector.get("config_keys") or [])
         auth_keys = list(connector.get("auth") or [])
@@ -202,6 +206,10 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
     route_identities = [
         _summarize_pi_route_identity(config, source_config, route) for route in routes
     ]
+    try:
+        budgets = resolve_connector_budget(config, "pi_skills").to_dict()
+    except Exception as exc:
+        budgets = {"error": str(exc)}
 
     try:
         skills = [
@@ -218,6 +226,7 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
             "default_model": str(source_config.get("default_model") or "archivist_agent"),
             "routes": routes,
             "route_identities": route_identities,
+            "budgets": budgets,
             "total": 0,
             "skills": [],
             "error": str(exc),
@@ -231,6 +240,7 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
         "default_model": str(source_config.get("default_model") or "archivist_agent"),
         "routes": routes,
         "route_identities": route_identities,
+        "budgets": budgets,
         "total": len(skills),
         "skills": skills,
     }
@@ -560,6 +570,7 @@ def _skills_group(pi_skills_summary: dict[str, Any]) -> dict[str, Any]:
         "output_dir": pi_skills_summary.get("output_dir"),
         "routes": pi_skills_summary.get("routes", []),
         "route_identities": pi_skills_summary.get("route_identities", []),
+        "budgets": pi_skills_summary.get("budgets", {}),
         "error": pi_skills_summary.get("error"),
     }
 
