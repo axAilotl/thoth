@@ -12,6 +12,7 @@ from datetime import datetime
 
 from .config import config
 from .path_layout import build_path_layout
+from .sensitive_redaction import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +31,16 @@ class LLMCache:
         self.hits = 0
         self.misses = 0
     
+    def _redact_cache_material(self, content: str) -> tuple[str, dict[str, Any] | None]:
+        redaction = redact_sensitive_text(content)
+        metadata = redaction.to_metadata() if redaction.has_findings else None
+        return redaction.redacted_text, metadata
+
     def _generate_cache_key(self, content: str, task_type: str, model: str = "") -> str:
         """Generate cache key from content hash and task parameters"""
         # Create hash from content + task type + model
-        hash_input = f"{content}|{task_type}|{model}"
+        redacted_content, _ = self._redact_cache_material(content)
+        hash_input = f"{redacted_content}|{task_type}|{model}"
         content_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()[:16]
         return f"{task_type}_{content_hash}"
     
@@ -63,18 +70,21 @@ class LLMCache:
     def set(self, content: str, task_type: str, result: Dict[str, Any], model: str = ""):
         """Cache an LLM result"""
         try:
+            redacted_content, redaction_metadata = self._redact_cache_material(content)
             cache_key = self._generate_cache_key(content, task_type, model)
             cache_file = self.cache_dir / f"{cache_key}.json"
-            
+
             cache_data = {
                 'task_type': task_type,
                 'model': model,
-                'content_hash': hashlib.sha256(content.encode('utf-8')).hexdigest()[:16],
+                'content_hash': hashlib.sha256(redacted_content.encode('utf-8')).hexdigest()[:16],
                 'result': result,
                 'cached_at': datetime.now().isoformat(),
-                'content_length': len(content)
+                'content_length': len(redacted_content)
             }
-            
+            if redaction_metadata:
+                cache_data['redaction'] = redaction_metadata
+
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(cache_data, f, indent=2, ensure_ascii=False)
             

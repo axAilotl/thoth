@@ -13,6 +13,11 @@ from dataclasses import dataclass
 import asyncio
 
 from .prompt_security import wrap_untrusted_content
+from .sensitive_redaction import (
+    SensitiveRedactionError,
+    redact_sensitive_text,
+    summarize_redactions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +31,7 @@ class LLMResponse:
     tokens_used: Optional[int] = None
     cost: Optional[float] = None
     error: Optional[str] = None
+    redaction_metadata: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -696,6 +702,19 @@ class LLMInterface:
 
     async def generate(self, prompt: str, system_prompt: str = None, provider: str = None, model: str = None, **kwargs) -> LLMResponse:
         """Generate text using specified or default provider"""
+        try:
+            prompt, system_prompt, redaction_metadata = self._redact_prompt_payload(
+                prompt,
+                system_prompt,
+            )
+        except SensitiveRedactionError as exc:
+            return LLMResponse(
+                content="",
+                model=model or "none",
+                provider=provider or "none",
+                error=f"Blocked: sensitive content could not be safely redacted: {exc}",
+            )
+
         if not provider:
             # Fallback to default route from any task (first available provider)
             if not self.providers:
@@ -726,11 +745,39 @@ class LLMInterface:
             selected_provider.model = model_id
             try:
                 result = await selected_provider.generate(prompt, system_prompt, **kwargs)
+                if redaction_metadata:
+                    result.redaction_metadata = redaction_metadata
                 return result
             finally:
                 selected_provider.model = original_model
         else:
-            return await selected_provider.generate(prompt, system_prompt, **kwargs)
+            result = await selected_provider.generate(prompt, system_prompt, **kwargs)
+            if redaction_metadata:
+                result.redaction_metadata = redaction_metadata
+            return result
+
+    def _redact_prompt_payload(
+        self,
+        prompt: str,
+        system_prompt: str | None,
+    ) -> tuple[str, str | None, dict[str, Any] | None]:
+        """Redact sensitive values before any prompt reaches a provider."""
+        prompt_result = redact_sensitive_text(prompt)
+        system_result = redact_sensitive_text(system_prompt) if system_prompt else None
+        metadata = summarize_redactions(
+            result for result in (prompt_result, system_result) if result is not None
+        )
+        if metadata:
+            logger.warning(
+                "Redacted %s sensitive value(s) before LLM provider call: %s",
+                metadata["finding_count"],
+                ", ".join(metadata["categories"].keys()),
+            )
+        return (
+            prompt_result.redacted_text,
+            system_result.redacted_text if system_result else system_prompt,
+            metadata,
+        )
     
     async def generate_tags(self, content: str) -> List[str]:
         """Generate tags for content"""
