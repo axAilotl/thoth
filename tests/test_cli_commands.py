@@ -42,6 +42,29 @@ def test_web_clipper_commands_are_still_wired():
         assert command in result.stdout
 
 
+def test_artifact_review_commands_are_wired():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    commands = (
+        ("artifacts", "review"),
+        ("artifacts", "get"),
+        ("artifacts", "provenance"),
+        ("artifacts", "retry"),
+        ("artifacts", "reject"),
+        ("artifacts", "reviewed"),
+    )
+    for command in commands:
+        result = subprocess.run(
+            [sys.executable, "thoth.py", *command, "--help"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0
+        assert command[-1] in result.stdout
+
+
 def test_okf_lint_command_is_wired():
     repo_root = Path(__file__).resolve().parents[1]
 

@@ -641,7 +641,15 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
         captured_at: str,
     ) -> IngestionQueueEntry:
         existing = self.db.get_ingestion_entry(queue_artifact_id)
-        preserved_statuses = {"processing", "processed"}
+        preserved_statuses = {
+            "processing",
+            "processed",
+            "needs_review",
+            "blocked",
+            "failed",
+            "reviewed",
+            "rejected",
+        }
         status = (
             existing.status
             if existing and existing.status in preserved_statuses
@@ -659,6 +667,7 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             next_attempt_at=existing.next_attempt_at if existing else captured_at,
             created_at=existing.created_at if existing else captured_at,
             processed_at=existing.processed_at if existing else None,
+            review_json=existing.review_json if existing else None,
             capabilities_json=json.dumps(
                 [str(item) for item in capabilities],
                 ensure_ascii=False,

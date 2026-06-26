@@ -156,6 +156,73 @@ def test_agent_surface_lists_queue_security_metadata(tmp_path: Path):
     assert findings == detail_findings
 
 
+def test_agent_surface_review_queue_inspects_and_transitions_bad_artifacts(
+    tmp_path: Path,
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    db.upsert_ingestion_entry(
+        IngestionQueueEntry(
+            artifact_id="bad-json",
+            artifact_type="paper",
+            source="manual",
+            payload_json='{"id":',
+            created_at="2026-04-04T00:00:00",
+        )
+    )
+    db.upsert_ingestion_entry(
+        IngestionQueueEntry(
+            artifact_id="missing-id",
+            artifact_type="paper",
+            source="manual",
+            payload_json=json.dumps({"title": "No id"}),
+            created_at="2026-04-04T00:01:00",
+        )
+    )
+
+    service = AgentSurfaceService(config, layout=layout, db=db)
+    review_list = service.list_artifact_reviews(limit=10)
+    detail = service.get_artifact("bad-json", include_quarantined=True)
+    retry = service.retry_artifact_review(
+        "bad-json",
+        actor="operator",
+        reason="payload fixed upstream",
+    )
+    rejected = service.reject_artifact_review(
+        "missing-id",
+        actor="operator",
+        reason="source emitted no usable identifier",
+    )
+    reviewed = service.mark_artifact_reviewed(
+        "bad-json",
+        actor="operator",
+        reason="recorded for audit",
+    )
+    closed = service.list_artifact_reviews(include_closed=True, limit=10)
+
+    assert {item["artifact_id"] for item in review_list["artifacts"]} == {
+        "bad-json",
+        "missing-id",
+    }
+    assert detail["canonical_record"] is None
+    assert detail["queue_payload"]["raw"] == '{"id":'
+    assert detail["materialization_error"]["type"] == "IngestionRuntimeError"
+    assert detail["provenance"]["queue_id"] == "bad-json"
+    assert retry["queue"]["status"] == "pending"
+    assert retry["queue"]["last_error"] is None
+    assert rejected["queue"]["status"] == "rejected"
+    assert "missing a native artifact id" in rejected["queue"]["last_error"]
+    assert reviewed["queue"]["status"] == "reviewed"
+    assert json.loads(db.get_ingestion_entry("bad-json").review_json)["events"][-1][
+        "action"
+    ] == "mark_reviewed"
+    assert {item["status"] for item in closed["artifacts"]} == {
+        "reviewed",
+        "rejected",
+    }
+
+
 def test_agent_surface_hybrid_query_searches_artifacts_with_filters(tmp_path: Path):
     config = _config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)

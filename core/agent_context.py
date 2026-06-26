@@ -18,7 +18,14 @@ from .prompt_security import (
     prompt_security_requires_review,
 )
 
-_BLOCKING_SECURITY_STATUSES = {"blocked", "needs_review", "quarantined"}
+_BLOCKING_SECURITY_STATUSES = {
+    "blocked",
+    "failed",
+    "needs_review",
+    "quarantined",
+    "reviewed",
+    "rejected",
+}
 
 
 def artifact_security_state(entry: IngestionQueueEntry) -> dict[str, Any]:

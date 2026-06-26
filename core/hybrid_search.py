@@ -32,7 +32,14 @@ from .wiki_contract import WikiContract, is_legacy_tweet_slug
 from .wiki_io import read_document, truncate_summary
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-_BLOCKING_SECURITY_STATUSES = {"blocked", "needs_review", "quarantined"}
+_BLOCKING_SECURITY_STATUSES = {
+    "blocked",
+    "failed",
+    "needs_review",
+    "quarantined",
+    "reviewed",
+    "rejected",
+}
 _CLOSED_FINDING_STATUSES = {"closed", "resolved", "suppressed", "accepted"}
 _OPEN_FINDING_STATUSES = {"new", "open", "active", "triage"}
 _VALID_RESULT_TYPES = {"wiki_page", "artifact", "capture_event"}

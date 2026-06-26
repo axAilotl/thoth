@@ -1873,6 +1873,18 @@ def _memory_review_kwargs(args) -> dict[str, Any]:
     }
 
 
+def _artifact_review_kwargs(args) -> dict[str, Any]:
+    metadata = _read_json_arg(
+        getattr(args, "metadata_json", None),
+        field_name="metadata-json",
+    )
+    return {
+        "actor": getattr(args, "actor", None),
+        "reason": getattr(args, "reason", None),
+        "metadata": metadata,
+    }
+
+
 def cmd_capture(args):
     """Inspect capture events and manually ingest artifacts."""
     try:
@@ -2020,17 +2032,51 @@ def cmd_artifacts(args):
                 source=getattr(args, "source", None),
                 limit=max(1, int(getattr(args, "limit", 50) or 50)),
             )
+        elif args.artifacts_action == "review":
+            payload = service.list_artifact_reviews(
+                status=getattr(args, "status", None),
+                include_closed=bool(getattr(args, "include_closed", False)),
+                limit=max(1, int(getattr(args, "limit", 50) or 50)),
+            )
         elif args.artifacts_action == "get":
-            payload = service.get_artifact(args.artifact_id)
+            payload = service.get_artifact(
+                args.artifact_id,
+                include_quarantined=bool(getattr(args, "include_review", False)),
+            )
         elif args.artifacts_action == "provenance":
-            payload = service.get_artifact_provenance(args.artifact_id)
+            payload = service.get_artifact_provenance(
+                args.artifact_id,
+                include_quarantined=bool(getattr(args, "include_review", False)),
+            )
+        elif args.artifacts_action == "retry":
+            payload = service.retry_artifact_review(
+                args.artifact_id,
+                **_artifact_review_kwargs(args),
+            )
+        elif args.artifacts_action == "reject":
+            payload = service.reject_artifact_review(
+                args.artifact_id,
+                **_artifact_review_kwargs(args),
+            )
+        elif args.artifacts_action == "reviewed":
+            payload = service.mark_artifact_reviewed(
+                args.artifact_id,
+                **_artifact_review_kwargs(args),
+            )
         else:
             raise ValueError("Unknown artifacts action")
-    except AgentSurfaceError as exc:
+    except (AgentSurfaceError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
     if getattr(args, "json", False) or args.artifacts_action in {"get", "provenance"}:
         _print_json(payload)
+        return
+
+    if args.artifacts_action in {"retry", "reject", "reviewed"}:
+        queue = payload["queue"]
+        print(
+            f"{queue['artifact_type']}:{queue['artifact_id']} -> {queue['status']}"
+        )
         return
 
     print(f"Artifacts: {payload['total']}")
@@ -2906,18 +2952,58 @@ Examples:
     artifacts_list_parser.add_argument("--source", type=str, default=None)
     artifacts_list_parser.add_argument("--limit", type=int, default=50)
     artifacts_list_parser.add_argument("--json", action="store_true")
+    artifacts_review_parser = artifacts_subparsers.add_parser(
+        "review",
+        help="List artifacts in the operator review queue",
+    )
+    artifacts_review_parser.add_argument("--status", type=str, default=None)
+    artifacts_review_parser.add_argument(
+        "--include-closed",
+        action="store_true",
+        help="Include reviewed and rejected artifacts",
+    )
+    artifacts_review_parser.add_argument("--limit", type=int, default=50)
+    artifacts_review_parser.add_argument("--json", action="store_true")
     artifacts_get_parser = artifacts_subparsers.add_parser(
         "get",
         help="Get a canonical artifact record",
     )
     artifacts_get_parser.add_argument("artifact_id")
+    artifacts_get_parser.add_argument(
+        "--include-review",
+        action="store_true",
+        help="Allow inspection of review-queue artifacts and raw queue payloads",
+    )
     artifacts_get_parser.add_argument("--json", action="store_true")
     artifacts_provenance_parser = artifacts_subparsers.add_parser(
         "provenance",
         help="Get artifact provenance",
     )
     artifacts_provenance_parser.add_argument("artifact_id")
+    artifacts_provenance_parser.add_argument(
+        "--include-review",
+        action="store_true",
+        help="Allow provenance inspection for review-queue artifacts",
+    )
     artifacts_provenance_parser.add_argument("--json", action="store_true")
+    for action_name, action_help in (
+        ("retry", "Move a review-queue artifact back to pending"),
+        ("reject", "Reject a bad artifact"),
+        ("reviewed", "Mark a bad artifact reviewed without retrying it"),
+    ):
+        action_parser = artifacts_subparsers.add_parser(
+            action_name,
+            help=action_help,
+        )
+        action_parser.add_argument("artifact_id")
+        action_parser.add_argument("--actor", required=True)
+        action_parser.add_argument("--reason", required=True)
+        action_parser.add_argument(
+            "--metadata-json",
+            default=None,
+            help="Additional review audit metadata as a JSON object",
+        )
+        action_parser.add_argument("--json", action="store_true")
 
     ingest_parser = subparsers.add_parser(
         "ingest",

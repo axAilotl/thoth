@@ -26,7 +26,12 @@ from .artifacts import (
 from .bookmark_contract import normalize_bookmark_payload, validate_tweet_id
 from .config import Config, config
 from .data_models import Tweet
-from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
+from .metadata_db import (
+    INGESTION_REVIEW_STATUSES,
+    IngestionQueueEntry,
+    MetadataDB,
+    get_metadata_db,
+)
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import prompt_security_requires_review
 from .translation_companion import EnglishCompanionPublisher, TranslationCompanionResult
@@ -87,6 +92,23 @@ def _capabilities_from_queue(value: str | None) -> tuple[str, ...] | None:
     if not isinstance(payload, list):
         raise IngestionRuntimeError("Queue capabilities_json must decode to a list")
     return tuple(str(item) for item in payload if str(item).strip())
+
+
+def _reviewable_artifact_error(exc: Exception) -> bool:
+    return isinstance(exc, (IngestionRuntimeError, ValueError, TypeError))
+
+
+def _review_category_for_error(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "invalid json" in message or "decode" in message:
+        return "malformed_payload"
+    if "missing" in message:
+        return "incomplete_payload"
+    if "unsupported" in message:
+        return "unsupported_artifact"
+    if "security review" in message:
+        return "security_policy"
+    return "runtime_validation"
 
 
 class KnowledgeArtifactRuntime:
@@ -225,15 +247,20 @@ class KnowledgeArtifactRuntime:
         self, entry: IngestionQueueEntry
     ) -> IngestionDispatchResult:
         """Process a single ingestion queue row."""
-        if entry.status in {"needs_review", "blocked"}:
+        if entry.status in INGESTION_REVIEW_STATUSES:
             raise IngestionRuntimeError(
-                f"Ingestion artifact {entry.artifact_id} requires security review"
+                f"Ingestion artifact {entry.artifact_id} requires operator review"
             )
-        artifact = self.materialize_artifact(entry)
-        if prompt_security_requires_review(artifact.normalized_metadata):
-            raise IngestionRuntimeError(
-                f"Ingestion artifact {entry.artifact_id} requires security review"
-            )
+        try:
+            artifact = self.materialize_artifact(entry)
+            if prompt_security_requires_review(artifact.normalized_metadata):
+                raise IngestionRuntimeError(
+                    f"Ingestion artifact {entry.artifact_id} requires security review"
+                )
+        except Exception as exc:
+            if _reviewable_artifact_error(exc):
+                return self._route_entry_to_review(entry, exc, stage="materialize")
+            raise
         self.db.mark_ingestion_processing(entry.artifact_id)
 
         try:
@@ -245,6 +272,8 @@ class KnowledgeArtifactRuntime:
             self.db.mark_ingestion_processed(entry.artifact_id)
             return result
         except Exception as exc:
+            if _reviewable_artifact_error(exc):
+                return self._route_entry_to_review(entry, exc, stage="dispatch")
             failure = self.db.mark_ingestion_failed(entry.artifact_id, str(exc))
             if failure and failure.status == "pending" and failure.next_attempt_at:
                 logger.info(
@@ -253,6 +282,37 @@ class KnowledgeArtifactRuntime:
                     exc,
                 )
             raise
+
+    def _route_entry_to_review(
+        self,
+        entry: IngestionQueueEntry,
+        exc: Exception,
+        *,
+        stage: str,
+    ) -> IngestionDispatchResult:
+        error = f"artifact review required: {exc}"
+        updated = self.db.mark_ingestion_review_required(
+            entry.artifact_id,
+            category=_review_category_for_error(exc),
+            reason=str(exc),
+            error=error,
+            error_type=exc.__class__.__name__,
+            metadata={"stage": stage},
+        )
+        status = updated.status if updated else "needs_review"
+        return IngestionDispatchResult(
+            artifact_id=entry.artifact_id,
+            artifact_type=entry.artifact_type,
+            source=entry.source,
+            status=status,
+            processed_at=_now_iso(),
+            details={
+                "review_required": True,
+                "stage": stage,
+                "error": str(exc),
+                "error_type": exc.__class__.__name__,
+            },
+        )
 
     async def dispatch_artifact(self, artifact: KnowledgeArtifact) -> IngestionDispatchResult:
         """Dispatch a typed artifact to the existing processors."""

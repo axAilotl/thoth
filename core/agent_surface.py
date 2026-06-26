@@ -21,6 +21,12 @@ from .agent_context import (
     hybrid_hit_citations,
 )
 from .agent_response import build_agent_query_response
+from .artifact_review_queue import (
+    ArtifactReviewQueueError,
+    ArtifactReviewQueueService,
+    active_review_statuses,
+    closed_review_statuses,
+)
 from .capture_surface import (
     CaptureSurfaceError,
     CaptureSurfaceNotFoundError,
@@ -159,6 +165,26 @@ class AgentSurfaceService:
             "total": len(entries),
         }
 
+    def list_artifact_reviews(
+        self,
+        *,
+        status: str | None = None,
+        include_closed: bool = False,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """List artifacts that are in active or closed operator review states."""
+        entries = ArtifactReviewQueueService(self.db).list_entries(
+            status=status,
+            include_closed=include_closed,
+            limit=limit,
+        )
+        return {
+            "artifacts": [self._serialize_ingestion_entry(entry) for entry in entries],
+            "total": len(entries),
+            "active_statuses": list(active_review_statuses()),
+            "closed_statuses": list(closed_review_statuses()),
+        }
+
     def get_artifact(
         self,
         artifact_id: str,
@@ -174,10 +200,17 @@ class AgentSurfaceService:
                 f"Artifact requires security review: {artifact_id}"
             )
         runtime = KnowledgeArtifactRuntime(self.config, layout=self.layout, db=self.db)
-        artifact = runtime.materialize_artifact(entry)
+        try:
+            artifact = runtime.materialize_artifact(entry)
+        except Exception as exc:
+            if include_quarantined:
+                return self._serialize_unmaterialized_artifact(entry, exc)
+            raise AgentSurfaceError(
+                f"Artifact cannot be materialized: {artifact_id}: {exc}"
+            ) from exc
         canonical_record = artifact.canonical_record()
         provenance = artifact.provenance.to_dict() if artifact.provenance else {}
-        return {
+        payload = {
             "queue": self._serialize_ingestion_entry(entry),
             "canonical_record": canonical_record,
             "provenance": provenance,
@@ -189,6 +222,9 @@ class AgentSurfaceService:
                 provenance=provenance,
             ),
         }
+        if include_quarantined:
+            payload["queue_payload"] = _queue_payload_for_review(entry.payload_json)
+        return payload
 
     def get_artifact_provenance(
         self,
@@ -367,6 +403,66 @@ class AgentSurfaceService:
         )
         if not entry:
             raise AgentSurfaceError(f"Artifact not found: {artifact_id}")
+        return {"queue": self._serialize_ingestion_entry(entry)}
+
+    def retry_artifact_review(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Retry a review-queue artifact by moving it back to pending."""
+        try:
+            entry = ArtifactReviewQueueService(self.db).retry(
+                artifact_id,
+                actor=actor,
+                reason=reason,
+                metadata=metadata,
+            )
+        except ArtifactReviewQueueError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+        return {"queue": self._serialize_ingestion_entry(entry)}
+
+    def reject_artifact_review(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Reject a bad artifact and keep its provenance/error audit."""
+        try:
+            entry = ArtifactReviewQueueService(self.db).reject(
+                artifact_id,
+                actor=actor,
+                reason=reason,
+                metadata=metadata,
+            )
+        except ArtifactReviewQueueError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+        return {"queue": self._serialize_ingestion_entry(entry)}
+
+    def mark_artifact_reviewed(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Mark a bad artifact reviewed without retrying or accepting it."""
+        try:
+            entry = ArtifactReviewQueueService(self.db).mark_reviewed(
+                artifact_id,
+                actor=actor,
+                reason=reason,
+                metadata=metadata,
+            )
+        except ArtifactReviewQueueError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
         return {"queue": self._serialize_ingestion_entry(entry)}
 
     def list_connectors(self) -> dict[str, Any]:
@@ -607,9 +703,42 @@ class AgentSurfaceService:
             "processed_at": entry.processed_at,
             "capabilities": _json_list(entry.capabilities_json),
             "security_metadata": _security_metadata_from_payload(entry.payload_json),
+            "review": _json_object(entry.review_json),
             "security": artifact_security_state(entry),
             "trust": artifact_trust_state(entry),
             "citations": artifact_citations(entry),
+        }
+
+    def _serialize_unmaterialized_artifact(
+        self,
+        entry: IngestionQueueEntry,
+        exc: Exception,
+    ) -> dict[str, Any]:
+        provenance = {
+            "queue_id": entry.artifact_id,
+            "source_identity": {
+                "source_name": entry.source,
+                "source_type": entry.source,
+                "native_id": entry.artifact_id,
+                "collector": entry.source,
+            },
+            "raw_payload": {
+                "content_key": "payload_json",
+                "immutable": True,
+            },
+        }
+        return {
+            "queue": self._serialize_ingestion_entry(entry),
+            "canonical_record": None,
+            "provenance": provenance,
+            "security": artifact_security_state(entry),
+            "trust": artifact_trust_state(entry),
+            "citations": artifact_citations(entry, provenance=provenance),
+            "queue_payload": _queue_payload_for_review(entry.payload_json),
+            "materialization_error": {
+                "type": exc.__class__.__name__,
+                "message": str(exc),
+            },
         }
 
     def _serialize_hybrid_hit(self, hit: HybridSearchHit) -> dict[str, Any]:
@@ -1068,6 +1197,24 @@ def _json_object(value: str | None) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _queue_payload_for_review(value: str | None) -> dict[str, Any]:
+    if value is None:
+        return {"raw": None}
+    try:
+        payload = json.loads(value)
+    except Exception as exc:
+        return {
+            "raw": value,
+            "parse_error": {
+                "type": exc.__class__.__name__,
+                "message": str(exc),
+            },
+        }
+    if isinstance(payload, Mapping):
+        return {"json": dict(payload)}
+    return {"json": payload}
+
+
 def _initial_connector_run_metadata(
     manifest: Any,
     *,
@@ -1443,7 +1590,14 @@ def _security_metadata_from_payload(payload_json: str | None) -> dict[str, Any]:
 
 
 def _entry_requires_security_review(entry: IngestionQueueEntry) -> bool:
-    if entry.status in {"needs_review", "blocked", "quarantined"}:
+    if entry.status in {
+        "needs_review",
+        "blocked",
+        "quarantined",
+        "failed",
+        "reviewed",
+        "rejected",
+    }:
         return True
     metadata = _security_metadata_from_payload(entry.payload_json)
     return prompt_security_requires_review(metadata)

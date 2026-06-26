@@ -343,6 +343,70 @@ def test_ingestion_queue_applies_quarantine_policy_and_audited_override(
         "reason": "manual review completed",
         "status": PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
     }
+    assert json.loads(approved.review_json)["state"]["status"] == "pending"
+
+
+def test_ingestion_queue_routes_bad_artifacts_to_review_states(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    config.set("ingestion.max_review_payload_bytes", 4096)
+
+    db = MetadataDB()
+    assert db.upsert_ingestion_entry(
+        IngestionQueueEntry(
+            artifact_id="bad-json",
+            artifact_type="paper",
+            source="manual",
+            payload_json='{"id":',
+            created_at="2026-04-04T00:00:00",
+        )
+    )
+    assert db.upsert_ingestion_entry(
+        IngestionQueueEntry(
+            artifact_id="missing-id",
+            artifact_type="paper",
+            source="manual",
+            payload_json=json.dumps({"title": "No native id"}),
+            created_at="2026-04-04T00:01:00",
+        )
+    )
+    assert db.upsert_ingestion_entry(
+        IngestionQueueEntry(
+            artifact_id="too-large",
+            artifact_type="paper",
+            source="manual",
+            payload_json=json.dumps(
+                {
+                    "id": "too-large",
+                    "source_type": "manual",
+                    "raw_payload_size_bytes": 8192,
+                }
+            ),
+            created_at="2026-04-04T00:02:00",
+        )
+    )
+
+    bad_json = db.get_ingestion_entry("bad-json")
+    missing_id = db.get_ingestion_entry("missing-id")
+    too_large = db.get_ingestion_entry("too-large")
+
+    assert bad_json.status == "needs_review"
+    assert missing_id.status == "needs_review"
+    assert too_large.status == "needs_review"
+    assert "malformed payload" in bad_json.last_error
+    assert "missing a native artifact id" in missing_id.last_error
+    assert "oversized" in too_large.last_error
+    assert json.loads(bad_json.review_json)["state"]["category"] == "malformed_payload"
+    assert json.loads(missing_id.review_json)["state"]["category"] == "incomplete_payload"
+    assert json.loads(too_large.review_json)["state"]["category"] == "oversized_payload"
+    assert db.get_pending_ingestions() == []
+    assert {entry.artifact_id for entry in db.list_ingestion_review_entries()} == {
+        "bad-json",
+        "missing-id",
+        "too-large",
+    }
 
 
 def test_web_clipper_materialization_preserves_raw_and_derived_locations(
@@ -515,6 +579,36 @@ def test_process_pending_ingestions_marks_processed(
     assert db.get_ingestion_entry("repo-queued").status == "processed"
 
 
+def test_process_pending_ingestions_routes_materialization_errors_to_review(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    db = MetadataDB()
+    runtime = KnowledgeArtifactRuntime(db=db)
+    entry = IngestionQueueEntry(
+        artifact_id="bad-capabilities",
+        artifact_type="paper",
+        source="manual",
+        payload_json=json.dumps({"id": "bad-capabilities", "title": "Bad caps"}),
+        capabilities_json=json.dumps({"not": "a list"}),
+        created_at="2026-04-04T00:00:00",
+    )
+    assert db.upsert_ingestion_entry(entry)
+
+    results = asyncio.run(runtime.process_pending_ingestions_once())
+    persisted = db.get_ingestion_entry("bad-capabilities")
+    review = json.loads(persisted.review_json)
+
+    assert results[0].status == "needs_review"
+    assert persisted.status == "needs_review"
+    assert persisted.attempts == 0
+    assert "capabilities_json" in persisted.last_error
+    assert review["state"]["category"] == "malformed_payload"
+    assert review["state"]["metadata"] == {"stage": "materialize"}
+
+
 def test_runtime_fails_closed_when_quarantined_entry_is_called_directly(
     tmp_path: Path, monkeypatch, restore_runtime_config
 ):
@@ -540,7 +634,7 @@ def test_runtime_fails_closed_when_quarantined_entry_is_called_directly(
     assert db.upsert_ingestion_entry(entry)
     quarantined = db.get_ingestion_entry("repo-review")
 
-    with pytest.raises(IngestionRuntimeError, match="security review"):
+    with pytest.raises(IngestionRuntimeError, match="operator review"):
         asyncio.run(runtime.process_ingestion_entry(quarantined))
 
 
