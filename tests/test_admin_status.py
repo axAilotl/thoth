@@ -12,6 +12,11 @@ from core.config import Config
 from core.llm_usage import record_llm_usage
 from core.metadata_db import BookmarkQueueEntry, IngestionQueueEntry, MetadataDB
 from core.path_layout import build_path_layout
+from core.semantic_memory import (
+    SemanticMemoryCandidate,
+    SemanticMemoryEvidence,
+    SemanticMemoryStore,
+)
 from core.wiki_io import render_frontmatter
 
 
@@ -103,6 +108,18 @@ class FakeCaptureStore:
     def list_events(self):
         return self.events
 
+    def get_event(self, event_id):
+        return next(
+            (event for event in self.events if event.event_id == event_id),
+            None,
+        )
+
+    def list_raw_refs(self, *, event_id=None):
+        return ()
+
+    def list_artifact_links(self, *, event_id=None):
+        return ()
+
 
 def test_admin_status_dashboard_uses_operational_stores(tmp_path: Path):
     config_data = _config_data(tmp_path)
@@ -144,6 +161,68 @@ topics:
         + "\n# Old Capture Rollup\n",
         encoding="utf-8",
     )
+    raw_source_path = layout.raw_root / "capture" / "event-1.json"
+    raw_source_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_source_path.write_text('{"title":"Lineage source"}\n', encoding="utf-8")
+    lineage_page_path = layout.wiki_root / "pages" / "lineage-page.md"
+    lineage_page_path.write_text(
+        render_frontmatter(
+            {
+                "type": "Topic",
+                "id": "lineage-page",
+                "title": "Lineage Page",
+                "description": "Lineage Page",
+                "thoth_type": "wiki_page",
+                "thoth_id": "lineage-page",
+                "thoth_slug": "lineage-page",
+                "thoth_kind": "topic",
+                "thoth_summary": "Lineage Page",
+                "thoth_source_paths": ["raw/capture/event-1.json"],
+                "thoth_event_ids": ["event-1"],
+                "thoth_artifact_id": "artifact-failed",
+                "thoth_source_type": "arxiv",
+                "thoth_semantic_candidate_ids": ["candidate-lineage"],
+                "thoth_updated_at": "2026-06-25T00:00:00Z",
+                "updated_at": "2026-06-25T00:00:00Z",
+                "thoth_input_hash": "new-hash",
+                "thoth_input_manifest": [
+                    {
+                        "input_id": "capture_event:event-1",
+                        "input_kind": "capture_event",
+                        "event_id": "event-1",
+                        "event_type": "web_clip",
+                        "event_hash": "event-hash",
+                        "sha256": "event-sha",
+                    },
+                    {
+                        "input_id": "raw_ref:raw-1",
+                        "input_kind": "raw_ref",
+                        "raw_ref_id": "raw-1",
+                        "event_id": "event-1",
+                        "source_path": "raw/capture/event-1.json",
+                        "sha256": "file-sha",
+                        "size_bytes": 27,
+                    },
+                ],
+                "thoth_change_provenance": {
+                    "compiled_at": "2026-06-25T00:00:00Z",
+                    "reason": "inputs_changed",
+                    "input_hash_before": "old-hash",
+                    "input_hash_after": "new-hash",
+                    "changes": [
+                        {
+                            "change_type": "changed",
+                            "input_id": "raw_ref:raw-1",
+                            "input_kind": "raw_ref",
+                            "reason": "Raw artifact raw-1 hash changed.",
+                        }
+                    ],
+                },
+            }
+        )
+        + "\n# Lineage Page\n",
+        encoding="utf-8",
+    )
 
     db = MetadataDB(str(layout.database_path))
     assert db.upsert_bookmark_entry(
@@ -168,6 +247,28 @@ topics:
             last_error="compiler input invalid",
             created_at="2026-06-24T00:00:00Z",
         )
+    )
+    semantic_store = SemanticMemoryStore(db)
+    semantic_store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-lineage",
+            candidate_type="claim",
+            status="confirmed",
+            text="Lineage views should explain wiki changes.",
+            entity_type="topic",
+            entity_name="Lineage",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-lineage",
+                evidence_id="evidence-lineage",
+                artifact_id="artifact-failed",
+                artifact_type="paper",
+                capture_event_id="event-1",
+                source_path="raw/capture/event-1.json",
+                evidence_text="The local raw capture influenced this page.",
+            ),
+        ),
     )
     run = db.begin_connector_run("omi", inputs={"export_paths": ["omi.json"]})
     assert run is not None
@@ -234,6 +335,21 @@ topics:
     assert payload["llm_usage"]["totals_by_source"][0]["source_connector"] == "omi"
     assert payload["llm_usage"]["totals_by_task"][0]["task"] == "archivist"
     assert payload["llm_usage"]["recent_expensive_runs"][0]["run_id"] == run.run_id
+    assert payload["lineage"]["pages_with_lineage"] >= 1
+    lineage_page = next(
+        item
+        for item in payload["lineage"]["recent_pages"]
+        if item["slug"] == "lineage-page"
+    )
+    assert lineage_page["why_changed"] == "Raw artifact raw-1 hash changed."
+    assert lineage_page["local_files"][0]["source_path"] == "raw/capture/event-1.json"
+    assert lineage_page["capture_events"][0]["event_id"] == "event-1"
+    assert lineage_page["raw_refs"][0]["raw_ref_id"] == "raw-1"
+    assert lineage_page["artifacts"][0]["artifact_id"] == "artifact-failed"
+    assert lineage_page["semantic_candidates"][0]["candidate_id"] == "candidate-lineage"
+    assert lineage_page["semantic_candidates"][0]["evidence"][0]["source_path"] == (
+        "raw/capture/event-1.json"
+    )
 
     stuck_reasons = {item["reason"] for item in payload["stuck_work"]["items"]}
     assert "network down" in stuck_reasons

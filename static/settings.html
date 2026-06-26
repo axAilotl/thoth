@@ -1599,6 +1599,14 @@
                         <div class="stat-label">Stuck Work</div>
                     </div>
                     <div class="stat-card">
+                        <div class="stat-value" id="health-lineage-pages">-</div>
+                        <div class="stat-label">Lineage Pages</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-lineage-files">-</div>
+                        <div class="stat-label">Lineage Files</div>
+                    </div>
+                    <div class="stat-card">
                         <div class="stat-value" id="health-llm-cost">-</div>
                         <div class="stat-label">LLM Cost Est.</div>
                     </div>
@@ -1622,6 +1630,10 @@
                 <div class="form-group">
                     <label>Stuck Work</label>
                     <div id="health-stuck-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Artifact and Wiki Lineage</label>
+                    <div id="health-lineage-list" class="security-table-wrap"></div>
                 </div>
                 <div class="form-group">
                     <label>Recent Expensive LLM Runs</label>
@@ -2651,6 +2663,49 @@
             `;
         }
 
+        function renderLineagePages(lineage) {
+            const rows = lineage?.recent_pages || [];
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No wiki lineage metadata is recorded.</div>';
+            }
+            const previewList = (items, key, limit = 3) => {
+                if (!Array.isArray(items) || items.length === 0) return '-';
+                const labels = items.slice(0, limit).map(item => item?.[key] || '');
+                const extra = items.length > limit ? ` +${items.length - limit}` : '';
+                return `${labels.filter(Boolean).join(', ')}${extra}` || '-';
+            };
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Wiki Page</th>
+                            <th>Why Changed</th>
+                            <th>Local Files</th>
+                            <th>Capture</th>
+                            <th>Artifacts</th>
+                            <th>Semantic</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => {
+                            const summary = row.relation_summary || {};
+                            const captureText = `${summary.capture_events || 0} event(s), ${summary.raw_refs || 0} raw ref(s)`;
+                            return `
+                                <tr>
+                                    <td>${escapeHtml(row.title || row.slug || '')}<br><span class="stat-label">${escapeHtml(row.page_type || '')} · ${escapeHtml(formatOptionalDate(row.updated_at))}</span></td>
+                                    <td>${escapeHtml(row.why_changed || '')}<br><span class="stat-label">${escapeHtml(row.input_hash || 'no input hash')}</span></td>
+                                    <td>${escapeHtml(previewList(row.local_files, 'source_path'))}<br><span class="stat-label">${escapeHtml(summary.local_files ?? 0)} file(s)</span></td>
+                                    <td>${escapeHtml(captureText)}<br><span class="stat-label">${escapeHtml(previewList(row.raw_refs, 'raw_ref_id', 2))}</span></td>
+                                    <td>${escapeHtml(previewList(row.artifacts, 'artifact_id'))}<br><span class="stat-label">${escapeHtml(summary.artifacts ?? 0)} artifact(s)</span></td>
+                                    <td>${escapeHtml(previewList(row.semantic_candidates, 'candidate_id'))}<br><span class="stat-label">${escapeHtml(summary.semantic_candidates ?? 0)} candidate(s)</span></td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
         function renderLLMExpensiveRuns(rows) {
             if (!Array.isArray(rows) || rows.length === 0) {
                 return '<div class="security-empty">No LLM usage has been recorded.</div>';
@@ -2725,10 +2780,12 @@
             const compilerRuns = status?.compiler_runs || {};
             const llmUsage = status?.llm_usage || {};
             const stuck = status?.stuck_work || {};
+            const lineage = status?.lineage || {};
             const bookmarkTotal = queues.bookmark_queue?.total || 0;
             const ingestionTotal = queues.ingestion_queue?.total || 0;
             const archivistCount = compilerRuns.archivist?.topic_count || 0;
             const captureCompileCount = compilerRuns.capture_wiki?.compiled_page_count || 0;
+            const lineageRelationCounts = lineage.relation_counts || {};
 
             setTextValue('health-sources', `${sourceHealth.active || 0}/${sourceHealth.total || 0}`);
             setTextValue('health-events', events.total ?? 0);
@@ -2736,12 +2793,15 @@
             setTextValue('health-stale-pages', stalePages.total ?? 0);
             setTextValue('health-compiler-runs', archivistCount + captureCompileCount);
             setTextValue('health-stuck', stuck.total ?? 0);
+            setTextValue('health-lineage-pages', `${lineage.pages_with_lineage || 0}/${lineage.total_pages || 0}`);
+            setTextValue('health-lineage-files', lineageRelationCounts.local_files ?? 0);
             setTextValue('health-llm-cost', formatUsd(llmUsage.total_cost_estimate_usd));
             setTextValue('health-llm-calls', llmUsage.call_count ?? 0);
             setHtmlValue('health-source-table', renderHealthSources(sourceHealth.sources || []));
             setHtmlValue('health-sessions-table', renderHealthSessions(status?.recent_sessions?.sessions || []));
             setHtmlValue('health-compiler-list', renderHealthCompiler(status || {}));
             setHtmlValue('health-stuck-list', renderHealthStuck(stuck.items || []));
+            setHtmlValue('health-lineage-list', renderLineagePages(lineage));
             setHtmlValue('health-llm-expensive-runs', renderLLMExpensiveRuns(llmUsage.recent_expensive_runs || []));
             setHtmlValue(
                 'health-llm-source-totals',
