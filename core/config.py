@@ -47,6 +47,47 @@ def _validate_llm_task_route(
         )
 
 
+def _validate_positive_int_setting(
+    *,
+    errors: List[str],
+    config: Dict[str, Any],
+    key: str,
+    path: str,
+) -> None:
+    if key not in config:
+        return
+    value = config.get(key)
+    if isinstance(value, bool):
+        errors.append(f"{path}.{key} must be a positive integer")
+        return
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        errors.append(f"{path}.{key} must be a positive integer")
+        return
+    if parsed < 1:
+        errors.append(f"{path}.{key} must be a positive integer")
+
+
+def _validate_string_list_setting(
+    *,
+    errors: List[str],
+    config: Dict[str, Any],
+    key: str,
+    path: str,
+) -> None:
+    if key not in config:
+        return
+    value = config.get(key)
+    if not isinstance(value, list):
+        errors.append(f"{path}.{key} must be a list of strings")
+        return
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"{path}.{key} must be a list of non-empty strings")
+            return
+
+
 def load_env_file(env_path: str = '.env'):
     """Load environment variables from .env file if it exists"""
     env_file = Path(env_path)
@@ -236,6 +277,34 @@ class Config:
                 errors.append("rate_limit.requests_per_window must be positive")
             if rate_limit_config.get('window_duration', 0) <= 0:
                 errors.append("rate_limit.window_duration must be positive")
+
+        semantic_memory_config = self.get("semantic_memory", {})
+        if semantic_memory_config:
+            if not isinstance(semantic_memory_config, dict):
+                errors.append("semantic_memory must be an object")
+            else:
+                promotion_config = semantic_memory_config.get("promotion", {})
+                if promotion_config:
+                    if not isinstance(promotion_config, dict):
+                        errors.append("semantic_memory.promotion must be an object")
+                    else:
+                        for key in ("min_evidence_count", "min_distinct_sources"):
+                            _validate_positive_int_setting(
+                                errors=errors,
+                                config=promotion_config,
+                                key=key,
+                                path="semantic_memory.promotion",
+                            )
+                        for key in (
+                            "trusted_structured_artifact_types",
+                            "trusted_structured_metadata_keys",
+                        ):
+                            _validate_string_list_setting(
+                                errors=errors,
+                                config=promotion_config,
+                                key=key,
+                                path="semantic_memory.promotion",
+                            )
 
         try:
             from .postgres import validate_capture_event_store_config
