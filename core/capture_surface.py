@@ -28,6 +28,7 @@ from .postgres import (
     open_postgres_connection,
     resolve_postgres_settings,
 )
+from .retention_service import CaptureRetentionService, RetentionServiceError
 from .wiki_updater import CompiledWikiUpdater
 
 
@@ -51,9 +52,13 @@ class CaptureSurfaceService:
         event_store: CaptureEventStore,
         *,
         lifecycle_service: CaptureLifecycleService | None = None,
+        layout: PathLayout | None = None,
+        db: MetadataDB | None = None,
     ) -> None:
         self.event_store = event_store
         self.lifecycle_service = lifecycle_service
+        self.layout = layout
+        self.db = db
 
     def list_sources(self) -> dict[str, Any]:
         """Return configured capture sources."""
@@ -147,6 +152,65 @@ class CaptureSurfaceService:
             for result in results
         ]
         return _json_safe({"pages": pages, "total": len(pages)})
+
+    def inspect_retention(
+        self,
+        *,
+        event_id: str | None = None,
+        source_id: str | None = None,
+        session_id: str | None = None,
+        as_of: Any = None,
+    ) -> dict[str, Any]:
+        """Inspect retention classes and expiry eligibility for capture data."""
+        try:
+            return _json_safe(
+                self._retention_service().inspect(
+                    event_id=event_id,
+                    source_id=source_id,
+                    session_id=session_id,
+                    as_of=as_of,
+                )
+            )
+        except RetentionServiceError as exc:
+            raise CaptureSurfaceError(str(exc)) from exc
+
+    def expire_retention(
+        self,
+        *,
+        event_id: str,
+        delete_raw: bool = False,
+        delete_distilled: bool = False,
+        dry_run: bool = True,
+        reason: str | None = None,
+        actor: str | None = None,
+        as_of: Any = None,
+    ) -> dict[str, Any]:
+        """Expire eligible raw or distilled capture data with audit records."""
+        try:
+            return _json_safe(
+                self._retention_service().expire(
+                    event_id=event_id,
+                    delete_raw=delete_raw,
+                    delete_distilled=delete_distilled,
+                    dry_run=dry_run,
+                    reason=reason,
+                    actor=actor,
+                    as_of=as_of,
+                )
+            )
+        except RetentionServiceError as exc:
+            raise CaptureSurfaceError(str(exc)) from exc
+
+    def _retention_service(self) -> CaptureRetentionService:
+        if self.layout is None:
+            raise CaptureSurfaceConfigError(
+                "retention operations require an initialized PathLayout"
+            )
+        return CaptureRetentionService(
+            self.event_store,
+            layout=self.layout,
+            db=self.db,
+        )
 
     def _event_payload(
         self,
@@ -322,6 +386,8 @@ def open_capture_surface(
             yield CaptureSurfaceService(
                 event_store,
                 lifecycle_service=lifecycle,
+                layout=surface_layout,
+                db=surface_db,
             )
     except PostgresConfigError as exc:
         raise CaptureSurfaceConfigError(str(exc)) from exc

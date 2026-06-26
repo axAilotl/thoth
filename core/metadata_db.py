@@ -1892,6 +1892,49 @@ class MetadataDB:
                 for row in rows
             ]
 
+    def list_archivist_corpus_documents_for_sources(
+        self,
+        *,
+        source_ids: tuple[str, ...] = (),
+        paths: tuple[str, ...] = (),
+    ) -> List[Dict[str, Any]]:
+        """List indexed corpus documents that match source ids or known paths."""
+        cleaned_source_ids = tuple(
+            dict.fromkeys(str(item).strip() for item in source_ids if str(item).strip())
+        )
+        cleaned_paths = tuple(
+            dict.fromkeys(str(item).strip() for item in paths if str(item).strip())
+        )
+        if not cleaned_source_ids and not cleaned_paths:
+            return []
+        self.ensure_archivist_corpus_tables()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if cleaned_source_ids:
+            placeholders = ",".join("?" for _ in cleaned_source_ids)
+            clauses.append(f"source_id IN ({placeholders})")
+            params.extend(cleaned_source_ids)
+        if cleaned_paths:
+            placeholders = ",".join("?" for _ in cleaned_paths)
+            clauses.append(
+                f"(scope_relative_path IN ({placeholders}) OR path IN ({placeholders}))"
+            )
+            params.extend(cleaned_paths)
+            params.extend(cleaned_paths)
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT candidate_key, path, scope, scope_relative_path, source_type,
+                    file_type, source_id, source_hash, updated_at
+                FROM archivist_corpus_documents
+                WHERE {" OR ".join(clauses)}
+                ORDER BY updated_at DESC, candidate_key DESC
+                """,
+                tuple(params),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def prune_archivist_corpus_documents(
         self,
         *,
@@ -2081,6 +2124,49 @@ class MetadataDB:
                 }
                 for row in rows
             }
+
+    def list_archivist_corpus_embeddings_for_candidate_keys(
+        self,
+        candidate_keys: tuple[str, ...],
+    ) -> List[Dict[str, Any]]:
+        """Return all stored embeddings for candidate keys."""
+        cleaned = tuple(
+            dict.fromkeys(str(item).strip() for item in candidate_keys if str(item).strip())
+        )
+        if not cleaned:
+            return []
+        self.ensure_archivist_corpus_tables()
+        placeholders = ",".join("?" for _ in cleaned)
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT candidate_key, provider, model, source_hash, updated_at
+                FROM archivist_corpus_embeddings
+                WHERE candidate_key IN ({placeholders})
+                ORDER BY updated_at DESC, candidate_key, provider, model
+                """,
+                cleaned,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_archivist_corpus_embedding(
+        self,
+        *,
+        candidate_key: str,
+        provider: str,
+        model: str,
+    ) -> int:
+        """Delete one stored corpus embedding."""
+        self.ensure_archivist_corpus_tables()
+        with self._get_connection() as conn:
+            result = conn.execute(
+                """
+                DELETE FROM archivist_corpus_embeddings
+                WHERE candidate_key = ? AND provider = ? AND model = ?
+                """,
+                (candidate_key, provider, model),
+            )
+            return int(result.rowcount or 0)
 
     def get_archivist_corpus_stats(self) -> Dict[str, Any]:
         """Return corpus inventory counts for diagnostics."""
@@ -3755,6 +3841,68 @@ class MetadataDB:
             logger.error(f"Failed to summarize llm cache: {exc}")
             return {}
 
+    def list_llm_cache_entries_for_contexts(
+        self,
+        contexts: tuple[str, ...],
+    ) -> List[Dict[str, Any]]:
+        """Return LLM cache rows whose cache key or legacy context matches contexts."""
+        cleaned = tuple(dict.fromkeys(str(item).strip() for item in contexts if str(item).strip()))
+        if not cleaned:
+            return []
+        try:
+            with self._get_connection() as conn:
+                columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(llm_cache)").fetchall()
+                }
+                clauses = []
+                params: list[Any] = []
+                for context in cleaned:
+                    clauses.append("cache_key LIKE ?")
+                    params.append(f"%{context}%")
+                    if "context" in columns:
+                        clauses.append("context LIKE ?")
+                        params.append(f"%{context}%")
+                selected_columns = [
+                    "cache_key",
+                    "task_type",
+                    "content_hash",
+                    "created_at",
+                    "model_provider",
+                ]
+                if "context" in columns:
+                    selected_columns.append("context")
+                rows = conn.execute(
+                    f"""
+                    SELECT {", ".join(selected_columns)}
+                    FROM llm_cache
+                    WHERE {" OR ".join(clauses)}
+                    ORDER BY created_at DESC, cache_key
+                    """,
+                    tuple(params),
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except Exception as exc:
+            logger.error(f"Failed to list LLM cache entries for retention: {exc}")
+            return []
+
+    def delete_llm_cache_entries(self, cache_keys: tuple[str, ...]) -> int:
+        """Delete LLM cache rows by key and return the number removed."""
+        cleaned = tuple(dict.fromkeys(str(item).strip() for item in cache_keys if str(item).strip()))
+        if not cleaned:
+            return 0
+        placeholders = ",".join("?" for _ in cleaned)
+        try:
+            with self._get_connection() as conn:
+                result = conn.execute(
+                    f"DELETE FROM llm_cache WHERE cache_key IN ({placeholders})",
+                    cleaned,
+                )
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            logger.error(f"Failed to delete LLM cache entries for retention: {exc}")
+            return 0
+
     def get_transcript_chunk_stats(self) -> Dict[str, Any]:
         """Summarize transcript chunk cache health."""
         try:
@@ -3839,6 +3987,51 @@ class MetadataDB:
         except Exception as exc:
             logger.error(f"Failed to summarize transcript chunks: {exc}")
             return {}
+
+    def list_transcript_chunks_for_contexts(
+        self,
+        context_ids: tuple[str, ...],
+    ) -> List[Dict[str, Any]]:
+        """Return transcript chunk cache rows for matching context ids."""
+        cleaned = tuple(dict.fromkeys(str(item).strip() for item in context_ids if str(item).strip()))
+        if not cleaned:
+            return []
+        placeholders = ",".join("?" for _ in cleaned)
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT context_id, chunk_index, content_hash, updated_at, model_provider
+                    FROM transcript_chunk_cache
+                    WHERE context_id IN ({placeholders})
+                    ORDER BY context_id, chunk_index
+                    """,
+                    cleaned,
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except Exception as exc:
+            logger.error(f"Failed to list transcript chunks for retention: {exc}")
+            return []
+
+    def delete_transcript_chunks_for_contexts(
+        self,
+        context_ids: tuple[str, ...],
+    ) -> int:
+        """Delete transcript chunk cache rows for context ids."""
+        cleaned = tuple(dict.fromkeys(str(item).strip() for item in context_ids if str(item).strip()))
+        if not cleaned:
+            return 0
+        placeholders = ",".join("?" for _ in cleaned)
+        try:
+            with self._get_connection() as conn:
+                result = conn.execute(
+                    f"DELETE FROM transcript_chunk_cache WHERE context_id IN ({placeholders})",
+                    cleaned,
+                )
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            logger.error(f"Failed to delete transcript chunks for retention: {exc}")
+            return 0
     
     # Database maintenance
     def vacuum(self) -> bool:

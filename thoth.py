@@ -1864,6 +1864,23 @@ def cmd_capture(args):
                 )
             elif args.capture_action == "event":
                 payload = surface.get_event(args.event_id)
+            elif args.capture_action == "retention":
+                payload = surface.inspect_retention(
+                    event_id=getattr(args, "event_id", None),
+                    source_id=getattr(args, "source_id", None),
+                    session_id=getattr(args, "session_id", None),
+                    as_of=getattr(args, "as_of", None),
+                )
+            elif args.capture_action == "expire":
+                payload = surface.expire_retention(
+                    event_id=args.event_id,
+                    delete_raw=getattr(args, "raw", False),
+                    delete_distilled=getattr(args, "distilled", False),
+                    dry_run=not getattr(args, "execute", False),
+                    reason=getattr(args, "reason", None),
+                    actor=getattr(args, "actor", None),
+                    as_of=getattr(args, "as_of", None),
+                )
             elif args.capture_action == "compile-wiki":
                 layout = build_path_layout(config)
                 updater = CompiledWikiUpdater(config, layout=layout)
@@ -1923,6 +1940,7 @@ def cmd_capture(args):
     if getattr(args, "json", False) or args.capture_action in {
         "compile-wiki",
         "event",
+        "expire",
         "ingest",
     }:
         _print_json(payload)
@@ -1934,6 +1952,23 @@ def cmd_capture(args):
             print(
                 f"- {source['source_name']} ({source['source_type']}) "
                 f"id={source['source_id']} status={source['status']}"
+        )
+        return
+
+    if args.capture_action == "retention":
+        print(
+            f"Retention targets: {payload['total']} "
+            f"eligible={payload['eligible']} as_of={payload['as_of']}"
+        )
+        for target in payload["targets"]:
+            privacy = target.get("privacy_class") or "-"
+            retention = target.get("retention_class") or "-"
+            path = target.get("path") or target.get("cache_key") or target.get("target_id")
+            print(
+                f"- {target['target_type']} {target['target_id']} "
+                f"scope={target['retention_scope']} eligible={target['eligible']} "
+                f"privacy={privacy} retention={retention} "
+                f"reason={target['eligibility_reason']} path={path}"
             )
         return
 
@@ -2589,6 +2624,39 @@ Examples:
     )
     capture_event_parser.add_argument("event_id")
     capture_event_parser.add_argument("--json", action="store_true")
+    capture_retention_parser = capture_subparsers.add_parser(
+        "retention",
+        help="Inspect capture retention classes and expiry eligibility",
+    )
+    capture_retention_parser.add_argument("--event-id", type=str, default=None)
+    capture_retention_parser.add_argument("--source-id", type=str, default=None)
+    capture_retention_parser.add_argument("--session-id", type=str, default=None)
+    capture_retention_parser.add_argument("--as-of", type=str, default=None)
+    capture_retention_parser.add_argument("--json", action="store_true")
+    capture_expire_parser = capture_subparsers.add_parser(
+        "expire",
+        help="Expire eligible raw or distilled capture data",
+    )
+    capture_expire_parser.add_argument("event_id")
+    capture_expire_parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Expire eligible raw capture files",
+    )
+    capture_expire_parser.add_argument(
+        "--distilled",
+        action="store_true",
+        help="Expire eligible transcripts, summaries, caches, embeddings, and wiki output",
+    )
+    capture_expire_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Perform deletion; without this flag the command is a dry run",
+    )
+    capture_expire_parser.add_argument("--reason", default=None)
+    capture_expire_parser.add_argument("--actor", default=None)
+    capture_expire_parser.add_argument("--as-of", type=str, default=None)
+    capture_expire_parser.add_argument("--json", action="store_true")
     capture_compile_wiki_parser = capture_subparsers.add_parser(
         "compile-wiki",
         help="Compile event-backed wiki pages from capture events",

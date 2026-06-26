@@ -110,6 +110,60 @@ class FakeCaptureSurface:
         assert event_id == "event-1"
         return {**CAPTURE_EVENT, "payload": {"title": "Manual note"}}
 
+    def inspect_retention(self, *, event_id=None, source_id=None, session_id=None, as_of=None):
+        assert event_id == "event-1"
+        assert source_id is None
+        assert session_id is None
+        assert as_of == "2026-01-01T00:00:00Z"
+        return {
+            "as_of": as_of,
+            "targets": [
+                {
+                    "event_id": "event-1",
+                    "target_type": "raw_ref",
+                    "target_id": "raw-1",
+                    "retention_scope": "raw_capture",
+                    "retention_class": "raw-expire",
+                    "privacy_class": "private",
+                    "eligible": True,
+                    "eligibility_reason": "eligible",
+                }
+            ],
+            "total": 1,
+            "eligible": 1,
+            "by_scope": {"raw_capture": {"total": 1, "eligible": 1}},
+        }
+
+    def expire_retention(
+        self,
+        *,
+        event_id,
+        delete_raw=False,
+        delete_distilled=False,
+        dry_run=True,
+        reason=None,
+        actor=None,
+        as_of=None,
+    ):
+        assert event_id == "event-1"
+        assert delete_raw is True
+        assert delete_distilled is False
+        assert dry_run is False
+        assert reason == "expired"
+        assert actor == "operator"
+        assert as_of == "2026-01-01T00:00:00Z"
+        return {
+            "dry_run": False,
+            "delete_raw": True,
+            "delete_distilled": False,
+            "operations": [{"status": "deleted", "retention_scope": "raw_capture"}],
+            "audit_records": [{"operation": "retention.expired"}],
+            "total": 1,
+            "by_status": {"deleted": 1},
+            "by_scope": {"raw_capture": {"deleted": 1}},
+            "bytes_deleted": 12,
+        }
+
 
 class FakeCaptureContext:
     def __enter__(self):
@@ -155,3 +209,34 @@ def test_capture_cli_lists_events_and_event_detail(monkeypatch, capsys):
     assert detail_payload["event_id"] == "event-1"
     assert detail_payload["payload"] == {"title": "Manual note"}
     assert detail_payload["artifact_ids"] == ["artifact-1"]
+
+    thoth.cmd_capture(
+        SimpleNamespace(
+            capture_action="retention",
+            event_id="event-1",
+            source_id=None,
+            session_id=None,
+            as_of="2026-01-01T00:00:00Z",
+            json=True,
+        )
+    )
+    retention_payload = json.loads(capsys.readouterr().out)
+    assert retention_payload["targets"][0]["retention_class"] == "raw-expire"
+
+    thoth.cmd_capture(
+        SimpleNamespace(
+            capture_action="expire",
+            event_id="event-1",
+            raw=True,
+            distilled=False,
+            execute=True,
+            reason="expired",
+            actor="operator",
+            as_of="2026-01-01T00:00:00Z",
+            json=True,
+        )
+    )
+    expire_payload = json.loads(capsys.readouterr().out)
+    assert expire_payload["delete_raw"] is True
+    assert expire_payload["delete_distilled"] is False
+    assert expire_payload["by_status"] == {"deleted": 1}

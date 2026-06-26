@@ -760,6 +760,17 @@ class CaptureIngestRequest(BaseModel):
     capabilities: List[str] = Field(default_factory=list)
 
 
+class CaptureRetentionExpireRequest(BaseModel):
+    """Request payload for expiring eligible capture data."""
+
+    delete_raw: bool = False
+    delete_distilled: bool = False
+    execute: bool = False
+    reason: Optional[str] = None
+    actor: Optional[str] = None
+    as_of: Optional[str] = None
+
+
 class BookmarkStatusRequest(BaseModel):
     """Request body for bookmark status lookups."""
 
@@ -1195,6 +1206,53 @@ def get_capture_event(event_id: str):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.error(f"Error reading capture event {event_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/capture/retention")
+def inspect_capture_retention(
+    event_id: Optional[str] = Query(default=None),
+    source_id: Optional[str] = Query(default=None),
+    session_id: Optional[str] = Query(default=None),
+    as_of: Optional[str] = Query(default=None),
+):
+    """Inspect retention classes and expiry eligibility for capture data."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.inspect_retention(
+                event_id=event_id,
+                source_id=source_id,
+                session_id=session_id,
+                as_of=as_of,
+            )
+    except (CaptureSurfaceError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error inspecting capture retention: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/capture/events/{event_id}/expire")
+def expire_capture_event_retention(
+    event_id: str,
+    request: CaptureRetentionExpireRequest,
+):
+    """Expire eligible raw or distilled capture data with audit records."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.expire_retention(
+                event_id=event_id,
+                delete_raw=request.delete_raw,
+                delete_distilled=request.delete_distilled,
+                dry_run=not request.execute,
+                reason=request.reason,
+                actor=request.actor,
+                as_of=request.as_of,
+            )
+    except (CaptureSurfaceError, ValueError, FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error expiring capture event {event_id}: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

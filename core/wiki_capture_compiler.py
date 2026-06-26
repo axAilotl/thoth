@@ -16,6 +16,7 @@ from .capture_event_store import (
     CaptureSource,
     PrivacyAnnotation,
     RawArtifactRef,
+    RetentionPolicy,
     SecurityFinding,
 )
 from .path_layout import PathLayout
@@ -81,6 +82,7 @@ class _CaptureEventRecord:
     raw_refs: tuple[RawArtifactRef, ...]
     artifact_links: tuple[ArtifactLink, ...]
     privacy_annotations: tuple[PrivacyAnnotation, ...]
+    retention_policies: tuple[RetentionPolicy, ...]
     security_findings: tuple[SecurityFinding, ...]
 
 
@@ -213,6 +215,19 @@ def _privacy_classes_for_capture_record(record: _CaptureEventRecord) -> tuple[st
             classes.append(value.lower())
     for annotation in record.privacy_annotations:
         value = _clean_text(annotation.classification)
+        if value:
+            classes.append(value.lower())
+    return tuple(dict.fromkeys(classes))
+
+
+def _retention_classes_for_capture_record(record: _CaptureEventRecord) -> tuple[str, ...]:
+    classes: list[str] = []
+    for key in ("retention_class", "policy_name", "policy", "class"):
+        value = _clean_text(record.event.retention.get(key))
+        if value:
+            classes.append(value.lower())
+    for policy in record.retention_policies:
+        value = _clean_text(policy.policy_name)
         if value:
             classes.append(value.lower())
     return tuple(dict.fromkeys(classes))
@@ -426,6 +441,7 @@ class CaptureWikiCompiler:
                 session = session_cache[event.session_id]
 
             raw_refs = event_store.list_raw_refs(event_id=event.event_id)
+            artifact_links = event_store.list_artifact_links(event_id=event.event_id)
             security_findings: list[SecurityFinding] = list(
                 event_store.list_security_findings(event_id=event.event_id)
             )
@@ -438,17 +454,42 @@ class CaptureWikiCompiler:
             for finding in security_findings:
                 deduped_findings.setdefault(finding.finding_id, finding)
 
+            retention_policies: list[RetentionPolicy] = list(
+                event_store.list_retention_policies(
+                    target_type="event",
+                    target_id=event.event_id,
+                )
+            )
+            for raw_ref in raw_refs:
+                retention_policies.extend(
+                    event_store.list_retention_policies(
+                        target_type="raw_ref",
+                        target_id=raw_ref.raw_ref_id,
+                    )
+                )
+            for link in artifact_links:
+                retention_policies.extend(
+                    event_store.list_retention_policies(
+                        target_type="artifact_link",
+                        target_id=link.artifact_link_id,
+                    )
+                )
+            deduped_retention: dict[str, RetentionPolicy] = {}
+            for policy in retention_policies:
+                deduped_retention.setdefault(policy.retention_id, policy)
+
             records.append(
                 _CaptureEventRecord(
                     event=event,
                     source=source_cache[event.source_id],
                     session=session,
                     raw_refs=raw_refs,
-                    artifact_links=event_store.list_artifact_links(
-                        event_id=event.event_id
-                    ),
+                    artifact_links=artifact_links,
                     privacy_annotations=event_store.list_privacy_annotations(
                         event_id=event.event_id
+                    ),
+                    retention_policies=tuple(
+                        deduped_retention[key] for key in sorted(deduped_retention)
                     ),
                     security_findings=tuple(
                         deduped_findings[key] for key in sorted(deduped_findings)
@@ -813,6 +854,11 @@ class CaptureWikiCompiler:
         privacy_classes = _privacy_classes_for_capture_record(record)
         if privacy_classes:
             line += "; privacy " + ", ".join(f"`{item}`" for item in privacy_classes)
+        retention_classes = _retention_classes_for_capture_record(record)
+        if retention_classes:
+            line += "; retention " + ", ".join(
+                f"`{item}`" for item in retention_classes
+            )
         security_label = self._capture_event_security_label(record)
         if security_label:
             line += f"; security {security_label}"
