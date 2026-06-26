@@ -58,6 +58,13 @@ from .archivist_compiler import (
     ArchivistCompilerError,
 )
 from .agent_surface import AgentSurfaceError, AgentSurfaceService
+from .capture_lifecycle import (
+    CaptureLifecycleConfigError,
+    CaptureLifecycleError,
+    CaptureLifecycleResult,
+    CaptureLifecycleService,
+    get_capture_lifecycle_service,
+)
 from .mcp_server import ThothMCPServer
 from .archivist_runtime import (
     ARCHIVIST_JOB_NAME,
@@ -184,6 +191,11 @@ __all__ = [
     'ArchivistCompilerError',
     'AgentSurfaceError',
     'AgentSurfaceService',
+    'CaptureLifecycleConfigError',
+    'CaptureLifecycleError',
+    'CaptureLifecycleResult',
+    'CaptureLifecycleService',
+    'get_capture_lifecycle_service',
     'ThothMCPServer',
     'ARCHIVIST_JOB_NAME',
     'ArchivistRuntimeError',
