@@ -378,6 +378,11 @@ def test_capture_metadata_produces_stable_event_and_queue_ids(
 
     entry = service.db.get_ingestion_entry("skill-note-1")
     assert entry is not None
+    assert json.loads(entry.capabilities_json) == [
+        "transcript",
+        "text",
+        "llm_summary",
+    ]
     queued_payload = json.loads(entry.payload_json)
     assert queued_payload["normalized_metadata"]["queue_artifact_id"] == "skill-note-1"
     assert queued_payload["normalized_metadata"]["capture_event_id"] == first.event_id

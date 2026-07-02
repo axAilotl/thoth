@@ -106,6 +106,31 @@ class FakeCaptureSurface:
             "bytes_deleted": 20,
         }
 
+    def ingest_manual(
+        self,
+        *,
+        artifact_type,
+        payload,
+        source,
+        session=None,
+        event=None,
+        raw_path=None,
+        queue_artifact_id=None,
+        priority=0,
+        capabilities=None,
+    ):
+        return {
+            "artifact_type": artifact_type,
+            "payload": payload,
+            "source": source,
+            "session": session,
+            "event": event,
+            "raw_path": raw_path,
+            "queue_artifact_id": queue_artifact_id,
+            "priority": priority,
+            "capabilities": capabilities,
+        }
+
 
 class FakeCaptureContext:
     def __enter__(self):
@@ -186,3 +211,36 @@ def test_capture_api_lists_sources_events_and_detail(monkeypatch):
     assert expire_payload["delete_raw"] is False
     assert expire_payload["delete_distilled"] is True
     assert expire_payload["by_status"] == {"deleted": 1}
+
+
+def test_capture_api_omitted_capabilities_preserve_lifecycle_default(monkeypatch):
+    _patch_background_tasks(monkeypatch)
+    monkeypatch.setattr(
+        thoth_api,
+        "open_api_capture_surface",
+        lambda: FakeCaptureContext(),
+    )
+
+    with TestClient(thoth_api.app) as client:
+        omitted_response = client.post(
+            "/api/capture/ingest",
+            json={
+                "artifact_type": "repository",
+                "payload": {"id": "repo-1", "repo_name": "owner/repo"},
+                "source": "github",
+            },
+        )
+        explicit_empty_response = client.post(
+            "/api/capture/ingest",
+            json={
+                "artifact_type": "repository",
+                "payload": {"id": "repo-2", "repo_name": "owner/repo-2"},
+                "source": "github",
+                "capabilities": [],
+            },
+        )
+
+    assert omitted_response.status_code == 200
+    assert omitted_response.json()["capabilities"] is None
+    assert explicit_empty_response.status_code == 200
+    assert explicit_empty_response.json()["capabilities"] == []

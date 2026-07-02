@@ -762,7 +762,7 @@ class CaptureIngestRequest(BaseModel):
     raw_path: Optional[str] = None
     queue_artifact_id: Optional[str] = None
     priority: int = 0
-    capabilities: List[str] = Field(default_factory=list)
+    capabilities: Optional[List[str]] = None
 
 
 class CaptureRetentionExpireRequest(BaseModel):

@@ -28,6 +28,7 @@ SUPPORTED_INGESTION_ARTIFACT_TYPES = frozenset(
         "paper",
         "repository",
         "web_clipper",
+        "markdown",
         "video",
         "transcript",
     }
@@ -264,6 +265,13 @@ def _artifact_id_candidates_for_type(
             payload.get("full_name"),
         )
     if artifact_type == "web_clipper":
+        return (
+            payload.get("id"),
+            payload.get("artifact_id"),
+            payload.get("source_relative_path"),
+            payload.get("source_path"),
+        )
+    if artifact_type == "markdown":
         return (
             payload.get("id"),
             payload.get("artifact_id"),

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.artifacts import RepositoryArtifact, TranscriptArtifact
+from core.artifacts import MarkdownArtifact, RepositoryArtifact, TranscriptArtifact
 from core.capture_event_store import (
     ArtifactLink,
     CaptureEvent,
@@ -288,6 +288,28 @@ def test_wiki_updater_blocks_quarantined_artifacts_and_index_entries(
     assert "base64_prompt_payload" in risky.normalized_metadata[
         THOTH_SECURITY_PATTERN_IDS_KEY
     ]
+
+
+def test_wiki_updater_maps_markdown_artifact_type(
+    tmp_path: Path,
+    monkeypatch,
+    restore_runtime_config,
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    artifact = MarkdownArtifact(
+        id="manual-note",
+        source_type="imported_markdown",
+        raw_content="# Manual note\n",
+        source_path=str(tmp_path / "notes" / "manual.md"),
+        source_relative_path="notes/manual.md",
+        title="Manual note",
+    )
+
+    updater = CompiledWikiUpdater(config, layout=layout)
+
+    assert updater._artifact_type_for_artifact(artifact) == "markdown"
 
 
 @pytest.mark.anyio

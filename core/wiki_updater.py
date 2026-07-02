@@ -607,6 +607,8 @@ class CompiledWikiUpdater:
             return "repository"
         if isinstance(artifact, WebClipperArtifact):
             return "web_clipper"
+        if isinstance(artifact, MarkdownArtifact):
+            return "markdown"
         if isinstance(artifact, VideoArtifact):
             return "video"
         if isinstance(artifact, TranscriptArtifact):

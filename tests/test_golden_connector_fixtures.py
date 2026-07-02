@@ -421,14 +421,22 @@ def test_imported_markdown_fixture_preserves_raw_and_queues_capture_only(
     entry = db.get_ingestion_entry(record.artifact_id)
     assert entry is not None
     assert entry.artifact_type == "markdown"
-    assert entry.status == "needs_review"
-    assert "unsupported artifact type" in (entry.last_error or "")
+    assert entry.status == "pending"
     payload = json.loads(entry.payload_json)
     assert payload["title"] == "Imported Markdown Golden Note"
     assert payload["raw_content"] == text
     assert payload["custom_metadata"]["raw_payload_path"].startswith(
         "raw/imported_markdown/manual-import/manual-note-"
     )
+
+    processed = asyncio.run(
+        KnowledgeArtifactRuntime(config, layout=layout, db=db)
+        .process_pending_ingestions_once()
+    )
+    processed_entry = db.get_ingestion_entry(record.artifact_id)
+    assert [item.artifact_type for item in processed] == ["markdown"]
+    assert processed[0].status == "skipped"
+    assert processed_entry.status == "processed"
 
     pages_dir = layout.wiki_root / "pages"
     assert not pages_dir.exists() or not list(pages_dir.glob("*imported-markdown*"))
