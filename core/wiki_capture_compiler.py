@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 import os
 from pathlib import Path
@@ -21,12 +21,18 @@ from .capture_event_store import (
 )
 from .path_layout import PathLayout
 from .prompt_security import prompt_security_requires_review
+from .time_utils import utc_now_iso as _now_iso
 from .wiki_change_provenance import (
     capture_influence_sources,
     capture_records_snapshot,
     change_provenance,
 )
-from .wiki_contract import WikiContract, WikiPageSpec, normalize_wiki_slug
+from .wiki_contract import (
+    WikiContract,
+    WikiPageSpec,
+    normalize_wiki_slug,
+    wiki_slug_component as _slug_component,
+)
 from .wiki_io import atomic_write_text, read_frontmatter, render_frontmatter
 
 
@@ -105,10 +111,6 @@ class _CapturePageGroup:
     kind: str
     records: tuple[_CaptureEventRecord, ...]
     resource: str | None = None
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _as_sequence(value: Any) -> tuple[Any, ...]:
@@ -358,16 +360,6 @@ def _capture_event_label(record: _CaptureEventRecord) -> str:
         or _clean_text(record.event.event_hash)
         or record.event.event_id
     )
-
-
-def _slug_component(value: str, fallback: str) -> str:
-    try:
-        return normalize_wiki_slug(value)
-    except ValueError:
-        try:
-            return normalize_wiki_slug(fallback)
-        except ValueError:
-            return "unknown"
 
 
 class CaptureWikiCompiler:
@@ -711,30 +703,10 @@ class CaptureWikiCompiler:
             previous_manifest = existing.get("input_manifest")
         if not isinstance(previous_manifest, list):
             previous_manifest = []
-        updated_spec = WikiPageSpec(
-            title=spec.title,
-            slug=spec.slug,
-            kind=spec.kind,
-            summary=spec.summary,
-            aliases=spec.aliases,
-            source_paths=spec.source_paths,
-            influence_sources=spec.influence_sources,
-            related_slugs=spec.related_slugs,
-            language=spec.language,
-            translated_from=spec.translated_from,
+        updated_spec = replace(
+            spec,
             created_at=created_at,
             updated_at=updated_at,
-            resource=spec.resource,
-            event_ids=spec.event_ids,
-            source_ids=spec.source_ids,
-            session_ids=spec.session_ids,
-            capture_page_type=spec.capture_page_type,
-            capture_page_key=spec.capture_page_key,
-            capture_event_count=spec.capture_event_count,
-            capture_audit=spec.capture_audit,
-            security_findings=spec.security_findings,
-            input_hash=spec.input_hash,
-            input_manifest=spec.input_manifest,
             change_provenance=change_provenance(
                 previous_hash=(
                     str(existing.get("thoth_input_hash") or existing.get("input_hash"))

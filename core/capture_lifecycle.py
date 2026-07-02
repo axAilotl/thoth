@@ -6,10 +6,10 @@ import hashlib
 import json
 import uuid
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from .artifact_identity import native_id_from_payload
 from .capture_event_store import (
     ArtifactLink,
     CaptureEvent,
@@ -26,6 +26,7 @@ from .ingestion_runtime import (
 from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
 from .path_layout import PathLayout
 from .postgres import PostgresConfigError, resolve_postgres_settings
+from .time_utils import utc_now_iso as _now_iso
 
 
 _CAPTURE_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "thoth.capture_lifecycle")
@@ -768,10 +769,6 @@ def get_capture_lifecycle_service(
     )
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
 def _clean_string(value: Any) -> str | None:
     if value is None:
         return None
@@ -823,24 +820,7 @@ def _native_id_from_payload(
     artifact_type: str,
     payload: Mapping[str, Any],
 ) -> str | None:
-    keys_by_type = {
-        "tweet": ("tweet_id", "id"),
-        "paper": ("id", "arxiv_id", "doi", "artifact_id"),
-        "repository": ("id", "repo_name", "full_name", "artifact_id"),
-        "web_clipper": (
-            "id",
-            "artifact_id",
-            "source_relative_path",
-            "source_path",
-        ),
-        "video": ("video_id", "native_id", "id", "artifact_id"),
-        "transcript": ("transcript_id", "id", "artifact_id", "video_id"),
-    }
-    for key in keys_by_type.get(artifact_type, ("id", "artifact_id")):
-        value = _clean_string(payload.get(key))
-        if value:
-            return value
-    return None
+    return native_id_from_payload(artifact_type, payload)
 
 
 def _capture_hash(

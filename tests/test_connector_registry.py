@@ -41,6 +41,9 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
     assert registry.get("omi").artifact_types == ("transcript",)
     assert registry.get("imported_markdown").artifact_types == ("markdown",)
     assert registry.get("manual_import").name == "imported_markdown"
+    assert registry.get("manual_import").to_dict(config=config)["runner"] == (
+        "imported_markdown"
+    )
     assert registry.get("personal_transcripts").name == "omi"
     assert registry.get("last30days-skill").name == "skill_outputs"
     assert registry.get("pi_skill").name == "pi_skills"

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from .metadata_db import MetadataDB
@@ -12,6 +11,7 @@ from .semantic_memory import (
     SemanticMemoryStore,
     SemanticMemoryValidationError,
 )
+from .time_utils import utc_now_iso as _now_iso
 
 
 JsonObject = dict[str, Any]
@@ -24,10 +24,6 @@ class SemanticMemoryReviewError(RuntimeError):
 
 class SemanticMemoryReviewNotFoundError(SemanticMemoryReviewError):
     """Raised when a requested semantic memory candidate does not exist."""
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _clean_optional(value: Any) -> str | None:

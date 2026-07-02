@@ -85,14 +85,6 @@ def _resolve_raw_roots(raw_roots: Sequence[str | Path]) -> tuple[Path, ...]:
     return tuple(roots)
 
 
-def _path_is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
-
-
 def _validate_raw_file(
     path: str | Path,
     *,
@@ -110,7 +102,7 @@ def _validate_raw_file(
 
     roots = _resolve_raw_roots(raw_roots)
     matching_root = next(
-        (root for root in roots if _path_is_relative_to(resolved, root)),
+        (root for root in roots if resolved.is_relative_to(root)),
         None,
     )
     if roots and matching_root is None:

@@ -2174,40 +2174,34 @@ class MetadataDB:
                 )
                 """
             )
-            existing_columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(archivist_corpus_documents)")
-            }
-            for column_name, ddl in (
-                ("source_key", "source_key TEXT NOT NULL DEFAULT ''"),
-                ("source_trust_score", "source_trust_score REAL NOT NULL DEFAULT 1.0"),
-                (
-                    "source_trust_reason",
-                    "source_trust_reason TEXT NOT NULL DEFAULT 'legacy_unscanned'",
-                ),
-                (
-                    "source_security_status",
-                    "source_security_status TEXT NOT NULL DEFAULT 'allowed'",
-                ),
-                (
-                    "source_security_pattern_ids_json",
-                    "source_security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'",
-                ),
-                ("artifact_id", "artifact_id TEXT"),
-                ("event_id", "event_id TEXT"),
-                (
-                    "privacy_class",
-                    "privacy_class TEXT NOT NULL DEFAULT 'unspecified'",
-                ),
-                (
-                    "retention_class",
-                    "retention_class TEXT NOT NULL DEFAULT 'unspecified'",
-                ),
-            ):
-                if column_name not in existing_columns:
-                    conn.execute(
-                        f"ALTER TABLE archivist_corpus_documents ADD COLUMN {ddl}"
-                    )
+            self._ensure_columns(
+                conn,
+                "archivist_corpus_documents",
+                {
+                    "source_key": "source_key TEXT NOT NULL DEFAULT ''",
+                    "source_trust_score": (
+                        "source_trust_score REAL NOT NULL DEFAULT 1.0"
+                    ),
+                    "source_trust_reason": (
+                        "source_trust_reason TEXT NOT NULL DEFAULT "
+                        "'legacy_unscanned'"
+                    ),
+                    "source_security_status": (
+                        "source_security_status TEXT NOT NULL DEFAULT 'allowed'"
+                    ),
+                    "source_security_pattern_ids_json": (
+                        "source_security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'"
+                    ),
+                    "artifact_id": "artifact_id TEXT",
+                    "event_id": "event_id TEXT",
+                    "privacy_class": (
+                        "privacy_class TEXT NOT NULL DEFAULT 'unspecified'"
+                    ),
+                    "retention_class": (
+                        "retention_class TEXT NOT NULL DEFAULT 'unspecified'"
+                    ),
+                },
+            )
             try:
                 conn.execute(
                     """
@@ -2253,37 +2247,34 @@ class MetadataDB:
                 )
                 """
             )
-            existing_embedding_columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(archivist_corpus_embeddings)")
-            }
-            for column_name, ddl in (
-                ("source_type", "source_type TEXT NOT NULL DEFAULT ''"),
-                ("source_id", "source_id TEXT NOT NULL DEFAULT ''"),
-                ("source_key", "source_key TEXT NOT NULL DEFAULT ''"),
-                ("artifact_id", "artifact_id TEXT NOT NULL DEFAULT ''"),
-                ("event_id", "event_id TEXT NOT NULL DEFAULT ''"),
-                ("trust_tier", "trust_tier TEXT NOT NULL DEFAULT 'trusted'"),
-                ("trust_score", "trust_score REAL NOT NULL DEFAULT 1.0"),
-                ("trust_reason", "trust_reason TEXT NOT NULL DEFAULT 'legacy_unscanned'"),
-                (
-                    "privacy_class",
-                    "privacy_class TEXT NOT NULL DEFAULT 'unspecified'",
-                ),
-                (
-                    "retention_class",
-                    "retention_class TEXT NOT NULL DEFAULT 'unspecified'",
-                ),
-                ("security_state", "security_state TEXT NOT NULL DEFAULT 'allowed'"),
-                (
-                    "security_pattern_ids_json",
-                    "security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'",
-                ),
-            ):
-                if column_name not in existing_embedding_columns:
-                    conn.execute(
-                        f"ALTER TABLE archivist_corpus_embeddings ADD COLUMN {ddl}"
-                    )
+            self._ensure_columns(
+                conn,
+                "archivist_corpus_embeddings",
+                {
+                    "source_type": "source_type TEXT NOT NULL DEFAULT ''",
+                    "source_id": "source_id TEXT NOT NULL DEFAULT ''",
+                    "source_key": "source_key TEXT NOT NULL DEFAULT ''",
+                    "artifact_id": "artifact_id TEXT NOT NULL DEFAULT ''",
+                    "event_id": "event_id TEXT NOT NULL DEFAULT ''",
+                    "trust_tier": "trust_tier TEXT NOT NULL DEFAULT 'trusted'",
+                    "trust_score": "trust_score REAL NOT NULL DEFAULT 1.0",
+                    "trust_reason": (
+                        "trust_reason TEXT NOT NULL DEFAULT 'legacy_unscanned'"
+                    ),
+                    "privacy_class": (
+                        "privacy_class TEXT NOT NULL DEFAULT 'unspecified'"
+                    ),
+                    "retention_class": (
+                        "retention_class TEXT NOT NULL DEFAULT 'unspecified'"
+                    ),
+                    "security_state": (
+                        "security_state TEXT NOT NULL DEFAULT 'allowed'"
+                    ),
+                    "security_pattern_ids_json": (
+                        "security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'"
+                    ),
+                },
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_archivist_docs_scope_path ON archivist_corpus_documents (scope, scope_relative_path)"
             )

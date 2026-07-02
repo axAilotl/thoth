@@ -9,8 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping
 
 from .metadata_db import (
@@ -27,6 +26,7 @@ from .semantic_memory_promotion import (
     metadata_flag_enabled,
     semantic_text_fingerprint,
 )
+from .time_utils import utc_now_iso as _now_iso
 
 
 JsonObject = dict[str, Any]
@@ -56,10 +56,6 @@ class SemanticMemoryTransitionError(SemanticMemoryValidationError):
 
 def _new_id() -> str:
     return str(uuid.uuid4())
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -684,23 +680,8 @@ class SemanticMemoryStore:
             )
         else:
             status_updated_at = candidate.status_updated_at or now
-        return SemanticMemoryCandidate(
-            candidate_id=candidate.candidate_id,
-            candidate_type=candidate.candidate_type,
-            status=candidate.status,
-            subject=candidate.subject,
-            predicate=candidate.predicate,
-            object_value=candidate.object_value,
-            text=candidate.text,
-            entity_id=candidate.entity_id,
-            entity_type=candidate.entity_type,
-            entity_name=candidate.entity_name,
-            confidence=candidate.confidence,
-            privacy_class=candidate.privacy_class,
-            supersedes_candidate_id=candidate.supersedes_candidate_id,
-            superseded_by_candidate_id=candidate.superseded_by_candidate_id,
-            metadata=candidate.metadata,
-            write_provenance=candidate.write_provenance,
+        return replace(
+            candidate,
             created_at=created_at,
             updated_at=updated_at,
             status_updated_at=status_updated_at,
@@ -711,19 +692,8 @@ class SemanticMemoryStore:
         evidence: SemanticMemoryEvidence,
     ) -> SemanticMemoryEvidence:
         now = _now_iso()
-        return SemanticMemoryEvidence(
-            evidence_id=evidence.evidence_id,
-            candidate_id=evidence.candidate_id,
-            artifact_id=evidence.artifact_id,
-            artifact_type=evidence.artifact_type,
-            capture_event_id=evidence.capture_event_id,
-            source_path=evidence.source_path,
-            source_timestamp=evidence.source_timestamp,
-            evidence_text=evidence.evidence_text,
-            confidence=evidence.confidence,
-            privacy_class=evidence.privacy_class,
-            metadata=evidence.metadata,
-            write_provenance=evidence.write_provenance,
+        return replace(
+            evidence,
             created_at=evidence.created_at or now,
             updated_at=evidence.updated_at or now,
         )
@@ -734,29 +704,12 @@ class SemanticMemoryStore:
         decision: SemanticMemoryPromotionDecision,
     ) -> SemanticMemoryCandidate:
         decision_metadata = decision.to_metadata()
-        return SemanticMemoryCandidate(
-            candidate_id=candidate.candidate_id,
-            candidate_type=candidate.candidate_type,
-            status=candidate.status,
-            subject=candidate.subject,
-            predicate=candidate.predicate,
-            object_value=candidate.object_value,
-            text=candidate.text,
-            entity_id=candidate.entity_id,
-            entity_type=candidate.entity_type,
-            entity_name=candidate.entity_name,
-            confidence=candidate.confidence,
-            privacy_class=candidate.privacy_class,
-            supersedes_candidate_id=candidate.supersedes_candidate_id,
-            superseded_by_candidate_id=candidate.superseded_by_candidate_id,
+        return replace(
+            candidate,
             metadata={
                 **candidate.metadata,
                 SEMANTIC_MEMORY_PROMOTION_METADATA_KEY: decision_metadata,
             },
-            write_provenance=candidate.write_provenance,
-            created_at=candidate.created_at,
-            updated_at=candidate.updated_at,
-            status_updated_at=candidate.status_updated_at,
         )
 
     def _promotion_decision_in_connection(

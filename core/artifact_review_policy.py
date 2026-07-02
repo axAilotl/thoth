@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from .artifact_identity import native_id_candidates_for_artifact_type
 from .config import config
 
 INGESTION_ACTIVE_REVIEW_STATUSES = (
@@ -253,46 +254,9 @@ def _artifact_id_candidates_for_type(
     artifact_type: str,
     payload: Mapping[str, Any],
 ) -> tuple[Any, ...]:
-    if artifact_type == "tweet":
-        return (payload.get("id"), payload.get("tweet_id"), payload.get("artifact_id"))
-    if artifact_type == "paper":
-        return (payload.get("id"), payload.get("artifact_id"), payload.get("arxiv_id"))
-    if artifact_type == "repository":
-        return (
-            payload.get("id"),
-            payload.get("artifact_id"),
-            payload.get("repo_name"),
-            payload.get("full_name"),
-        )
-    if artifact_type == "web_clipper":
-        return (
-            payload.get("id"),
-            payload.get("artifact_id"),
-            payload.get("source_relative_path"),
-            payload.get("source_path"),
-        )
-    if artifact_type == "markdown":
-        return (
-            payload.get("id"),
-            payload.get("artifact_id"),
-            payload.get("source_relative_path"),
-            payload.get("source_path"),
-        )
-    if artifact_type == "video":
-        return (
-            payload.get("video_id"),
-            payload.get("native_id"),
-            payload.get("id"),
-            payload.get("artifact_id"),
-        )
-    if artifact_type == "transcript":
-        return (
-            payload.get("transcript_id"),
-            payload.get("id"),
-            payload.get("artifact_id"),
-            payload.get("video_id"),
-        )
-    return ()
+    if artifact_type not in SUPPORTED_INGESTION_ARTIFACT_TYPES:
+        return ()
+    return native_id_candidates_for_artifact_type(artifact_type, payload)
 
 
 def _compact_review_event(event: Mapping[str, Any]) -> dict[str, Any]:

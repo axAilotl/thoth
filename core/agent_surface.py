@@ -57,6 +57,20 @@ from .hybrid_search import HybridSearchFilters, HybridSearchHit
 from .wiki_query import WikiQueryRunner
 
 
+_CONNECTOR_RUNNER_METHODS = {
+    "arxiv": "_run_arxiv_connector",
+    "github": "_run_github_connector",
+    "huggingface": "_run_huggingface_connector",
+    "web_clipper": "_run_web_clipper_connector",
+    "x_api": "_run_x_api_connector",
+    "youtube": "_run_youtube_connector",
+    "omi": "_run_omi_connector",
+    "skill_outputs": "_run_skill_outputs_connector",
+    "pi_skills": "_run_pi_skills_connector",
+    "imported_markdown": "_run_imported_markdown_connector",
+}
+
+
 class AgentSurfaceError(RuntimeError):
     """Raised when an agent-facing request cannot be fulfilled safely."""
 
@@ -565,25 +579,7 @@ class AgentSurfaceService:
                 f"Connector pin drift detected for {connector_name}: {drift_fields}"
             )
 
-        handlers = {
-            "arxiv": self._run_arxiv_connector,
-            "github": self._run_github_connector,
-            "huggingface": self._run_huggingface_connector,
-            "web_clipper": self._run_web_clipper_connector,
-            "x_api": self._run_x_api_connector,
-            "youtube": self._run_youtube_connector,
-            "omi": self._run_omi_connector,
-            "personal_transcripts": self._run_omi_connector,
-            "skill_outputs": self._run_skill_outputs_connector,
-            "external_skill": self._run_skill_outputs_connector,
-            "last30days-skill": self._run_skill_outputs_connector,
-            "pi_skills": self._run_pi_skills_connector,
-            "pi_skill": self._run_pi_skills_connector,
-            "imported_markdown": self._run_imported_markdown_connector,
-            "markdown_import": self._run_imported_markdown_connector,
-            "manual_import": self._run_imported_markdown_connector,
-        }
-        handler = handlers.get(manifest.name) or handlers.get(connector_name)
+        handler = self._connector_handler_for_manifest(manifest)
         if handler is None:
             raise AgentSurfaceError(
                 f"Connector {connector_name!r} has no executable adapter registered"
@@ -666,6 +662,13 @@ class AgentSurfaceService:
                 "checkpoint": _serialize_connector_checkpoint(checkpoint),
             },
         }
+
+    def _connector_handler_for_manifest(self, manifest):
+        runner_key = manifest.runner or manifest.name
+        method_name = _CONNECTOR_RUNNER_METHODS.get(runner_key)
+        if method_name is None:
+            return None
+        return getattr(self, method_name, None)
 
     def _resolve_connector_actor(self, options: Mapping[str, Any]) -> str | None:
         for value in (

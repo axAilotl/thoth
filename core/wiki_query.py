@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 import os
 import re
@@ -13,6 +12,7 @@ from .config import Config
 from .hybrid_search import HybridSearchFilters, HybridSearchResult, HybridSearchService
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import prompt_security_requires_review
+from .time_utils import utc_now_iso as _now_iso
 from .wiki_contract import (
     WikiContract,
     WikiPageSpec,
@@ -34,10 +34,6 @@ from .wiki_scaffold import (
 )
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _query_tokens(query: str) -> tuple[str, ...]:

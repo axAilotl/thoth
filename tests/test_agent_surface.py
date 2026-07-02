@@ -20,6 +20,7 @@ from core.capture_event_store import (
     SecurityFinding,
 )
 from core.config import Config
+from core.connector_registry import load_connector_registry
 from core.mcp_server import ThothMCPServer
 from core.metadata_db import IngestionQueueEntry, MetadataDB
 from core.path_layout import build_path_layout
@@ -649,6 +650,33 @@ def test_connector_execution_rejects_pin_drift(tmp_path: Path):
             execute=True,
             options={"topics": "agents"},
         )
+
+
+def test_enabled_builtin_connectors_have_executable_handlers(tmp_path: Path):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    registry = load_connector_registry(config, project_root=tmp_path)
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    missing_handlers = [
+        manifest.name
+        for manifest in registry.list()
+        if manifest.origin == "builtin"
+        and manifest.is_enabled(config)
+        and service._connector_handler_for_manifest(manifest) is None
+    ]
+
+    assert missing_handlers == []
+    assert registry.get("manual_import").name == "imported_markdown"
+    assert (
+        service._connector_handler_for_manifest(registry.get("manual_import"))
+        == service._run_imported_markdown_connector
+    )
+    assert (
+        service._connector_handler_for_manifest(registry.get("personal_transcripts"))
+        == service._run_omi_connector
+    )
 
 
 def test_stable_agent_cli_groups_are_wired():

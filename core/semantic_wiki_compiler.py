@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
 import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -15,7 +14,13 @@ from .semantic_memory import (
     SemanticMemoryEvidence,
     SemanticMemoryStore,
 )
-from .wiki_contract import WikiContract, WikiPageSpec, normalize_wiki_slug
+from .time_utils import utc_now_iso as _now_iso
+from .wiki_contract import (
+    WikiContract,
+    WikiPageSpec,
+    normalize_wiki_slug,
+    wiki_slug_component as _slug_component,
+)
 from .wiki_io import atomic_write_text, read_frontmatter, render_frontmatter
 
 
@@ -65,10 +70,6 @@ class _SemanticPageGroup:
     slug: str
     kind: str
     facts: tuple[_SemanticFactRecord, ...]
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _clean_text(value: Any) -> str | None:
@@ -148,16 +149,6 @@ def _safe_source_path(value: str | None) -> str | None:
 
 def _stable_unique_strings(values: Iterable[str | None]) -> tuple[str, ...]:
     return tuple(sorted({str(value).strip() for value in values if _clean_text(value)}))
-
-
-def _slug_component(value: str, fallback: str) -> str:
-    try:
-        return normalize_wiki_slug(value)
-    except ValueError:
-        try:
-            return normalize_wiki_slug(fallback)
-        except ValueError:
-            return "unknown"
 
 
 def _entity_slug_seed(candidate: SemanticMemoryCandidate, page_type: str) -> str:
@@ -374,6 +365,8 @@ class SemanticMemoryWikiCompiler:
         )
         updated_at = _now_iso()
         summary = self._summary_for_group(group)
+        # Semantic pages are backed by durable candidate/evidence IDs rather than
+        # source-file snapshots, so their managed provenance is those IDs.
         spec = WikiPageSpec(
             title=group.title,
             slug=group.slug,
@@ -392,20 +385,10 @@ class SemanticMemoryWikiCompiler:
         page_path = self.contract.page_path_for(spec)
         existing = read_frontmatter(page_path) if page_path.exists() else {}
         created_at = str(existing.get("created_at") or spec.created_at or updated_at)
-        updated_spec = WikiPageSpec(
-            title=spec.title,
-            slug=spec.slug,
-            kind=spec.kind,
-            summary=spec.summary,
-            source_paths=spec.source_paths,
-            influence_sources=spec.influence_sources,
-            related_slugs=spec.related_slugs,
+        updated_spec = replace(
+            spec,
             created_at=created_at,
             updated_at=updated_at,
-            event_ids=spec.event_ids,
-            semantic_page_type=spec.semantic_page_type,
-            semantic_candidate_ids=spec.semantic_candidate_ids,
-            semantic_evidence_ids=spec.semantic_evidence_ids,
         )
         content = self._render_page(updated_spec, group)
         action = "updated" if page_path.exists() else "created"

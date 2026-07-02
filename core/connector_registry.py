@@ -61,6 +61,7 @@ class ConnectorManifest:
     config_keys: tuple[str, ...] = field(default_factory=tuple)
     auth: tuple[str, ...] = field(default_factory=tuple)
     source_aliases: tuple[str, ...] = field(default_factory=tuple)
+    runner: str | None = None
     cli_command: str | None = None
     config_namespace: str | None = None
     default_enabled: bool = True
@@ -86,6 +87,7 @@ class ConnectorManifest:
             "source_name": self.source_name,
             "source_aliases": list(self.source_aliases),
             "source_names": list(self.source_names),
+            "runner": self.runner or self.name,
             "display_name": self.display_name,
             "description": self.description,
             "artifact_types": list(self.artifact_types),
@@ -154,6 +156,7 @@ class ConnectorManifest:
         )
         validate_allowed_side_effects(allowed_side_effects, origin=origin)
         source_aliases = _string_tuple(value.get("source_aliases"))
+        runner = _optional_string(value.get("runner"))
         cli_command = _optional_string(value.get("cli_command"))
         config_namespace = _optional_string(value.get("config_namespace"))
         description = _optional_string(value.get("description")) or ""
@@ -181,6 +184,7 @@ class ConnectorManifest:
             config_keys=config_keys,
             auth=auth,
             source_aliases=source_aliases,
+            runner=runner,
             cli_command=cli_command,
             config_namespace=config_namespace,
             default_enabled=default_enabled,

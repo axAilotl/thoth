@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 import os
 from pathlib import Path
 from typing import Any, Mapping
@@ -39,6 +38,7 @@ from .research_wiki_context import (
 )
 from .semantic_memory import SemanticMemoryStore
 from .semantic_wiki_compiler import SemanticMemoryWikiCompiler
+from .time_utils import utc_now_iso as _now_iso
 from .wiki_change_provenance import (
     change_provenance,
     influence_with_input_hashes,
@@ -55,10 +55,6 @@ from .wiki_scaffold import (
     append_wiki_log_entry,
     ensure_wiki_scaffold,
 )
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _atomic_write_text(path: Path, content: str) -> None:

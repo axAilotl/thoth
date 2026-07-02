@@ -45,6 +45,37 @@ verified; the notes below reflect the follow-up validation pass.
 4. `thoth-7v1.11`: performance fixes after correctness behavior is settled.
 5. `thoth-7v1.12`: behavior-preserving consolidation.
 
+## Final Scope
+
+Completed on 2026-07-02. All 12 child beads for `thoth-7v1` were closed with
+focused regression coverage and a final full-suite run.
+
+Final validation evidence:
+
+```text
+.venv/bin/python -m pytest -q
+409 passed, 2 skipped
+
+git diff --check
+bd dep cycles
+```
+
+Scope notes and remaining follow-ups:
+
+- Functional regressions #1-#31 were fixed in the child beads listed above.
+- Consolidation bead `thoth-7v1.12` removed the drift-prone helper duplication
+  that was touched by the functional fixes: UTC timestamp helpers,
+  frozen-dataclass/WikiPageSpec reconstruction, native artifact identity keys,
+  archivist schema column migration loops, wiki slug components, connector
+  runner alias dispatch, and duplicate path-relative helpers.
+- Finding #33 remains a lower-priority maintainability follow-up: usage
+  recording in `core/llm_interface.py` still has multiple call sites. It was
+  not folded into this epic because the validated issue was observability drift
+  risk rather than a reproduced user-visible failure, and the performance bead
+  already made usage schema writes once-per-process.
+- Broader utility consolidation from finding #40 remains opportunistic cleanup
+  outside this epic where helpers were not part of the reviewed fix surface.
+
 ## Validation Nuances
 
 - Finding #3 is fully valid for the payload-return path. Capture-event queuing

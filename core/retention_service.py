@@ -935,7 +935,7 @@ class CaptureRetentionService:
             )
         resolved = candidate.resolve(strict=False)
         allowed_roots = self._allowed_roots()
-        if not any(_is_relative_to(resolved, root) for root in allowed_roots):
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
             return _PathStatus(
                 path=resolved,
                 safe=False,
@@ -967,9 +967,8 @@ class CaptureRetentionService:
         resolved = Path(path_text).expanduser()
         if not resolved.is_absolute():
             resolved = self.layout.vault_root / resolved
-        return _is_relative_to(
-            resolved.resolve(strict=False),
-            self.layout.raw_root.resolve(strict=False),
+        return resolved.resolve(strict=False).is_relative_to(
+            self.layout.raw_root.resolve(strict=False)
         )
 
     def _delete_target(self, target: RetentionTarget) -> _DeletionOutcome:
@@ -1438,14 +1437,6 @@ def _clean_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
 
 
 def _relative_id(path: Path, root: Path) -> str:

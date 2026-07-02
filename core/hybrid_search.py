@@ -28,6 +28,7 @@ from .prompt_security import (
     THOTH_SECURITY_POLICY_KEY,
     prompt_security_requires_review,
 )
+from .time_utils import utc_now_iso as _now_iso
 from .wiki_contract import WikiContract, is_legacy_tweet_slug
 from .wiki_io import read_document_cached, truncate_summary
 
@@ -654,10 +655,6 @@ class HybridSearchService:
                 )
             )
         return hits
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _query_tokens(query: str) -> tuple[str, ...]:

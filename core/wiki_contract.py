@@ -56,6 +56,17 @@ def normalize_wiki_slug(raw_value: str, max_length: int = WIKI_SLUG_MAX_LENGTH) 
     return value
 
 
+def wiki_slug_component(value: str, fallback: str) -> str:
+    """Return a safe slug component, falling back to a stable default."""
+    try:
+        return normalize_wiki_slug(value)
+    except ValueError:
+        try:
+            return normalize_wiki_slug(fallback)
+        except ValueError:
+            return "unknown"
+
+
 def is_legacy_tweet_slug(raw_value: str) -> bool:
     """Return True when a page slug matches the legacy compiled tweet-page pattern."""
     value = str(raw_value or "").strip().lower()
