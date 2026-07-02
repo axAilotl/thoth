@@ -1,6 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from core.bounded_workers import map_bounded
 from core.data_models import Tweet
 from processors.document_factory import DocumentFactory
@@ -58,6 +60,26 @@ def test_map_bounded_stops_starting_work_when_cancel_event_is_set():
 
     assert result == [0, 1]
     assert started == [0, 1]
+
+
+def test_map_bounded_continues_sibling_items_after_worker_exception():
+    async def run():
+        started = []
+
+        async def worker(item: int) -> int:
+            started.append(item)
+            await asyncio.sleep(0)
+            if item == 1:
+                raise RuntimeError("item failed")
+            return item
+
+        with pytest.raises(RuntimeError, match="item failed"):
+            await map_bounded([0, 1, 2, 3], worker, concurrency=2)
+        return started
+
+    started = asyncio.run(run())
+
+    assert sorted(started) == [0, 1, 2, 3]
 
 
 def test_document_factory_async_downloads_use_bounded_workers(monkeypatch):

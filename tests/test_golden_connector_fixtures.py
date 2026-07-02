@@ -414,10 +414,11 @@ def test_imported_markdown_fixture_preserves_raw_and_queues_capture_only(
     assert parsed.frontmatter["source"] == "manual_import"
     assert len(result.records) == 1
     record = result.records[0]
-    assert record.artifact_id == "manual-imported-markdown-golden-note"
+    assert record.artifact_id.startswith("manual-imported-markdown-golden-note-")
+    assert len(record.artifact_id.rsplit("-", 1)[-1]) == 12
     assert record.raw_markdown_path.read_bytes() == path.read_bytes()
 
-    entry = db.get_ingestion_entry("manual-imported-markdown-golden-note")
+    entry = db.get_ingestion_entry(record.artifact_id)
     assert entry is not None
     assert entry.artifact_type == "markdown"
     assert entry.status == "needs_review"

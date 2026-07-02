@@ -330,6 +330,12 @@ class KnowledgeArtifactRuntime:
             )
             self.db.mark_ingestion_processed(entry.artifact_id)
             return result
+        except asyncio.CancelledError:
+            self.db.mark_ingestion_failed(
+                entry.artifact_id,
+                "processing cancelled before completion",
+            )
+            raise
         except Exception as exc:
             if _reviewable_artifact_error(exc):
                 return self._route_entry_to_review(entry, exc, stage="dispatch")

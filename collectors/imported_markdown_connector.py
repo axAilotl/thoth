@@ -314,7 +314,11 @@ class ImportedMarkdownConnector:
     ) -> MarkdownArtifact:
         source_path = parsed_note.source_path
         source_id = _source_id_for_path(source_path, layout=self.layout)
-        artifact_id = _artifact_id(parsed_note, source_name=source_name)
+        artifact_id = _artifact_id(
+            parsed_note,
+            source_name=source_name,
+            source_id=source_id,
+        )
         raw_ref = self._relative_to_vault(raw_markdown_path)
         sha256 = _sha256_file(raw_markdown_path)
         size_bytes = raw_markdown_path.stat().st_size
@@ -402,7 +406,12 @@ def _source_name_from_note(
     return default_source_name
 
 
-def _artifact_id(parsed_note: WebClipperParsedNote, *, source_name: str) -> str:
+def _artifact_id(
+    parsed_note: WebClipperParsedNote,
+    *,
+    source_name: str,
+    source_id: str,
+) -> str:
     explicit = _frontmatter_string(
         parsed_note.frontmatter,
         "artifact_id",
@@ -411,7 +420,11 @@ def _artifact_id(parsed_note: WebClipperParsedNote, *, source_name: str) -> str:
     )
     if explicit:
         return explicit
-    return f"{_artifact_id_source_prefix(source_name)}-{_safe_slug(parsed_note.title)}"
+    source_hash = hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:12]
+    return (
+        f"{_artifact_id_source_prefix(source_name)}-"
+        f"{_safe_slug(parsed_note.title)}-{source_hash}"
+    )
 
 
 def _artifact_id_source_prefix(source_name: str) -> str:

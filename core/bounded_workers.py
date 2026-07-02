@@ -58,6 +58,7 @@ async def map_bounded(
         queue.put_nowait((index, item))
 
     results: list[object] = [_MISSING] * len(items)
+    errors: list[tuple[int, Exception]] = []
 
     async def run_worker() -> None:
         while True:
@@ -71,6 +72,8 @@ async def map_bounded(
                 if cancel_event is not None and cancel_event.is_set():
                     return
                 results[index] = await worker(item)
+            except Exception as exc:
+                errors.append((index, exc))
             finally:
                 queue.task_done()
 
@@ -83,5 +86,9 @@ async def map_bounded(
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
+
+    if errors:
+        errors.sort(key=lambda item: item[0])
+        raise errors[0][1]
 
     return [item for item in results if item is not _MISSING]

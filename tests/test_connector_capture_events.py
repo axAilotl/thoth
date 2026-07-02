@@ -717,7 +717,8 @@ def test_imported_markdown_connector_records_capture_event_metadata(
 
     result = asyncio.run(connector.collect(import_paths=[import_path]))
 
-    assert result.records[0].artifact_id == "manual-imported-markdown-note"
+    assert result.records[0].artifact_id.startswith("manual-imported-markdown-note-")
+    assert len(result.records[0].artifact_id.rsplit("-", 1)[-1]) == 12
     source = next(iter(event_store.sources.values()))
     session = next(iter(event_store.sessions.values()))
     event = next(iter(event_store.events.values()))
@@ -734,8 +735,56 @@ def test_imported_markdown_connector_records_capture_event_metadata(
     assert event.provenance["security_policy"] == "prompt_security_scan_on_queue"
     assert raw_ref.path == str(result.records[0].raw_markdown_path.resolve())
     assert Path(raw_ref.path).is_relative_to(layout.raw_root)
-    assert link.artifact_id == "manual-imported-markdown-note"
-    entry = db.get_ingestion_entry("manual-imported-markdown-note")
+    assert link.artifact_id == result.records[0].artifact_id
+    entry = db.get_ingestion_entry(result.records[0].artifact_id)
     assert entry is not None
     payload = json.loads(entry.payload_json)
     assert payload["normalized_metadata"]["capture_event_id"] == event.event_id
+
+
+def test_imported_markdown_connector_generates_distinct_ids_for_duplicate_titles(
+    tmp_path: Path,
+):
+    config, layout, db = _layout_and_db(tmp_path)
+    event_store = _store(layout)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first_path = first_dir / "Journal.md"
+    second_path = second_dir / "Journal.md"
+    content = "\n".join(
+        [
+            "---",
+            "title: Journal",
+            "source: manual_import",
+            "---",
+            "",
+            "# Journal",
+            "",
+            "Capture this journal.",
+            "",
+        ]
+    )
+    first_path.write_text(content, encoding="utf-8")
+    second_path.write_text(content, encoding="utf-8")
+    connector = ImportedMarkdownConnector(
+        config,
+        layout=layout,
+        db=db,
+        capture_event_store=event_store,
+    )
+
+    result = asyncio.run(connector.collect(import_paths=[first_path, second_path]))
+
+    artifact_ids = [record.artifact_id for record in result.records]
+    assert len(artifact_ids) == 2
+    assert len(set(artifact_ids)) == 2
+    assert all(artifact_id.startswith("manual-journal-") for artifact_id in artifact_ids)
+    assert all(len(artifact_id.rsplit("-", 1)[-1]) == 12 for artifact_id in artifact_ids)
+    assert all(db.get_ingestion_entry(artifact_id) is not None for artifact_id in artifact_ids)
+    assert len(event_store.events) == 2
+    assert {event.native_event_id for event in event_store.events.values()} == {
+        str(first_path.resolve()),
+        str(second_path.resolve()),
+    }

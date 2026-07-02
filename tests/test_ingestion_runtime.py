@@ -682,6 +682,102 @@ def test_process_pending_ingestions_respects_concurrency_and_cancel_event(
     assert max_active == 2
 
 
+def test_process_ingestion_entry_requeues_cancelled_processing_row(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    db = MetadataDB()
+    entry = IngestionQueueEntry(
+        artifact_id="repo-cancelled",
+        artifact_type="repository",
+        source="github",
+        payload_json=json.dumps(
+            {
+                "id": "repo-cancelled",
+                "source_type": "github",
+                "repo_name": "owner/cancelled",
+            }
+        ),
+        created_at="2026-04-04T00:00:00",
+    )
+    assert db.upsert_ingestion_entry(entry)
+    runtime = KnowledgeArtifactRuntime(db=db)
+
+    async def run():
+        dispatch_started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_dispatch(_artifact):
+            dispatch_started.set()
+            await release.wait()
+
+        monkeypatch.setattr(runtime, "dispatch_artifact", fake_dispatch)
+        task = asyncio.create_task(runtime.process_ingestion_entry(entry))
+        await dispatch_started.wait()
+        assert db.get_ingestion_entry("repo-cancelled").status == "processing"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
+
+    cancelled = db.get_ingestion_entry("repo-cancelled")
+    assert cancelled.status == "pending"
+    assert cancelled.attempts == 1
+    assert cancelled.last_error == "processing cancelled before completion"
+    assert cancelled.next_attempt_at is not None
+
+
+def test_process_pending_ingestions_does_not_drop_siblings_after_one_failure(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+
+    db = MetadataDB()
+    runtime = KnowledgeArtifactRuntime(db=db)
+    for index in range(3):
+        assert db.upsert_ingestion_entry(
+            IngestionQueueEntry(
+                artifact_id=f"repo-{index}",
+                artifact_type="repository",
+                source="github",
+                payload_json=json.dumps(
+                    {
+                        "id": f"repo-{index}",
+                        "source_type": "github",
+                        "repo_name": f"owner/repo-{index}",
+                    }
+                ),
+                created_at=f"2026-04-04T00:0{index}:00",
+            )
+        )
+
+    async def fake_dispatch(artifact):
+        await asyncio.sleep(0)
+        if artifact.id == "repo-1":
+            raise RuntimeError("dispatch boom")
+        return IngestionDispatchResult(
+            artifact_id=artifact.id,
+            artifact_type="repository",
+            source=artifact.source_type,
+            status="processed",
+            processed_at="2026-04-04T00:00:00",
+        )
+
+    monkeypatch.setattr(runtime, "dispatch_artifact", fake_dispatch)
+
+    with pytest.raises(RuntimeError, match="dispatch boom"):
+        asyncio.run(runtime.process_pending_ingestions_once(limit=10, concurrency=2))
+
+    assert db.get_ingestion_entry("repo-0").status == "processed"
+    assert db.get_ingestion_entry("repo-1").status == "pending"
+    assert db.get_ingestion_entry("repo-1").last_error == "dispatch boom"
+    assert db.get_ingestion_entry("repo-2").status == "processed"
+
+
 def test_process_pending_ingestions_deduplicates_imported_doc_wiki_pages(
     tmp_path: Path, monkeypatch, restore_runtime_config
 ):
