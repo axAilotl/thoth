@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -49,6 +50,7 @@ ENVELOPE_KEYS = {
     "source_name",
     "type",
 }
+URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -517,7 +519,12 @@ def _looks_like_direct_wiki_path(value: str, *, wiki_root: Path | None) -> bool:
             break
     if lowered.startswith(("wiki/", "./wiki/", "../wiki/")):
         return True
-    if "/wiki/" in lowered:
+    lowered_without_urls = URL_RE.sub("", lowered).strip()
+    if lowered_without_urls.startswith(("wiki/", "./wiki/", "../wiki/")):
+        return True
+    if "/wiki/" in lowered_without_urls and not any(
+        character.isspace() for character in lowered_without_urls
+    ):
         return True
     if wiki_root is None:
         return False

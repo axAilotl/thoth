@@ -51,6 +51,7 @@ class PiSkillDefinition:
     description: str = ""
     prompt: str = ""
     artifact_types: tuple[str, ...] = field(default_factory=tuple)
+    artifact_types_defaulted: bool = False
     inputs: tuple[str, ...] = field(default_factory=tuple)
     outputs: tuple[str, ...] = field(default_factory=tuple)
     auth: tuple[str, ...] = field(default_factory=tuple)
@@ -140,6 +141,7 @@ class PiSkillConnector:
             "allowlist": self._skill_allowlist_status(skill.id),
             "description": skill.description,
             "artifact_types": list(skill.artifact_types),
+            "artifact_types_defaulted": skill.artifact_types_defaulted,
             "inputs": list(skill.inputs),
             "outputs": list(skill.outputs),
             "auth": list(skill.auth),
@@ -332,14 +334,14 @@ class PiSkillConnector:
             prompt = _clean_string(raw_skill.get("prompt") or raw_skill.get("prompt_template"))
             if not prompt and raw_skill.get("prompt_file"):
                 prompt = _read_text_file(Path(str(raw_skill["prompt_file"])))
-            artifact_types = tuple(
+            raw_artifact_types = tuple(
                 dict.fromkeys(
                     artifact_type.lower()
                     for artifact_type in _string_list(raw_skill.get("artifact_types"))
                 )
             )
-            if not artifact_types:
-                raise ValueError(f"Pi skill {skill_id!r} requires artifact_types")
+            artifact_types_defaulted = not raw_artifact_types
+            artifact_types = raw_artifact_types or tuple(sorted(SUPPORTED_ARTIFACT_TYPES))
             unsupported = set(artifact_types) - SUPPORTED_ARTIFACT_TYPES
             if unsupported:
                 raise ValueError(
@@ -400,6 +402,7 @@ class PiSkillConnector:
                 description=_clean_string(raw_skill.get("description")) or "",
                 prompt=prompt or "",
                 artifact_types=artifact_types,
+                artifact_types_defaulted=artifact_types_defaulted,
                 inputs=inputs,
                 outputs=outputs,
                 auth=auth,

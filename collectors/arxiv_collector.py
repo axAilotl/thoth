@@ -48,6 +48,8 @@ class ArXivCollector:
             db=self.db,
             capture_event_store=capture_event_store,
         )
+        self.last_errors: list[dict[str, str]] = []
+        self.last_summary: dict[str, Any] = {}
 
     def discover_papers(
         self, 
@@ -67,6 +69,7 @@ class ArXivCollector:
             List of discovered PaperArtifact objects
         """
         discovered = []
+        self.last_errors = []
         run_id = datetime.now().isoformat()
 
         with self.capture_queue.lifecycle() as lifecycle:
@@ -88,7 +91,7 @@ class ArXivCollector:
                 feed = feedparser.parse(url)
 
                 for entry in feed.entries:
-                    paper = self._queue_paper_from_entry(
+                    paper = self._queue_paper_from_entry_safely(
                         entry,
                         source="arxiv",
                         lifecycle=lifecycle,
@@ -97,7 +100,11 @@ class ArXivCollector:
                     )
                     if paper:
                         discovered.append(paper)
-                    
+        self.last_summary = {
+            "discovered_count": len(discovered),
+            "error_count": len(self.last_errors),
+            "errors": list(self.last_errors),
+        }
         return discovered
 
     def scan_rss_feeds(
@@ -108,6 +115,7 @@ class ArXivCollector:
     ) -> List[PaperArtifact]:
         """Scan arXiv category feeds and queue newly discovered papers."""
         discovered = []
+        self.last_errors = []
         feed_limit = min(max_results, 2000)
         base_url = self.BASE_RSS_URL if feed_format == "rss" else self.BASE_ATOM_URL
 
@@ -124,7 +132,7 @@ class ArXivCollector:
                 feed = feedparser.parse(f"{base_url}{encoded_category}")
 
                 for entry in feed.entries[:feed_limit]:
-                    paper = self._queue_paper_from_entry(
+                    paper = self._queue_paper_from_entry_safely(
                         entry,
                         source="arxiv_rss",
                         lifecycle=lifecycle,
@@ -138,7 +146,45 @@ class ArXivCollector:
                     if paper:
                         discovered.append(paper)
 
+        self.last_summary = {
+            "discovered_count": len(discovered),
+            "error_count": len(self.last_errors),
+            "errors": list(self.last_errors),
+        }
         return discovered
+
+    def _queue_paper_from_entry_safely(
+        self,
+        entry: Any,
+        source: str,
+        *,
+        lifecycle: CaptureLifecycleService,
+        run_id: str,
+        session_metadata: dict[str, Any],
+    ) -> Optional[PaperArtifact]:
+        try:
+            return self._queue_paper_from_entry(
+                entry,
+                source,
+                lifecycle=lifecycle,
+                run_id=run_id,
+                session_metadata=session_metadata,
+            )
+        except Exception as exc:
+            artifact_id = self._extract_artifact_id(entry) or ""
+            error = {
+                "source": source,
+                "artifact_id": artifact_id,
+                "error_type": exc.__class__.__name__,
+                "error": str(exc),
+            }
+            self.last_errors.append(error)
+            logger.warning(
+                "Skipping arXiv entry %s after queue failure: %s",
+                artifact_id or "<unknown>",
+                exc,
+            )
+            return None
 
     def _queue_paper_from_entry(
         self,

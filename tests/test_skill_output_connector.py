@@ -142,6 +142,35 @@ def test_skill_output_connector_rejects_direct_wiki_path_values(tmp_path: Path):
     assert db.get_ingestion_entry("bad-skill-output-path") is None
 
 
+def test_skill_output_connector_allows_prose_wikipedia_urls(tmp_path: Path):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    output_path = tmp_path / "wikipedia-url-output.json"
+    output_path.write_text(
+        json.dumps(
+            {
+                "artifact_type": "transcript",
+                "artifact_id": "skill-output-with-wikipedia-url",
+                "payload": {
+                    "title": "Citation Note",
+                    "raw_transcript": (
+                        "See https://en.wikipedia.org/wiki/Python_(programming_language) "
+                        "for background."
+                    ),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    connector = SkillOutputConnector(config, layout=layout, db=db)
+
+    result = asyncio.run(connector.collect(output_paths=[output_path]))
+
+    assert result.records[0].artifact_id == "skill-output-with-wikipedia-url"
+    assert db.get_ingestion_entry("skill-output-with-wikipedia-url") is not None
+
+
 def test_skill_output_connector_stops_when_transcript_chunk_budget_exceeded(
     tmp_path: Path,
 ):

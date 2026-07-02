@@ -100,6 +100,37 @@ def test_arxiv_api_discovery_uses_query_endpoint(monkeypatch):
     assert db.entries[0].source == "arxiv"
 
 
+def test_arxiv_discovery_continues_after_one_queue_failure(monkeypatch):
+    db = FakeDB()
+    collector = ArXivCollector(db=db)
+    original_queue_artifact = collector.capture_queue.queue_artifact
+
+    def fake_parse(_url):
+        return SimpleNamespace(
+            entries=[
+                make_feed_entry("2604.00010"),
+                make_feed_entry("2604.00011"),
+            ]
+        )
+
+    def flaky_queue_artifact(lifecycle, artifact, **kwargs):
+        if artifact.id == "2604.00010":
+            raise RuntimeError("queue unavailable")
+        return original_queue_artifact(lifecycle, artifact, **kwargs)
+
+    monkeypatch.setattr("collectors.arxiv_collector.feedparser.parse", fake_parse)
+    collector.capture_queue.queue_artifact = flaky_queue_artifact
+
+    discovered = collector.discover_papers(["agentic ai"], max_results=2)
+
+    assert [paper.arxiv_id for paper in discovered] == ["2604.00011"]
+    assert [entry.artifact_id for entry in db.entries] == ["2604.00011"]
+    assert collector.last_summary["discovered_count"] == 1
+    assert collector.last_summary["error_count"] == 1
+    assert collector.last_errors[0]["artifact_id"] == "2604.00010"
+    assert collector.last_errors[0]["error_type"] == "RuntimeError"
+
+
 def test_arxiv_rss_scan_uses_category_feed_and_derives_pdf(monkeypatch):
     db = FakeDB()
     collector = ArXivCollector(db=db)
