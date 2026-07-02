@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import core.wiki_io as wiki_io
 from core.capture_event_store import (
     ArtifactLink,
     CaptureEvent,
@@ -20,11 +21,31 @@ from core.config import config
 from core.archivist_retrieval.models import ArchivistCorpusDocument
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
-from core.wiki_io import atomic_write_text, render_frontmatter
+from core.wiki_io import atomic_write_text, clear_wiki_document_cache, render_frontmatter
 from core.wiki_io import read_document
 from core.wiki_updater import CompiledWikiUpdater
 
 from test_capture_event_store import FakeCaptureConnection
+
+
+class CountingCaptureConnection(FakeCaptureConnection):
+    def __init__(self):
+        super().__init__()
+        self.select_counts = {
+            "raw_artifact_refs": 0,
+            "artifact_links": 0,
+            "privacy_annotations": 0,
+            "retention_policies": 0,
+        }
+
+    def execute(self, sql, params=None):
+        normalized = sql.lower()
+        if " from " in f" {normalized} ":
+            for table_name in self.select_counts:
+                if table_name in normalized:
+                    self.select_counts[table_name] += 1
+                    break
+        return super().execute(sql, params)
 
 
 def _surface(tmp_path: Path) -> tuple[CaptureSurfaceService, str]:
@@ -393,6 +414,94 @@ def test_capture_surface_compiles_wiki_pages_with_audited_restricted_include(
             "operator reviewed restricted capture event"
         )
     finally:
+        config.data = original
+
+
+def test_capture_retention_prefetches_compiled_wiki_pages_once(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    original = deepcopy(config.data)
+    clear_wiki_document_cache()
+    try:
+        _configure_runtime_config(tmp_path)
+        layout = build_path_layout(config)
+        layout.ensure_directories()
+        db = MetadataDB(str(layout.database_path))
+        for event_id in ("event-prefetch-a", "event-prefetch-b"):
+            wiki_page = layout.wiki_root / "pages" / f"{event_id}.md"
+            atomic_write_text(
+                wiki_page,
+                render_frontmatter(
+                    {
+                        "thoth_type": "wiki_page",
+                        "thoth_slug": event_id,
+                        "thoth_event_ids": [event_id],
+                    }
+                )
+                + f"\n# {event_id}\n",
+            )
+
+        conn = CountingCaptureConnection()
+        store = CaptureEventStore(
+            conn,
+            schema="capture_unit",
+            raw_roots=[layout.raw_root],
+        )
+        source = store.upsert_source(
+            CaptureSource(
+                source_id="source-prefetch",
+                source_name="prefetch-source",
+                source_type="manual",
+            )
+        )
+        for event_id in ("event-prefetch-a", "event-prefetch-b"):
+            store.upsert_event(
+                CaptureEvent(
+                    event_id=event_id,
+                    source_id=source.source_id,
+                    event_type="note",
+                    payload={"title": event_id},
+                    retention={
+                        "policy": "compiled-expire",
+                        "action": "delete",
+                        "delete_after": "2000-01-01T00:00:00Z",
+                    },
+                )
+            )
+
+        original_read_document = wiki_io.read_document
+        read_paths = []
+
+        def counted_read_document(path: Path):
+            read_paths.append(Path(path).name)
+            return original_read_document(path)
+
+        monkeypatch.setattr(wiki_io, "read_document", counted_read_document)
+        surface = CaptureSurfaceService(store, layout=layout, db=db)
+
+        inspection = surface.inspect_retention(
+            source_id=source.source_id,
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+        assert {target["target_id"] for target in inspection["targets"]} == {
+            "pages/event-prefetch-a.md",
+            "pages/event-prefetch-b.md",
+        }
+        assert sorted(read_paths) == [
+            "event-prefetch-a.md",
+            "event-prefetch-b.md",
+        ]
+        assert conn.select_counts == {
+            "raw_artifact_refs": 1,
+            "artifact_links": 1,
+            "privacy_annotations": 1,
+            "retention_policies": 1,
+        }
+    finally:
+        clear_wiki_document_cache()
         config.data = original
 
 

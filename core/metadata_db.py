@@ -1139,6 +1139,7 @@ class MetadataDB:
                     privacy_class TEXT NOT NULL DEFAULT 'unspecified',
                     supersedes_candidate_id TEXT,
                     superseded_by_candidate_id TEXT,
+                    candidate_fingerprint TEXT NOT NULL DEFAULT '',
                     metadata_json TEXT NOT NULL DEFAULT '{{}}',
                     write_provenance_json TEXT NOT NULL DEFAULT '{{}}',
                     created_at TEXT NOT NULL,
@@ -1150,6 +1151,11 @@ class MetadataDB:
                         REFERENCES semantic_memory_candidates (candidate_id)
                 )
                 """
+            )
+            self._ensure_columns(
+                conn,
+                "semantic_memory_candidates",
+                {"candidate_fingerprint": "candidate_fingerprint TEXT NOT NULL DEFAULT ''"},
             )
             conn.execute(
                 """
@@ -1181,6 +1187,7 @@ class MetadataDB:
             )
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_type_status ON semantic_memory_candidates (candidate_type, status)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_rejected_fingerprint ON semantic_memory_candidates (candidate_type, status, candidate_fingerprint)",
                 "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_entity ON semantic_memory_candidates (entity_type, entity_id)",
                 "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_status_updated ON semantic_memory_candidates (status, status_updated_at)",
                 "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_candidate ON semantic_memory_evidence (candidate_id)",

@@ -2007,7 +2007,7 @@ async def bookmark_status(request: BookmarkStatusRequest):
 
 
 @app.get("/api/query/wiki")
-async def query_wiki_endpoint(
+def query_wiki_endpoint(
     query: str = Query(..., min_length=1),
     limit: int = Query(default=10, ge=1, le=100),
     include_quarantined: bool = Query(default=False),

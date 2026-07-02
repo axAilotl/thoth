@@ -20,7 +20,13 @@ from .wiki_contract import (
     is_legacy_tweet_slug,
     normalize_wiki_slug,
 )
-from .wiki_io import atomic_write_text, read_document, render_frontmatter, truncate_summary
+from .wiki_io import (
+    atomic_write_text,
+    read_document,
+    read_document_cached,
+    render_frontmatter,
+    truncate_summary,
+)
 from .wiki_scaffold import (
     append_wiki_log_entry,
     build_wiki_scaffold,
@@ -167,7 +173,7 @@ class WikiQueryRunner:
         hits: list[WikiQueryHit] = []
 
         for page_path in sorted(self.contract.pages_dir.glob("*.md")):
-            document = read_document(page_path)
+            document = read_document_cached(page_path)
             frontmatter = document.frontmatter
             title = str(frontmatter.get("title") or page_path.stem)
             slug = str(_frontmatter_value(frontmatter, "thoth_slug", "slug") or page_path.stem)

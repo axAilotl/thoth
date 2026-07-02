@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 import json
 import logging
 import math
+from pathlib import Path
 import sqlite3
+import threading
 import time
 import uuid
 from typing import Any
@@ -25,6 +27,8 @@ logger = logging.getLogger(__name__)
 _DEFAULT_LIMIT = 8
 _MAX_LABEL_LENGTH = 160
 _MAX_ERROR_LENGTH = 500
+_LLM_USAGE_SCHEMA_READY: set[str] = set()
+_LLM_USAGE_SCHEMA_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -105,7 +109,7 @@ def record_llm_usage(
 
     try:
         metadata_db = db or get_metadata_db()
-        ensure_llm_usage_schema(metadata_db)
+        ensure_llm_usage_schema_once(metadata_db)
         source_connector, run_id = _resolve_run_context(
             metadata_db,
             source_connector=source_connector,
@@ -202,7 +206,7 @@ def build_llm_usage_status(
     """Return usage totals and recent expensive run aggregates for admin status."""
 
     try:
-        ensure_llm_usage_schema(db)
+        ensure_llm_usage_schema_once(db)
         limit = max(1, int(recent_limit or _DEFAULT_LIMIT))
         with db._get_connection() as conn:
             summary = _summary(conn)
@@ -263,6 +267,23 @@ def ensure_llm_usage_schema(db: MetadataDB) -> None:
             "CREATE INDEX IF NOT EXISTS idx_llm_usage_run ON llm_usage_events (run_id)",
         ):
             conn.execute(statement)
+
+
+def ensure_llm_usage_schema_once(db: MetadataDB) -> None:
+    """Create the LLM usage schema once per process for each database."""
+    cache_key = _llm_usage_schema_cache_key(db)
+    with _LLM_USAGE_SCHEMA_LOCK:
+        if cache_key in _LLM_USAGE_SCHEMA_READY:
+            return
+        ensure_llm_usage_schema(db)
+        _LLM_USAGE_SCHEMA_READY.add(cache_key)
+
+
+def _llm_usage_schema_cache_key(db: MetadataDB) -> str:
+    db_path = getattr(db, "db_path", None)
+    if db_path is None:
+        return f"object:{id(db)}"
+    return str(Path(db_path).expanduser().resolve(strict=False))
 
 
 def split_model_provider(model_provider: str | None) -> tuple[str, str]:

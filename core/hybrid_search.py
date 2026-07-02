@@ -29,7 +29,7 @@ from .prompt_security import (
     prompt_security_requires_review,
 )
 from .wiki_contract import WikiContract, is_legacy_tweet_slug
-from .wiki_io import read_document, truncate_summary
+from .wiki_io import read_document_cached, truncate_summary
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _BLOCKING_SECURITY_STATUSES = {
@@ -258,7 +258,7 @@ class HybridSearchService:
 
         hits: list[HybridSearchHit] = []
         for page_path in sorted(self.contract.pages_dir.glob("*.md")):
-            document = read_document(page_path)
+            document = read_document_cached(page_path)
             frontmatter = document.frontmatter if isinstance(document.frontmatter, dict) else {}
             slug = str(_frontmatter_value(frontmatter, "thoth_slug", "slug") or page_path.stem)
             if is_legacy_tweet_slug(slug):
@@ -519,13 +519,34 @@ class HybridSearchService:
         if self.event_store is None:
             return []
 
+        events = self.event_store.list_events()
+        sources_by_id = {
+            source.source_id: source for source in self.event_store.list_sources()
+        }
+        raw_refs_by_event = _group_by_optional_attr(
+            self.event_store.list_raw_refs(),
+            "event_id",
+        )
+        links_by_event = _group_by_optional_attr(
+            self.event_store.list_artifact_links(),
+            "event_id",
+        )
+        findings = self.event_store.list_security_findings()
+        findings_by_event = _group_by_optional_attr(findings, "event_id")
+        findings_by_raw_ref = _group_by_optional_attr(findings, "raw_ref_id")
+
         hits: list[HybridSearchHit] = []
-        for event in self.event_store.list_events():
-            source = self.event_store.get_source(event.source_id)
-            raw_refs = self.event_store.list_raw_refs(event_id=event.event_id)
-            links = self.event_store.list_artifact_links(event_id=event.event_id)
-            findings = _capture_security_findings(self.event_store, event, raw_refs)
-            security = _capture_security(event, findings)
+        for event in events:
+            source = sources_by_id.get(event.source_id)
+            raw_refs = raw_refs_by_event.get(event.event_id, ())
+            links = links_by_event.get(event.event_id, ())
+            event_findings = _capture_security_findings_from_groups(
+                event,
+                raw_refs,
+                findings_by_event=findings_by_event,
+                findings_by_raw_ref=findings_by_raw_ref,
+            )
+            security = _capture_security(event, event_findings)
             source_type = source.source_type if source else None
             source_name = source.source_name if source else None
             source_paths = tuple(raw_ref.path for raw_ref in raw_refs if raw_ref.path)
@@ -1037,6 +1058,21 @@ def _capture_security_findings(
     return tuple(_dedupe_by_attr(findings, "finding_id"))
 
 
+def _capture_security_findings_from_groups(
+    event: CaptureEvent,
+    raw_refs: tuple[RawArtifactRef, ...],
+    *,
+    findings_by_event: Mapping[str, tuple[SecurityFinding, ...]],
+    findings_by_raw_ref: Mapping[str, tuple[SecurityFinding, ...]],
+) -> tuple[SecurityFinding, ...]:
+    findings: list[SecurityFinding] = list(
+        findings_by_event.get(event.event_id, ())
+    )
+    for raw_ref in raw_refs:
+        findings.extend(findings_by_raw_ref.get(raw_ref.raw_ref_id, ()))
+    return tuple(_dedupe_by_attr(findings, "finding_id"))
+
+
 def _finding_is_open(finding: SecurityFinding) -> bool:
     status = str(finding.status or "").strip().lower()
     return status in _OPEN_FINDING_STATUSES or status not in _CLOSED_FINDING_STATUSES
@@ -1221,3 +1257,12 @@ def _dedupe_by_attr(items: Iterable[Any], attr_name: str) -> list[Any]:
         seen.add(key)
         deduped.append(item)
     return deduped
+
+
+def _group_by_optional_attr(items: Iterable[Any], attr_name: str) -> dict[str, tuple[Any, ...]]:
+    grouped: dict[str, list[Any]] = {}
+    for item in items:
+        key = str(getattr(item, attr_name, "") or "").strip()
+        if key:
+            grouped.setdefault(key, []).append(item)
+    return {key: tuple(values) for key, values in grouped.items()}

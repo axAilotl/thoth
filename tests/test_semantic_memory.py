@@ -559,6 +559,103 @@ def test_semantic_memory_rejected_candidates_need_new_evidence_to_reappear(
     assert reappeared.status == "proposed"
 
 
+def test_semantic_memory_rejected_lookup_uses_candidate_fingerprint(
+    tmp_path: Path,
+    monkeypatch,
+):
+    store = make_store(tmp_path)
+    for index in range(5):
+        candidate_id = f"candidate-rejected-unrelated-{index}"
+        unrelated = store.add_candidate(
+            SemanticMemoryCandidate(
+                candidate_id=candidate_id,
+                candidate_type="preference",
+                text=f"Ada prefers unrelated option {index}.",
+                subject="Ada",
+                predicate="prefers",
+                object_value=f"unrelated option {index}",
+            ),
+            evidence=(
+                SemanticMemoryEvidence(
+                    candidate_id=candidate_id,
+                    evidence_id=f"evidence-rejected-unrelated-{index}",
+                    source_path=f"transcripts/unrelated-{index}.txt",
+                ),
+            ),
+        )
+        store.transition_candidate(unrelated.candidate_id, "rejected")
+
+    rejected = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-rejected-fingerprint-target",
+            candidate_type="preference",
+            text="Ada prefers evening standups.",
+            subject="Ada",
+            predicate="prefers",
+            object_value="evening standups",
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-rejected-fingerprint-target",
+                evidence_id="evidence-rejected-fingerprint-target",
+                source_path="transcripts/day-1.txt",
+            ),
+        ),
+    )
+    store.transition_candidate(rejected.candidate_id, "rejected")
+
+    with store.db._get_connection() as conn:
+        index_names = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA index_list(semantic_memory_candidates)"
+            ).fetchall()
+        }
+        stored_fingerprints = {
+            row["candidate_id"]: row["candidate_fingerprint"]
+            for row in conn.execute(
+                """
+                SELECT candidate_id, candidate_fingerprint
+                FROM semantic_memory_candidates
+                """
+            ).fetchall()
+        }
+
+    assert "idx_semantic_memory_candidates_rejected_fingerprint" in index_names
+    assert all(stored_fingerprints.values())
+
+    materialized_candidate_ids = []
+    original_from_row = store._candidate_from_row
+
+    def counted_from_row(row):
+        materialized_candidate_ids.append(row["candidate_id"])
+        return original_from_row(row)
+
+    monkeypatch.setattr(store, "_candidate_from_row", counted_from_row)
+    with pytest.raises(SemanticMemoryValidationError):
+        store.add_candidate(
+            SemanticMemoryCandidate(
+                candidate_id="candidate-rejected-fingerprint-repeat",
+                candidate_type="preference",
+                text="Ada prefers evening standups.",
+                subject="Ada",
+                predicate="prefers",
+                object_value="evening standups",
+            ),
+            evidence=(
+                SemanticMemoryEvidence(
+                    candidate_id="candidate-rejected-fingerprint-repeat",
+                    evidence_id="evidence-rejected-fingerprint-repeat",
+                    source_path="transcripts/day-1.txt",
+                ),
+            ),
+        )
+
+    assert materialized_candidate_ids == [
+        "candidate-rejected-fingerprint-target"
+    ]
+
+
 def test_semantic_memory_fails_closed_on_invalid_inputs(tmp_path: Path):
     store = make_store(tmp_path)
 

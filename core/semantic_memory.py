@@ -319,6 +319,7 @@ class SemanticMemoryStore:
             promotion_policy or SemanticMemoryPromotionPolicy.from_config()
         )
         self.db.ensure_semantic_memory_tables()
+        self._backfill_candidate_fingerprints()
 
     def add_candidate(
         self,
@@ -913,7 +914,6 @@ class SemanticMemoryStore:
         *,
         exclude_candidate_id: str | None = None,
     ) -> tuple[SemanticMemoryCandidate, ...]:
-        fingerprint = self._candidate_fingerprint(candidate)
         excluded_id = _clean_optional(exclude_candidate_id)
         rows = conn.execute(
             """
@@ -921,14 +921,17 @@ class SemanticMemoryStore:
             FROM semantic_memory_candidates
             WHERE status = 'rejected'
               AND candidate_type = ?
+              AND candidate_fingerprint = ?
             """,
-            (candidate.candidate_type,),
+            (
+                candidate.candidate_type,
+                self._candidate_fingerprint_text(candidate),
+            ),
         ).fetchall()
         return tuple(
             existing
             for existing in (self._candidate_from_row(row) for row in rows)
             if existing.candidate_id != excluded_id
-            if self._candidate_fingerprint(existing) == fingerprint
         )
 
     def _candidate_fingerprint(
@@ -960,6 +963,16 @@ class SemanticMemoryStore:
             candidate.candidate_type,
             entity,
             semantic_text_fingerprint(candidate.text),
+        )
+
+    def _candidate_fingerprint_text(
+        self,
+        candidate: SemanticMemoryCandidate,
+    ) -> str:
+        return json.dumps(
+            self._candidate_fingerprint(candidate),
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
 
     def _evidence_source_key(self, evidence: SemanticMemoryEvidence) -> str:
@@ -1026,13 +1039,14 @@ class SemanticMemoryStore:
                 privacy_class,
                 supersedes_candidate_id,
                 superseded_by_candidate_id,
+                candidate_fingerprint,
                 metadata_json,
                 write_provenance_json,
                 created_at,
                 updated_at,
                 status_updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             self._candidate_params(candidate),
         )
@@ -1057,6 +1071,7 @@ class SemanticMemoryStore:
                 privacy_class = ?,
                 supersedes_candidate_id = ?,
                 superseded_by_candidate_id = ?,
+                candidate_fingerprint = ?,
                 metadata_json = ?,
                 write_provenance_json = ?,
                 updated_at = ?,
@@ -1076,6 +1091,7 @@ class SemanticMemoryStore:
                 candidate.privacy_class,
                 candidate.supersedes_candidate_id,
                 candidate.superseded_by_candidate_id,
+                self._candidate_fingerprint_text(candidate),
                 _json_param(candidate.metadata),
                 _json_param(candidate.write_provenance),
                 candidate.updated_at,
@@ -1103,6 +1119,7 @@ class SemanticMemoryStore:
             candidate.privacy_class,
             candidate.supersedes_candidate_id,
             candidate.superseded_by_candidate_id,
+            self._candidate_fingerprint_text(candidate),
             _json_param(candidate.metadata),
             _json_param(candidate.write_provenance),
             candidate.created_at,
@@ -1216,6 +1233,30 @@ class SemanticMemoryStore:
             updated_at=row["updated_at"],
             status_updated_at=row["status_updated_at"],
         )
+
+    def _backfill_candidate_fingerprints(self) -> None:
+        with self.db._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM semantic_memory_candidates
+                WHERE candidate_fingerprint = ''
+                   OR candidate_fingerprint IS NULL
+                """
+            ).fetchall()
+            for row in rows:
+                candidate = self._candidate_from_row(row)
+                conn.execute(
+                    """
+                    UPDATE semantic_memory_candidates
+                    SET candidate_fingerprint = ?
+                    WHERE candidate_id = ?
+                    """,
+                    (
+                        self._candidate_fingerprint_text(candidate),
+                        candidate.candidate_id,
+                    ),
+                )
 
     def _evidence_from_row(self, row: sqlite3.Row) -> SemanticMemoryEvidence:
         return SemanticMemoryEvidence(

@@ -121,6 +121,39 @@ def test_llm_cache_hit_records_zero_cost_usage(tmp_path: Path, monkeypatch):
     assert payload["totals_by_task"][0]["task"] == "tags"
 
 
+def test_llm_usage_schema_is_created_once_per_database(tmp_path: Path, monkeypatch):
+    db = MetadataDB(str(tmp_path / "meta.db"))
+
+    import core.llm_usage as llm_usage
+
+    llm_usage._LLM_USAGE_SCHEMA_READY.clear()
+    original_ensure = llm_usage.ensure_llm_usage_schema
+    ensure_calls = []
+
+    def counted_ensure(metadata_db):
+        ensure_calls.append(str(metadata_db.db_path))
+        original_ensure(metadata_db)
+
+    monkeypatch.setattr(llm_usage, "ensure_llm_usage_schema", counted_ensure)
+
+    for operation in ("first", "second"):
+        event = record_llm_usage(
+            provider="fake",
+            model="fake-model",
+            task="summary",
+            operation=operation,
+            input_text="short prompt",
+            output_text="short result",
+            db=db,
+        )
+        assert event is not None
+
+    payload = build_llm_usage_status(db)
+
+    assert payload["call_count"] == 2
+    assert ensure_calls == [str(db.db_path)]
+
+
 def test_llm_cache_info_uses_stored_task_and_model_metadata(tmp_path: Path):
     cache = LLMCache(str(tmp_path / "cache"))
 

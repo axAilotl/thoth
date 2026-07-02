@@ -18,7 +18,7 @@ from .capture_event_store import (
 )
 from .metadata_db import MetadataDB
 from .path_layout import PathLayout
-from .wiki_io import read_frontmatter
+from .wiki_io import read_frontmatter_cached
 
 
 class RetentionServiceError(RuntimeError):
@@ -116,6 +116,22 @@ class _DeletionOutcome:
     bytes_deleted: int = 0
 
 
+@dataclass(frozen=True)
+class _CompiledWikiPage:
+    page_path: Path
+    frontmatter: dict[str, Any]
+    event_ids: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _RetentionPrefetch:
+    raw_refs_by_event: dict[str, tuple[RawArtifactRef, ...]]
+    artifact_links_by_event: dict[str, tuple[ArtifactLink, ...]]
+    privacy_annotations_by_event: dict[str, tuple[PrivacyAnnotation, ...]]
+    compiled_wiki_pages_by_event: dict[str, tuple[_CompiledWikiPage, ...]]
+    retention_policies_by_target: dict[tuple[str, str], tuple[RetentionPolicy, ...]] | None = None
+
+
 class CaptureRetentionService:
     """Inspect and expire raw and distilled capture data."""
 
@@ -145,9 +161,12 @@ class CaptureRetentionService:
             source_id=source_id,
             session_id=session_id,
         )
+        prefetch = self._prefetch_for_events(events)
         targets: list[RetentionTarget] = []
         for event in events:
-            targets.extend(self._targets_for_event(event, as_of=as_of_dt))
+            targets.extend(
+                self._targets_for_event(event, as_of=as_of_dt, prefetch=prefetch)
+            )
         return _inspection_payload(targets, as_of=as_of_dt)
 
     def expire(
@@ -181,10 +200,15 @@ class CaptureRetentionService:
         event = self.event_store.get_event(event_id)
         if event is None:
             raise RetentionServiceError(f"capture event not found: {event_id}")
+        prefetch = self._prefetch_for_events((event,))
 
         operations: list[dict[str, Any]] = []
         audit_records: list[dict[str, Any]] = []
-        for target in self._targets_for_event(event, as_of=as_of_dt):
+        for target in self._targets_for_event(
+            event,
+            as_of=as_of_dt,
+            prefetch=prefetch,
+        ):
             if target.retention_scope not in selected_scopes:
                 continue
             if not target.eligible:
@@ -252,16 +276,122 @@ class CaptureRetentionService:
             return (event,)
         return self.event_store.list_events(source_id=source_id, session_id=session_id)
 
+    def _prefetch_for_events(
+        self,
+        events: tuple[CaptureEvent, ...],
+    ) -> _RetentionPrefetch:
+        event_ids = tuple(event.event_id for event in events)
+        if not event_ids:
+            return _RetentionPrefetch(
+                raw_refs_by_event={},
+                artifact_links_by_event={},
+                privacy_annotations_by_event={},
+                compiled_wiki_pages_by_event={},
+                retention_policies_by_target={},
+            )
+
+        if len(event_ids) > 1:
+            raw_refs = tuple(
+                item
+                for item in self.event_store.list_raw_refs()
+                if item.event_id in event_ids
+            )
+            artifact_links = tuple(
+                item
+                for item in self.event_store.list_artifact_links()
+                if item.event_id in event_ids
+            )
+            privacy_annotations = tuple(
+                item
+                for item in self.event_store.list_privacy_annotations()
+                if item.event_id in event_ids
+            )
+            retention_policies_by_target = _group_policies_by_target(
+                self.event_store.list_retention_policies()
+            )
+        else:
+            event_id = event_ids[0]
+            raw_refs = self.event_store.list_raw_refs(event_id=event_id)
+            artifact_links = self.event_store.list_artifact_links(event_id=event_id)
+            privacy_annotations = self.event_store.list_privacy_annotations(
+                event_id=event_id
+            )
+            retention_policies_by_target = None
+
+        return _RetentionPrefetch(
+            raw_refs_by_event=_group_by_optional_attr(raw_refs, "event_id"),
+            artifact_links_by_event=_group_by_optional_attr(
+                artifact_links,
+                "event_id",
+            ),
+            privacy_annotations_by_event=_group_by_optional_attr(
+                privacy_annotations,
+                "event_id",
+            ),
+            compiled_wiki_pages_by_event=self._compiled_wiki_pages_for_events(
+                event_ids
+            ),
+            retention_policies_by_target=retention_policies_by_target,
+        )
+
+    def _compiled_wiki_pages_for_events(
+        self,
+        event_ids: Iterable[str],
+    ) -> dict[str, tuple[_CompiledWikiPage, ...]]:
+        wanted_event_ids = {str(item) for item in event_ids if str(item).strip()}
+        if not wanted_event_ids:
+            return {}
+        pages_dir = self.layout.wiki_root / "pages"
+        if not pages_dir.exists():
+            return {}
+
+        grouped: dict[str, list[_CompiledWikiPage]] = {}
+        for page_path in sorted(pages_dir.glob("*.md")):
+            try:
+                frontmatter = read_frontmatter_cached(page_path)
+            except Exception:
+                continue
+            event_values = frontmatter.get("thoth_event_ids") or frontmatter.get(
+                "event_ids"
+            )
+            if not isinstance(event_values, list):
+                continue
+            page_event_ids = frozenset(
+                str(item) for item in event_values if str(item).strip()
+            )
+            matching_event_ids = page_event_ids.intersection(wanted_event_ids)
+            if not matching_event_ids:
+                continue
+            page = _CompiledWikiPage(
+                page_path=page_path,
+                frontmatter=dict(frontmatter),
+                event_ids=page_event_ids,
+            )
+            for event_id in matching_event_ids:
+                grouped.setdefault(event_id, []).append(page)
+        return {key: tuple(value) for key, value in grouped.items()}
+
     def _targets_for_event(
         self,
         event: CaptureEvent,
         *,
         as_of: datetime,
+        prefetch: _RetentionPrefetch | None = None,
     ) -> list[RetentionTarget]:
-        raw_refs = self.event_store.list_raw_refs(event_id=event.event_id)
-        artifact_links = self.event_store.list_artifact_links(event_id=event.event_id)
-        privacy_annotations = self.event_store.list_privacy_annotations(
-            event_id=event.event_id
+        raw_refs = (
+            prefetch.raw_refs_by_event.get(event.event_id, ())
+            if prefetch is not None
+            else self.event_store.list_raw_refs(event_id=event.event_id)
+        )
+        artifact_links = (
+            prefetch.artifact_links_by_event.get(event.event_id, ())
+            if prefetch is not None
+            else self.event_store.list_artifact_links(event_id=event.event_id)
+        )
+        privacy_annotations = (
+            prefetch.privacy_annotations_by_event.get(event.event_id, ())
+            if prefetch is not None
+            else self.event_store.list_privacy_annotations(event_id=event.event_id)
         )
         event_policy = self._policy_for(
             "event",
@@ -272,6 +402,7 @@ class CaptureRetentionService:
                 metadata=event.retention,
             ),
             as_of=as_of,
+            prefetch=prefetch,
         )
         privacy_class = _privacy_class(event.privacy, privacy_annotations)
         event_retention_class = _retention_class(event.retention, event_policy)
@@ -283,6 +414,7 @@ class CaptureRetentionService:
                 raw_ref.raw_ref_id,
                 fallback=event_policy,
                 as_of=as_of,
+                prefetch=prefetch,
             )
             targets.append(
                 self._raw_target(
@@ -302,6 +434,7 @@ class CaptureRetentionService:
                 link.artifact_link_id,
                 fallback=event_policy,
                 as_of=as_of,
+                prefetch=prefetch,
             )
             for path_scope, path_text in derived_paths.get(link.artifact_link_id, ()):
                 target = self._path_target(
@@ -330,6 +463,7 @@ class CaptureRetentionService:
                 fallback_retention_class=event_retention_class,
                 privacy_class=privacy_class,
                 as_of=as_of,
+                prefetch=prefetch,
             )
         )
 
@@ -343,6 +477,7 @@ class CaptureRetentionService:
                     fallback_retention_class=event_retention_class,
                     privacy_class=privacy_class,
                     as_of=as_of,
+                    prefetch=prefetch,
                 )
             )
             targets.extend(
@@ -353,6 +488,7 @@ class CaptureRetentionService:
                     fallback_retention_class=event_retention_class,
                     privacy_class=privacy_class,
                     as_of=as_of,
+                    prefetch=prefetch,
                 )
             )
             targets.extend(
@@ -363,6 +499,7 @@ class CaptureRetentionService:
                     fallback_retention_class=event_retention_class,
                     privacy_class=privacy_class,
                     as_of=as_of,
+                    prefetch=prefetch,
                     source_paths=tuple(
                         target.path
                         for target in targets
@@ -452,23 +589,25 @@ class CaptureRetentionService:
         fallback_retention_class: str | None,
         privacy_class: str | None,
         as_of: datetime,
+        prefetch: _RetentionPrefetch | None = None,
     ) -> list[RetentionTarget]:
         pages_dir = self.layout.wiki_root / "pages"
         if not pages_dir.exists():
             return []
 
         targets: list[RetentionTarget] = []
-        for page_path in sorted(pages_dir.glob("*.md")):
-            try:
-                frontmatter = read_frontmatter(page_path)
-            except Exception:
-                continue
-            event_ids = frontmatter.get("thoth_event_ids") or frontmatter.get("event_ids")
-            if not isinstance(event_ids, list):
-                continue
-            page_event_ids = {str(item) for item in event_ids if str(item).strip()}
-            if event.event_id not in page_event_ids:
-                continue
+        pages = (
+            prefetch.compiled_wiki_pages_by_event.get(event.event_id, ())
+            if prefetch is not None
+            else self._compiled_wiki_pages_for_events((event.event_id,)).get(
+                event.event_id,
+                (),
+            )
+        )
+        for page in pages:
+            page_path = page.page_path
+            frontmatter = page.frontmatter
+            page_event_ids = set(page.event_ids)
             other_event_ids = sorted(page_event_ids - {event.event_id})
             relative_id = _relative_id(page_path, self.layout.wiki_root)
             policy = self._policy_for(
@@ -476,6 +615,7 @@ class CaptureRetentionService:
                 relative_id,
                 fallback=event_policy,
                 as_of=as_of,
+                prefetch=prefetch,
             )
             target = self._path_target(
                 event=event,
@@ -513,6 +653,7 @@ class CaptureRetentionService:
         fallback_retention_class: str | None,
         privacy_class: str | None,
         as_of: datetime,
+        prefetch: _RetentionPrefetch | None = None,
     ) -> list[RetentionTarget]:
         if self.db is None:
             return []
@@ -531,6 +672,7 @@ class CaptureRetentionService:
                 cache_key,
                 fallback=event_policy,
                 as_of=as_of,
+                prefetch=prefetch,
             )
             eligible, reason = self._eligibility(policy, as_of=as_of)
             targets.append(
@@ -565,6 +707,7 @@ class CaptureRetentionService:
         fallback_retention_class: str | None,
         privacy_class: str | None,
         as_of: datetime,
+        prefetch: _RetentionPrefetch | None = None,
     ) -> list[RetentionTarget]:
         if self.db is None:
             return []
@@ -581,6 +724,7 @@ class CaptureRetentionService:
                 context_id,
                 fallback=event_policy,
                 as_of=as_of,
+                prefetch=prefetch,
             )
             eligible, reason = self._eligibility(policy, as_of=as_of)
             targets.append(
@@ -631,6 +775,7 @@ class CaptureRetentionService:
         fallback_retention_class: str | None,
         privacy_class: str | None,
         as_of: datetime,
+        prefetch: _RetentionPrefetch | None = None,
         source_paths: tuple[str, ...],
     ) -> list[RetentionTarget]:
         if self.db is None:
@@ -664,6 +809,7 @@ class CaptureRetentionService:
                 target_id,
                 fallback=event_policy,
                 as_of=as_of,
+                prefetch=prefetch,
             )
             eligible, reason = self._eligibility(policy, as_of=as_of)
             targets.append(
@@ -729,11 +875,21 @@ class CaptureRetentionService:
         *,
         fallback: RetentionPolicy | None,
         as_of: datetime,
+        prefetch: _RetentionPrefetch | None = None,
     ) -> RetentionPolicy | None:
-        policies = self.event_store.list_retention_policies(
-            target_type=target_type,
-            target_id=target_id,
-        )
+        if (
+            prefetch is not None
+            and prefetch.retention_policies_by_target is not None
+        ):
+            policies = prefetch.retention_policies_by_target.get(
+                (target_type, target_id),
+                (),
+            )
+        else:
+            policies = self.event_store.list_retention_policies(
+                target_type=target_type,
+                target_id=target_id,
+            )
         return _select_policy(policies, as_of=as_of) or fallback
 
     def _eligibility(
@@ -1141,6 +1297,24 @@ def _select_policy(
     if immediate is not None:
         return immediate
     return policy_list[0]
+
+
+def _group_by_optional_attr(items: Iterable[Any], attr_name: str) -> dict[str, tuple[Any, ...]]:
+    grouped: dict[str, list[Any]] = {}
+    for item in items:
+        key = str(getattr(item, attr_name, "") or "").strip()
+        if key:
+            grouped.setdefault(key, []).append(item)
+    return {key: tuple(values) for key, values in grouped.items()}
+
+
+def _group_policies_by_target(
+    policies: Iterable[RetentionPolicy],
+) -> dict[tuple[str, str], tuple[RetentionPolicy, ...]]:
+    grouped: dict[tuple[str, str], list[RetentionPolicy]] = {}
+    for policy in policies:
+        grouped.setdefault((policy.target_type, policy.target_id), []).append(policy)
+    return {key: tuple(values) for key, values in grouped.items()}
 
 
 def _path_specs_from_mapping(value: Mapping[str, Any]) -> list[tuple[str, str]]:
