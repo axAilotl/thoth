@@ -541,6 +541,10 @@ def _float_or_default(value: Any, default: float) -> float:
     return float(value)
 
 
+def _escape_sql_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _safe_dashboard_error(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
@@ -5167,11 +5171,12 @@ class MetadataDB:
                 clauses = []
                 params: list[Any] = []
                 for context in cleaned:
-                    clauses.append("cache_key LIKE ?")
-                    params.append(f"%{context}%")
+                    pattern = f"%{_escape_sql_like(context)}%"
+                    clauses.append("cache_key LIKE ? ESCAPE '\\'")
+                    params.append(pattern)
                     if "context" in columns:
-                        clauses.append("context LIKE ?")
-                        params.append(f"%{context}%")
+                        clauses.append("context LIKE ? ESCAPE '\\'")
+                        params.append(pattern)
                 selected_columns = [
                     "cache_key",
                     "task_type",

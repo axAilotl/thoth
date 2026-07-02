@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -266,7 +266,11 @@ class CaptureRetentionService:
         event_policy = self._policy_for(
             "event",
             event.event_id,
-            fallback=None,
+            fallback=_retention_policy_from_metadata(
+                target_type="event",
+                target_id=event.event_id,
+                metadata=event.retention,
+            ),
             as_of=as_of,
         )
         privacy_class = _privacy_class(event.privacy, privacy_annotations)
@@ -460,10 +464,12 @@ class CaptureRetentionService:
             except Exception:
                 continue
             event_ids = frontmatter.get("thoth_event_ids") or frontmatter.get("event_ids")
-            if not isinstance(event_ids, list) or event.event_id not in {
-                str(item) for item in event_ids
-            }:
+            if not isinstance(event_ids, list):
                 continue
+            page_event_ids = {str(item) for item in event_ids if str(item).strip()}
+            if event.event_id not in page_event_ids:
+                continue
+            other_event_ids = sorted(page_event_ids - {event.event_id})
             relative_id = _relative_id(page_path, self.layout.wiki_root)
             policy = self._policy_for(
                 "wiki_page",
@@ -471,20 +477,31 @@ class CaptureRetentionService:
                 fallback=event_policy,
                 as_of=as_of,
             )
-            targets.append(
-                self._path_target(
-                    event=event,
-                    target_type="wiki_page",
-                    target_id=relative_id,
-                    retention_scope="compiled_wiki",
-                    policy=policy,
-                    fallback_retention_class=fallback_retention_class,
-                    privacy_class=privacy_class,
-                    path_text=str(page_path),
-                    as_of=as_of,
-                    metadata={"slug": frontmatter.get("thoth_slug") or frontmatter.get("slug")},
-                )
+            target = self._path_target(
+                event=event,
+                target_type="wiki_page",
+                target_id=relative_id,
+                retention_scope="compiled_wiki",
+                policy=policy,
+                fallback_retention_class=fallback_retention_class,
+                privacy_class=privacy_class,
+                path_text=str(page_path),
+                as_of=as_of,
+                metadata={
+                    "slug": frontmatter.get("thoth_slug") or frontmatter.get("slug"),
+                    "event_ids": sorted(page_event_ids),
+                },
             )
+            if other_event_ids:
+                target = replace(
+                    target,
+                    eligible=False,
+                    eligibility_reason=(
+                        "compiled wiki page also references live events"
+                    ),
+                    metadata={**target.metadata, "other_event_ids": other_event_ids},
+                )
+            targets.append(target)
         return targets
 
     def _llm_cache_targets(
@@ -1007,6 +1024,38 @@ def _retention_policy_payload(policy: RetentionPolicy | None) -> dict[str, Any] 
         "legal_hold": policy.legal_hold,
         "metadata": dict(policy.metadata),
     }
+
+
+def _retention_policy_from_metadata(
+    *,
+    target_type: str,
+    target_id: str,
+    metadata: Mapping[str, Any],
+) -> RetentionPolicy | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    retain_until = metadata.get("retain_until")
+    delete_after = metadata.get("delete_after") or metadata.get("expires_at")
+    raw_action = metadata.get("action")
+    if not any((retain_until, delete_after, raw_action)):
+        return None
+    action = _clean_text(raw_action) or ("delete" if delete_after else "retain")
+    policy_name = (
+        _clean_text(metadata.get("policy_name"))
+        or _clean_text(metadata.get("policy"))
+        or _clean_text(metadata.get("retention_class"))
+        or "event_retention"
+    )
+    return RetentionPolicy(
+        target_type=target_type,
+        target_id=target_id,
+        policy_name=policy_name,
+        action=action,
+        retain_until=retain_until,
+        delete_after=delete_after,
+        legal_hold=bool(metadata.get("legal_hold", False)),
+        metadata={"source": "event.retention", **dict(metadata)},
+    )
 
 
 def _provenance_payload(record: ProvenanceRecord) -> dict[str, Any]:

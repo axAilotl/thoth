@@ -489,6 +489,215 @@ def test_capture_surface_retention_expires_raw_and_distilled_separately(
         config.data = original
 
 
+def test_capture_surface_retention_uses_event_retention_metadata(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    original = deepcopy(config.data)
+    try:
+        _configure_runtime_config(tmp_path)
+        layout = build_path_layout(config)
+        layout.ensure_directories()
+        db = MetadataDB(str(layout.database_path))
+        raw_file = layout.raw_root / "capture" / "metadata-retention.json"
+        raw_file.parent.mkdir(parents=True, exist_ok=True)
+        raw_file.write_text('{"raw":"expire me"}\n', encoding="utf-8")
+        store = CaptureEventStore(
+            FakeCaptureConnection(),
+            schema="capture_unit",
+            raw_roots=[layout.raw_root],
+        )
+        source = store.upsert_source(
+            CaptureSource(
+                source_id="source-metadata-retention",
+                source_name="metadata-retention",
+                source_type="manual",
+            )
+        )
+        event = store.upsert_event(
+            CaptureEvent(
+                event_id="event-metadata-retention",
+                source_id=source.source_id,
+                event_type="note",
+                payload={"title": "Metadata retention"},
+                retention={
+                    "policy": "frontmatter-expire",
+                    "action": "delete",
+                    "delete_after": "2000-01-01T00:00:00Z",
+                },
+            )
+        )
+        store.upsert_raw_ref(
+            RawArtifactRef.from_file(
+                raw_file,
+                source_id=source.source_id,
+                event_id=event.event_id,
+                raw_roots=[layout.raw_root],
+            )
+        )
+        surface = CaptureSurfaceService(store, layout=layout, db=db)
+
+        inspection = surface.inspect_retention(
+            event_id=event.event_id,
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+        raw_target = next(
+            target
+            for target in inspection["targets"]
+            if target["target_type"] == "raw_ref"
+        )
+        assert raw_target["eligible"] is True
+        assert raw_target["eligibility_reason"] == "eligible"
+        assert raw_target["policy"]["metadata"]["source"] == "event.retention"
+
+        result = surface.expire_retention(
+            event_id=event.event_id,
+            delete_raw=True,
+            dry_run=False,
+            reason="frontmatter retention expired",
+            actor="operator",
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+        assert result["by_scope"]["raw_capture"]["deleted"] == 1
+        assert not raw_file.exists()
+    finally:
+        config.data = original
+
+
+def test_capture_surface_retention_preserves_shared_compiled_wiki_pages(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    original = deepcopy(config.data)
+    try:
+        _configure_runtime_config(tmp_path)
+        layout = build_path_layout(config)
+        layout.ensure_directories()
+        db = MetadataDB(str(layout.database_path))
+        wiki_page = layout.wiki_root / "pages" / "shared-capture.md"
+        atomic_write_text(
+            wiki_page,
+            render_frontmatter(
+                {
+                    "thoth_type": "wiki_page",
+                    "thoth_slug": "shared-capture",
+                    "thoth_event_ids": ["event-expiring", "event-live"],
+                }
+            )
+            + "\n# Shared Capture\n",
+        )
+        store = CaptureEventStore(
+            FakeCaptureConnection(),
+            schema="capture_unit",
+            raw_roots=[layout.raw_root],
+        )
+        source = store.upsert_source(
+            CaptureSource(
+                source_id="source-shared-page",
+                source_name="shared-page",
+                source_type="manual",
+            )
+        )
+        store.upsert_event(
+            CaptureEvent(
+                event_id="event-expiring",
+                source_id=source.source_id,
+                event_type="note",
+                payload={"title": "Expiring note"},
+                retention={
+                    "policy": "compiled-expire",
+                    "action": "delete",
+                    "delete_after": "2000-01-01T00:00:00Z",
+                },
+            )
+        )
+        store.upsert_event(
+            CaptureEvent(
+                event_id="event-live",
+                source_id=source.source_id,
+                event_type="note",
+                payload={"title": "Live note"},
+            )
+        )
+        surface = CaptureSurfaceService(store, layout=layout, db=db)
+
+        result = surface.expire_retention(
+            event_id="event-expiring",
+            delete_distilled=True,
+            dry_run=False,
+            reason="event expired",
+            actor="operator",
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+        operation = next(
+            item for item in result["operations"] if item["target_type"] == "wiki_page"
+        )
+        assert operation["status"] == "skipped"
+        assert operation["eligibility_reason"] == (
+            "compiled wiki page also references live events"
+        )
+        assert operation["metadata"]["other_event_ids"] == ["event-live"]
+        assert wiki_page.exists()
+    finally:
+        config.data = original
+
+
+def test_llm_cache_context_matching_escapes_sql_wildcards(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    original = deepcopy(config.data)
+    try:
+        _configure_runtime_config(tmp_path)
+        layout = build_path_layout(config)
+        db = MetadataDB(str(layout.database_path))
+        db.upsert_llm_cache(
+            "summary-tweet_1234",
+            "summary",
+            "hash-underscore",
+            "{}",
+            model_provider="test",
+        )
+        db.upsert_llm_cache(
+            "summary-tweetX1234",
+            "summary",
+            "hash-near-underscore",
+            "{}",
+            model_provider="test",
+        )
+        db.upsert_llm_cache(
+            "summary-tweet%done",
+            "summary",
+            "hash-percent",
+            "{}",
+            model_provider="test",
+        )
+        db.upsert_llm_cache(
+            "summary-tweetAdone",
+            "summary",
+            "hash-near-percent",
+            "{}",
+            model_provider="test",
+        )
+
+        entries = db.list_llm_cache_entries_for_contexts(
+            ("tweet_1234", "tweet%done")
+        )
+
+        assert {entry["cache_key"] for entry in entries} == {
+            "summary-tweet_1234",
+            "summary-tweet%done",
+        }
+    finally:
+        config.data = original
+
+
 def test_capture_surface_retention_refuses_unsafe_distilled_paths(
     tmp_path: Path, monkeypatch
 ):
