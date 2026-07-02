@@ -106,6 +106,25 @@ class _InvalidLLMInterface:
         )
 
 
+class _FencedLLMInterface:
+    calls = 0
+
+    def __init__(self, llm_config):
+        self.llm_config = llm_config
+
+    def resolve_task_route(self, task: str):
+        assert task == "transcript"
+        return ("openai", "gpt-test", {})
+
+    async def generate(self, **kwargs):
+        type(self).calls += 1
+        return _FakeResponse(
+            "```json\n"
+            '{"text":"fenced transcript","summary":"summary","tags":"alpha, beta",}\n'
+            "```"
+        )
+
+
 def test_transcript_llm_skips_recent_failed_chunk_and_uses_redacted_fallback(
     tmp_path: Path,
     monkeypatch,
@@ -249,7 +268,9 @@ def test_transcript_llm_rejects_noisy_json_before_cache_write(
     )
 
     assert _InvalidLLMInterface.calls == 1
-    assert result is None
+    assert result is not None
+    assert result["text"] == "[00:00] hello world"
+    assert result["chunk_metadata"]["fallback_used"] is True
     assert llm_cache.get_stats()["cached_results"] == 0
     stored = metadata_db.get_transcript_chunk("video-invalid", 1)
     assert stored is not None
@@ -257,6 +278,94 @@ def test_transcript_llm_rejects_noisy_json_before_cache_write(
     assert payload["status"] == "failed"
     assert "validation_error" in payload["reason"]
     assert "generated text" not in stored["result_json"]
+
+
+def test_transcript_llm_accepts_fenced_json_and_trailing_comma(
+    tmp_path: Path,
+    monkeypatch,
+    restore_runtime_config,
+):
+    _configure_runtime_paths(tmp_path)
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.pipeline_registry.is_enabled",
+        lambda name: True,
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.get_metadata_db",
+        lambda: MetadataDB(db_path=str(tmp_path / "meta.db")),
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.llm_cache",
+        LLMCache(str(tmp_path / "llm_cache")),
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.LLMInterface",
+        _FencedLLMInterface,
+    )
+    _FencedLLMInterface.calls = 0
+
+    processor = TranscriptLLMProcessor()
+    result = asyncio.run(
+        processor.process_transcript("[00:00] hello world", context_id="video-fenced")
+    )
+
+    assert _FencedLLMInterface.calls == 1
+    assert result["text"] == "fenced transcript"
+    assert result["summary"] == "summary"
+    assert result["tags"] == "alpha, beta"
+
+
+def test_youtube_single_chunk_validation_failure_writes_redacted_fallback(
+    tmp_path: Path,
+    monkeypatch,
+    restore_runtime_config,
+):
+    _configure_runtime_paths(tmp_path)
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.pipeline_registry.is_enabled",
+        lambda name: True,
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.get_metadata_db",
+        lambda: MetadataDB(db_path=str(tmp_path / "meta.db")),
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.llm_cache",
+        LLMCache(str(tmp_path / "llm_cache")),
+    )
+    monkeypatch.setattr(
+        "processors.transcript_llm_processor.LLMInterface",
+        _InvalidLLMInterface,
+    )
+    _InvalidLLMInterface.calls = 0
+
+    processor = YouTubeProcessor(vault_path=str(tmp_path / "vault"))
+    processor.transcript_llm_processor = TranscriptLLMProcessor()
+
+    async def fake_get_video_info(video_id: str):
+        return YouTubeVideo(
+            video_id=video_id,
+            title="Secret Video",
+            description="desc",
+            published_at="2026-04-04T00:00:00Z",
+            channel_id="chan-1",
+            channel_title="Channel",
+        )
+
+    async def fake_get_video_transcript(video_id: str):
+        return "[00:00] OPENAI_API_KEY=sk-proj-" + "a" * 32
+
+    processor.get_video_info = fake_get_video_info
+    processor.get_video_transcript = fake_get_video_transcript
+
+    video, metrics = asyncio.run(processor.process_video("secret1"))
+
+    assert video is not None
+    assert metrics["transcript_attempts"] == 1
+    transcript_path = processor.transcripts_dir / "youtube_secret1_Secret_Video.md"
+    content = transcript_path.read_text(encoding="utf-8")
+    assert "sk-proj-" not in content
+    assert "OPENAI_API_KEY=[[REDACTED_ENV_SECRET_1]]" in content
 
 
 def test_pipeline_should_process_youtube_skips_when_transcript_markdown_exists(

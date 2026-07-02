@@ -1,8 +1,6 @@
 import asyncio
 from pathlib import Path
 
-import pytest
-
 from collectors.youtube_connector import YouTubeConnector
 from core.config import Config
 from core.connector_budgets import ConnectorBudgetError
@@ -142,23 +140,41 @@ def test_youtube_connector_accepts_playlist_urls_via_adapter(tmp_path: Path):
     assert db.get_ingestion_entry("yt_video_pl123") is not None
 
 
-def test_youtube_connector_stops_when_export_byte_budget_exceeded(tmp_path: Path):
+def test_youtube_connector_skips_one_video_when_budget_exceeded(tmp_path: Path):
     config = _config(tmp_path)
-    config.set("connectors.budgets.per_connector.youtube.max_bytes_per_file", 8)
     layout = build_path_layout(config, project_root=tmp_path)
     db = MetadataDB(str(layout.database_path))
-    export_path = tmp_path / "watch-later.html"
-    export_path.write_text(
-        '<a href="https://www.youtube.com/watch?v=abc123">Fixture</a>',
-        encoding="utf-8",
-    )
     processor = FakeYouTubeProcessor(layout.vault_root / "transcripts")
     connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
+    original_collect_video = connector._collect_video
 
-    with pytest.raises(ConnectorBudgetError, match="max_bytes_per_file"):
-        asyncio.run(connector.collect(export_paths=[export_path]))
+    async def collect_or_budget_error(video_id, **kwargs):
+        if video_id == "overbudget":
+            raise ConnectorBudgetError(
+                "video exceeded transcript budget",
+                connector_name="youtube",
+                field="max_output_tokens_per_run",
+                subject=video_id,
+            )
+        return await original_collect_video(video_id, **kwargs)
 
-    assert db.list_ingestion_entries(limit=10) == []
+    connector._collect_video = collect_or_budget_error
+
+    result = asyncio.run(
+        connector.collect(
+            urls=[
+                "https://youtu.be/overbudget",
+                "https://youtu.be/afterbudget",
+            ]
+        )
+    )
+
+    assert [record.video_id for record in result.records] == ["afterbudget"]
+    assert result.skipped_urls == ("https://youtu.be/overbudget",)
+    assert result.errors[0]["video_id"] == "overbudget"
+    assert result.errors[0]["error_type"] == "ConnectorBudgetError"
+    assert db.get_ingestion_entry("yt_video_afterbudget") is not None
+    assert db.get_ingestion_entry("yt_video_overbudget") is None
 
 
 def test_youtube_connector_video_archival_is_config_gated(tmp_path: Path, monkeypatch):

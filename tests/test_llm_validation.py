@@ -33,6 +33,26 @@ def test_parse_llm_json_response_rejects_invalid_json():
         )
 
 
+def test_parse_llm_json_response_accepts_opt_in_fence_and_trailing_commas():
+    payload = parse_llm_json_response(
+        '```json\n{"text":"clean transcript","tags":"security, notes",}\n```',
+        fields=FIELDS,
+        allow_code_fence=True,
+        allow_trailing_commas=True,
+    )
+
+    assert payload == {"text": "clean transcript", "tags": "security, notes"}
+
+
+def test_parse_llm_json_response_rejects_fenced_json_with_extra_text():
+    with pytest.raises(LLMOutputValidationError, match="not valid JSON"):
+        parse_llm_json_response(
+            'Here is the JSON:\n```json\n{"text":"clean","tags":"security"}\n```',
+            fields=FIELDS,
+            allow_code_fence=True,
+        )
+
+
 def test_parse_llm_json_response_rejects_wrong_field_type():
     with pytest.raises(LLMOutputValidationError, match="field tags must be str"):
         parse_llm_json_response(

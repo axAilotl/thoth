@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -87,6 +88,8 @@ def test_agent_context_preserves_explicit_zero_trust_scores():
 
 def test_agent_surface_queries_wiki_with_provenance(tmp_path: Path):
     config = _config(tmp_path)
+    config.set("sources.youtube.enabled", True)
+    config.set("connectors.allowlist", ["youtube"])
     layout = build_path_layout(config, project_root=tmp_path)
     db = MetadataDB(str(layout.database_path))
     artifact = RepositoryArtifact(
@@ -338,6 +341,44 @@ def test_agent_surface_hybrid_query_searches_artifacts_with_filters(tmp_path: Pa
         "blocked-repo",
     }
     assert review_result["security_state"]["status"] == "blocked"
+
+
+def test_agent_surface_youtube_connector_parses_string_booleans(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    calls = {}
+
+    class FakeYouTubeConnector:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def collect(self, **kwargs):
+            calls.update(kwargs)
+            return SimpleNamespace(to_dict=lambda: {"status": "ok"})
+
+    monkeypatch.setattr(
+        "collectors.youtube_connector.YouTubeConnector",
+        FakeYouTubeConnector,
+    )
+
+    service = AgentSurfaceService(config, layout=layout, db=db)
+    result = service.run_connector(
+        "youtube",
+        execute=True,
+        options={
+            "urls": "https://youtu.be/abc123",
+            "archive_video": "false",
+            "no_resume": "false",
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert calls["archive_video"] is False
+    assert calls["resume"] is True
 
 
 def test_agent_query_response_keeps_retrieval_text_out_of_answer(tmp_path: Path):

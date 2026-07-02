@@ -16,7 +16,11 @@ from core.artifacts import TranscriptArtifact, VideoArtifact
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config
-from core.connector_budgets import ConnectorBudgetTracker, start_connector_budget_run
+from core.connector_budgets import (
+    ConnectorBudgetError,
+    ConnectorBudgetTracker,
+    start_connector_budget_run,
+)
 from core.connector_capture import ConnectorCaptureQueue
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
@@ -50,6 +54,7 @@ class YouTubeConnectorResult:
 
     records: tuple[YouTubeConnectorRecord, ...] = field(default_factory=tuple)
     skipped_urls: tuple[str, ...] = field(default_factory=tuple)
+    errors: tuple[Mapping[str, str], ...] = field(default_factory=tuple)
     playlist_urls: tuple[str, ...] = field(default_factory=tuple)
     export_paths: tuple[str, ...] = field(default_factory=tuple)
     budget: dict[str, Any] = field(default_factory=dict)
@@ -75,6 +80,7 @@ class YouTubeConnectorResult:
             ],
             "queued_count": sum(1 for record in self.records if record.queued),
             "skipped_urls": list(self.skipped_urls),
+            "errors": [dict(error) for error in self.errors],
             "playlist_urls": list(self.playlist_urls),
             "export_paths": list(self.export_paths),
             "budget": self.budget,
@@ -146,25 +152,44 @@ class YouTubeConnector:
 
         records: list[YouTubeConnectorRecord] = []
         skipped: list[str] = []
+        errors: list[dict[str, str]] = []
         run_id = datetime.now().isoformat()
         for source_url in unique_urls:
             video_id = self.processor.extract_video_id(source_url)
             if not video_id:
                 skipped.append(source_url)
                 continue
-            record = await self._collect_video(
-                video_id,
-                source_url=source_url,
-                archive_video=archive_video,
-                resume=resume,
-                run_id=run_id,
-                budget=budget,
-            )
+            try:
+                record = await self._collect_video(
+                    video_id,
+                    source_url=source_url,
+                    archive_video=archive_video,
+                    resume=resume,
+                    run_id=run_id,
+                    budget=budget,
+                )
+            except ConnectorBudgetError as exc:
+                logger.warning(
+                    "Skipping YouTube video %s after budget error: %s",
+                    video_id,
+                    exc,
+                )
+                skipped.append(source_url)
+                errors.append(
+                    {
+                        "url": source_url,
+                        "video_id": video_id,
+                        "error_type": exc.__class__.__name__,
+                        "error": str(exc),
+                    }
+                )
+                continue
             records.append(record)
 
         return YouTubeConnectorResult(
             records=tuple(records),
             skipped_urls=tuple(skipped),
+            errors=tuple(errors),
             playlist_urls=tuple(playlist_inputs),
             export_paths=tuple(str(path) for path in export_inputs),
             budget=budget.summary(),

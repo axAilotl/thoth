@@ -35,17 +35,26 @@ def parse_llm_json_response(
     fields: Iterable[LLMJSONField],
     object_name: str = "LLM response",
     reject_extra_fields: bool = True,
+    allow_code_fence: bool = False,
+    allow_trailing_commas: bool = False,
 ) -> dict[str, Any]:
     """Parse and validate a JSON object returned by an LLM.
 
-    The parser intentionally accepts only a JSON object as the whole response.
-    Preambles, code fences, trailing prose, and extracted substrings fail closed.
+    By default, the parser accepts only a JSON object as the whole response.
+    Callers that need compatibility with common model formatting can opt into
+    whole-response code fences or trailing-comma repair. Preambles, trailing
+    prose, and extracted substrings still fail closed.
     """
     if not isinstance(content, str) or not content.strip():
         raise LLMOutputValidationError(f"{object_name} was empty")
 
+    normalized = _normalize_json_response_text(
+        content,
+        allow_code_fence=allow_code_fence,
+        allow_trailing_commas=allow_trailing_commas,
+    )
     try:
-        payload = json.loads(content.strip())
+        payload = json.loads(normalized)
     except json.JSONDecodeError as exc:
         raise LLMOutputValidationError(
             f"{object_name} was not valid JSON: {exc.msg}"
@@ -57,6 +66,60 @@ def parse_llm_json_response(
         object_name=object_name,
         reject_extra_fields=reject_extra_fields,
     )
+
+
+_FENCED_JSON_RE = re.compile(
+    r"\A```(?:json|JSON)?[ \t]*\r?\n(?P<body>.*)\r?\n?```[ \t]*\Z",
+    re.DOTALL,
+)
+
+
+def _normalize_json_response_text(
+    content: str,
+    *,
+    allow_code_fence: bool,
+    allow_trailing_commas: bool,
+) -> str:
+    text = content.strip()
+    if allow_code_fence:
+        match = _FENCED_JSON_RE.fullmatch(text)
+        if match:
+            text = match.group("body").strip()
+    if allow_trailing_commas:
+        text = _remove_json_trailing_commas(text)
+    return text
+
+
+def _remove_json_trailing_commas(text: str) -> str:
+    result: list[str] = []
+    in_string = False
+    escape = False
+    length = len(text)
+    for index, char in enumerate(text):
+        if in_string:
+            result.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            result.append(char)
+            continue
+
+        if char == ",":
+            next_index = index + 1
+            while next_index < length and text[next_index].isspace():
+                next_index += 1
+            if next_index < length and text[next_index] in "}]":
+                continue
+
+        result.append(char)
+    return "".join(result)
 
 
 def validate_llm_json_object(

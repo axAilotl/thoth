@@ -949,15 +949,14 @@ class AgentSurfaceService:
     def _run_x_api_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
         from .x_api_bookmark_sync import run_x_api_bookmark_backfill
 
+        no_resume = _optional_bool(options.get("no_resume"))
         return _run_async(
             run_x_api_bookmark_backfill(
                 self.config,
                 layout=self.layout,
                 max_results=_optional_int(options.get("max_results")),
                 max_pages=_optional_int(options.get("max_pages")),
-                resume_from_checkpoint=(
-                    False if bool(options.get("no_resume", False)) else None
-                ),
+                resume_from_checkpoint=False if no_resume else None,
             )
         )
 
@@ -979,18 +978,20 @@ class AgentSurfaceService:
             raise AgentSurfaceError(
                 "youtube connector requires urls, playlist_urls, or export_paths"
             )
+        archive_video = (
+            _optional_bool(options.get("archive_video"))
+            if "archive_video" in options
+            else None
+        )
+        no_resume = _optional_bool(options.get("no_resume"))
         result = _run_async(
             connector.collect(
                 urls=urls,
                 playlist_urls=playlist_urls,
                 export_paths=export_paths,
                 limit=_optional_int(options.get("limit")),
-                archive_video=(
-                    bool(options["archive_video"])
-                    if "archive_video" in options
-                    else None
-                ),
-                resume=not bool(options.get("no_resume", False)),
+                archive_video=archive_video,
+                resume=not bool(no_resume),
             )
         )
         return result.to_dict()

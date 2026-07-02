@@ -350,7 +350,13 @@ class TranscriptLLMProcessor:
                         f'validation_error: {e}',
                         chunk_id=chunk_id,
                     )
-                    return None
+                    return self._build_fallback_chunk_result(
+                        transcript_text,
+                        chunk_index,
+                        chunks_total=chunks_total,
+                        chunk_id=chunk_id,
+                        source_hash=source_hash,
+                    )
             else:
                 error_msg = response.error if response else "No response received"
                 logger.warning(
@@ -367,8 +373,15 @@ class TranscriptLLMProcessor:
                     error_msg or 'no_response',
                     chunk_id=chunk_id,
                 )
-                return None
-                
+                return self._build_fallback_chunk_result(
+                    transcript_text,
+                    chunk_index,
+                    chunks_total=chunks_total,
+                    chunk_id=chunk_id,
+                    source_hash=source_hash,
+                )
+        except ConnectorBudgetError:
+            raise
         except Exception as e:
             logger.error(
                 "Error processing single chunk for %s chunk %s: %s",
@@ -384,7 +397,13 @@ class TranscriptLLMProcessor:
                 str(e),
                 chunk_id=chunk_id,
             )
-            return None
+            return self._build_fallback_chunk_result(
+                transcript_text,
+                chunk_index,
+                chunks_total=chunks_total,
+                chunk_id=chunk_id,
+                source_hash=source_hash,
+            )
     
     async def _process_chunked_transcript(
         self,
@@ -657,6 +676,8 @@ class TranscriptLLMProcessor:
             fields=TRANSCRIPT_RESPONSE_FIELDS,
             object_name=f"transcript LLM response for {target_label} chunk {chunk_index or 1}",
             reject_extra_fields=True,
+            allow_code_fence=True,
+            allow_trailing_commas=True,
         )
 
     def _validate_cached_chunk_payload(
