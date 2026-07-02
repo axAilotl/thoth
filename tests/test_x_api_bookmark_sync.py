@@ -323,6 +323,187 @@ def test_sync_x_api_bookmarks_uses_pagination_token_and_resumes_checkpoint(
     assert result["checkpoint"]["seen_bookmark_ids"][-1] == "500"
 
 
+def test_sync_x_api_bookmarks_does_not_checkpoint_undelivered_page_on_later_failure(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    write_token_bundle(layout)
+
+    import core.x_api_bookmark_sync as x_api_bookmark_sync
+
+    x_api_bookmark_sync.store_x_api_bookmark_sync_checkpoint(
+        layout,
+        XApiBookmarkSyncCheckpoint(user_id="42", seen_bookmark_ids=("100",)),
+    )
+    client = FakeAsyncClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "data": [
+                        {
+                            "id": "900",
+                            "text": "first page bookmark",
+                            "created_at": "2026-04-04T12:30:00.000Z",
+                            "author_id": "9",
+                            "conversation_id": "900",
+                        }
+                    ],
+                    "meta": {"next_token": "page-2", "result_count": 1},
+                },
+            ),
+            FakeResponse(500, {"title": "temporary failure"}),
+        ]
+    )
+    monkeypatch.setattr(
+        x_api_bookmark_sync.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: client,
+    )
+
+    with pytest.raises(Exception, match="bookmark lookup failed"):
+        pytest.importorskip("asyncio").run(
+            sync_x_api_bookmarks(config, layout=layout)
+        )
+
+    stored = load_x_api_bookmark_sync_checkpoint(layout)
+    assert stored.seen_bookmark_ids == ("100",)
+    assert stored.pagination_token is None
+    assert [request[2].get("pagination_token") for request in client.requests] == [
+        None,
+        "page-2",
+    ]
+
+
+def test_sync_x_api_bookmarks_queue_failure_does_not_advance_checkpoint(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    write_token_bundle(layout)
+    db = MetadataDB(str(layout.database_path))
+    event_store = RecordingCaptureEventStore(
+        raw_roots=(layout.raw_root, layout.library_root, layout.vault_root)
+    )
+
+    import core.x_api_bookmark_sync as x_api_bookmark_sync
+
+    client = FakeAsyncClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "data": [
+                        {
+                            "id": "901",
+                            "text": "queue failure bookmark",
+                            "created_at": "2026-04-04T12:30:00.000Z",
+                            "author_id": "9",
+                            "conversation_id": "901",
+                        }
+                    ],
+                    "meta": {"result_count": 1},
+                },
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        x_api_bookmark_sync.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: client,
+    )
+
+    def fail_queue(*args, **kwargs):
+        raise RuntimeError("capture queue unavailable")
+
+    monkeypatch.setattr(
+        x_api_bookmark_sync,
+        "_queue_x_api_bookmark_capture",
+        fail_queue,
+    )
+
+    with pytest.raises(RuntimeError, match="capture queue unavailable"):
+        pytest.importorskip("asyncio").run(
+            sync_x_api_bookmarks(
+                config,
+                layout=layout,
+                db=db,
+                capture_event_store=event_store,
+            )
+        )
+
+    assert load_x_api_bookmark_sync_checkpoint(layout) is None
+    assert db.get_ingestion_entry("901") is None
+
+
+def test_sync_x_api_bookmarks_checkpoint_queued_page_before_later_failure(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    write_token_bundle(layout)
+    db = MetadataDB(str(layout.database_path))
+    event_store = RecordingCaptureEventStore(
+        raw_roots=(layout.raw_root, layout.library_root, layout.vault_root)
+    )
+
+    import core.x_api_bookmark_sync as x_api_bookmark_sync
+
+    client = FakeAsyncClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "data": [
+                        {
+                            "id": "902",
+                            "text": "queued first page bookmark",
+                            "created_at": "2026-04-04T12:30:00.000Z",
+                            "author_id": "9",
+                            "conversation_id": "902",
+                        }
+                    ],
+                    "meta": {"next_token": "page-2", "result_count": 1},
+                },
+            ),
+            FakeResponse(500, {"title": "temporary failure"}),
+        ]
+    )
+    monkeypatch.setattr(
+        x_api_bookmark_sync.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: client,
+    )
+
+    with pytest.raises(Exception, match="bookmark lookup failed"):
+        pytest.importorskip("asyncio").run(
+            sync_x_api_bookmarks(
+                config,
+                layout=layout,
+                db=db,
+                capture_event_store=event_store,
+            )
+        )
+
+    stored = load_x_api_bookmark_sync_checkpoint(layout)
+    assert stored.seen_bookmark_ids == ("902",)
+    assert stored.pagination_token == "page-2"
+    assert stored.last_synced_bookmark_id == "902"
+    assert [request[2].get("pagination_token") for request in client.requests] == [
+        None,
+        "page-2",
+    ]
+    assert db.get_ingestion_entry("902") is not None
+    assert next(iter(event_store.events.values())).native_event_id == "902"
+
+
 def test_sync_x_api_bookmarks_records_capture_event_when_store_supplied(
     tmp_path: Path,
     monkeypatch,

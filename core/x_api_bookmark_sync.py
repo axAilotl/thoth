@@ -486,7 +486,12 @@ async def sync_x_api_bookmarks(
     max_pages: int | None = None,
     resume_from_checkpoint: bool = True,
 ) -> dict[str, Any]:
-    """Fetch bookmark pages, persist checkpoint state, and emit new payloads."""
+    """Fetch bookmark pages, persist delivery-safe checkpoint state, and emit payloads.
+
+    Returned-payload mode persists the checkpoint only after all fetched payloads
+    can be returned to the caller. Capture-event mode persists after each page is
+    successfully queued, because the queue is the durable delivery boundary.
+    """
     if not 1 <= max_results <= X_API_BOOKMARKS_MAX_RESULTS:
         raise XApiBookmarkSyncConfigError(
             f"max_results must be between 1 and {X_API_BOOKMARKS_MAX_RESULTS}"
@@ -516,6 +521,7 @@ async def sync_x_api_bookmarks(
     pages_fetched = 0
     stopped_at_known_id = False
     last_sync_timestamp = _iso_utc()
+    latest_checkpoint: XApiBookmarkSyncCheckpoint | None = None
 
     should_capture_events = _should_capture_bookmark_events(
         config,
@@ -560,7 +566,7 @@ async def sync_x_api_bookmarks(
                 if meta is not None and not isinstance(meta, dict):
                     raise XApiBookmarkSyncError("X API bookmark lookup meta must be an object")
 
-                unseen_ids: list[str] = []
+                page_unseen_ids: list[str] = []
                 for tweet in page_data:
                     if not isinstance(tweet, dict):
                         raise XApiBookmarkSyncError(
@@ -591,7 +597,7 @@ async def sync_x_api_bookmarks(
                             run_id=last_sync_timestamp,
                         )
                     seen_ids.add(tweet_id)
-                    unseen_ids.append(tweet_id)
+                    page_unseen_ids.append(tweet_id)
 
                 next_token = None
                 if isinstance(meta, dict):
@@ -599,28 +605,38 @@ async def sync_x_api_bookmarks(
                     if raw_next_token is not None:
                         next_token = str(raw_next_token).strip() or None
 
-                seen_order = list(_merge_seen_ids(tuple(seen_order), unseen_ids))
-                checkpoint_payload = XApiBookmarkSyncCheckpoint(
+                seen_order = list(_merge_seen_ids(tuple(seen_order), page_unseen_ids))
+                latest_checkpoint = XApiBookmarkSyncCheckpoint(
                     user_id=user_id,
                     seen_bookmark_ids=tuple(seen_order),
                     pagination_token=None if stopped_at_known_id else next_token,
                     last_synced_at=last_sync_timestamp,
-                    last_synced_bookmark_id=unseen_ids[-1] if unseen_ids else None,
+                    last_synced_bookmark_id=page_unseen_ids[-1]
+                    if page_unseen_ids
+                    else None,
                     last_result_count=len(page_data),
                 )
-                store_x_api_bookmark_sync_checkpoint(resolved_layout, checkpoint_payload)
+                if capture_queue is not None:
+                    store_x_api_bookmark_sync_checkpoint(
+                        resolved_layout,
+                        latest_checkpoint,
+                    )
 
                 if stopped_at_known_id or not next_token:
                     break
                 pagination_token = next_token
 
+    if capture_queue is None and latest_checkpoint is not None:
+        store_x_api_bookmark_sync_checkpoint(resolved_layout, latest_checkpoint)
+
+    stored_checkpoint = load_x_api_bookmark_sync_checkpoint(resolved_layout)
     return {
         "status": "ok",
         "user_id": user_id,
         "pages_fetched": pages_fetched,
         "bookmarks_emitted": len(payloads),
         "stopped_at_known_id": stopped_at_known_id,
-        "checkpoint": load_x_api_bookmark_sync_checkpoint(resolved_layout).to_dict(),
+        "checkpoint": stored_checkpoint.to_dict() if stored_checkpoint else None,
         "payloads": payloads,
     }
 
