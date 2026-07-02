@@ -49,7 +49,6 @@ _QUARANTINED_EVENT_STATUSES = {
     "security_review",
 }
 _CLOSED_SECURITY_STATUSES = {"accepted", "closed", "resolved", "suppressed"}
-_REVIEW_SECURITY_SEVERITIES = {"critical", "high"}
 _PERSON_METADATA_KEYS = ("people", "persons", "participants")
 _PERSON_SINGLE_METADATA_KEYS = ("person", "speaker")
 _PROJECT_METADATA_KEYS = ("projects", "repositories")
@@ -203,12 +202,7 @@ def _capture_record_security_requires_review(record: _CaptureEventRecord) -> boo
         status = finding.status.lower()
         if status in _CLOSED_SECURITY_STATUSES:
             continue
-        severity = finding.severity.lower()
-        finding_type = finding.finding_type.lower()
-        if severity in _REVIEW_SECURITY_SEVERITIES:
-            return True
-        if finding_type in {"prompt_injection", "prompt_security"}:
-            return True
+        return True
     return False
 
 

@@ -31,6 +31,7 @@ class RecordingCaptureEventStore:
         self.events = {}
         self.raw_refs = {}
         self.artifact_links = {}
+        self.security_findings = {}
 
     def upsert_source(self, source):
         self.sources[source.source_id] = source
@@ -51,6 +52,34 @@ class RecordingCaptureEventStore:
     def upsert_artifact_link(self, link):
         self.artifact_links[link.artifact_link_id] = link
         return link
+
+    def upsert_security_findings_from_metadata(
+        self,
+        metadata,
+        *,
+        event_id=None,
+        raw_ref_id=None,
+    ):
+        findings = metadata.get("thoth_security_findings")
+        if not isinstance(findings, list):
+            return ()
+        persisted = []
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            fingerprint = str(
+                finding.get("fingerprint")
+                or f"{event_id}:{raw_ref_id}:{len(self.security_findings)}"
+            )
+            key = (event_id, raw_ref_id, fingerprint)
+            self.security_findings[key] = {
+                "event_id": event_id,
+                "raw_ref_id": raw_ref_id,
+                "fingerprint": fingerprint,
+                "finding": dict(finding),
+            }
+            persisted.append(self.security_findings[key])
+        return tuple(persisted)
 
 
 def _config(tmp_path: Path) -> Config:

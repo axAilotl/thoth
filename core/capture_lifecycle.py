@@ -339,6 +339,11 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             else None,
         )
         stored_entry = self._upsert_queue_entry(entry)
+        self._upsert_security_findings_from_queue_entry(
+            stored_entry,
+            event_id=event_id,
+            raw_ref_id=raw_ref_id,
+        )
 
         lifecycle_id = _stable_id(
             "lifecycle",
@@ -719,6 +724,32 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
                 f"Persisted ingestion queue entry cannot be read: {entry.artifact_id}"
             )
         return stored_entry
+
+    def _upsert_security_findings_from_queue_entry(
+        self,
+        entry: IngestionQueueEntry,
+        *,
+        event_id: str,
+        raw_ref_id: str | None,
+    ) -> None:
+        if self.capture_event_store is None:
+            return
+        try:
+            payload = json.loads(entry.payload_json or "{}")
+        except Exception as exc:
+            raise CaptureLifecycleError(
+                f"Queued artifact {entry.artifact_id} has invalid payload_json"
+            ) from exc
+        if not isinstance(payload, Mapping):
+            return
+        metadata = payload.get("normalized_metadata")
+        if not isinstance(metadata, Mapping):
+            return
+        self.capture_event_store.upsert_security_findings_from_metadata(
+            metadata,
+            event_id=event_id,
+            raw_ref_id=raw_ref_id,
+        )
 
 
 def get_capture_lifecycle_service(

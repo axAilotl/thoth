@@ -68,6 +68,8 @@ def _capture_store_with_public_and_restricted_events(layout):
     )
     restricted_raw = layout.raw_root / "capture" / "restricted.json"
     restricted_raw.write_text('{"text":"private note"}\n', encoding="utf-8")
+    review_raw = layout.raw_root / "capture" / "medium-review.json"
+    review_raw.write_text('{"text":"medium classifier review"}\n', encoding="utf-8")
 
     store = CaptureEventStore(
         FakeCaptureConnection(),
@@ -133,9 +135,50 @@ def _capture_store_with_public_and_restricted_events(layout):
             event_id=public_event.event_id,
             finding_type="classifier",
             severity="low",
-            status="open",
+            status="closed",
             fingerprint="low-classifier",
             details={"pattern_id": "benign-marker", "scope": "context"},
+        )
+    )
+
+    review_event = store.upsert_event(
+        CaptureEvent(
+            event_id="event-medium-review",
+            source_id=source.source_id,
+            session_id=session.session_id,
+            event_type="note",
+            native_event_id="note-medium-review",
+            occurred_at="2026-04-04T10:30:00Z",
+            captured_at="2026-04-04T10:31:00Z",
+            payload={"title": "Medium classifier review note"},
+            privacy={"classification": "public"},
+        )
+    )
+    review_ref = store.upsert_raw_ref(
+        RawArtifactRef.from_file(
+            review_raw,
+            source_id=source.source_id,
+            session_id=session.session_id,
+            event_id=review_event.event_id,
+            raw_roots=[layout.raw_root],
+        )
+    )
+    store.upsert_artifact_link(
+        ArtifactLink(
+            event_id=review_event.event_id,
+            raw_ref_id=review_ref.raw_ref_id,
+            artifact_id="artifact-medium-review",
+            artifact_type="note",
+        )
+    )
+    store.upsert_security_finding(
+        SecurityFinding(
+            event_id=review_event.event_id,
+            finding_type="classifier",
+            severity="medium",
+            status="open",
+            fingerprint="medium-classifier",
+            details={"pattern_id": "classifier-medium", "scope": "context"},
         )
     )
 
@@ -585,7 +628,7 @@ def test_wiki_updater_compiles_capture_event_rollup_pages_with_filters(
             ],
             "finding_type": "classifier",
             "severity": "low",
-            "status": "open",
+            "status": "closed",
             "fingerprint": "low-classifier",
             "pattern_id": "benign-marker",
             "scope": "context",
@@ -595,6 +638,8 @@ def test_wiki_updater_compiles_capture_event_rollup_pages_with_filters(
     assert "# Citations" in document.body
     assert "raw/capture/public.json" in document.body
     assert "Capture event event-public" in document.body
+    assert "event-medium-review" not in document.body
+    assert "medium classifier review" not in document.body
     assert "event-private" not in document.body
     assert "do not copy this raw transcript" not in document.body
     assert "do not render this payload blob" not in document.body
@@ -681,15 +726,17 @@ def test_wiki_updater_requires_audit_reason_for_restricted_capture_events(
     )
     document = read_document(daily_page)
     assert document.frontmatter["thoth_event_ids"] == [
+        "event-medium-review",
         "event-private",
         "event-public",
     ]
-    assert document.frontmatter["thoth_capture_event_count"] == 2
+    assert document.frontmatter["thoth_capture_event_count"] == 3
     assert document.frontmatter["thoth_capture_audit"] == {
         "compiled_at": document.frontmatter["thoth_capture_audit"]["compiled_at"],
         "include_restricted_events": True,
         "reason": "operator reviewed private note",
     }
+    assert "event-medium-review" in document.body
     assert "event-private" in document.body
 
 
