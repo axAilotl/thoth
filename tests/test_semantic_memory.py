@@ -66,9 +66,13 @@ def test_semantic_memory_stores_candidates_and_queryable_evidence(tmp_path: Path
 
     assert candidate.status == "proposed"
     assert candidate.entity_id == "person:ada"
+    assert candidate.created_at.endswith("Z")
+    assert candidate.updated_at.endswith("Z")
 
     by_candidate = store.list_evidence(candidate_id=candidate.candidate_id)
     assert [item.evidence_id for item in by_candidate] == ["evidence-1"]
+    assert by_candidate[0].created_at.endswith("Z")
+    assert by_candidate[0].updated_at.endswith("Z")
 
     by_artifact = store.list_evidence(artifact_id="artifact-1")
     assert [item.candidate_id for item in by_artifact] == [candidate.candidate_id]
@@ -97,7 +101,15 @@ def test_semantic_memory_enforces_states_and_immutable_types(tmp_path: Path):
             candidate_id="candidate-fact-1",
             candidate_type="fact",
             text="Project Thoth uses beads for issue tracking.",
-        )
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-fact-1",
+                evidence_id="evidence-fact-1",
+                source_path="notes/project.md",
+                evidence_text="Project notes mention beads issue tracking.",
+            ),
+        ),
     )
     assert proposed.status == "proposed"
 
@@ -163,6 +175,28 @@ def test_semantic_memory_enforces_states_and_immutable_types(tmp_path: Path):
 
     with pytest.raises(SemanticMemoryTransitionError):
         store.transition_candidate(superseded.candidate_id, "confirmed")
+
+
+def test_semantic_memory_promotion_rejects_zero_evidence_confirmation(
+    tmp_path: Path,
+):
+    store = make_store(tmp_path)
+    candidate = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-no-evidence-promotion",
+            candidate_type="fact",
+            text="Evidence-free promoted facts should not compile silently.",
+        )
+    )
+    confirmed = store.transition_candidate(candidate.candidate_id, "confirmed")
+
+    with pytest.raises(SemanticMemoryTransitionError, match="at least one evidence"):
+        store.transition_candidate(confirmed.candidate_id, "promoted")
+
+    decision = store.evaluate_promotion(confirmed.candidate_id)
+    assert decision.allowed is False
+    assert decision.reason == "missing_evidence"
+    assert decision.evidence_count == 0
 
 
 def test_semantic_memory_review_service_records_auditable_actions(tmp_path: Path):

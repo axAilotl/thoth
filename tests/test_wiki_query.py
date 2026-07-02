@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -266,5 +267,63 @@ def test_hybrid_search_filters_artifacts_and_excludes_quarantined_by_default(
             ),
         )
         assert [hit.result_id for hit in trusted_result.hits] == ["artifact:artifact-safe"]
+    finally:
+        config.data = original
+
+
+def test_hybrid_search_treats_legacy_naive_timestamps_as_utc(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = make_config(tmp_path)
+    try:
+        layout = build_path_layout(config, project_root=tmp_path)
+        contract = build_wiki_contract(config, project_root=tmp_path)
+        db = MetadataDB(str(layout.database_path))
+        for artifact_id, created_at in (
+            ("naive-time", "2026-05-01T12:00:00"),
+            ("utc-time", "2026-05-01T12:00:00Z"),
+        ):
+            db.upsert_ingestion_entry(
+                IngestionQueueEntry(
+                    artifact_id=artifact_id,
+                    artifact_type="repository",
+                    source="github",
+                    status="pending",
+                    payload_json=json.dumps(
+                        {
+                            "id": artifact_id,
+                            "source_type": "github",
+                            "repo_name": f"owner/{artifact_id}",
+                            "description": "Timezone boundary artifact",
+                        }
+                    ),
+                    created_at=created_at,
+                )
+            )
+
+        runner = WikiQueryRunner(config, layout=layout, contract=contract, db=db)
+        inclusive = runner.hybrid_search(
+            "timezone boundary",
+            filters=HybridSearchFilters(
+                result_types=("artifact",),
+                created_before="2026-05-01T12:00:00Z",
+            ),
+            limit=10,
+        )
+        exclusive = runner.hybrid_search(
+            "timezone boundary",
+            filters=HybridSearchFilters(
+                result_types=("artifact",),
+                created_after="2026-05-01T12:00:01Z",
+            ),
+            limit=10,
+        )
+
+        assert {hit.artifact_id for hit in inclusive.hits} == {
+            "naive-time",
+            "utc-time",
+        }
+        assert exclusive.hits == ()
     finally:
         config.data = original

@@ -10,7 +10,7 @@ import json
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from .metadata_db import (
@@ -59,7 +59,7 @@ def _new_id() -> str:
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat()
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -780,7 +780,10 @@ class SemanticMemoryStore:
             evidence_tuple,
         )
         explicitly_confirmed = explicit_status == "confirmed"
-        if explicitly_confirmed:
+        if not evidence_tuple:
+            reason = "missing_evidence"
+            allowed = False
+        elif explicitly_confirmed:
             reason = "explicit_confirmation"
             allowed = True
         elif trusted_structured_input:
@@ -813,6 +816,12 @@ class SemanticMemoryStore:
     ) -> None:
         if decision.allowed:
             return
+        if decision.evidence_count == 0:
+            raise SemanticMemoryTransitionError(
+                "semantic memory promotion requires at least one evidence item; "
+                "explicit confirmation and trusted structured input are only valid "
+                "for candidates with durable evidence"
+            )
         raise SemanticMemoryTransitionError(
             "semantic memory promotion requires explicit confirmation, "
             "trusted structured input, or repeated evidence; "

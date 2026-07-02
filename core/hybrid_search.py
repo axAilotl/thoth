@@ -164,6 +164,9 @@ class HybridSearchHit:
     page_path: str | None = None
     artifact_id: str | None = None
     event_id: str | None = None
+    resource: str | None = None
+    kind: str | None = None
+    record_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -266,7 +269,11 @@ class HybridSearchService:
                 _frontmatter_value(frontmatter, "description", "thoth_summary", "summary")
                 or ""
             )
+            record_type = str(
+                _frontmatter_value(frontmatter, "thoth_type", "type") or "wiki_page"
+            )
             kind = str(_frontmatter_value(frontmatter, "thoth_kind", "kind") or "topic")
+            resource = _optional_string(_frontmatter_value(frontmatter, "resource"))
             source_type = _optional_string(
                 _frontmatter_value(frontmatter, "thoth_source_type", "source_type")
             )
@@ -345,6 +352,9 @@ class HybridSearchService:
                 "session_ids": list(session_ids),
                 "slug": slug,
                 "page_path": str(page_path),
+                "resource": resource,
+                "kind": kind,
+                "record_type": record_type,
                 "related_slugs": list(related_slugs),
                 "influence_sources": list(influence_sources),
             }
@@ -368,6 +378,9 @@ class HybridSearchService:
                     slug=slug,
                     page_path=str(page_path),
                     artifact_id=artifact_id,
+                    resource=resource,
+                    kind=kind,
+                    record_type=record_type,
                 )
             )
         return hits
@@ -490,6 +503,9 @@ class HybridSearchService:
                     security=security,
                     trust=trust,
                     artifact_id=entry.artifact_id,
+                    resource=source_path,
+                    kind=entry.artifact_type,
+                    record_type=entry.artifact_type,
                 )
             )
         return hits
@@ -611,6 +627,9 @@ class HybridSearchService:
                     security=security,
                     trust=trust,
                     event_id=event.event_id,
+                    resource=source_paths[0] if source_paths else None,
+                    kind="capture_event",
+                    record_type=event.event_type,
                 )
             )
         return hits

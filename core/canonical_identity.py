@@ -570,10 +570,10 @@ def _youtube_id_from_url(value: Any) -> str | None:
     if not url:
         return None
     parsed = urlparse(url)
-    host = parsed.netloc.lower().removeprefix("www.")
+    host = (parsed.hostname or "").lower().removeprefix("www.")
     if host == "youtu.be":
         return parsed.path.strip("/") or None
-    if host.endswith("youtube.com"):
+    if _host_matches_domain(host, "youtube.com"):
         query_id = parse_qs(parsed.query).get("v", [None])[0]
         if query_id:
             return query_id
@@ -594,11 +594,17 @@ def _normalize_url(value: Any) -> str | None:
     host = parsed.netloc.lower()
     path = quote(unquote(parsed.path), safe="/:@")
     query = parsed.query
-    if host.endswith("youtube.com"):
+    if _host_matches_domain((parsed.hostname or "").lower(), "youtube.com"):
         video_id = _youtube_id_from_url(text)
         if video_id:
             return f"https://www.youtube.com/watch?v={video_id}"
     return urlunparse((scheme, host, path.rstrip("/") or "/", "", query, ""))
+
+
+def _host_matches_domain(host: str, domain: str) -> bool:
+    clean_host = host.lower().rstrip(".")
+    clean_domain = domain.lower().rstrip(".")
+    return clean_host == clean_domain or clean_host.endswith(f".{clean_domain}")
 
 
 def _normalize_name(value: str) -> str:

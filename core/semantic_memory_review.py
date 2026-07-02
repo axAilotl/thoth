@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from .metadata_db import MetadataDB
@@ -27,7 +27,7 @@ class SemanticMemoryReviewNotFoundError(SemanticMemoryReviewError):
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat()
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _clean_optional(value: Any) -> str | None:

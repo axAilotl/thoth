@@ -110,6 +110,41 @@ def test_wiki_lint_reports_contradictions_staleness_and_orphans(
         config.data = original
 
 
+def test_wiki_lint_accepts_unquoted_yaml_date_frontmatter(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = make_config(tmp_path)
+    try:
+        layout = build_path_layout(config, project_root=tmp_path)
+        contract = build_wiki_contract(config, project_root=tmp_path)
+        page_path = contract.pages_dir / "yaml-date.md"
+        atomic_write_text(
+            page_path,
+            "---\n"
+            "title: YAML Date\n"
+            "thoth_slug: yaml-date\n"
+            "thoth_kind: topic\n"
+            "thoth_summary: Generated page with date frontmatter.\n"
+            "thoth_source_paths:\n"
+            "  - raw/date.md\n"
+            "thoth_updated_at: 2026-05-01\n"
+            "---\n\n"
+            "# YAML Date\n\n"
+            "## Sources\n\n"
+            "- [raw/date.md](../../vault/raw/date.md)\n",
+        )
+
+        report = WikiLintRunner(config, layout=layout, contract=contract).lint(
+            stale_after_days=999999
+        )
+
+        assert report.pages_checked == 1
+        assert "invalid-updated-at" not in {issue.code for issue in report.issues}
+    finally:
+        config.data = original
+
+
 def test_wiki_lint_reports_generated_quality_failures(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     original = make_config(tmp_path)

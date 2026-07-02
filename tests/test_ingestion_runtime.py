@@ -575,6 +575,48 @@ def test_canonical_metadata_people_do_not_replace_artifact_link(
     assert db.get_canonical_entity(person_ids[0]).entity_type == "person"
 
 
+def test_canonical_identity_does_not_treat_fake_youtube_as_youtube(tmp_path: Path):
+    db = MetadataDB(str(tmp_path / "meta.db"))
+    service = CanonicalIdentityService(db)
+    artifact = WebClipperArtifact(
+        id="fake-youtube-clip",
+        title="Fake YouTube Clip",
+        source_url="https://fakeyoutube.com/watch?v=X",
+        raw_content="not actually YouTube",
+    )
+
+    identity = service.canonicalize_artifact(artifact)
+
+    key_values = {key.key_value for key in identity.keys}
+    assert "https://fakeyoutube.com/watch?v=X" in key_values
+    assert "https://www.youtube.com/watch?v=X" not in key_values
+
+
+def test_ingestion_queue_generated_timestamps_are_utc(tmp_path: Path):
+    db = MetadataDB(str(tmp_path / "meta.db"))
+    entry = IngestionQueueEntry(
+        artifact_id="timestamp-defaults",
+        artifact_type="repository",
+        source="github",
+        payload_json=json.dumps(
+            {
+                "id": "timestamp-defaults",
+                "source_type": "github",
+                "repo_name": "owner/timestamp-defaults",
+            }
+        ),
+    )
+
+    assert db.upsert_ingestion_entry(entry)
+    stored = db.get_ingestion_entry("timestamp-defaults")
+    assert stored.created_at.endswith("Z")
+    assert stored.next_attempt_at.endswith("Z")
+
+    assert db.mark_ingestion_processed("timestamp-defaults")
+    processed = db.get_ingestion_entry("timestamp-defaults")
+    assert processed.processed_at.endswith("Z")
+
+
 def test_process_pending_ingestions_marks_processed(
     tmp_path: Path, monkeypatch, restore_runtime_config
 ):

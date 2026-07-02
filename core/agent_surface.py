@@ -748,6 +748,9 @@ class AgentSurfaceService:
         return {
             "result_id": hit.result_id,
             "result_type": hit.result_type,
+            "record_type": hit.record_type or hit.result_type,
+            "kind": hit.kind or hit.result_type,
+            "resource": hit.resource,
             "slug": hit.slug,
             "title": hit.title,
             "summary": hit.summary,

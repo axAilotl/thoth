@@ -113,6 +113,9 @@ def test_agent_surface_queries_wiki_with_provenance(tmp_path: Path):
     hit = result["retrieval"]["hits"][0]
     assert result["citations"][0]["supports_result_id"] == hit["result_id"]
     assert hit["title"] == "owner/agent-repo"
+    assert hit["record_type"] == "wiki_page"
+    assert hit["kind"] == "entity"
+    assert hit["resource"] == "https://github.com/owner/agent-repo"
     assert hit["provenance"]["artifact_id"] == "gh_1"
     assert hit["provenance"]["source_type"] == "github"
     assert hit["citations"][0]["kind"] == "wiki_page"
