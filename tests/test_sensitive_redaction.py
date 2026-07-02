@@ -39,17 +39,47 @@ def test_redaction_avoids_example_email_false_positive():
     assert result.findings == ()
 
 
-def test_llm_cache_uses_redacted_key_material_and_metadata(tmp_path):
+def test_llm_cache_keeps_redacted_metadata_without_sensitive_key_collision(tmp_path):
     cache = LLMCache(str(tmp_path))
     content = "TOKEN=" + "c" * 32
 
     cache.set(content, "summary", {"summary": "ok"}, "fake:model")
     cached = cache.get("TOKEN=" + "d" * 32, "summary", "fake:model")
 
-    assert cached == {"summary": "ok"}
+    assert cached is None
+    assert cache.get(content, "summary", "fake:model") == {"summary": "ok"}
     cache_files = list(tmp_path.glob("*.json"))
     assert len(cache_files) == 1
     payload = json.loads(cache_files[0].read_text(encoding="utf-8"))
     serialized = json.dumps(payload)
     assert "c" * 32 not in serialized
     assert payload["redaction"]["categories"] == {"env_secret": 1}
+    assert payload["cache_key_version"] == "v2"
+
+
+def test_llm_cache_distinguishes_redacted_email_and_phone_values(tmp_path):
+    cache = LLMCache(str(tmp_path))
+
+    cache.set(
+        "Contact Alice at alice@private.test or +1 (202) 555-0188",
+        "summary",
+        {"summary": "alice"},
+        "fake:model",
+    )
+
+    assert (
+        cache.get(
+            "Contact Bob at bob@private.test or +1 (303) 555-0199",
+            "summary",
+            "fake:model",
+        )
+        is None
+    )
+    assert (
+        cache.get(
+            "Contact Alice at alice@private.test or +1 (202) 555-0188",
+            "summary",
+            "fake:model",
+        )
+        == {"summary": "alice"}
+    )

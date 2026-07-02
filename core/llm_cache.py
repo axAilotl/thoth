@@ -16,6 +16,8 @@ from .sensitive_redaction import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
 
+_CACHE_KEY_VERSION = "v2"
+
 
 class LLMCache:
     """Simple disk-based cache for LLM results"""
@@ -38,11 +40,9 @@ class LLMCache:
 
     def _generate_cache_key(self, content: str, task_type: str, model: str = "") -> str:
         """Generate cache key from content hash and task parameters"""
-        # Create hash from content + task type + model
-        redacted_content, _ = self._redact_cache_material(content)
-        hash_input = f"{redacted_content}|{task_type}|{model}"
-        content_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()[:16]
-        return f"{task_type}_{content_hash}"
+        hash_input = f"{_CACHE_KEY_VERSION}|{content}|{task_type}|{model}"
+        content_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()[:32]
+        return f"{task_type}_{_CACHE_KEY_VERSION}_{content_hash}"
     
     def get(self, content: str, task_type: str, model: str = "") -> Optional[Dict[str, Any]]:
         """Get cached result if available"""
@@ -94,6 +94,7 @@ class LLMCache:
                 'task_type': task_type,
                 'model': model,
                 'content_hash': hashlib.sha256(redacted_content.encode('utf-8')).hexdigest()[:16],
+                'cache_key_version': _CACHE_KEY_VERSION,
                 'result': result,
                 'cached_at': datetime.now().isoformat(),
                 'content_length': len(redacted_content)

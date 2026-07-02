@@ -180,6 +180,23 @@ def test_hybrid_search_filters_artifacts_and_excludes_quarantined_by_default(
                 created_at="2026-04-06T00:00:00",
             )
         )
+        db.upsert_ingestion_entry(
+            IngestionQueueEntry(
+                artifact_id="artifact-zero-trust",
+                artifact_type="repository",
+                source="github",
+                status="pending",
+                payload_json=(
+                    '{"id":"repo-zero-trust","source_type":"github",'
+                    '"repo_name":"Zero Trust Agentic Retrieval",'
+                    '"description":"Agentic workflows with explicit zero trust",'
+                    '"tags":["untrusted"],'
+                    '"source_trust_score":0,'
+                    '"trust_score":1.0}'
+                ),
+                created_at="2026-04-05T12:00:00",
+            )
+        )
 
         runner = WikiQueryRunner(config, layout=layout, contract=contract, db=db)
         result = runner.hybrid_search(
@@ -194,11 +211,18 @@ def test_hybrid_search_filters_artifacts_and_excludes_quarantined_by_default(
         ids = {hit.result_id for hit in result.hits}
         assert "wiki_page:hybrid-retrieval" in ids
         assert "artifact:artifact-safe" in ids
+        assert "artifact:artifact-zero-trust" in ids
         assert "artifact:artifact-blocked" not in ids
         assert result.capabilities["embedding"]["available"] is False
         assert all(hit.provenance for hit in result.hits)
         assert all(hit.security["status"] == "allowed" for hit in result.hits)
         assert all("score" in hit.trust for hit in result.hits)
+        zero_trust = next(
+            hit
+            for hit in result.hits
+            if hit.result_id == "artifact:artifact-zero-trust"
+        )
+        assert zero_trust.trust["score"] == 0.0
 
         artifact_only = runner.hybrid_search(
             "agentic workflows",
@@ -222,6 +246,7 @@ def test_hybrid_search_filters_artifacts_and_excludes_quarantined_by_default(
         assert {hit.result_id for hit in review_result.hits} == {
             "artifact:artifact-safe",
             "artifact:artifact-blocked",
+            "artifact:artifact-zero-trust",
         }
         blocked = next(
             hit
@@ -230,5 +255,16 @@ def test_hybrid_search_filters_artifacts_and_excludes_quarantined_by_default(
         )
         assert blocked.security["requires_review"] is True
         assert blocked.trust["score"] == 0.0
+
+        trusted_result = runner.hybrid_search(
+            "agentic workflows",
+            limit=10,
+            filters=HybridSearchFilters(
+                result_types=("artifact",),
+                include_quarantined=True,
+                min_trust_score=0.5,
+            ),
+        )
+        assert [hit.result_id for hit in trusted_result.hits] == ["artifact:artifact-safe"]
     finally:
         config.data = original

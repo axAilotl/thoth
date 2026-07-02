@@ -56,6 +56,33 @@ def make_config(tmp_path: Path) -> tuple[Config, MetadataDB]:
     return config, MetadataDB(str(db_path))
 
 
+def test_archivist_corpus_document_preserves_zero_source_trust(tmp_path: Path):
+    _config, db = make_config(tmp_path)
+    document = ArchivistCorpusDocument(
+        candidate_key="vault:repos/zero.md",
+        path=tmp_path / "vault" / "repos" / "zero.md",
+        scope="vault",
+        scope_relative_path="repos/zero.md",
+        source_type="repository",
+        file_type="markdown",
+        title="Zero Trust",
+        tags=("retrieval",),
+        content_text="Explicitly untrusted retrieval source.",
+        source_hash="zero-source-hash",
+        size_bytes=10,
+        updated_at="2026-04-04T00:00:00Z",
+        source_trust_score=0.0,
+        source_trust_reason="operator_untrusted",
+    )
+
+    db.upsert_archivist_corpus_document(document)
+
+    assert (
+        db.get_archivist_corpus_document(document.candidate_key).source_trust_score
+        == 0.0
+    )
+
+
 def test_archivist_inventory_reuses_unchanged_documents_between_runs(tmp_path: Path):
     config, db = make_config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)

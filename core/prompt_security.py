@@ -112,8 +112,12 @@ _PATTERNS: tuple[tuple[str, str, PromptThreatScope], ...] = (
         "|ignorez\\s+(?:toutes\\s+)?les\\s+instructions\\s+pr(?:e|\u00e9)c(?:e|\u00e9)dentes"
         "|ignoriere\\s+(?:alle\\s+)?(?:vorherigen|fr(?:u|\u00fc)heren)\\s+anweisungen"
         "|ignore\\s+(?:todas\\s+)?as\\s+instru(?:coes|\u00e7\u00f5es)\\s+anteriores"
-        "|ignora\\s+(?:tutte\\s+)?le\\s+istruzioni\\s+precedenti"
-        "|\u5ffd\u7565(?:\u6240\u6709|\u5168\u90e8)?(?:\u4ee5\u524d|\u4e4b\u524d|\u5148\u524d)\u7684?(?:\u6307\u4ee4|\u8bf4\u660e|\u7cfb\u7edf\u63d0\u793a)"
+        "|ignora\\s+(?:tutte\\s+)?le\\s+istruzioni\\s+precedenti)",
+        "multilingual_instruction_override",
+        "all",
+    ),
+    (
+        "(?:\u5ffd\u7565(?:\u6240\u6709|\u5168\u90e8)?(?:\u4ee5\u524d|\u4e4b\u524d|\u5148\u524d)\u7684?(?:\u6307\u4ee4|\u8bf4\u660e|\u7cfb\u7edf\u63d0\u793a)"
         "|(?:\u4ee5\u524d|\u524d)\u306e(?:\u3059\u3079\u3066\u306e)?\u6307\u793a\u3092\u7121\u8996)",
         "multilingual_instruction_override",
         "all",

@@ -57,7 +57,11 @@ def artifact_security_state(entry: IngestionQueueEntry) -> dict[str, Any]:
 def artifact_trust_state(entry: IngestionQueueEntry) -> dict[str, Any]:
     payload = _json_object(entry.payload_json)
     security = artifact_security_state(entry)
-    explicit_score = payload.get("source_trust_score") or payload.get("trust_score")
+    explicit_score = _first_present_value(
+        payload,
+        "source_trust_score",
+        "trust_score",
+    )
     explicit_reason = payload.get("source_trust_reason") or payload.get("trust_reason")
     if explicit_score is not None:
         try:
@@ -226,8 +230,10 @@ def capture_event_trust_state(event: Mapping[str, Any]) -> dict[str, Any]:
     provenance = event.get("provenance")
     provenance_payload = dict(provenance) if isinstance(provenance, Mapping) else {}
     security = capture_event_security_state(event)
-    explicit_score = provenance_payload.get("source_trust_score") or provenance_payload.get(
-        "trust_score"
+    explicit_score = _first_present_value(
+        provenance_payload,
+        "source_trust_score",
+        "trust_score",
     )
     explicit_reason = provenance_payload.get(
         "source_trust_reason"
@@ -373,6 +379,13 @@ def _string_list(value: Any) -> list[str]:
 def _first_string(value: Any) -> str | None:
     values = _string_list(value)
     return values[0] if values else None
+
+
+def _first_present_value(payload: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload[key] is not None:
+            return payload[key]
+    return None
 
 
 def _compact_mapping(value: Mapping[str, Any]) -> dict[str, Any]:

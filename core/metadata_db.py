@@ -535,6 +535,12 @@ def _redaction_total(value: Any) -> int:
     return max(explicit_count, sum(_redaction_categories(value).values()))
 
 
+def _float_or_default(value: Any, default: float) -> float:
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
 def _safe_dashboard_error(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
@@ -2419,7 +2425,7 @@ class MetadataDB:
                 updated_at=row["updated_at"],
                 source_id=row["source_id"],
                 source_key=row["source_key"] or "",
-                source_trust_score=float(row["source_trust_score"] or 1.0),
+                source_trust_score=_float_or_default(row["source_trust_score"], 1.0),
                 source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
                 source_security_status=row["source_security_status"] or "allowed",
                 source_security_pattern_ids=_json_string_tuple(
@@ -2493,7 +2499,7 @@ class MetadataDB:
                     updated_at=row["updated_at"],
                     source_id=row["source_id"],
                     source_key=row["source_key"] or "",
-                    source_trust_score=float(row["source_trust_score"] or 1.0),
+                    source_trust_score=_float_or_default(row["source_trust_score"], 1.0),
                     source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
                     source_security_status=row["source_security_status"] or "allowed",
                     source_security_pattern_ids=_json_string_tuple(
@@ -2662,7 +2668,7 @@ class MetadataDB:
                     updated_at=row["updated_at"],
                     source_id=row["source_id"],
                     source_key=row["source_key"] or "",
-                    source_trust_score=float(row["source_trust_score"] or 1.0),
+                    source_trust_score=_float_or_default(row["source_trust_score"], 1.0),
                     source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
                     source_security_status=row["source_security_status"] or "allowed",
                     source_security_pattern_ids=_json_string_tuple(

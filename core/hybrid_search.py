@@ -859,6 +859,13 @@ def _optional_string(value: Any) -> str | None:
     return text or None
 
 
+def _first_present_value(payload: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload[key] is not None:
+            return payload[key]
+    return None
+
+
 def _first_string(value: Any) -> str | None:
     values = _normalize_strings(value)
     return values[0] if values else None
@@ -1063,7 +1070,11 @@ def _artifact_trust(
     security: Mapping[str, Any],
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    explicit_score = payload.get("source_trust_score") or payload.get("trust_score")
+    explicit_score = _first_present_value(
+        payload,
+        "source_trust_score",
+        "trust_score",
+    )
     explicit_reason = payload.get("source_trust_reason") or payload.get("trust_reason")
     if explicit_score is not None:
         try:
@@ -1090,8 +1101,10 @@ def _capture_trust(
     event: CaptureEvent,
     security: Mapping[str, Any],
 ) -> dict[str, Any]:
-    explicit_score = event.provenance.get("source_trust_score") or event.provenance.get(
-        "trust_score"
+    explicit_score = _first_present_value(
+        event.provenance,
+        "source_trust_score",
+        "trust_score",
     )
     explicit_reason = event.provenance.get("source_trust_reason") or event.provenance.get(
         "trust_reason"

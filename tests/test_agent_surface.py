@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from core.agent_response import AGENT_QUERY_RESPONSE_TYPE, AGENT_QUERY_RESPONSE_VERSION
+from core.agent_context import artifact_trust_state, capture_event_trust_state
 from core.agent_surface import AgentSurfaceError, AgentSurfaceService
 from core.artifacts import PaperArtifact, RepositoryArtifact
 from core.capture_event_store import (
@@ -38,6 +39,50 @@ def _config(tmp_path: Path) -> Config:
     config.set("paths.digests_dir", "_digests")
     config.set("database.path", "meta.db")
     return config
+
+
+def test_agent_context_preserves_explicit_zero_trust_scores():
+    entry = IngestionQueueEntry(
+        artifact_id="zero-trust",
+        artifact_type="repository",
+        source="github",
+        status="pending",
+        payload_json=json.dumps(
+            {
+                "id": "zero-trust",
+                "source_trust_score": 0,
+                "trust_score": 0.9,
+            }
+        ),
+    )
+    trust_score_only = IngestionQueueEntry(
+        artifact_id="fallback-zero-trust",
+        artifact_type="repository",
+        source="github",
+        status="pending",
+        payload_json=json.dumps(
+            {
+                "id": "fallback-zero-trust",
+                "trust_score": 0,
+            }
+        ),
+    )
+
+    assert artifact_trust_state(entry)["score"] == 0.0
+    assert artifact_trust_state(trust_score_only)["score"] == 0.0
+    assert (
+        capture_event_trust_state(
+            {
+                "status": "captured",
+                "security_state": {},
+                "provenance": {
+                    "source_trust_score": 0,
+                    "trust_score": 0.9,
+                },
+            }
+        )["score"]
+        == 0.0
+    )
 
 
 def test_agent_surface_queries_wiki_with_provenance(tmp_path: Path):
