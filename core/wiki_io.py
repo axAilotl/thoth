@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,8 @@ class WikiDocument:
     body: str
 
 
-_WIKI_DOCUMENT_CACHE: dict[str, tuple[tuple[int, int], WikiDocument]] = {}
+_WIKI_DOCUMENT_CACHE_MAX_SIZE = 1024
+_WIKI_DOCUMENT_CACHE: OrderedDict[str, tuple[tuple[int, int], WikiDocument]] = OrderedDict()
 
 
 def atomic_write_text(path: Path, content: str) -> None:
@@ -78,9 +80,13 @@ def read_document_cached(path: Path) -> WikiDocument:
     fingerprint = (stat.st_mtime_ns, stat.st_size)
     cached = _WIKI_DOCUMENT_CACHE.get(cache_key)
     if cached is not None and cached[0] == fingerprint:
+        _WIKI_DOCUMENT_CACHE.move_to_end(cache_key)
         return cached[1]
     document = read_document(normalized)
     _WIKI_DOCUMENT_CACHE[cache_key] = (fingerprint, document)
+    _WIKI_DOCUMENT_CACHE.move_to_end(cache_key)
+    while len(_WIKI_DOCUMENT_CACHE) > _WIKI_DOCUMENT_CACHE_MAX_SIZE:
+        _WIKI_DOCUMENT_CACHE.popitem(last=False)
     return document
 
 
