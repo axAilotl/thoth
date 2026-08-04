@@ -12,13 +12,52 @@ class FakeDB:
     def __init__(self):
         self.entries = []
         self.existing = {}
+        self.canonical_entities = {}
+        self.canonical_keys = {}
 
     def get_ingestion_entry(self, artifact_id):
         return self.existing.get(artifact_id)
 
     def upsert_ingestion_entry(self, entry):
         self.entries.append(entry)
+        self.existing[entry.artifact_id] = entry
         return True
+
+    def find_canonical_entities_by_identity_keys(self, _entity_type, identity_keys):
+        canonical_ids = {
+            self.canonical_keys[key]
+            for key in identity_keys
+            if key in self.canonical_keys
+        }
+        return [self.canonical_entities[canonical_id] for canonical_id in canonical_ids]
+
+    def upsert_canonical_entity(
+        self,
+        *,
+        canonical_id,
+        entity_type,
+        primary_artifact_id,
+        primary_artifact_type,
+        primary_source_type,
+        display_name,
+        identity_keys,
+        **_kwargs,
+    ):
+        entity = self.canonical_entities.get(canonical_id)
+        if entity is None:
+            entity = SimpleNamespace(
+                canonical_id=canonical_id,
+                entity_type=entity_type,
+                primary_artifact_id=primary_artifact_id,
+                primary_artifact_type=primary_artifact_type,
+                primary_source_type=primary_source_type,
+                display_name=display_name,
+                wiki_slug=None,
+            )
+            self.canonical_entities[canonical_id] = entity
+        for key_record in identity_keys:
+            self.canonical_keys[key_record["identity_key"]] = canonical_id
+        return entity
 
 
 def make_feed_entry(arxiv_id, include_pdf_link=True):
@@ -61,6 +100,37 @@ def test_arxiv_api_discovery_uses_query_endpoint(monkeypatch):
     assert db.entries[0].source == "arxiv"
 
 
+def test_arxiv_discovery_continues_after_one_queue_failure(monkeypatch):
+    db = FakeDB()
+    collector = ArXivCollector(db=db)
+    original_queue_artifact = collector.capture_queue.queue_artifact
+
+    def fake_parse(_url):
+        return SimpleNamespace(
+            entries=[
+                make_feed_entry("2604.00010"),
+                make_feed_entry("2604.00011"),
+            ]
+        )
+
+    def flaky_queue_artifact(lifecycle, artifact, **kwargs):
+        if artifact.id == "2604.00010":
+            raise RuntimeError("queue unavailable")
+        return original_queue_artifact(lifecycle, artifact, **kwargs)
+
+    monkeypatch.setattr("collectors.arxiv_collector.feedparser.parse", fake_parse)
+    collector.capture_queue.queue_artifact = flaky_queue_artifact
+
+    discovered = collector.discover_papers(["agentic ai"], max_results=2)
+
+    assert [paper.arxiv_id for paper in discovered] == ["2604.00011"]
+    assert [entry.artifact_id for entry in db.entries] == ["2604.00011"]
+    assert collector.last_summary["discovered_count"] == 1
+    assert collector.last_summary["error_count"] == 1
+    assert collector.last_errors[0]["artifact_id"] == "2604.00010"
+    assert collector.last_errors[0]["error_type"] == "RuntimeError"
+
+
 def test_arxiv_rss_scan_uses_category_feed_and_derives_pdf(monkeypatch):
     db = FakeDB()
     collector = ArXivCollector(db=db)
@@ -68,7 +138,8 @@ def test_arxiv_rss_scan_uses_category_feed_and_derives_pdf(monkeypatch):
 
     def fake_parse(url):
         called_urls.append(url)
-        return SimpleNamespace(entries=[make_feed_entry("2604.00002", include_pdf_link=False)])
+        arxiv_id = "2604.00002" if url.endswith("cs.AI") else "2604.00003"
+        return SimpleNamespace(entries=[make_feed_entry(arxiv_id, include_pdf_link=False)])
 
     monkeypatch.setattr("collectors.arxiv_collector.feedparser.parse", fake_parse)
 

@@ -369,6 +369,14 @@ def _parse_retrieval_policy(
             raw_policy.get("recency_weight", fallback.recency_weight),
             field_name=f"{field_name}.recency_weight",
         ),
+        max_per_source=_parse_positive_int(
+            raw_policy.get("max_per_source", fallback.max_per_source),
+            field_name=f"{field_name}.max_per_source",
+        ),
+        max_source_share=_parse_ratio_float(
+            raw_policy.get("max_source_share", fallback.max_source_share),
+            field_name=f"{field_name}.max_source_share",
+        ),
         source_type_weights=source_type_weights or fallback.source_type_weights,
     )
 
@@ -539,6 +547,16 @@ def _parse_non_negative_float(value: Any, *, field_name: str) -> float:
         raise ArchivistTopicConfigError(f"{field_name} must be a number") from exc
     if parsed < 0:
         raise ArchivistTopicConfigError(f"{field_name} must be non-negative")
+    return parsed
+
+
+def _parse_ratio_float(value: Any, *, field_name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ArchivistTopicConfigError(f"{field_name} must be a number") from exc
+    if parsed <= 0 or parsed > 1:
+        raise ArchivistTopicConfigError(f"{field_name} must be greater than 0 and at most 1")
     return parsed
 
 

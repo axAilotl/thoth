@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+import re
 from typing import Any, Sequence
 
 from .archivist_retrieval.service import select_archivist_candidates_async
@@ -21,6 +22,11 @@ from .llm_interface import LLMInterface
 from .metadata_db import MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import wrap_untrusted_content
+from .wiki_change_provenance import (
+    change_provenance,
+    influence_with_input_hashes,
+    source_file_snapshot,
+)
 from .wiki_contract import WikiContract, WikiPageSpec, build_wiki_contract
 from .wiki_io import atomic_write_text, read_document, render_frontmatter, truncate_summary
 from .wiki_scaffold import append_wiki_log_entry, ensure_wiki_scaffold
@@ -28,6 +34,8 @@ from .wiki_updater import CompiledWikiUpdater
 
 DEFAULT_ARCHIVIST_SYSTEM_PROMPT = "prompts/archivist_system.md"
 DEFAULT_ARCHIVIST_USER_PROMPT = "prompts/archivist_user.md"
+_SOURCE_CITATION_RE = re.compile(r"\[S(\d+)\]")
+_NUMERIC_CITATION_RE = re.compile(r"(?m)(?:^|\s)\[(\d{1,3})\](?=\s*(?:\[|\(|$|[,.]))")
 
 
 class ArchivistCompilerError(ValueError):
@@ -234,6 +242,8 @@ class ArchivistCompiler:
             system_prompt=system_prompt,
             provider=provider_name,
             model=model_id,
+            task="archivist",
+            usage_model_config=model_cfg,
             max_tokens=int(model_cfg.get("max_tokens", 1800) or 1800),
             temperature=float(model_cfg.get("temperature", 0.2) or 0.2),
         )
@@ -246,7 +256,11 @@ class ArchivistCompiler:
             raise ArchivistCompilerError(
                 f"Archivist generation returned empty content for topic {topic.id}"
             )
-        return self._normalize_llm_body(topic.title, content)
+        return self._normalize_llm_body(
+            topic.title,
+            content,
+            candidate_count=len(candidates),
+        )
 
     def _render_prompts(
         self,
@@ -308,6 +322,10 @@ class ArchivistCompiler:
                     f"- Tags: {tags}",
                     f"- Updated At: {candidate.updated_at}",
                     f"- Source ID: {candidate.source_id or 'n/a'}",
+                    f"- Source Key: {candidate.source_key or 'n/a'}",
+                    f"- Source Trust: {candidate.source_trust_score:.3f} ({candidate.source_trust_reason})",
+                    f"- Retrieval Score: {candidate.retrieval_score:.6f}",
+                    f"- Retrieval Signals: {', '.join(candidate.retrieval_sources) if candidate.retrieval_sources else 'none'}",
                     "- Excerpt:",
                     wrap_untrusted_content(
                         excerpt,
@@ -341,15 +359,41 @@ class ArchivistCompiler:
             (existing.frontmatter.get("created_at") if existing else None)
             or self._now_iso()
         )
+        source_paths = self._source_paths_for_candidates(candidates)
+        input_snapshot = source_file_snapshot(self.layout, source_paths)
+        previous_manifest = None
+        previous_hash = None
+        if existing is not None:
+            previous_hash = existing.frontmatter.get("thoth_input_hash") or existing.frontmatter.get(
+                "input_hash"
+            )
+            previous_manifest = existing.frontmatter.get("thoth_input_manifest")
+            if not isinstance(previous_manifest, list):
+                previous_manifest = existing.frontmatter.get("input_manifest")
+        if not isinstance(previous_manifest, list):
+            previous_manifest = []
+        updated_at = self._now_iso()
         spec = WikiPageSpec(
             title=topic.title,
             slug=page_path.stem,
             kind="topic",
             summary=self._summary_from_body(body, fallback=topic.description or topic.title),
-            source_paths=self._source_paths_for_candidates(candidates),
+            source_paths=source_paths,
+            influence_sources=influence_with_input_hashes(
+                self._influence_sources_for_candidates(candidates),
+                input_snapshot,
+            ),
             language="en",
             created_at=created_at,
-            updated_at=self._now_iso(),
+            updated_at=updated_at,
+            input_hash=input_snapshot.input_hash,
+            input_manifest=input_snapshot.input_manifest,
+            change_provenance=change_provenance(
+                previous_hash=str(previous_hash) if previous_hash else None,
+                previous_manifest=previous_manifest,
+                current_snapshot=input_snapshot,
+                compiled_at=updated_at,
+            ),
         )
         frontmatter = render_frontmatter(self.contract.frontmatter_for(spec)).rstrip()
         source_lines = self._render_sources_section(candidates, page_path=page_path)
@@ -386,6 +430,9 @@ class ArchivistCompiler:
             lines.append(f"  - Type: `{candidate.source_type}` / `{candidate.file_type}`")
             lines.append(f"  - Tags: `{tags}`")
             lines.append(f"  - Updated: `{candidate.updated_at}`")
+            lines.append(f"  - Trust: `{candidate.source_trust_score:.3f}` ({candidate.source_trust_reason})")
+            if candidate.retrieval_sources:
+                lines.append(f"  - Retrieval: `{', '.join(candidate.retrieval_sources)}`")
         return lines
 
     def _absolute_path_for_candidate(self, candidate: ArchivistCandidate) -> Path:
@@ -411,7 +458,36 @@ class ArchivistCompiler:
             return candidate.scope_relative_path
         return f"{candidate.scope}/{candidate.scope_relative_path}"
 
-    def _normalize_llm_body(self, title: str, content: str) -> str:
+    def _influence_sources_for_candidates(
+        self,
+        candidates: Sequence[ArchivistCandidate],
+    ) -> tuple[dict[str, Any], ...]:
+        records: list[dict[str, Any]] = []
+        for index, candidate in enumerate(candidates, start=1):
+            record: dict[str, Any] = {
+                "label": f"S{index}",
+                "source_path": self._normalized_source_path(candidate),
+                "source_type": candidate.source_type,
+                "file_type": candidate.file_type,
+                "source_key": candidate.source_key or None,
+                "source_id": candidate.source_id or None,
+                "retrieval_score": round(float(candidate.retrieval_score), 6),
+                "retrieval_sources": list(candidate.retrieval_sources),
+                "trust_score": round(float(candidate.source_trust_score), 3),
+                "trust_reason": candidate.source_trust_reason,
+                "security_status": candidate.source_security_status,
+                "security_pattern_ids": list(candidate.source_security_pattern_ids) or None,
+            }
+            records.append({key: value for key, value in record.items() if value not in (None, [], "")})
+        return tuple(records)
+
+    def _normalize_llm_body(
+        self,
+        title: str,
+        content: str,
+        *,
+        candidate_count: int,
+    ) -> str:
         lines = content.strip().splitlines()
         while lines and not lines[0].strip():
             lines.pop(0)
@@ -424,7 +500,27 @@ class ArchivistCompiler:
             raise ArchivistCompilerError(
                 f"Archivist returned empty body for topic {title}"
             )
+        self._validate_body_citations(body, candidate_count=candidate_count)
         return body
+
+    def _validate_body_citations(self, body: str, *, candidate_count: int) -> None:
+        invalid_source_labels = sorted(
+            {
+                match.group(0)
+                for match in _SOURCE_CITATION_RE.finditer(body)
+                if int(match.group(1)) < 1 or int(match.group(1)) > candidate_count
+            }
+        )
+        if invalid_source_labels:
+            raise ArchivistCompilerError(
+                "Archivist output referenced unknown source labels: "
+                + ", ".join(invalid_source_labels)
+            )
+        numeric_citations = sorted({match.group(1) for match in _NUMERIC_CITATION_RE.finditer(body)})
+        if numeric_citations:
+            raise ArchivistCompilerError(
+                "Archivist output used untrusted numeric citations; use [S#] source labels only"
+            )
 
     def _summary_from_body(self, body: str, *, fallback: str) -> str:
         for raw_line in body.splitlines():

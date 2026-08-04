@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: thoth
+      POSTGRES_PASSWORD: thoth_dev
+      POSTGRES_DB: thoth
+    ports:
+      - "${THOTH_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - thoth_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thoth -d thoth"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  thoth_postgres_data:

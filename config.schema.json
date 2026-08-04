@@ -2,6 +2,25 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "thoth.config",
   "type": "object",
+  "definitions": {
+    "connectorBudget": {
+      "type": "object",
+      "properties": {
+        "max_bytes_per_file": { "type": ["integer", "null"], "minimum": 1 },
+        "max_bytes_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_files_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_input_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_output_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_transcript_chunks_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "transcript_chunk_chars": { "type": "integer", "minimum": 1 },
+        "estimated_output_tokens_per_artifact": { "type": "integer", "minimum": 0 },
+        "input_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+        "output_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+        "max_estimated_cost_usd": { "type": ["number", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
     "llm": {
       "type": "object",
@@ -24,6 +43,17 @@
                   "type": "array",
                   "items": { "type": "string" }
                 },
+                "command_pin": {
+                  "type": "object",
+                  "properties": {
+                    "command": { "type": "string" },
+                    "configured_command": { "type": "string" },
+                    "resolved_command": { "type": ["string", "null"] },
+                    "pi_provider": { "type": ["string", "null"] },
+                    "model": { "type": ["string", "null"] }
+                  },
+                  "additionalProperties": true
+                },
                 "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
                 "extra_args": {
                   "type": "array",
@@ -38,7 +68,10 @@
                         "id": { "type": "string" },
                         "prompt": { "type": "string" },
                         "max_tokens": { "type": "integer" },
-                        "temperature": { "type": "number" }
+                        "temperature": { "type": "number" },
+                        "input_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+                        "output_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+                        "cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 }
                       },
                       "required": ["id"],
                       "additionalProperties": false
@@ -172,7 +205,81 @@
     "database": {
       "type": "object",
       "properties": {
-        "path": { "type": "string" }
+        "path": { "type": "string" },
+        "capture_event_store": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "backend": { "type": "string", "enum": ["postgres"] },
+            "dsn_env": { "type": "string" },
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "connect_timeout_seconds": { "type": "integer", "minimum": 1 },
+            "application_name": { "type": "string", "minLength": 1 },
+            "migration_lock_id": { "type": "integer" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "connectors": {
+      "type": "object",
+      "properties": {
+        "plugin_dirs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "skill_dirs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "allowlist": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "pins": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "source_name": { "type": "string" },
+              "entrypoint": { "type": "string" },
+              "cli_command": { "type": ["string", "null"] },
+              "origin": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "budgets": {
+          "type": "object",
+          "properties": {
+            "defaults": { "$ref": "#/definitions/connectorBudget" },
+            "per_connector": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/definitions/connectorBudget" }
+            },
+            "connectors": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/definitions/connectorBudget" }
+            },
+            "max_bytes_per_file": { "type": ["integer", "null"], "minimum": 1 },
+            "max_bytes_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "max_files_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "max_input_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "max_output_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "max_transcript_chunks_per_run": { "type": ["integer", "null"], "minimum": 1 },
+            "transcript_chunk_chars": { "type": "integer", "minimum": 1 },
+            "estimated_output_tokens_per_artifact": { "type": "integer", "minimum": 0 },
+            "input_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+            "output_cost_per_1k_tokens_usd": { "type": "number", "minimum": 0 },
+            "max_estimated_cost_usd": { "type": ["number", "null"], "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": true
     },
@@ -378,6 +485,26 @@
           },
           "additionalProperties": true
         },
+        "imported_markdown": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "import_paths": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "import_dirs": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "file_patterns": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "source_name": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
         "pi_skills": {
           "type": "object",
           "properties": {
@@ -402,6 +529,24 @@
               "items": { "type": "string" }
             },
             "max_input_bytes": { "type": "integer", "minimum": 1 },
+            "allowlist": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "command_pins": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "command": { "type": "string" },
+                  "configured_command": { "type": "string" },
+                  "resolved_command": { "type": ["string", "null"] },
+                  "pi_provider": { "type": ["string", "null"] },
+                  "model": { "type": ["string", "null"] }
+                },
+                "additionalProperties": true
+              }
+            },
             "skills": {
               "type": ["array", "object"],
               "items": {
@@ -416,13 +561,40 @@
                     "type": "array",
                     "items": { "type": "string" }
                   },
+                  "inputs": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "outputs": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "auth": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "safety_mode": { "type": "string" },
+                  "queue_behavior": { "type": "string" },
+                  "allowed_side_effects": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
                   "source_name": { "type": "string" },
                   "input_roots": {
                     "type": "array",
                     "items": { "type": "string" }
                   }
                 },
-                "required": ["id"],
+                "required": [
+                  "id",
+                  "artifact_types",
+                  "inputs",
+                  "outputs",
+                  "auth",
+                  "safety_mode",
+                  "queue_behavior",
+                  "allowed_side_effects"
+                ],
                 "additionalProperties": true
               }
             }
@@ -444,6 +616,28 @@
             "max_references": { "type": "integer", "minimum": 0 },
             "mailto": { "type": "string" },
             "api_key": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "semantic_memory": {
+      "type": "object",
+      "properties": {
+        "promotion": {
+          "type": "object",
+          "properties": {
+            "min_evidence_count": { "type": "integer", "minimum": 1 },
+            "min_distinct_sources": { "type": "integer", "minimum": 1 },
+            "trusted_structured_artifact_types": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "trusted_structured_metadata_keys": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
           },
           "additionalProperties": true
         }

@@ -13,8 +13,16 @@ from typing import Any, Iterable, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from core.artifacts import TranscriptArtifact, VideoArtifact
+from core.capture_event_store import CaptureEventStore
+from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config
-from core.metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
+from core.connector_budgets import (
+    ConnectorBudgetError,
+    ConnectorBudgetTracker,
+    start_connector_budget_run,
+)
+from core.connector_capture import ConnectorCaptureQueue
+from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
 from processors.youtube_processor import YouTubeProcessor, YouTubeVideo
 
@@ -46,8 +54,10 @@ class YouTubeConnectorResult:
 
     records: tuple[YouTubeConnectorRecord, ...] = field(default_factory=tuple)
     skipped_urls: tuple[str, ...] = field(default_factory=tuple)
+    errors: tuple[Mapping[str, str], ...] = field(default_factory=tuple)
     playlist_urls: tuple[str, ...] = field(default_factory=tuple)
     export_paths: tuple[str, ...] = field(default_factory=tuple)
+    budget: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -70,8 +80,10 @@ class YouTubeConnectorResult:
             ],
             "queued_count": sum(1 for record in self.records if record.queued),
             "skipped_urls": list(self.skipped_urls),
+            "errors": [dict(error) for error in self.errors],
             "playlist_urls": list(self.playlist_urls),
             "export_paths": list(self.export_paths),
+            "budget": self.budget,
         }
 
 
@@ -85,12 +97,19 @@ class YouTubeConnector:
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
         processor: YouTubeProcessor | None = None,
+        capture_event_store: CaptureEventStore | None = None,
     ):
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.layout.ensure_directories()
         self.db = db or get_metadata_db()
         self.processor = processor or YouTubeProcessor(vault_path=str(self.layout.vault_root))
+        self.capture_queue = ConnectorCaptureQueue(
+            self.config,
+            layout=self.layout,
+            db=self.db,
+            capture_event_store=capture_event_store,
+        )
 
     async def collect(
         self,
@@ -106,6 +125,15 @@ class YouTubeConnector:
         explicit_urls = _string_list(urls)
         playlist_inputs = _string_list(playlist_urls)
         export_inputs = [Path(path).expanduser() for path in _string_list(export_paths)]
+        budget = start_connector_budget_run(self.config, "youtube")
+        budget.add_files(export_inputs)
+        if explicit_urls:
+            budget.add_input_text("\n".join(explicit_urls), label="youtube urls")
+        if playlist_inputs:
+            budget.add_input_text(
+                "\n".join(playlist_inputs),
+                label="youtube playlist urls",
+            )
 
         discovered_urls: list[str] = []
         discovered_urls.extend(explicit_urls)
@@ -117,27 +145,54 @@ class YouTubeConnector:
         unique_urls = _dedupe(discovered_urls)
         if limit is not None:
             unique_urls = unique_urls[: max(1, int(limit))]
+        budget.add_estimated_output_artifacts(
+            len(unique_urls) * 2,
+            label="youtube video and transcript artifacts",
+        )
 
         records: list[YouTubeConnectorRecord] = []
         skipped: list[str] = []
+        errors: list[dict[str, str]] = []
+        run_id = datetime.now().isoformat()
         for source_url in unique_urls:
             video_id = self.processor.extract_video_id(source_url)
             if not video_id:
                 skipped.append(source_url)
                 continue
-            record = await self._collect_video(
-                video_id,
-                source_url=source_url,
-                archive_video=archive_video,
-                resume=resume,
-            )
+            try:
+                record = await self._collect_video(
+                    video_id,
+                    source_url=source_url,
+                    archive_video=archive_video,
+                    resume=resume,
+                    run_id=run_id,
+                    budget=budget,
+                )
+            except ConnectorBudgetError as exc:
+                logger.warning(
+                    "Skipping YouTube video %s after budget error: %s",
+                    video_id,
+                    exc,
+                )
+                skipped.append(source_url)
+                errors.append(
+                    {
+                        "url": source_url,
+                        "video_id": video_id,
+                        "error_type": exc.__class__.__name__,
+                        "error": str(exc),
+                    }
+                )
+                continue
             records.append(record)
 
         return YouTubeConnectorResult(
             records=tuple(records),
             skipped_urls=tuple(skipped),
+            errors=tuple(errors),
             playlist_urls=tuple(playlist_inputs),
             export_paths=tuple(str(path) for path in export_inputs),
+            budget=budget.summary(),
         )
 
     async def _collect_video(
@@ -147,6 +202,8 @@ class YouTubeConnector:
         source_url: str,
         archive_video: bool | None,
         resume: bool,
+        run_id: str,
+        budget: ConnectorBudgetTracker,
     ) -> YouTubeConnectorRecord:
         video, _metrics = await self.processor.process_video(
             video_id,
@@ -156,6 +213,13 @@ class YouTubeConnector:
         )
         if video is None:
             video = self._video_from_existing_or_stub(video_id, source_url)
+
+        transcript_text = video.transcript or video.formatted_transcript or ""
+        if transcript_text:
+            budget.add_transcript_text(
+                transcript_text,
+                label=f"youtube transcript {video_id}",
+            )
 
         archive_path = None
         if self._archive_enabled(archive_video):
@@ -168,33 +232,48 @@ class YouTubeConnector:
             transcript_path=transcript_path,
             archive_path=archive_path,
         )
+        budget.add_bytes(
+            raw_payload_path.stat().st_size,
+            label=f"youtube raw payload {video_id}",
+        )
         raw_payload_ref = self._relative_to_vault(raw_payload_path)
         transcript_ref = self._relative_to_vault(transcript_path) if transcript_path else None
         archive_ref = self._relative_to_vault(archive_path) if archive_path else None
 
         transcript_artifact_id = None
-        if video.transcript or video.formatted_transcript or transcript_path:
-            transcript_artifact = self._build_transcript_artifact(
+        with self.capture_queue.lifecycle() as lifecycle:
+            if video.transcript or video.formatted_transcript or transcript_path:
+                transcript_artifact = self._build_transcript_artifact(
+                    video,
+                    source_url=source_url,
+                    raw_payload_ref=raw_payload_ref,
+                    transcript_ref=transcript_ref,
+                )
+                transcript_artifact_id = transcript_artifact.id
+                self._queue_artifact(
+                    lifecycle,
+                    transcript_artifact,
+                    artifact_type="transcript",
+                    raw_payload_path=raw_payload_path,
+                    source_url=source_url,
+                    run_id=run_id,
+                )
+
+            video_artifact = self._build_video_artifact(
                 video,
                 source_url=source_url,
                 raw_payload_ref=raw_payload_ref,
-                transcript_ref=transcript_ref,
+                archive_ref=archive_ref,
+                transcript_artifact_id=transcript_artifact_id,
             )
-            transcript_artifact_id = transcript_artifact.id
             self._queue_artifact(
-                transcript_artifact,
-                artifact_type="transcript",
-                source="youtube",
+                lifecycle,
+                video_artifact,
+                artifact_type="video",
+                raw_payload_path=raw_payload_path,
+                source_url=source_url,
+                run_id=run_id,
             )
-
-        video_artifact = self._build_video_artifact(
-            video,
-            source_url=source_url,
-            raw_payload_ref=raw_payload_ref,
-            archive_ref=archive_ref,
-            transcript_artifact_id=transcript_artifact_id,
-        )
-        self._queue_artifact(video_artifact, artifact_type="video", source="youtube")
 
         return YouTubeConnectorRecord(
             video_id=video_id,
@@ -370,20 +449,48 @@ class YouTubeConnector:
 
     def _queue_artifact(
         self,
+        lifecycle: CaptureLifecycleService,
         artifact: VideoArtifact | TranscriptArtifact,
         *,
         artifact_type: str,
-        source: str,
+        raw_payload_path: Path,
+        source_url: str,
+        run_id: str,
     ) -> None:
-        entry = IngestionQueueEntry(
-            artifact_id=artifact.id,
-            artifact_type=artifact_type,
-            source=source,
-            payload_json=json.dumps(artifact.to_dict(), ensure_ascii=False),
-            created_at=artifact.ingested_at,
-            capabilities_json=json.dumps(list(artifact.capabilities)),
+        native_id = artifact.video_id if isinstance(artifact, VideoArtifact) else (
+            artifact.video_id or artifact.transcript_id
         )
-        if not self.db.upsert_ingestion_entry(entry):
+        self.capture_queue.queue_artifact(
+            lifecycle,
+            artifact,
+            artifact_type=artifact_type,
+            source={
+                "source_name": "youtube",
+                "source_type": "video_platform",
+                "collector": "youtube_connector",
+                "native_source_id": getattr(artifact, "channel_id", None),
+                "base_uri": "https://www.youtube.com",
+                "metadata": {
+                    "source_url": source_url,
+                    "channel_title": getattr(artifact, "channel_title", None),
+                },
+            },
+            session={
+                "session_type": "youtube_collect",
+                "native_session_id": f"youtube:{run_id}",
+                "started_at": run_id,
+                "metadata": {"source_url": source_url},
+            },
+            event={
+                "event_type": f"youtube_{artifact_type}",
+                "native_event_id": f"{artifact_type}:{native_id}",
+                "occurred_at": artifact.created_at,
+                "captured_at": artifact.ingested_at,
+                "provenance": {"collector": "youtube_connector"},
+            },
+            raw_path=raw_payload_path,
+        )
+        if self.db.get_ingestion_entry(artifact.id) is None:
             raise RuntimeError(f"Failed to queue YouTube artifact: {artifact.id}")
 
     def _archive_enabled(self, archive_video: bool | None) -> bool:

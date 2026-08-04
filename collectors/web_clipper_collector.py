@@ -8,7 +8,6 @@ source documents.
 
 from __future__ import annotations
 
-import json
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -16,11 +15,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from core.capture_event_store import CaptureEventStore
+from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config
+from core.connector_budgets import start_connector_budget_run
+from core.connector_capture import ConnectorCaptureQueue
 from core.artifacts.web_clipper import WebClipperArtifact
 from core.metadata_db import (
     FileMetadata,
-    IngestionQueueEntry,
     MetadataDB,
     get_metadata_db,
 )
@@ -68,24 +70,52 @@ class WebClipperCollector:
         layout: PathLayout | None = None,
         contract: WebClipperSourceContract | None = None,
         db: Optional[MetadataDB] = None,
+        capture_event_store: CaptureEventStore | None = None,
     ):
         self.config = config
         self.layout = layout or build_path_layout(config)
         self.contract = contract or build_web_clipper_contract(config, layout=self.layout)
         self.db = db or get_metadata_db()
         self.asset_publisher = StagedAssetPublisher(config, layout=self.layout)
+        self.capture_queue = ConnectorCaptureQueue(
+            config,
+            layout=self.layout,
+            db=self.db,
+            capture_event_store=capture_event_store,
+        )
+        self.last_budget_usage: dict[str, object] = {}
 
         self._validate_roots()
 
     def collect(self) -> List[WebClipperFileRecord]:
         """Scan the configured allowlist and upsert file metadata."""
         discovered: List[WebClipperFileRecord] = []
+        run_id = datetime.now().isoformat()
+        targets: list[tuple[Path, Path, str]] = []
 
         for root in self.contract.note_dirs:
-            discovered.extend(self._scan_root(root, expected_type="note"))
+            targets.extend(self._discover_root(root, expected_type="note"))
 
         for root in self.contract.attachment_dirs:
-            discovered.extend(self._scan_root(root, expected_type="attachment"))
+            targets.extend(self._discover_root(root, expected_type="attachment"))
+
+        budget = start_connector_budget_run(self.config, "web_clipper")
+        budget.add_files([path for path, _root, _file_type in targets])
+        self.last_budget_usage = budget.summary()
+
+        with self.capture_queue.lifecycle() as lifecycle:
+            for path, root, file_type in targets:
+                if file_type == "note":
+                    discovered.append(
+                        self._index_note_file(
+                            path,
+                            root=root,
+                            lifecycle=lifecycle,
+                            run_id=run_id,
+                        )
+                    )
+                elif file_type == "attachment":
+                    discovered.append(self._index_attachment_file(path, root=root))
 
         return discovered
 
@@ -98,8 +128,13 @@ class WebClipperCollector:
             if not root.is_dir():
                 raise ValueError(f"Web Clipper source directory is not a directory: {root}")
 
-    def _scan_root(self, root: Path, *, expected_type: str) -> List[WebClipperFileRecord]:
-        discovered: List[WebClipperFileRecord] = []
+    def _discover_root(
+        self,
+        root: Path,
+        *,
+        expected_type: str,
+    ) -> list[tuple[Path, Path, str]]:
+        discovered: list[tuple[Path, Path, str]] = []
         for path in sorted(root.rglob("*"), key=lambda value: str(value)):
             if not path.is_file():
                 continue
@@ -109,16 +144,18 @@ class WebClipperCollector:
                 logger.debug("Skipping unsupported Web Clipper file: %s", path)
                 continue
 
-            if file_type == "note":
-                discovered.append(self._index_note_file(path, root=root))
-            elif file_type == "attachment":
-                discovered.append(self._index_attachment_file(path, root=root))
-            else:
-                logger.debug("Skipping unsupported Web Clipper file: %s", path)
+            discovered.append((path, root, file_type))
 
         return discovered
 
-    def _index_note_file(self, path: Path, *, root: Path) -> WebClipperFileRecord:
+    def _index_note_file(
+        self,
+        path: Path,
+        *,
+        root: Path,
+        lifecycle: CaptureLifecycleService,
+        run_id: str,
+    ) -> WebClipperFileRecord:
         self._ensure_safe_source_path(path)
         try:
             source_text = path.read_text(encoding="utf-8")
@@ -155,7 +192,14 @@ class WebClipperCollector:
             raise RuntimeError(f"Failed to index Web Clipper file: {path}")
 
         if is_new_or_changed:
-            self._queue_note_artifact(parsed_note, source_id=source_id, size_bytes=size_bytes, sha256=sha256)
+            self._queue_note_artifact(
+                parsed_note,
+                source_id=source_id,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                lifecycle=lifecycle,
+                run_id=run_id,
+            )
 
         return WebClipperFileRecord(
             path=path,
@@ -182,6 +226,8 @@ class WebClipperCollector:
         source_id: str,
         size_bytes: int,
         sha256: str,
+        lifecycle: CaptureLifecycleService,
+        run_id: str,
     ) -> None:
         artifact = self._build_artifact(
             parsed_note,
@@ -190,15 +236,37 @@ class WebClipperCollector:
             size_bytes=size_bytes,
             sha256=sha256,
         )
-        queue_entry = IngestionQueueEntry(
-            artifact_id=artifact.id,
+        self.capture_queue.queue_artifact(
+            lifecycle,
+            artifact,
             artifact_type="web_clipper",
-            source="web_clipper",
-            payload_json=json.dumps(artifact.to_dict(), ensure_ascii=False),
-            created_at=artifact.ingested_at,
-            capabilities_json=json.dumps(list(artifact.capabilities)),
+            source={
+                "source_name": "web_clipper",
+                "source_type": "web_clipper",
+                "collector": "web_clipper_collector",
+                "native_source_id": source_id,
+                "base_uri": str(self.layout.vault_root),
+                "metadata": {
+                    "source_relative_path": source_id,
+                    "file_type": "note",
+                },
+            },
+            session={
+                "session_type": "web_clipper_scan",
+                "native_session_id": f"web_clipper:{run_id}",
+                "started_at": run_id,
+                "metadata": {"note_roots": [str(root) for root in self.contract.note_dirs]},
+            },
+            event={
+                "event_type": "web_clipper_note",
+                "native_event_id": source_id,
+                "occurred_at": artifact.created_at,
+                "captured_at": artifact.ingested_at,
+                "provenance": {"collector": "web_clipper_collector"},
+            },
+            raw_path=parsed_note.source_path,
         )
-        if not self.db.upsert_ingestion_entry(queue_entry):
+        if self.db.get_ingestion_entry(artifact.id) is None:
             raise RuntimeError(
                 f"Failed to queue Web Clipper note for ingestion: {parsed_note.source_path}"
             )

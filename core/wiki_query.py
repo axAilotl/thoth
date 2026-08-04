@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 import os
 import re
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from .config import Config
+from .hybrid_search import HybridSearchFilters, HybridSearchResult, HybridSearchService
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import prompt_security_requires_review
+from .time_utils import utc_now_iso as _now_iso
 from .wiki_contract import (
     WikiContract,
     WikiPageSpec,
@@ -18,14 +20,20 @@ from .wiki_contract import (
     is_legacy_tweet_slug,
     normalize_wiki_slug,
 )
-from .wiki_io import atomic_write_text, read_document, render_frontmatter, truncate_summary
-from .wiki_scaffold import append_wiki_log_entry, ensure_wiki_scaffold
+from .wiki_io import (
+    atomic_write_text,
+    read_document,
+    read_document_cached,
+    render_frontmatter,
+    truncate_summary,
+)
+from .wiki_scaffold import (
+    append_wiki_log_entry,
+    build_wiki_scaffold,
+    ensure_wiki_scaffold,
+)
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _query_tokens(query: str) -> tuple[str, ...]:
@@ -50,6 +58,17 @@ def _frontmatter_sequence(frontmatter: dict, *keys: str) -> tuple[str, ...]:
     return tuple(str(item) for item in value or ())
 
 
+def _frontmatter_mapping_sequence(frontmatter: dict, *keys: str) -> tuple[dict[str, Any], ...]:
+    value = _frontmatter_value(frontmatter, *keys)
+    if value is None:
+        return tuple()
+    if isinstance(value, dict):
+        return (dict(value),)
+    if not isinstance(value, (list, tuple)):
+        return tuple()
+    return tuple(dict(item) for item in value if isinstance(item, dict))
+
+
 @dataclass(frozen=True)
 class WikiQueryHit:
     """Single wiki search match."""
@@ -61,6 +80,7 @@ class WikiQueryHit:
     record_type: str
     kind: str
     source_paths: tuple[str, ...]
+    influence_sources: tuple[dict[str, Any], ...]
     related_slugs: tuple[str, ...]
     matched_fields: tuple[str, ...]
     score: int
@@ -96,14 +116,51 @@ class WikiQueryRunner:
         *,
         layout: PathLayout | None = None,
         contract: WikiContract | None = None,
+        db: Any | None = None,
+        event_store: Any | None = None,
     ):
         self.config = config
         self.layout = layout or build_path_layout(config)
-        self.layout.ensure_directories()
-        self.scaffold = ensure_wiki_scaffold(config)
-        self.contract = contract or build_wiki_contract(config)
+        self.db = db
+        self.event_store = event_store
+        self.project_root = self.layout.vault_root.parent
+        self.scaffold = build_wiki_scaffold(
+            config,
+            project_root=self.project_root,
+        )
+        self.contract = contract or build_wiki_contract(
+            config,
+            project_root=self.project_root,
+        )
 
-    def search(self, query: str, *, limit: int = 10) -> WikiQueryResult:
+    def hybrid_search(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        filters: HybridSearchFilters | None = None,
+        use_embedding: bool = False,
+    ) -> HybridSearchResult:
+        """Search wiki pages plus configured artifact and capture-event sources."""
+        service = HybridSearchService(
+            contract=self.contract,
+            db=self.db,
+            event_store=self.event_store,
+        )
+        return service.search(
+            query,
+            limit=limit,
+            filters=filters,
+            use_embedding=use_embedding,
+        )
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        include_quarantined: bool = False,
+    ) -> WikiQueryResult:
         """Search compiled wiki pages using deterministic text matching."""
         if limit <= 0:
             raise ValueError("Wiki query limit must be positive")
@@ -112,11 +169,13 @@ class WikiQueryRunner:
         hits: list[WikiQueryHit] = []
 
         for page_path in sorted(self.contract.pages_dir.glob("*.md")):
-            document = read_document(page_path)
+            document = read_document_cached(page_path)
             frontmatter = document.frontmatter
             title = str(frontmatter.get("title") or page_path.stem)
             slug = str(_frontmatter_value(frontmatter, "thoth_slug", "slug") or page_path.stem)
             if is_legacy_tweet_slug(slug):
+                continue
+            if not include_quarantined and prompt_security_requires_review(frontmatter):
                 continue
             summary = str(
                 _frontmatter_value(frontmatter, "description", "thoth_summary", "summary")
@@ -125,6 +184,11 @@ class WikiQueryRunner:
             record_type = str(frontmatter.get("thoth_type") or "wiki_page")
             kind = str(_frontmatter_value(frontmatter, "thoth_kind", "kind") or "topic")
             source_paths = _frontmatter_sequence(frontmatter, "thoth_source_paths", "source_paths")
+            influence_sources = _frontmatter_mapping_sequence(
+                frontmatter,
+                "thoth_influence_sources",
+                "influence_sources",
+            )
             related_slugs = _frontmatter_sequence(frontmatter, "thoth_related_slugs", "related_slugs")
             aliases = _frontmatter_sequence(frontmatter, "thoth_aliases", "aliases")
 
@@ -167,6 +231,7 @@ class WikiQueryRunner:
                     record_type=record_type,
                     kind=kind,
                     source_paths=source_paths,
+                    influence_sources=influence_sources,
                     related_slugs=related_slugs,
                     matched_fields=tuple(dict.fromkeys(matched_fields)),
                     score=score,
@@ -211,6 +276,14 @@ class WikiQueryRunner:
             source_paths=tuple(
                 self._relative_wiki_path(hit.page_path) for hit in selected
             ),
+            influence_sources=tuple(
+                {
+                    "source_path": self._relative_wiki_path(hit.page_path),
+                    "source_type": "wiki_page",
+                    "slug": hit.slug,
+                }
+                for hit in selected
+            ),
             related_slugs=tuple(hit.slug for hit in selected),
             language="en",
             record_type="wiki_query",
@@ -241,10 +314,24 @@ class WikiQueryRunner:
             body_lines.append(f"- [{hit.title}]({rel_link})")
             body_lines.append(f"  - Score: `{hit.score}`")
             body_lines.append(f"  - Matched Fields: `{fields}`")
+            if hit.influence_sources:
+                influence_paths = tuple(
+                    str(record.get("source_path") or "")
+                    for record in hit.influence_sources
+                    if str(record.get("source_path") or "").strip()
+                )
+                if influence_paths:
+                    body_lines.append(
+                        f"  - Influence Sources: `{', '.join(dict.fromkeys(influence_paths))}`"
+                    )
 
         if curated_notes:
             body_lines.extend(["", "## Curated Notes", "", curated_notes.strip(), ""])
 
+        self.scaffold = ensure_wiki_scaffold(
+            self.config,
+            project_root=self.project_root,
+        )
         atomic_write_text(page_path, "\n".join(body_lines) + "\n")
 
         from .wiki_updater import CompiledWikiUpdater

@@ -20,18 +20,34 @@ from core import (
     AgentSurfaceError,
     AgentSurfaceService,
     ArchivistCompiler,
+    CaptureSurfaceError,
+    CaptureSurfaceNotFoundError,
+    CompiledWikiUpdater,
     Tweet,
     config,
     build_path_layout,
     ensure_wiki_scaffold,
     load_connector_registry,
+    open_capture_surface,
     OKFLintRunner,
     ResearchGraphService,
+    SemanticMemoryError,
+    SemanticMemoryReviewError,
+    SemanticMemoryReviewNotFoundError,
+    SemanticMemoryReviewService,
+    LegacyArtifactLintRunner,
     WikiLintRunner,
     WikiQueryRunner,
+    legacy_artifact_lint_report_payload,
 )
 from core.archivist_benchmark import benchmark_archivist_topics
+from core.capture_event_store import CaptureEventStore
 from core.graphql_cache import maybe_cleanup_graphql_cache
+from core.postgres import (
+    PostgresConfigError,
+    open_postgres_connection,
+    resolve_postgres_settings,
+)
 from processors import URLProcessor, CacheLoader, VideoUpdater
 from processors.pipeline_processor import PipelineProcessor
 from processors.async_llm_processor import AsyncLLMProcessor, AsyncProcessingConfig
@@ -1143,6 +1159,10 @@ def cmd_stats(args):
         if chunk_stats and chunk_stats.get("total_contexts"):
             print(f"🎬 Transcript Chunk Cache:")
             print(f"   Contexts tracked: {chunk_stats['total_contexts']:,}")
+            print(f"   Cached chunks: {chunk_stats['total_chunks']:,}")
+            print(
+                f"   Successful chunks: {chunk_stats.get('total_successful_chunks', 0):,}"
+            )
             print(
                 f"   Contexts with failures: {chunk_stats['contexts_with_failures']:,}"
             )
@@ -1150,14 +1170,27 @@ def cmd_stats(args):
                 f"   Contexts with fallback: {chunk_stats['contexts_with_fallback']:,}"
             )
             print(f"   Failed chunks: {chunk_stats['total_failed_chunks']:,}")
+            if chunk_stats.get("by_provider"):
+                print(f"   By provider:")
+                for provider, count in chunk_stats["by_provider"].items():
+                    print(f"     {provider:20} {count:,}")
             details = chunk_stats.get("context_details", [])
             if details:
-                print(f"   Recent failures:")
+                print(f"   Recent contexts:")
                 for detail in details[:5]:
                     print(
                         f"     {detail['context_id']} -> processed {detail['chunks_processed']}/"
                         f"{detail['chunks_total']} chunks, failures: {detail['failed_count']}"
                         f" (fallback: {'Yes' if detail['fallback'] else 'No'})"
+                    )
+            recent_chunks = chunk_stats.get("recent_entries", [])
+            if recent_chunks:
+                print(f"   Recent chunks:")
+                for entry in recent_chunks[:5]:
+                    chunk_id = entry.get("chunk_id") or f"index:{entry.get('chunk_index')}"
+                    print(
+                        f"     {entry['context_id']} {chunk_id} "
+                        f"{entry.get('status', 'cached')} at {entry['updated_at']}"
                     )
 
 
@@ -1706,6 +1739,8 @@ def cmd_connectors(args):
             "playlist_urls": getattr(args, "playlist_url", None),
             "export_paths": getattr(args, "export_path", None),
             "export_dirs": getattr(args, "export_dir", None),
+            "import_paths": getattr(args, "import_path", None),
+            "import_dirs": getattr(args, "import_dir", None),
             "output_paths": getattr(args, "output_path", None),
             "output_dirs": getattr(args, "output_dir", None),
             "file_patterns": getattr(args, "file_pattern", None),
@@ -1743,7 +1778,7 @@ def cmd_connectors(args):
                 execute=bool(getattr(args, "execute", False)),
                 options=options,
             )
-        except (AgentSurfaceError, KeyError) as exc:
+        except (AgentSurfaceError, KeyError, ValueError, FileNotFoundError) as exc:
             raise SystemExit(str(exc)) from exc
         if getattr(args, "json", False):
             _print_json(payload)
@@ -1765,6 +1800,38 @@ def cmd_connectors(args):
             ):
                 if key in result:
                     print(f"   {key}: {result[key]}")
+        return
+
+    if args.connectors_action == "history":
+        from core.metadata_db import get_metadata_db
+
+        service = AgentSurfaceService(
+            config,
+            layout=build_path_layout(config),
+            db=get_metadata_db(),
+        )
+        payload = service.list_connector_runs(
+            connector_name=getattr(args, "connector_name", None),
+            status=getattr(args, "status", None),
+            limit=getattr(args, "limit", 20),
+        )
+        if getattr(args, "json", False):
+            _print_json(payload)
+            return
+
+        print("Connector runs")
+        for run in payload["runs"]:
+            failure = f" failure={run['failure_reason']}" if run.get("failure_reason") else ""
+            retry = (
+                f" next_retry_at={run['next_retry_at']}"
+                if run.get("next_retry_at")
+                else ""
+            )
+            print(
+                f"- {run['connector_name']} {run['status']} "
+                f"run={run['run_id']} outputs={run['output_count']} "
+                f"attempt={run['attempt']}/{run['max_attempts']}{failure}{retry}"
+            )
         return
 
     registry = load_connector_registry(config, project_root=Path(__file__).parent)
@@ -1790,6 +1857,189 @@ def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def _read_json_arg(value: str | None, *, field_name: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field_name} must be valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return payload
+
+
+def _read_json_file_arg(path: str | None, *, field_name: str) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field_name} file must contain valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{field_name} file must contain a JSON object")
+    return payload
+
+
+def _memory_review_kwargs(args) -> dict[str, Any]:
+    metadata = _read_json_arg(
+        getattr(args, "metadata_json", None),
+        field_name="metadata-json",
+    )
+    return {
+        "actor": getattr(args, "actor", None),
+        "reason": getattr(args, "reason", None),
+        "reviewed_at": getattr(args, "reviewed_at", None),
+        "metadata": metadata,
+    }
+
+
+def _artifact_review_kwargs(args) -> dict[str, Any]:
+    metadata = _read_json_arg(
+        getattr(args, "metadata_json", None),
+        field_name="metadata-json",
+    )
+    return {
+        "actor": getattr(args, "actor", None),
+        "reason": getattr(args, "reason", None),
+        "metadata": metadata,
+    }
+
+
+def cmd_capture(args):
+    """Inspect capture events and manually ingest artifacts."""
+    try:
+        with open_capture_surface(config) as surface:
+            if args.capture_action == "sources":
+                payload = surface.list_sources()
+            elif args.capture_action == "events":
+                payload = surface.list_events(
+                    source_id=getattr(args, "source_id", None),
+                    session_id=getattr(args, "session_id", None),
+                    limit=getattr(args, "limit", None),
+                )
+            elif args.capture_action == "event":
+                payload = surface.get_event(args.event_id)
+            elif args.capture_action == "retention":
+                payload = surface.inspect_retention(
+                    event_id=getattr(args, "event_id", None),
+                    source_id=getattr(args, "source_id", None),
+                    session_id=getattr(args, "session_id", None),
+                    as_of=getattr(args, "as_of", None),
+                )
+            elif args.capture_action == "expire":
+                payload = surface.expire_retention(
+                    event_id=args.event_id,
+                    delete_raw=getattr(args, "raw", False),
+                    delete_distilled=getattr(args, "distilled", False),
+                    dry_run=not getattr(args, "execute", False),
+                    reason=getattr(args, "reason", None),
+                    actor=getattr(args, "actor", None),
+                    as_of=getattr(args, "as_of", None),
+                )
+            elif args.capture_action == "compile-wiki":
+                layout = build_path_layout(config)
+                updater = CompiledWikiUpdater(config, layout=layout)
+                payload = surface.compile_wiki_pages(
+                    updater,
+                    source_id=getattr(args, "source_id", None),
+                    session_id=getattr(args, "session_id", None),
+                    include_restricted_events=getattr(
+                        args,
+                        "include_restricted_events",
+                        False,
+                    ),
+                    audit_reason=getattr(args, "audit_reason", None),
+                )
+            elif args.capture_action == "ingest":
+                payload_obj = _read_json_arg(
+                    getattr(args, "payload_json", None),
+                    field_name="payload-json",
+                )
+                if payload_obj is None:
+                    payload_obj = _read_json_file_arg(
+                        getattr(args, "payload_file", None),
+                        field_name="payload-file",
+                    )
+                if payload_obj is None:
+                    raise ValueError("--payload-json or --payload-file is required")
+                source_obj = _read_json_arg(
+                    getattr(args, "source_json", None),
+                    field_name="source-json",
+                )
+                event_obj = _read_json_arg(
+                    getattr(args, "event_json", None),
+                    field_name="event-json",
+                )
+                session_obj = _read_json_arg(
+                    getattr(args, "session_json", None),
+                    field_name="session-json",
+                )
+                payload = surface.ingest_manual(
+                    artifact_type=args.artifact_type,
+                    payload=payload_obj,
+                    source=source_obj if source_obj is not None else args.source,
+                    session=session_obj,
+                    event=event_obj,
+                    raw_path=getattr(args, "raw_path", None),
+                    queue_artifact_id=getattr(args, "queue_artifact_id", None),
+                    priority=getattr(args, "priority", 0),
+                    capabilities=getattr(args, "capability", None),
+                )
+            else:
+                raise ValueError("Unknown capture action")
+    except CaptureSurfaceNotFoundError as exc:
+        raise SystemExit(str(exc)) from exc
+    except (CaptureSurfaceError, ValueError, FileNotFoundError, OSError) as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if getattr(args, "json", False) or args.capture_action in {
+        "compile-wiki",
+        "event",
+        "expire",
+        "ingest",
+    }:
+        _print_json(payload)
+        return
+
+    if args.capture_action == "sources":
+        print(f"Capture sources: {payload['total']}")
+        for source in payload["sources"]:
+            print(
+                f"- {source['source_name']} ({source['source_type']}) "
+                f"id={source['source_id']} status={source['status']}"
+        )
+        return
+
+    if args.capture_action == "retention":
+        print(
+            f"Retention targets: {payload['total']} "
+            f"eligible={payload['eligible']} as_of={payload['as_of']}"
+        )
+        for target in payload["targets"]:
+            privacy = target.get("privacy_class") or "-"
+            retention = target.get("retention_class") or "-"
+            path = target.get("path") or target.get("cache_key") or target.get("target_id")
+            print(
+                f"- {target['target_type']} {target['target_id']} "
+                f"scope={target['retention_scope']} eligible={target['eligible']} "
+                f"privacy={privacy} retention={retention} "
+                f"reason={target['eligibility_reason']} path={path}"
+            )
+        return
+
+    print(f"Capture events: {payload['total']}")
+    for event in payload["events"]:
+        security = event["security_state"]["state"]
+        privacy = event.get("privacy_class") or "-"
+        retention = event.get("retention_class") or "-"
+        print(
+            f"- {event['event_id']} source={event['source_id']} "
+            f"session={event.get('session_id') or '-'} type={event['event_type']} "
+            f"privacy={privacy} retention={retention} security={security}"
+        )
+
+
 def cmd_artifacts(args):
     """Inspect artifact queue records and provenance."""
     from core.metadata_db import get_metadata_db
@@ -1803,17 +2053,51 @@ def cmd_artifacts(args):
                 source=getattr(args, "source", None),
                 limit=max(1, int(getattr(args, "limit", 50) or 50)),
             )
+        elif args.artifacts_action == "review":
+            payload = service.list_artifact_reviews(
+                status=getattr(args, "status", None),
+                include_closed=bool(getattr(args, "include_closed", False)),
+                limit=max(1, int(getattr(args, "limit", 50) or 50)),
+            )
         elif args.artifacts_action == "get":
-            payload = service.get_artifact(args.artifact_id)
+            payload = service.get_artifact(
+                args.artifact_id,
+                include_quarantined=bool(getattr(args, "include_review", False)),
+            )
         elif args.artifacts_action == "provenance":
-            payload = service.get_artifact_provenance(args.artifact_id)
+            payload = service.get_artifact_provenance(
+                args.artifact_id,
+                include_quarantined=bool(getattr(args, "include_review", False)),
+            )
+        elif args.artifacts_action == "retry":
+            payload = service.retry_artifact_review(
+                args.artifact_id,
+                **_artifact_review_kwargs(args),
+            )
+        elif args.artifacts_action == "reject":
+            payload = service.reject_artifact_review(
+                args.artifact_id,
+                **_artifact_review_kwargs(args),
+            )
+        elif args.artifacts_action == "reviewed":
+            payload = service.mark_artifact_reviewed(
+                args.artifact_id,
+                **_artifact_review_kwargs(args),
+            )
         else:
             raise ValueError("Unknown artifacts action")
-    except AgentSurfaceError as exc:
+    except (AgentSurfaceError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
     if getattr(args, "json", False) or args.artifacts_action in {"get", "provenance"}:
         _print_json(payload)
+        return
+
+    if args.artifacts_action in {"retry", "reject", "reviewed"}:
+        queue = payload["queue"]
+        print(
+            f"{queue['artifact_type']}:{queue['artifact_id']} -> {queue['status']}"
+        )
         return
 
     print(f"Artifacts: {payload['total']}")
@@ -1838,17 +2122,116 @@ def cmd_query(args):
     from core.metadata_db import get_metadata_db
 
     service = AgentSurfaceService(config, layout=build_path_layout(config), db=get_metadata_db())
-    payload = service.query_wiki(args.query, limit=max(1, int(args.limit or 10)))
+    payload = service.query_wiki(
+        args.query,
+        limit=max(1, int(args.limit or 10)),
+        include_quarantined=bool(getattr(args, "include_quarantined", False)),
+        result_types=getattr(args, "type", None),
+        source_types=getattr(args, "source_type", None),
+        tags=getattr(args, "tag", None),
+        security_statuses=getattr(args, "security_status", None),
+        min_trust_score=getattr(args, "min_trust_score", None),
+        time_after=getattr(args, "time_after", None),
+        time_before=getattr(args, "time_before", None),
+    )
     if getattr(args, "json", False):
         _print_json(payload)
         return
 
-    print(f"Wiki query: {payload['query']}")
-    print(f"Matches: {len(payload['hits'])}")
-    for hit in payload["hits"]:
+    retrieval = payload["retrieval"]
+    hits = retrieval["hits"]
+    print(f"Wiki query: {retrieval['query']}")
+    print(f"Answer: {payload['answer']}")
+    print(
+        f"Confidence: {payload['confidence']['level']} "
+        f"({payload['confidence']['score']})"
+    )
+    print(f"Security: {payload['security_state']['status']}")
+    print(f"Matches: {len(hits)}")
+    for hit in hits:
         provenance = hit.get("provenance") or {}
         artifact = provenance.get("artifact_id") or "-"
-        print(f"- {hit['title']} [{hit['slug']}] score={hit['score']} artifact={artifact}")
+        identifier = (
+            hit.get("slug")
+            or hit.get("artifact_id")
+            or hit.get("event_id")
+            or hit["result_id"]
+        )
+        print(
+            f"- {hit['title']} [{identifier}] "
+            f"type={hit['result_type']} score={hit['score']} artifact={artifact}"
+        )
+
+
+def cmd_memory(args):
+    """Review semantic memory candidates."""
+    if args.memory_action != "candidates":
+        raise ValueError("Unknown memory action")
+
+    service = SemanticMemoryReviewService()
+    try:
+        if args.candidate_action == "list":
+            payload = service.list_candidates(
+                candidate_type=getattr(args, "candidate_type", None),
+                status=getattr(args, "status", None),
+                entity_id=getattr(args, "entity_id", None),
+                entity_type=getattr(args, "entity_type", None),
+                artifact_id=getattr(args, "artifact_id", None),
+                artifact_type=getattr(args, "artifact_type", None),
+                capture_event_id=getattr(args, "capture_event_id", None),
+                limit=getattr(args, "limit", None),
+            )
+        elif args.candidate_action == "detail":
+            payload = service.get_candidate(args.candidate_id)
+        elif args.candidate_action == "confirm":
+            payload = service.confirm_candidate(
+                args.candidate_id,
+                **_memory_review_kwargs(args),
+            )
+        elif args.candidate_action == "reject":
+            payload = service.reject_candidate(
+                args.candidate_id,
+                **_memory_review_kwargs(args),
+            )
+        elif args.candidate_action == "supersede":
+            payload = service.supersede_candidate(
+                args.candidate_id,
+                superseded_by_candidate_id=args.superseded_by_candidate_id,
+                **_memory_review_kwargs(args),
+            )
+        elif args.candidate_action == "promote":
+            payload = service.promote_candidate(
+                args.candidate_id,
+                **_memory_review_kwargs(args),
+            )
+        else:
+            raise ValueError("Unknown memory candidate action")
+    except (
+        SemanticMemoryError,
+        SemanticMemoryReviewError,
+        SemanticMemoryReviewNotFoundError,
+        ValueError,
+    ) as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if getattr(args, "json", False) or args.candidate_action != "list":
+        _print_json(payload)
+        return
+
+    print(f"Semantic memory candidates: {payload['total']}")
+    for candidate in payload["candidates"]:
+        entity = (
+            candidate.get("entity_id")
+            or candidate.get("entity_name")
+            or candidate.get("entity_type")
+            or "-"
+        )
+        print(
+            f"- {candidate['candidate_id']} "
+            f"type={candidate['candidate_type']} status={candidate['status']} "
+            f"entity={entity} evidence={candidate['evidence_count']}"
+        )
+        print(f"  {candidate['text']}")
 
 
 async def cmd_wiki(args):
@@ -1867,6 +2250,29 @@ async def cmd_wiki(args):
     if args.wiki_action == "lint":
         lint_args = argparse.Namespace(stale_after_days=args.stale_after_days)
         await cmd_wiki_lint(lint_args)
+        return
+    if args.wiki_action == "compile-semantic":
+        layout = build_path_layout(config)
+        updater = CompiledWikiUpdater(config, layout=layout)
+        results = updater.update_from_semantic_memory()
+        payload = {
+            "pages": [
+                {
+                    "slug": result.slug,
+                    "page_path": str(result.page_path),
+                    "source_paths": list(result.source_paths),
+                    "action": result.action,
+                }
+                for result in results
+            ],
+            "total": len(results),
+        }
+        if getattr(args, "json", False):
+            _print_json(payload)
+            return
+        print(f"Semantic memory wiki pages: {payload['total']}")
+        for page in payload["pages"]:
+            print(f"- {page['slug']} {page['action']} {page['page_path']}")
         return
     raise ValueError("Unknown wiki action")
 
@@ -2050,9 +2456,14 @@ async def cmd_wiki_query(args):
 async def cmd_wiki_lint(args):
     """Run wiki health checks for contradictions, staleness, and orphans."""
     layout = build_path_layout(config)
-    runner = WikiLintRunner(config, layout=layout)
     stale_after_days = int(getattr(args, "stale_after_days", 30) or 30)
-    report = runner.lint(stale_after_days=stale_after_days)
+    report = _run_wiki_lint_report(layout, stale_after_days=stale_after_days)
+
+    if getattr(args, "json", False):
+        print(json.dumps(_wiki_lint_report_payload(report), indent=2, sort_keys=True))
+        if report.has_errors:
+            raise SystemExit(1)
+        return
 
     print("🧪 Wiki lint report")
     print(f"   Pages checked: {report.pages_checked}")
@@ -2060,9 +2471,131 @@ async def cmd_wiki_lint(args):
     for issue in report.issues:
         location = f" ({issue.page_path})" if issue.page_path else ""
         print(f"   - {issue.severity.upper()} {issue.code}{location}: {issue.message}")
+        for reason in _wiki_lint_provenance_reasons(issue):
+            print(f"     provenance: {reason}")
 
     if report.has_errors:
         raise SystemExit(1)
+
+
+def _run_wiki_lint_report(layout, *, stale_after_days: int):
+    try:
+        settings = resolve_postgres_settings(config)
+    except PostgresConfigError as exc:
+        raise ValueError(str(exc)) from exc
+    if not settings.enabled:
+        return WikiLintRunner(config, layout=layout).lint(
+            stale_after_days=stale_after_days
+        )
+    with open_postgres_connection(settings) as conn:
+        event_store = CaptureEventStore(
+            conn,
+            schema=settings.schema,
+            raw_roots=[layout.raw_root],
+        )
+        return WikiLintRunner(
+            config,
+            layout=layout,
+            event_store=event_store,
+        ).lint(stale_after_days=stale_after_days)
+
+
+def _wiki_lint_report_payload(report):
+    return {
+        "kind": "wiki",
+        "status": "failed" if report.has_errors else "ok",
+        "checked_at": report.checked_at,
+        "summary": {
+            "pages_checked": report.pages_checked,
+            "issue_count": len(report.issues),
+            "error_count": sum(1 for issue in report.issues if issue.severity == "error"),
+            "warning_count": sum(
+                1 for issue in report.issues if issue.severity == "warning"
+            ),
+        },
+        "issues": [
+            {
+                "code": issue.code,
+                "severity": issue.severity,
+                "message": issue.message,
+                "page_path": str(issue.page_path) if issue.page_path else None,
+                "related_paths": [str(path) for path in issue.related_paths],
+                "details": dict(issue.details),
+            }
+            for issue in report.issues
+        ],
+    }
+
+
+def _wiki_lint_provenance_reasons(issue) -> tuple[str, ...]:
+    details = issue.details if isinstance(issue.details, dict) else {}
+    changes = details.get("changes") or []
+    reasons: list[str] = []
+    for change in changes[:5]:
+        if not isinstance(change, dict):
+            continue
+        reason = str(change.get("reason") or "").strip()
+        if reason:
+            reasons.append(reason)
+    if len(changes) > 5:
+        reasons.append(f"{len(changes) - 5} additional input change(s)")
+    return tuple(reasons)
+
+
+def cmd_legacy_artifacts(args):
+    """Run read-only migration lint for pre-event-backbone artifacts."""
+    if args.legacy_artifacts_action != "lint":
+        raise ValueError("Unknown legacy artifacts action")
+
+    layout = build_path_layout(config)
+    report = _run_legacy_artifact_lint_report(
+        layout,
+        limit=getattr(args, "limit", None),
+        include_artifacts=not bool(getattr(args, "no_artifacts", False)),
+        include_wiki=not bool(getattr(args, "no_wiki", False)),
+    )
+    payload = legacy_artifact_lint_report_payload(report)
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        if report.has_errors:
+            raise SystemExit(1)
+        return
+
+    print("Legacy artifact lint report")
+    print(f"   Artifacts checked: {report.artifacts_checked}")
+    print(f"   Wiki pages checked: {report.wiki_pages_checked}")
+    print(f"   Issues found: {len(report.issues)}")
+    print(f"   Migration actions: {len(report.migration_actions)}")
+    for issue in report.issues:
+        if issue.subject_type == "wiki_page":
+            location = str(issue.page_path) if issue.page_path else "-"
+        else:
+            location = (
+                f"{issue.artifact_type}:{issue.artifact_id}"
+                if issue.artifact_type and issue.artifact_id
+                else issue.artifact_id or "-"
+            )
+        print(f"   - {issue.severity.upper()} {issue.code} ({location}): {issue.message}")
+    if report.migration_actions:
+        print("   Suggested migration actions are report-only; no artifacts were changed.")
+
+    if report.has_errors:
+        raise SystemExit(1)
+
+
+def _run_legacy_artifact_lint_report(
+    layout,
+    *,
+    limit: int | None,
+    include_artifacts: bool,
+    include_wiki: bool,
+):
+    return LegacyArtifactLintRunner(config, layout=layout).lint(
+        limit=limit,
+        include_artifacts=include_artifacts,
+        include_wiki=include_wiki,
+    )
 
 
 async def cmd_okf(args):
@@ -2402,6 +2935,105 @@ Examples:
     # Stats command
     stats_parser = subparsers.add_parser("stats", help="Show statistics")
 
+    capture_parser = subparsers.add_parser(
+        "capture",
+        help="Inspect and ingest capture events",
+    )
+    capture_subparsers = capture_parser.add_subparsers(
+        dest="capture_action",
+        help="Capture actions",
+    )
+    capture_subparsers.required = True
+    capture_sources_parser = capture_subparsers.add_parser(
+        "sources",
+        help="List capture sources",
+    )
+    capture_sources_parser.add_argument("--json", action="store_true")
+    capture_events_parser = capture_subparsers.add_parser(
+        "events",
+        help="List capture events",
+    )
+    capture_events_parser.add_argument("--source-id", type=str, default=None)
+    capture_events_parser.add_argument("--session-id", type=str, default=None)
+    capture_events_parser.add_argument("--limit", type=int, default=None)
+    capture_events_parser.add_argument("--json", action="store_true")
+    capture_event_parser = capture_subparsers.add_parser(
+        "event",
+        help="Show capture event detail",
+    )
+    capture_event_parser.add_argument("event_id")
+    capture_event_parser.add_argument("--json", action="store_true")
+    capture_retention_parser = capture_subparsers.add_parser(
+        "retention",
+        help="Inspect capture retention classes and expiry eligibility",
+    )
+    capture_retention_parser.add_argument("--event-id", type=str, default=None)
+    capture_retention_parser.add_argument("--source-id", type=str, default=None)
+    capture_retention_parser.add_argument("--session-id", type=str, default=None)
+    capture_retention_parser.add_argument("--as-of", type=str, default=None)
+    capture_retention_parser.add_argument("--json", action="store_true")
+    capture_expire_parser = capture_subparsers.add_parser(
+        "expire",
+        help="Expire eligible raw or distilled capture data",
+    )
+    capture_expire_parser.add_argument("event_id")
+    capture_expire_parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Expire eligible raw capture files",
+    )
+    capture_expire_parser.add_argument(
+        "--distilled",
+        action="store_true",
+        help="Expire eligible transcripts, summaries, caches, embeddings, and wiki output",
+    )
+    capture_expire_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Perform deletion; without this flag the command is a dry run",
+    )
+    capture_expire_parser.add_argument("--reason", default=None)
+    capture_expire_parser.add_argument("--actor", default=None)
+    capture_expire_parser.add_argument("--as-of", type=str, default=None)
+    capture_expire_parser.add_argument("--json", action="store_true")
+    capture_compile_wiki_parser = capture_subparsers.add_parser(
+        "compile-wiki",
+        help="Compile event-backed wiki pages from capture events",
+    )
+    capture_compile_wiki_parser.add_argument("--source-id", type=str, default=None)
+    capture_compile_wiki_parser.add_argument("--session-id", type=str, default=None)
+    capture_compile_wiki_parser.add_argument(
+        "--include-restricted-events",
+        action="store_true",
+        help="Include private, sensitive, or quarantined events; requires --audit-reason",
+    )
+    capture_compile_wiki_parser.add_argument("--audit-reason", default=None)
+    capture_compile_wiki_parser.add_argument("--json", action="store_true")
+    capture_ingest_parser = capture_subparsers.add_parser(
+        "ingest",
+        help="Manually capture an artifact through the lifecycle service",
+    )
+    capture_ingest_parser.add_argument("--artifact-type", required=True)
+    capture_ingest_parser.add_argument("--source", default="manual")
+    capture_ingest_parser.add_argument("--source-json", default=None)
+    capture_payload_group = capture_ingest_parser.add_mutually_exclusive_group(
+        required=True
+    )
+    capture_payload_group.add_argument("--payload-json", default=None)
+    capture_payload_group.add_argument("--payload-file", default=None)
+    capture_ingest_parser.add_argument("--session-json", default=None)
+    capture_ingest_parser.add_argument("--event-json", default=None)
+    capture_ingest_parser.add_argument("--raw-path", default=None)
+    capture_ingest_parser.add_argument("--queue-artifact-id", default=None)
+    capture_ingest_parser.add_argument("--priority", type=int, default=0)
+    capture_ingest_parser.add_argument(
+        "--capability",
+        action="append",
+        default=None,
+        help="Capability to attach to the queue entry; repeat for multiple values",
+    )
+    capture_ingest_parser.add_argument("--json", action="store_true")
+
     artifacts_parser = subparsers.add_parser(
         "artifacts",
         help="Inspect artifacts and provenance",
@@ -2420,18 +3052,58 @@ Examples:
     artifacts_list_parser.add_argument("--source", type=str, default=None)
     artifacts_list_parser.add_argument("--limit", type=int, default=50)
     artifacts_list_parser.add_argument("--json", action="store_true")
+    artifacts_review_parser = artifacts_subparsers.add_parser(
+        "review",
+        help="List artifacts in the operator review queue",
+    )
+    artifacts_review_parser.add_argument("--status", type=str, default=None)
+    artifacts_review_parser.add_argument(
+        "--include-closed",
+        action="store_true",
+        help="Include reviewed and rejected artifacts",
+    )
+    artifacts_review_parser.add_argument("--limit", type=int, default=50)
+    artifacts_review_parser.add_argument("--json", action="store_true")
     artifacts_get_parser = artifacts_subparsers.add_parser(
         "get",
         help="Get a canonical artifact record",
     )
     artifacts_get_parser.add_argument("artifact_id")
+    artifacts_get_parser.add_argument(
+        "--include-review",
+        action="store_true",
+        help="Allow inspection of review-queue artifacts and raw queue payloads",
+    )
     artifacts_get_parser.add_argument("--json", action="store_true")
     artifacts_provenance_parser = artifacts_subparsers.add_parser(
         "provenance",
         help="Get artifact provenance",
     )
     artifacts_provenance_parser.add_argument("artifact_id")
+    artifacts_provenance_parser.add_argument(
+        "--include-review",
+        action="store_true",
+        help="Allow provenance inspection for review-queue artifacts",
+    )
     artifacts_provenance_parser.add_argument("--json", action="store_true")
+    for action_name, action_help in (
+        ("retry", "Move a review-queue artifact back to pending"),
+        ("reject", "Reject a bad artifact"),
+        ("reviewed", "Mark a bad artifact reviewed without retrying it"),
+    ):
+        action_parser = artifacts_subparsers.add_parser(
+            action_name,
+            help=action_help,
+        )
+        action_parser.add_argument("artifact_id")
+        action_parser.add_argument("--actor", required=True)
+        action_parser.add_argument("--reason", required=True)
+        action_parser.add_argument(
+            "--metadata-json",
+            default=None,
+            help="Additional review audit metadata as a JSON object",
+        )
+        action_parser.add_argument("--json", action="store_true")
 
     ingest_parser = subparsers.add_parser(
         "ingest",
@@ -2463,7 +3135,105 @@ Examples:
     )
     query_wiki_parser.add_argument("query", help="Wiki search query")
     query_wiki_parser.add_argument("--limit", type=int, default=10)
+    query_wiki_parser.add_argument(
+        "--include-quarantined",
+        action="store_true",
+        help="Include content that requires security review",
+    )
+    query_wiki_parser.add_argument(
+        "--type",
+        action="append",
+        help="Result type filter: wiki_page, artifact, or capture_event",
+    )
+    query_wiki_parser.add_argument(
+        "--source-type",
+        action="append",
+        help="Source type filter such as github, arxiv, or web_clipper",
+    )
+    query_wiki_parser.add_argument(
+        "--tag",
+        action="append",
+        help="Tag filter; repeat to include more tags",
+    )
+    query_wiki_parser.add_argument(
+        "--security-status",
+        action="append",
+        help="Security status filter such as allowed, needs_review, or blocked",
+    )
+    query_wiki_parser.add_argument("--min-trust-score", type=float, default=None)
+    query_wiki_parser.add_argument("--time-after", type=str, default=None)
+    query_wiki_parser.add_argument("--time-before", type=str, default=None)
     query_wiki_parser.add_argument("--json", action="store_true")
+
+    memory_parser = subparsers.add_parser(
+        "memory",
+        help="Review semantic memory candidates",
+    )
+    memory_subparsers = memory_parser.add_subparsers(
+        dest="memory_action",
+        help="Memory actions",
+    )
+    memory_subparsers.required = True
+    memory_candidates_parser = memory_subparsers.add_parser(
+        "candidates",
+        help="List, inspect, and review semantic memory candidates",
+    )
+    candidate_subparsers = memory_candidates_parser.add_subparsers(
+        dest="candidate_action",
+        help="Candidate review actions",
+    )
+    candidate_subparsers.required = True
+    memory_list_parser = candidate_subparsers.add_parser(
+        "list",
+        help="List semantic memory candidates",
+    )
+    memory_list_parser.add_argument("--type", dest="candidate_type", default=None)
+    memory_list_parser.add_argument("--status", default=None)
+    memory_list_parser.add_argument("--entity-id", default=None)
+    memory_list_parser.add_argument("--entity-type", default=None)
+    memory_list_parser.add_argument("--artifact-id", default=None)
+    memory_list_parser.add_argument("--artifact-type", default=None)
+    memory_list_parser.add_argument("--capture-event-id", default=None)
+    memory_list_parser.add_argument("--limit", type=int, default=None)
+    memory_list_parser.add_argument("--json", action="store_true")
+    memory_detail_parser = candidate_subparsers.add_parser(
+        "detail",
+        help="Show candidate detail with evidence",
+    )
+    memory_detail_parser.add_argument("candidate_id")
+    memory_detail_parser.add_argument("--json", action="store_true")
+
+    memory_review_parsers = []
+    for action_name in ("confirm", "reject", "promote"):
+        review_parser = candidate_subparsers.add_parser(
+            action_name,
+            help=f"{action_name.title()} a semantic memory candidate",
+        )
+        review_parser.add_argument("candidate_id")
+        review_parser.add_argument("--json", action="store_true")
+        memory_review_parsers.append(review_parser)
+    memory_supersede_parser = candidate_subparsers.add_parser(
+        "supersede",
+        help="Mark a semantic memory candidate as superseded",
+    )
+    memory_supersede_parser.add_argument("candidate_id")
+    memory_supersede_parser.add_argument(
+        "--by",
+        dest="superseded_by_candidate_id",
+        required=True,
+        help="Replacement candidate ID",
+    )
+    memory_supersede_parser.add_argument("--json", action="store_true")
+    memory_review_parsers.append(memory_supersede_parser)
+    for review_parser in memory_review_parsers:
+        review_parser.add_argument("--actor", default=None)
+        review_parser.add_argument("--reason", default=None)
+        review_parser.add_argument("--reviewed-at", default=None)
+        review_parser.add_argument(
+            "--metadata-json",
+            default=None,
+            help="Additional review audit metadata as a JSON object",
+        )
 
     wiki_parser = subparsers.add_parser(
         "wiki",
@@ -2485,6 +3255,15 @@ Examples:
         help="Run wiki health checks",
     )
     wiki_lint_group.add_argument("--stale-after-days", type=int, default=30)
+    wiki_lint_group.add_argument("--json", action="store_true")
+    wiki_compile_semantic_group = wiki_subparsers.add_parser(
+        "compile-semantic",
+        help="Compile confirmed or promoted semantic memory facts into wiki pages",
+        description=(
+            "Compile confirmed or promoted semantic memory facts into wiki pages"
+        ),
+    )
+    wiki_compile_semantic_group.add_argument("--json", action="store_true")
 
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a tweet and all its artifacts")
@@ -2694,6 +3473,18 @@ Examples:
         help="Local export directory; repeat for multiple directories",
     )
     connectors_run_parser.add_argument(
+        "--import-path",
+        action="append",
+        default=None,
+        help="Imported markdown file; repeat for multiple files",
+    )
+    connectors_run_parser.add_argument(
+        "--import-dir",
+        action="append",
+        default=None,
+        help="Imported markdown directory; repeat for multiple directories",
+    )
+    connectors_run_parser.add_argument(
         "--output-path",
         action="append",
         default=None,
@@ -2847,6 +3638,34 @@ Examples:
         action="store_true",
         help="Emit the run plan/result as JSON",
     )
+    connectors_history_parser = connectors_subparsers.add_parser(
+        "history",
+        help="List connector run history and checkpoints",
+        description="List connector run history, checkpoints, failure reasons, and retry state",
+    )
+    connectors_history_parser.add_argument(
+        "connector_name",
+        nargs="?",
+        default=None,
+        help="Optional connector registry name to filter by",
+    )
+    connectors_history_parser.add_argument(
+        "--status",
+        choices=("running", "completed", "failed"),
+        default=None,
+        help="Filter connector runs by status",
+    )
+    connectors_history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum run records to return",
+    )
+    connectors_history_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit connector run history as JSON",
+    )
 
     archivist_parser = subparsers.add_parser(
         "archivist",
@@ -2968,6 +3787,7 @@ Examples:
         default=30,
         help="Warn when wiki pages have not been updated within this many days",
     )
+    wiki_lint_parser.add_argument("--json", action="store_true")
 
     okf_parser = subparsers.add_parser(
         "okf",
@@ -2983,6 +3803,41 @@ Examples:
         help="Validate the compiled wiki as an OKF v0.1 bundle",
         description="Validate the compiled wiki as an OKF v0.1 bundle",
     )
+
+    legacy_artifacts_parser = subparsers.add_parser(
+        "legacy-artifacts",
+        help="Audit pre-event-backbone artifacts and wiki pages",
+    )
+    legacy_artifacts_subparsers = legacy_artifacts_parser.add_subparsers(
+        dest="legacy_artifacts_action",
+        help="Legacy artifact actions",
+    )
+    legacy_artifacts_subparsers.required = True
+    legacy_artifacts_lint_parser = legacy_artifacts_subparsers.add_parser(
+        "lint",
+        help="Report artifacts and wiki pages missing event-backbone metadata",
+        description=(
+            "Report old artifacts and wiki pages missing canonical IDs, raw refs, "
+            "prompt-threat metadata, or capture event links. This command is read-only."
+        ),
+    )
+    legacy_artifacts_lint_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of artifact queue rows to inspect",
+    )
+    legacy_artifacts_lint_parser.add_argument(
+        "--no-artifacts",
+        action="store_true",
+        help="Skip artifact queue checks",
+    )
+    legacy_artifacts_lint_parser.add_argument(
+        "--no-wiki",
+        action="store_true",
+        help="Skip wiki page checks",
+    )
+    legacy_artifacts_lint_parser.add_argument("--json", action="store_true")
 
     ingest_queue_parser = subparsers.add_parser(
         "ingest-queue",
@@ -3000,7 +3855,15 @@ Examples:
     # Setup logging
     setup_logging(args.verbose)
 
-    validation_exempt = {"artifacts", "connectors", "query", "research"}
+    validation_exempt = {
+        "artifacts",
+        "capture",
+        "connectors",
+        "legacy-artifacts",
+        "memory",
+        "query",
+        "research",
+    }
 
     # Validate configuration (allow offline-safe commands even if invalid)
     if args.command not in validation_exempt and not config.validate_and_warn():
@@ -3008,7 +3871,9 @@ Examples:
         offline_safe = {
             "stats",
             "artifacts",
+            "capture",
             "ingest",
+            "memory",
             "query",
             "wiki",
             "process",
@@ -3028,6 +3893,7 @@ Examples:
             "wiki-lint",
             "okf",
             "ingest-queue",
+            "legacy-artifacts",
             "db",
         }
         if args.command not in offline_safe:  # Block only network-heavy commands
@@ -3038,7 +3904,15 @@ Examples:
     if not args.command:
         args.command = "stats"
 
-    scaffold_exempt = {"artifacts", "connectors", "research"}
+    scaffold_exempt = {
+        "artifacts",
+        "capture",
+        "connectors",
+        "legacy-artifacts",
+        "memory",
+        "query",
+        "research",
+    }
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
 
@@ -3062,12 +3936,16 @@ Examples:
             asyncio.run(cmd_twitter_transcripts(args))
         elif args.command == "stats":
             cmd_stats(args)
+        elif args.command == "capture":
+            cmd_capture(args)
         elif args.command == "artifacts":
             cmd_artifacts(args)
         elif args.command == "ingest":
             asyncio.run(cmd_ingest(args))
         elif args.command == "query":
             cmd_query(args)
+        elif args.command == "memory":
+            cmd_memory(args)
         elif args.command == "wiki":
             asyncio.run(cmd_wiki(args))
         elif args.command == "delete":
@@ -3100,6 +3978,8 @@ Examples:
             asyncio.run(cmd_wiki_lint(args))
         elif args.command == "okf":
             asyncio.run(cmd_okf(args))
+        elif args.command == "legacy-artifacts":
+            cmd_legacy_artifacts(args)
         elif args.command == "ingest-queue":
             asyncio.run(cmd_ingest_queue(args))
     except KeyboardInterrupt:

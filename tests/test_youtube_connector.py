@@ -3,10 +3,11 @@ from pathlib import Path
 
 from collectors.youtube_connector import YouTubeConnector
 from core.config import Config
+from core.connector_budgets import ConnectorBudgetError
 from core.ingestion_runtime import KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
-from processors.youtube_processor import YouTubeVideo
+from processors.youtube_processor import YouTubeProcessor, YouTubeVideo
 
 
 def _config(tmp_path: Path) -> Config:
@@ -139,6 +140,43 @@ def test_youtube_connector_accepts_playlist_urls_via_adapter(tmp_path: Path):
     assert db.get_ingestion_entry("yt_video_pl123") is not None
 
 
+def test_youtube_connector_skips_one_video_when_budget_exceeded(tmp_path: Path):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    processor = FakeYouTubeProcessor(layout.vault_root / "transcripts")
+    connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
+    original_collect_video = connector._collect_video
+
+    async def collect_or_budget_error(video_id, **kwargs):
+        if video_id == "overbudget":
+            raise ConnectorBudgetError(
+                "video exceeded transcript budget",
+                connector_name="youtube",
+                field="max_output_tokens_per_run",
+                subject=video_id,
+            )
+        return await original_collect_video(video_id, **kwargs)
+
+    connector._collect_video = collect_or_budget_error
+
+    result = asyncio.run(
+        connector.collect(
+            urls=[
+                "https://youtu.be/overbudget",
+                "https://youtu.be/afterbudget",
+            ]
+        )
+    )
+
+    assert [record.video_id for record in result.records] == ["afterbudget"]
+    assert result.skipped_urls == ("https://youtu.be/overbudget",)
+    assert result.errors[0]["video_id"] == "overbudget"
+    assert result.errors[0]["error_type"] == "ConnectorBudgetError"
+    assert db.get_ingestion_entry("yt_video_afterbudget") is not None
+    assert db.get_ingestion_entry("yt_video_overbudget") is None
+
+
 def test_youtube_connector_video_archival_is_config_gated(tmp_path: Path, monkeypatch):
     config = _config(tmp_path)
     layout = build_path_layout(config, project_root=tmp_path)
@@ -172,3 +210,33 @@ def test_youtube_connector_video_archival_is_config_gated(tmp_path: Path, monkey
     video_entry = db.get_ingestion_entry("yt_video_archive1")
     assert video_entry is not None
     assert "library/youtube/videos/archive1.mp4" in video_entry.payload_json
+
+
+def test_youtube_processor_metadata_fallback_uses_blank_timestamp(
+    tmp_path: Path,
+    monkeypatch,
+):
+    processor = YouTubeProcessor(vault_path=str(tmp_path / "vault"))
+    processor.transcript_llm_processor = None
+
+    async def no_metadata(_video_id: str):
+        return None
+
+    async def transcript(_video_id: str):
+        return "[00:00] Fallback transcript text."
+
+    monkeypatch.setattr(processor, "get_video_info", no_metadata)
+    monkeypatch.setattr(processor, "get_video_transcript", transcript)
+
+    video, _metrics = asyncio.run(
+        processor.process_video(
+            "fallback1",
+            resume_metadata=False,
+            resume_transcripts=False,
+            source_label="unit test",
+        )
+    )
+
+    assert video is not None
+    assert video.published_at == ""
+    assert list((tmp_path / "vault" / "transcripts").glob("youtube_fallback1_*.md"))

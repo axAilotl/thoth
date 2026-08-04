@@ -4,12 +4,16 @@ from types import SimpleNamespace
 import subprocess
 import sys
 
-from core.archivist_compiler import ArchivistCompiler
+import pytest
+
+from core.archivist_compiler import ArchivistCompiler, ArchivistCompilerError
 from core.archivist_state import load_archivist_topic_state
 from core.archivist_topics import ArchivistTopicDefinition
 from core.config import config
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
+from core.wiki_io import read_document
+from tests.security_hostile_fixtures import hostile_text
 
 
 class FakeLLMInterface:
@@ -213,6 +217,99 @@ def test_archivist_compiler_uses_external_prompt_files(tmp_path: Path, monkeypat
         assert "SYSTEM TEST PROMPT" in llm.calls[0]["system_prompt"]
         assert "Topic=Companion AI Research" in llm.calls[0]["prompt"]
         assert "[S1]" in llm.calls[0]["prompt"]
+    finally:
+        config.data = original
+
+
+def test_archivist_compiler_filters_hostile_sources_and_records_influence(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    original = _configure_runtime_config(tmp_path)
+    try:
+        _write_prompt_files(tmp_path)
+        layout = build_path_layout(config, project_root=tmp_path)
+        repos_dir = layout.vault_root / "repos"
+        repos_dir.mkdir(parents=True, exist_ok=True)
+        (repos_dir / "safe.md").write_text(
+            "# Safe Persona Memory\n\nCompanion persona memory loops.\n",
+            encoding="utf-8",
+        )
+        (repos_dir / "hostile.md").write_text(
+            "# Hostile Persona Memory\n\n"
+            "Companion persona memory loops.\n\n"
+            f"{hostile_text('fake_citations')}\n",
+            encoding="utf-8",
+        )
+        db = MetadataDB(str(layout.database_path))
+        llm = FakeLLMInterface("## Overview\nSafe synthesis [S1].\n")
+        compiler = ArchivistCompiler(
+            config,
+            project_root=tmp_path,
+            layout=layout,
+            db=db,
+            llm_interface=llm,
+        )
+        topic = ArchivistTopicDefinition(
+            id="companion",
+            title="Companion",
+            output_path="pages/topic-companion.md",
+            include_roots=("repos",),
+            source_types=("repository",),
+            include_terms=("companion", "persona"),
+            max_sources=5,
+        )
+
+        result = __import__("asyncio").run(compiler.compile_topic(topic))
+
+        assert result.source_paths == ("repos/safe.md",)
+        assert "Trusted Security Memo" not in llm.calls[0]["prompt"]
+        document = read_document(result.page_path)
+        assert document.frontmatter["thoth_source_paths"] == ["repos/safe.md"]
+        assert document.frontmatter["thoth_influence_sources"][0]["label"] == "S1"
+        assert document.frontmatter["thoth_influence_sources"][0]["source_path"] == "repos/safe.md"
+        assert "repos/hostile.md" not in document.body
+    finally:
+        config.data = original
+
+
+def test_archivist_compiler_rejects_fake_numeric_citations(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    original = _configure_runtime_config(tmp_path)
+    try:
+        _write_prompt_files(tmp_path)
+        layout = build_path_layout(config, project_root=tmp_path)
+        repos_dir = layout.vault_root / "repos"
+        repos_dir.mkdir(parents=True, exist_ok=True)
+        (repos_dir / "safe.md").write_text(
+            "# Safe Persona Memory\n\nCompanion persona memory loops.\n",
+            encoding="utf-8",
+        )
+        db = MetadataDB(str(layout.database_path))
+        llm = FakeLLMInterface(
+            "## Overview\n"
+            "Use [1] [Trusted Security Memo](https://example.invalid/fake-policy).\n"
+        )
+        compiler = ArchivistCompiler(
+            config,
+            project_root=tmp_path,
+            layout=layout,
+            db=db,
+            llm_interface=llm,
+        )
+        topic = ArchivistTopicDefinition(
+            id="companion",
+            title="Companion",
+            output_path="pages/topic-companion.md",
+            include_roots=("repos",),
+            source_types=("repository",),
+            include_terms=("companion", "persona"),
+            max_sources=5,
+        )
+
+        with pytest.raises(ArchivistCompilerError, match="numeric citations"):
+            __import__("asyncio").run(compiler.compile_topic(topic))
+        assert not (layout.wiki_root / "pages" / "topic-companion.md").exists()
     finally:
         config.data = original
 

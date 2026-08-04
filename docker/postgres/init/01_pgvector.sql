@@ -1,0 +1,7 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE DATABASE thoth_test;
+
+\connect thoth_test
+
+CREATE EXTENSION IF NOT EXISTS vector;

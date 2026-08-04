@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import asyncio
 
+from core.bounded_workers import map_bounded, resolve_worker_concurrency
 from core.data_models import Tweet, ProcessingStats
 from core.config import config
 from .arxiv_processor_v2 import ArXivProcessorV2
@@ -24,7 +25,11 @@ class DocumentFactory:
         self.arxiv_processor = ArXivProcessorV2(vault_path)
         self.pdf_processor = PDFProcessor(vault_path)
         self.readme_processor = READMEProcessor(vault_path)
-        self.concurrent_workers = max(1, int(config.get('processing.documents.concurrent_workers', 3)))
+        self.concurrent_workers = resolve_worker_concurrency(
+            config.get('processing.documents.concurrent_workers', 3),
+            default=3,
+            setting_name='processing.documents.concurrent_workers',
+        )
 
         self.processors = {
             'arxiv': self.arxiv_processor,
@@ -94,41 +99,44 @@ class DocumentFactory:
             'readme': []
         }
         
-        # Create tasks for each processor
-        tasks = []
+        work_items = []
         
         # ArXiv processing
         arxiv_urls = self.arxiv_processor.extract_urls_from_tweet(tweet)
         for url in arxiv_urls:
-            task = asyncio.create_task(
-                self._download_document_async(self.arxiv_processor, url, tweet.id, resume)
-            )
-            tasks.append(('arxiv', task))
+            work_items.append(('arxiv', self.arxiv_processor, url))
         
         # PDF processing
         pdf_urls = self.pdf_processor.extract_urls_from_tweet(tweet)
         for url in pdf_urls:
-            task = asyncio.create_task(
-                self._download_document_async(self.pdf_processor, url, tweet.id, resume)
-            )
-            tasks.append(('pdf', task))
+            work_items.append(('pdf', self.pdf_processor, url))
         
         # README processing
         readme_urls = self.readme_processor.extract_urls_from_tweet(tweet)
         for url in readme_urls:
-            task = asyncio.create_task(
-                self._download_document_async(self.readme_processor, url, tweet.id, resume)
-            )
-            tasks.append(('readme', task))
-        
-        # Wait for all tasks to complete
-        for doc_type, task in tasks:
+            work_items.append(('readme', self.readme_processor, url))
+
+        async def download_item(item):
+            doc_type, processor, url = item
             try:
-                document = await task
-                if document:
-                    results[doc_type].append(document)
+                document = await self._download_document_async(
+                    processor,
+                    url,
+                    tweet.id,
+                    resume,
+                )
+                return doc_type, document
             except Exception as e:
                 logger.error(f"Failed to process {doc_type} document for tweet {tweet.id}: {e}")
+                return doc_type, None
+
+        for doc_type, document in await map_bounded(
+            work_items,
+            download_item,
+            concurrency=self.concurrent_workers,
+        ):
+            if document:
+                results[doc_type].append(document)
         
         # Attach documents to tweet
         if results['arxiv']:

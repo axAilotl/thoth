@@ -1,0 +1,18 @@
+{
+  "artifacts": [
+    {
+      "source_name": "pi_skill:golden-notes",
+      "artifact_type": "transcript",
+      "artifact_id": "pi-golden-note",
+      "capabilities": ["transcript", "skill_output"],
+      "payload": {
+        "title": "Pi Golden Note",
+        "summary": "A deterministic Pi skill output fixture.",
+        "raw_transcript": "Pi skill raw output stays preserved.",
+        "processed_transcript": "Pi skill raw output stays preserved.",
+        "tags": ["pi", "fixtures"],
+        "language": "en"
+      }
+    }
+  ]
+}

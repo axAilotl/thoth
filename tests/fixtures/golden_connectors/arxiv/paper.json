@@ -1,0 +1,12 @@
+{
+  "id": "2604.00001",
+  "arxiv_id": "2604.00001",
+  "title": "A Deterministic Fixture Corpus for Local Connectors",
+  "authors": ["Ada Lovelace", "Grace Hopper"],
+  "abstract": "We describe a small local corpus for exercising connector ingestion without network access.",
+  "pdf_url": "https://arxiv.org/pdf/2604.00001.pdf",
+  "published_at": "2026-04-01T00:00:00Z",
+  "categories": ["cs.SE", "cs.DL"],
+  "source_type": "arxiv",
+  "raw_content": "Atom entry fixture for arXiv paper 2604.00001."
+}

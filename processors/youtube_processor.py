@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from core.data_models import ProcessingStats
 from core.config import config
+from core.connector_budgets import ConnectorBudgetError
 from core.pipeline_registry import PipelineStage, register_pipeline_stages
 
 logger = logging.getLogger(__name__)
@@ -346,7 +347,7 @@ class YouTubeProcessor:
                     video_id=video_id,
                     title=f"YouTube Video {video_id}",
                     description="Video information unavailable (API access failed)",
-                    published_at="Unknown",
+                    published_at="",
                     channel_id="Unknown",
                     channel_title="Unknown"
                 )
@@ -364,14 +365,24 @@ class YouTubeProcessor:
 
             # Get transcript if enabled
             if self.enable_transcripts:
-                logger.debug(f"📝 [YT] Try transcript {video_id}")
+                logger.debug(
+                    "📝 [YT] Try transcript for video %s from %s -> %s",
+                    video_id,
+                    log_source,
+                    transcript_file,
+                )
                 transcript_fetch_start = time.time()
                 raw_transcript = await self.get_video_transcript(video_id)
                 metrics['transcript_seconds'] += time.time() - transcript_fetch_start
 
                 formatted_transcript = None
                 if raw_transcript and self.transcript_llm_processor and self.transcript_llm_processor.is_enabled():
-                    logger.debug(f"🤖 [YT] LLM format transcript {video_id}")
+                    logger.debug(
+                        "🤖 [YT] LLM format transcript for video %s from %s -> %s",
+                        video_id,
+                        log_source,
+                        transcript_file,
+                    )
                     logger.info(
                         "Processing transcript with LLM for video %s from %s -> %s",
                         video_id,
@@ -405,9 +416,22 @@ class YouTubeProcessor:
                         formatted_length = len(formatted_transcript)
                         chunk_metadata = None
                     if raw_transcript:
-                        logger.info(f"✅ LLM formatted transcript: {len(raw_transcript)} → {formatted_length} characters")
+                        logger.info(
+                            "✅ LLM formatted transcript for video %s from %s -> %s: %s → %s characters",
+                            video_id,
+                            log_source,
+                            transcript_file,
+                            len(raw_transcript),
+                            formatted_length,
+                        )
                     else:
-                        logger.info(f"✅ LLM generated transcript: {formatted_length} characters")
+                        logger.info(
+                            "✅ LLM generated transcript for video %s from %s -> %s: %s characters",
+                            video_id,
+                            log_source,
+                            transcript_file,
+                            formatted_length,
+                        )
 
                     if chunk_metadata and chunk_metadata.get('chunks_failed'):
                         metrics['transcript_failed'] += chunk_metadata.get('chunks_failed', 0)
@@ -418,7 +442,12 @@ class YouTubeProcessor:
                 else:
                     video.formatted_transcript = None
                     if raw_transcript:
-                        logger.info("Using raw transcript (LLM formatting failed or disabled)")
+                        logger.info(
+                            "Using raw transcript for video %s from %s -> %s (LLM formatting failed or disabled)",
+                            video_id,
+                            log_source,
+                            transcript_file,
+                        )
                         metrics['transcript_failed'] += 1
                         chunk_metadata = {
                             'chunks_total': 0,
@@ -431,7 +460,12 @@ class YouTubeProcessor:
             else:
                 video.chunk_metadata = None
 
-            logger.debug(f"💾 [YT] Write transcript file {transcript_file.name}")
+            logger.debug(
+                "💾 [YT] Write transcript file for video %s from %s -> %s",
+                video_id,
+                log_source,
+                transcript_file,
+            )
             await self._create_transcript_file(video, transcript_file)
 
             logger.info(
@@ -442,6 +476,8 @@ class YouTubeProcessor:
             )
             return video, metrics
 
+        except ConnectorBudgetError:
+            raise
         except Exception as e:
             logger.error(f"Error processing video {video_id} for {source_label or 'unattributed source'}: {e}")
             metrics['transcript_failed'] += 1
@@ -485,6 +521,16 @@ class YouTubeProcessor:
                     yaml_lines.append("  failed_chunks:")
                     for idx in failed:
                         yaml_lines.append(f"    - {idx}")
+                chunk_ids = chunk_meta.get('chunk_ids') or []
+                if chunk_ids:
+                    yaml_lines.append("  chunk_ids:")
+                    for chunk_id in chunk_ids:
+                        yaml_lines.append(f"    - {chunk_id}")
+                failed_chunk_ids = chunk_meta.get('failed_chunk_ids') or []
+                if failed_chunk_ids:
+                    yaml_lines.append("  failed_chunk_ids:")
+                    for chunk_id in failed_chunk_ids:
+                        yaml_lines.append(f"    - {chunk_id}")
                 chunk_yaml = "\n".join(yaml_lines) + "\n"
 
             content = f"""---
@@ -530,6 +576,11 @@ processed_at: {datetime.now().isoformat()}
                     content += f"- Processed: {processed_chunks}/{total}\n"
                 if failed_chunks:
                     content += f"- Failed chunks: {failed_chunks}\n"
+                chunk_ids = chunk_meta.get('chunk_ids') or []
+                if chunk_ids:
+                    content += "- Chunk IDs:\n"
+                    for chunk_id in chunk_ids:
+                        content += f"  - `{chunk_id}`\n"
                 content += f"- Fallback used: {'Yes' if fallback_used else 'No'}\n\n"
 
             # Add embedded video

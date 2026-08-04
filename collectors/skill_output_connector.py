@@ -5,14 +5,22 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from core.capture_event_store import CaptureEventStore
+from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config
-from core.metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
+from core.connector_budgets import (
+    start_connector_budget_run,
+    transcript_text_from_payload,
+)
+from core.connector_capture import ConnectorCaptureQueue
+from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
 
 
@@ -42,6 +50,7 @@ ENVELOPE_KEYS = {
     "source_name",
     "type",
 }
+URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -62,6 +71,7 @@ class SkillOutputResult:
     records: tuple[SkillOutputRecord, ...] = field(default_factory=tuple)
     output_paths: tuple[str, ...] = field(default_factory=tuple)
     output_dirs: tuple[str, ...] = field(default_factory=tuple)
+    budget: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +88,7 @@ class SkillOutputResult:
             "queued_count": sum(1 for record in self.records if record.queued),
             "output_paths": list(self.output_paths),
             "output_dirs": list(self.output_dirs),
+            "budget": self.budget,
         }
 
 
@@ -89,6 +100,7 @@ class _PreparedEnvelope:
     priority: int
     payload: dict[str, Any]
     capabilities: tuple[str, ...]
+    raw_output_path: Path
 
 
 class SkillOutputConnector:
@@ -100,11 +112,20 @@ class SkillOutputConnector:
         *,
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
+        capture_event_store: CaptureEventStore | None = None,
+        collector_name: str = "skill_output_connector",
     ):
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.layout.ensure_directories()
         self.db = db or get_metadata_db()
+        self.collector_name = collector_name
+        self.capture_queue = ConnectorCaptureQueue(
+            self.config,
+            layout=self.layout,
+            db=self.db,
+            capture_event_store=capture_event_store,
+        )
 
     async def collect(
         self,
@@ -145,42 +166,84 @@ class SkillOutputConnector:
         if limit is not None:
             input_files = input_files[: max(0, int(limit))]
 
-        records: list[SkillOutputRecord] = []
+        budget = start_connector_budget_run(self.config, "skill_outputs")
+        budget.add_files(input_files)
+        payload_batches: list[tuple[Path, list[Any]]] = []
+        envelope_count = 0
         for output_path in input_files:
             envelope_payloads = await asyncio.to_thread(
                 self._load_envelope_payloads,
                 output_path,
             )
-            for envelope_payload in envelope_payloads:
-                envelope_source_name = _source_name_from_envelope(
+            payload_batches.append((output_path, envelope_payloads))
+            envelope_count += len(envelope_payloads)
+            for index, envelope_payload in enumerate(envelope_payloads, 1):
+                self._add_transcript_budget(
+                    budget,
                     envelope_payload,
-                    default_source_name=resolved_source,
+                    label=f"{output_path}:{index}",
                 )
-                raw_output_path = await asyncio.to_thread(
-                    self._preserve_raw_output,
-                    output_path,
-                    envelope_source_name,
-                )
-                envelope = self._prepare_envelope(
-                    envelope_payload,
-                    default_source_name=resolved_source,
-                    raw_output_path=raw_output_path,
-                )
-                self._queue_envelope(envelope)
-                records.append(
-                    SkillOutputRecord(
-                        artifact_id=envelope.artifact_id,
-                        artifact_type=envelope.artifact_type,
-                        source_name=envelope.source_name,
+        budget.add_estimated_output_artifacts(
+            envelope_count,
+            label="skill output envelopes",
+        )
+        budget_summary = budget.summary()
+
+        records: list[SkillOutputRecord] = []
+        run_id = datetime.now().isoformat()
+        with self.capture_queue.lifecycle() as lifecycle:
+            for output_path, envelope_payloads in payload_batches:
+                for envelope_payload in envelope_payloads:
+                    envelope_source_name = _source_name_from_envelope(
+                        envelope_payload,
+                        default_source_name=resolved_source,
+                    )
+                    raw_output_path = await asyncio.to_thread(
+                        self._preserve_raw_output,
+                        output_path,
+                        envelope_source_name,
+                    )
+                    envelope = self._prepare_envelope(
+                        envelope_payload,
+                        default_source_name=resolved_source,
                         raw_output_path=raw_output_path,
                     )
-                )
+                    self._queue_envelope(lifecycle, envelope, run_id=run_id)
+                    records.append(
+                        SkillOutputRecord(
+                            artifact_id=envelope.artifact_id,
+                            artifact_type=envelope.artifact_type,
+                            source_name=envelope.source_name,
+                            raw_output_path=raw_output_path,
+                        )
+                    )
 
         return SkillOutputResult(
             records=tuple(records),
             output_paths=tuple(str(path) for path in resolved_paths),
             output_dirs=tuple(str(path) for path in resolved_dirs),
+            budget=budget_summary,
         )
+
+    def _add_transcript_budget(
+        self,
+        budget: Any,
+        envelope_payload: Any,
+        *,
+        label: str,
+    ) -> None:
+        if not isinstance(envelope_payload, Mapping):
+            return
+        artifact_type = _clean_string(
+            envelope_payload.get("artifact_type") or envelope_payload.get("type")
+        )
+        if (artifact_type or "").lower() != "transcript":
+            return
+        payload_value = envelope_payload.get("payload")
+        payload = payload_value if isinstance(payload_value, Mapping) else envelope_payload
+        transcript_text = transcript_text_from_payload(payload)
+        if transcript_text:
+            budget.add_transcript_text(transcript_text, label=label)
 
     def _resolve_input_files(
         self,
@@ -285,8 +348,8 @@ class SkillOutputConnector:
         else:
             raise ValueError("Skill output envelope payload must be an object")
 
-        _reject_wiki_write_fields(envelope)
-        _reject_wiki_write_fields(payload)
+        reject_direct_wiki_write_claims(envelope, wiki_root=self.layout.wiki_root)
+        reject_direct_wiki_write_claims(payload, wiki_root=self.layout.wiki_root)
 
         raw_output_ref = self._relative_to_vault(raw_output_path)
         artifact_id = _clean_string(envelope.get("artifact_id") or payload.get("id"))
@@ -330,19 +393,70 @@ class SkillOutputConnector:
             priority=priority,
             payload=payload,
             capabilities=capabilities,
+            raw_output_path=raw_output_path,
         )
 
-    def _queue_envelope(self, envelope: _PreparedEnvelope) -> None:
-        entry = IngestionQueueEntry(
-            artifact_id=envelope.artifact_id,
-            artifact_type=envelope.artifact_type,
-            source=envelope.source_name,
-            payload_json=json.dumps(envelope.payload, ensure_ascii=False),
-            created_at=datetime.now().isoformat(),
-            capabilities_json=json.dumps(list(envelope.capabilities)),
-            priority=envelope.priority,
+    def _queue_envelope(
+        self,
+        lifecycle: CaptureLifecycleService,
+        envelope: _PreparedEnvelope,
+        *,
+        run_id: str,
+    ) -> None:
+        captured_at = datetime.now().isoformat()
+        source_type = (
+            "pi_skill"
+            if envelope.source_name.startswith("pi_skill")
+            else "skill_output"
         )
-        if not self.db.upsert_ingestion_entry(entry):
+        self.capture_queue.queue_payload(
+            lifecycle,
+            artifact_type=envelope.artifact_type,
+            payload=envelope.payload,
+            source={
+                "source_name": envelope.source_name,
+                "source_type": source_type,
+                "collector": self.collector_name,
+                "native_source_id": envelope.source_name,
+                "metadata": {"artifact_type": envelope.artifact_type},
+            },
+            session={
+                "session_type": "skill_output_collect",
+                "native_session_id": f"skill_output:{run_id}",
+                "started_at": run_id,
+                "metadata": {
+                    "collector": self.collector_name,
+                    "capture_run_id": run_id,
+                },
+            },
+            event={
+                "event_type": "skill_output_artifact",
+                "native_event_id": envelope.artifact_id,
+                "captured_at": captured_at,
+                "privacy": {
+                    "classification": "operator_supplied",
+                    "privacy_class": "operator_supplied",
+                },
+                "retention": {
+                    "retention_class": "skill_output",
+                    "policy": "skill_output",
+                    "action": "retain",
+                    "scope": ["raw_capture", "artifact_queue"],
+                },
+                "provenance": {
+                    "collector": self.collector_name,
+                    "capture_run_id": run_id,
+                    "raw_preserved": True,
+                    "security_policy": "prompt_security_scan_on_queue",
+                    "source_trust_reason": "operator_supplied_skill_output",
+                },
+            },
+            raw_path=envelope.raw_output_path,
+            queue_artifact_id=envelope.artifact_id,
+            priority=envelope.priority,
+            capabilities=envelope.capabilities,
+        )
+        if self.db.get_ingestion_entry(envelope.artifact_id) is None:
             raise RuntimeError(f"Failed to queue skill output artifact: {envelope.artifact_id}")
 
     def _relative_to_vault(self, path: Path | None) -> str | None:
@@ -365,7 +479,12 @@ def _envelope_payloads_from_json(payload: Any) -> list[Any]:
     raise ValueError("Skill output JSON must contain an object or array")
 
 
-def _reject_wiki_write_fields(value: Any) -> None:
+def reject_direct_wiki_write_claims(
+    value: Any,
+    *,
+    wiki_root: Path | None = None,
+) -> None:
+    """Reject envelope claims that try to steer output into compiled wiki paths."""
     if isinstance(value, Mapping):
         forbidden = sorted(FORBIDDEN_WIKI_WRITE_KEYS.intersection(value.keys()))
         if forbidden:
@@ -374,10 +493,49 @@ def _reject_wiki_write_fields(value: Any) -> None:
                 + ", ".join(forbidden)
             )
         for nested in value.values():
-            _reject_wiki_write_fields(nested)
+            reject_direct_wiki_write_claims(nested, wiki_root=wiki_root)
     elif isinstance(value, list):
         for item in value:
-            _reject_wiki_write_fields(item)
+            reject_direct_wiki_write_claims(item, wiki_root=wiki_root)
+    elif isinstance(value, str) and _looks_like_direct_wiki_path(
+        value,
+        wiki_root=wiki_root,
+    ):
+        raise ValueError(
+            "Skill outputs cannot target direct wiki paths: " + value.strip()
+        )
+
+
+def _looks_like_direct_wiki_path(value: str, *, wiki_root: Path | None) -> bool:
+    text = value.strip().strip("'\"")
+    if not text:
+        return False
+    lowered = text.lower().replace("\\", "/")
+    if lowered.startswith(("http://", "https://")):
+        return False
+    for prefix in ("local_file:", "file://", "file:", "path:", "output:", "target:"):
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix) :].lstrip()
+            break
+    if lowered.startswith(("wiki/", "./wiki/", "../wiki/")):
+        return True
+    lowered_without_urls = URL_RE.sub("", lowered).strip()
+    if lowered_without_urls.startswith(("wiki/", "./wiki/", "../wiki/")):
+        return True
+    if "/wiki/" in lowered_without_urls and not any(
+        character.isspace() for character in lowered_without_urls
+    ):
+        return True
+    if wiki_root is None:
+        return False
+    candidate = Path(text).expanduser()
+    if not candidate.is_absolute():
+        return False
+    try:
+        candidate.resolve().relative_to(wiki_root.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _source_name_from_envelope(

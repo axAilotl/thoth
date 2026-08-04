@@ -1,4 +1,4 @@
-"""Minimal MCP-style stdio server over Thoth agent surface tools."""
+"""Minimal read-only MCP-style stdio server over Thoth agent surface tools."""
 
 from __future__ import annotations
 
@@ -21,11 +21,30 @@ def _schema(properties: dict[str, Any], required: list[str] | None = None) -> di
 TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "name": "wiki_query",
-        "description": "Search the compiled wiki and return provenance for each hit.",
+        "description": "Search wiki pages, artifacts, and capture events with an agent-safe response envelope.",
         "inputSchema": _schema(
             {
                 "query": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "default": 10},
+                "include_quarantined": {"type": "boolean", "default": False},
+                "result_types": {"type": "array", "items": {"type": "string"}},
+                "source_types": {"type": "array", "items": {"type": "string"}},
+                "source_ids": {"type": "array", "items": {"type": "string"}},
+                "source_paths": {"type": "array", "items": {"type": "string"}},
+                "artifact_types": {"type": "array", "items": {"type": "string"}},
+                "event_types": {"type": "array", "items": {"type": "string"}},
+                "wiki_kinds": {"type": "array", "items": {"type": "string"}},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "exclude_tags": {"type": "array", "items": {"type": "string"}},
+                "security_statuses": {"type": "array", "items": {"type": "string"}},
+                "min_trust_score": {"type": "number"},
+                "time_after": {"type": "string"},
+                "time_before": {"type": "string"},
+                "created_after": {"type": "string"},
+                "created_before": {"type": "string"},
+                "updated_after": {"type": "string"},
+                "updated_before": {"type": "string"},
+                "use_embedding": {"type": "boolean", "default": False},
             },
             ["query"],
         ),
@@ -46,7 +65,10 @@ TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "name": "get_artifact",
         "description": "Return a single artifact record and canonical payload.",
         "inputSchema": _schema(
-            {"artifact_id": {"type": "string"}},
+            {
+                "artifact_id": {"type": "string"},
+                "include_quarantined": {"type": "boolean", "default": False},
+            },
             ["artifact_id"],
         ),
     },
@@ -54,8 +76,56 @@ TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "name": "get_artifact_provenance",
         "description": "Return queue and source provenance for one artifact.",
         "inputSchema": _schema(
-            {"artifact_id": {"type": "string"}},
+            {
+                "artifact_id": {"type": "string"},
+                "include_quarantined": {"type": "boolean", "default": False},
+            },
             ["artifact_id"],
+        ),
+    },
+    {
+        "name": "search_capture_events",
+        "description": "Search capture events with an agent-safe response envelope.",
+        "inputSchema": _schema(
+            {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "default": 10},
+                "include_quarantined": {"type": "boolean", "default": False},
+                "source_types": {"type": "array", "items": {"type": "string"}},
+                "source_ids": {"type": "array", "items": {"type": "string"}},
+                "source_paths": {"type": "array", "items": {"type": "string"}},
+                "event_types": {"type": "array", "items": {"type": "string"}},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "exclude_tags": {"type": "array", "items": {"type": "string"}},
+                "security_statuses": {"type": "array", "items": {"type": "string"}},
+                "min_trust_score": {"type": "number"},
+                "time_after": {"type": "string"},
+                "time_before": {"type": "string"},
+            },
+            ["query"],
+        ),
+    },
+    {
+        "name": "get_capture_event",
+        "description": "Return one capture event with cited provenance, security, and trust state.",
+        "inputSchema": _schema(
+            {
+                "event_id": {"type": "string"},
+                "include_quarantined": {"type": "boolean", "default": False},
+            },
+            ["event_id"],
+        ),
+    },
+    {
+        "name": "inspect_provenance",
+        "description": "Inspect artifact or capture-event provenance without taking actions.",
+        "inputSchema": _schema(
+            {
+                "target_type": {"type": "string"},
+                "target_id": {"type": "string"},
+                "include_quarantined": {"type": "boolean", "default": False},
+            },
+            ["target_type", "target_id"],
         ),
     },
     {
@@ -64,26 +134,14 @@ TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "inputSchema": _schema({}),
     },
     {
-        "name": "run_connector",
-        "description": "Plan or execute a connector through the shared Thoth service layer.",
+        "name": "list_connector_runs",
+        "description": "List connector run history, checkpoints, failure reasons, and retry state.",
         "inputSchema": _schema(
             {
                 "connector_name": {"type": "string"},
-                "execute": {"type": "boolean", "default": False},
-                "options": {"type": "object"},
-            },
-            ["connector_name"],
-        ),
-    },
-    {
-        "name": "connector_run_plan",
-        "description": "Return a safe connector run plan without executing the connector.",
-        "inputSchema": _schema(
-            {
-                "connector_name": {"type": "string"},
-                "options": {"type": "object"},
-            },
-            ["connector_name"],
+                "status": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "default": 20},
+            }
         ),
     },
     {
@@ -109,9 +167,11 @@ class ThothMCPServer:
             "list_artifacts": self._list_artifacts,
             "get_artifact": self._get_artifact,
             "get_artifact_provenance": self._get_artifact_provenance,
+            "search_capture_events": self._search_capture_events,
+            "get_capture_event": self._get_capture_event,
+            "inspect_provenance": self._inspect_provenance,
             "list_connectors": self._list_connectors,
-            "run_connector": self._run_connector,
-            "connector_run_plan": self._connector_run_plan,
+            "list_connector_runs": self._list_connector_runs,
             "research_missing_papers": self._research_missing_papers,
         }
 
@@ -178,6 +238,25 @@ class ThothMCPServer:
         return self.service.query_wiki(
             str(arguments.get("query") or ""),
             limit=int(arguments.get("limit") or 10),
+            include_quarantined=bool(arguments.get("include_quarantined", False)),
+            result_types=arguments.get("result_types"),
+            source_types=arguments.get("source_types"),
+            source_ids=arguments.get("source_ids"),
+            source_paths=arguments.get("source_paths"),
+            artifact_types=arguments.get("artifact_types"),
+            event_types=arguments.get("event_types"),
+            wiki_kinds=arguments.get("wiki_kinds"),
+            tags=arguments.get("tags"),
+            exclude_tags=arguments.get("exclude_tags"),
+            security_statuses=arguments.get("security_statuses"),
+            min_trust_score=arguments.get("min_trust_score"),
+            time_after=arguments.get("time_after"),
+            time_before=arguments.get("time_before"),
+            created_after=arguments.get("created_after"),
+            created_before=arguments.get("created_before"),
+            updated_after=arguments.get("updated_after"),
+            updated_before=arguments.get("updated_before"),
+            use_embedding=bool(arguments.get("use_embedding", False)),
         )
 
     def _list_artifacts(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -189,26 +268,55 @@ class ThothMCPServer:
         )
 
     def _get_artifact(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        return self.service.get_artifact(str(arguments.get("artifact_id") or ""))
+        return self.service.get_artifact(
+            str(arguments.get("artifact_id") or ""),
+            include_quarantined=bool(arguments.get("include_quarantined", False)),
+        )
 
     def _get_artifact_provenance(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        return self.service.get_artifact_provenance(str(arguments.get("artifact_id") or ""))
+        return self.service.get_artifact_provenance(
+            str(arguments.get("artifact_id") or ""),
+            include_quarantined=bool(arguments.get("include_quarantined", False)),
+        )
+
+    def _search_capture_events(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.service.search_capture_events(
+            str(arguments.get("query") or ""),
+            limit=int(arguments.get("limit") or 10),
+            include_quarantined=bool(arguments.get("include_quarantined", False)),
+            source_types=arguments.get("source_types"),
+            source_ids=arguments.get("source_ids"),
+            source_paths=arguments.get("source_paths"),
+            event_types=arguments.get("event_types"),
+            tags=arguments.get("tags"),
+            exclude_tags=arguments.get("exclude_tags"),
+            security_statuses=arguments.get("security_statuses"),
+            min_trust_score=arguments.get("min_trust_score"),
+            time_after=arguments.get("time_after"),
+            time_before=arguments.get("time_before"),
+        )
+
+    def _get_capture_event(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.service.get_capture_event(
+            str(arguments.get("event_id") or ""),
+            include_quarantined=bool(arguments.get("include_quarantined", False)),
+        )
+
+    def _inspect_provenance(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.service.inspect_provenance(
+            str(arguments.get("target_type") or ""),
+            str(arguments.get("target_id") or ""),
+            include_quarantined=bool(arguments.get("include_quarantined", False)),
+        )
 
     def _list_connectors(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.service.list_connectors()
 
-    def _run_connector(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        return self.service.run_connector(
-            str(arguments.get("connector_name") or ""),
-            execute=bool(arguments.get("execute", False)),
-            options=arguments.get("options") or {},
-        )
-
-    def _connector_run_plan(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        return self.service.run_connector(
-            str(arguments.get("connector_name") or ""),
-            execute=False,
-            options=arguments.get("options") or {},
+    def _list_connector_runs(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.service.list_connector_runs(
+            connector_name=arguments.get("connector_name"),
+            status=arguments.get("status"),
+            limit=int(arguments.get("limit") or 20),
         )
 
     def _research_missing_papers(self, arguments: dict[str, Any]) -> dict[str, Any]:

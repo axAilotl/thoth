@@ -566,6 +566,53 @@
         }
         .stat-label { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
 
+        .security-table-wrap {
+            overflow-x: auto;
+            border: 1px solid rgba(202, 162, 94, 0.1);
+            background: rgba(15, 10, 7, 0.3);
+        }
+        .security-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.84rem;
+        }
+        .security-table th,
+        .security-table td {
+            text-align: left;
+            vertical-align: top;
+            padding: 9px 10px;
+            border-bottom: 1px solid rgba(202, 162, 94, 0.1);
+        }
+        .security-table th {
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+        .security-empty {
+            padding: 14px;
+            color: var(--text-secondary);
+            border: 1px dashed var(--border);
+            background: rgba(15, 10, 7, 0.2);
+        }
+        .lint-result {
+            margin-top: 12px;
+            padding: 12px;
+            border: 1px solid rgba(202, 162, 94, 0.12);
+            background: rgba(15, 10, 7, 0.3);
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            white-space: pre-wrap;
+        }
+        a.btn {
+            text-decoration: none;
+        }
+        a.btn.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
         /* Modal */
         .modal-overlay {
             display: none;
@@ -649,18 +696,17 @@
             <button class="tab active" data-tab="stats">Overview</button>
             <button class="tab" data-tab="pipeline">Sources &amp; Skills</button>
             <button class="tab" data-tab="archivist">Wiki &amp; Archivist</button>
-            <button class="tab" data-tab="providers">Models</button>
-            <button class="tab" data-tab="tasks">Task Routing</button>
+            <button class="tab" data-tab="security">Security</button>
             <button class="tab" data-tab="paths">Advanced</button>
         </div>
 
-        <!-- LLM Providers Tab -->
+        <!-- LLM Providers Advanced Section -->
         <div id="providers" class="tab-content">
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <h2 class="card-title">LLM Providers</h2>
-                        <p class="card-description">Configure AI providers, API keys, and models. Providers with vision support can be used for image alt-text generation.</p>
+                        <h2 class="card-title">Advanced: Model Providers</h2>
+                        <p class="card-description">Configure AI providers, API keys, and model aliases. Most operators only need this when changing provider accounts or model routes.</p>
                     </div>
                 </div>
 
@@ -678,12 +724,12 @@
             </div>
         </div>
 
-        <!-- Task Routing Tab -->
+        <!-- Task Routing Advanced Section -->
         <div id="tasks" class="tab-content">
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <h2 class="card-title">Task Routing</h2>
+                        <h2 class="card-title">Advanced: Task Routing</h2>
                         <p class="card-description">Configure which provider and model alias handles each AI task. Translation routing is used for English companion generation.</p>
                     </div>
                 </div>
@@ -1419,6 +1465,77 @@
             </div>
         </div>
 
+        <!-- Security Tab -->
+        <div id="security" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Security</h2>
+                        <p class="card-description">Read-only runtime status for configured auth, prompt handling, and connector side-effect declarations.</p>
+                    </div>
+                </div>
+
+                <div class="stats-grid" id="security-dashboard-stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="security-artifacts-total">-</div>
+                        <div class="stat-label">Artifacts Checked</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="security-findings-total">-</div>
+                        <div class="stat-label">Findings</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="security-quarantined-total">-</div>
+                        <div class="stat-label">Quarantined</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="security-strict-total">-</div>
+                        <div class="stat-label">Strict Failures</div>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 18px;">
+                    <label>Findings by Connector/Source</label>
+                    <div id="security-findings-by-source" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Quarantined Artifacts</label>
+                    <div id="security-quarantine-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Strict Failures</label>
+                    <div id="security-strict-failures" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Secret Redactions</label>
+                    <textarea id="security-redactions" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Lint Actions</label>
+                    <div class="btn-group" style="margin-top: 0;">
+                        <button class="btn btn-secondary btn-small" id="security-okf-lint-button" onclick="runSettingsLint('okf')">Run OKF Lint</button>
+                        <button class="btn btn-secondary btn-small" id="security-security-lint-button" onclick="runSettingsLint('security')">Run Security Lint</button>
+                        <a class="btn btn-secondary btn-small disabled" id="security-okf-lint-download" href="/api/settings/lint/okf/download" download>Download OKF JSON</a>
+                        <a class="btn btn-secondary btn-small disabled" id="security-security-lint-download" href="/api/settings/lint/security/download" download>Download Security JSON</a>
+                    </div>
+                    <div id="security-lint-result" class="lint-result">No lint run yet</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Connector Auth Status</label>
+                    <textarea id="security-auth-summary" rows="7" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Prompt and Redaction Handling</label>
+                    <textarea id="security-prompt-summary" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Declared Safety Modes and Side Effects</label>
+                    <textarea id="security-side-effects" rows="6" readonly></textarea>
+                </div>
+            </div>
+        </div>
+
         <!-- Stats Tab -->
         <div id="stats" class="tab-content active">
             <div class="card">
@@ -1452,6 +1569,92 @@
             <div class="card">
                 <div class="card-header">
                     <div>
+                        <h2 class="card-title">Capture &amp; Compile Health</h2>
+                        <p class="card-description">Operational state from capture stores, queues, wiki lint, and compiler metadata</p>
+                    </div>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-sources">-</div>
+                        <div class="stat-label">Sources</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-events">-</div>
+                        <div class="stat-label">Events</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-queues">-</div>
+                        <div class="stat-label">Queued Items</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-stale-pages">-</div>
+                        <div class="stat-label">Stale Pages</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-compiler-runs">-</div>
+                        <div class="stat-label">Compiler Records</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-stuck">-</div>
+                        <div class="stat-label">Stuck Work</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-lineage-pages">-</div>
+                        <div class="stat-label">Lineage Pages</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-lineage-files">-</div>
+                        <div class="stat-label">Lineage Files</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-llm-cost">-</div>
+                        <div class="stat-label">LLM Cost Est.</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="health-llm-calls">-</div>
+                        <div class="stat-label">LLM Calls</div>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 16px;">
+                    <label>Source Health</label>
+                    <div id="health-source-table" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Recent Sessions</label>
+                    <div id="health-sessions-table" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Compiler Runs</label>
+                    <div id="health-compiler-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Stuck Work</label>
+                    <div id="health-stuck-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Artifact and Wiki Lineage</label>
+                    <div id="health-lineage-list" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Recent Expensive LLM Runs</label>
+                    <div id="health-llm-expensive-runs" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>LLM Totals by Source</label>
+                    <div id="health-llm-source-totals" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>LLM Totals by Task</label>
+                    <div id="health-llm-task-totals" class="security-table-wrap"></div>
+                </div>
+                <div class="form-group">
+                    <label>Errors</label>
+                    <textarea id="health-errors" rows="4" readonly></textarea>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div>
                         <h2 class="card-title">Runtime Health</h2>
                         <p class="card-description">Non-secret status from the active merged configuration</p>
                     </div>
@@ -1473,6 +1676,26 @@
                         <div class="stat-value" id="overview-okf">-</div>
                         <div class="stat-label">Wiki Target</div>
                     </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Operator Summary</h2>
+                        <p class="card-description">Runtime summary organized around what happened, what is stuck, and what should run next.</p>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>What Happened</label>
+                    <textarea id="overview-what-happened" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>What Is Stuck</label>
+                    <textarea id="overview-what-stuck" rows="4" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>What Should Run Next</label>
+                    <textarea id="overview-run-next" rows="4" readonly></textarea>
                 </div>
             </div>
         </div>
@@ -1534,13 +1757,20 @@
         let archivistRegistryState = null;
 
         // Tab switching
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                tab.classList.add('active');
-                document.getElementById(tab.dataset.tab).classList.add('active');
+        function showTab(tabName) {
+            const activeContentIds = tabName === 'paths'
+                ? ['providers', 'tasks', 'paths']
+                : [tabName];
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.tab === tabName);
             });
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.toggle('active', activeContentIds.includes(content.id));
+            });
+        }
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => showTab(tab.dataset.tab));
         });
 
         function showAlert(message, type = 'success') {
@@ -2051,15 +2281,39 @@
             element.textContent = value ?? '';
         }
 
+        function setHtmlValue(id, value) {
+            const element = document.getElementById(id);
+            if (!element) return;
+            element.innerHTML = value || '';
+        }
+
+        function formatUsd(value) {
+            const number = Number(value || 0);
+            if (!Number.isFinite(number)) return '$0.0000';
+            if (number >= 1) return `$${number.toFixed(2)}`;
+            return `$${number.toFixed(4)}`;
+        }
+
         function updateOverviewRuntime(groups) {
-            const providers = groups?.providers || {};
-            const connectors = groups?.connectors || {};
-            const skills = groups?.skills || {};
-            const wiki = groups?.wiki || {};
+            const overview = groups?.overview || {};
+            const advanced = groups?.advanced || {};
+            const sources = groups?.sources_and_skills || {};
+            const wiki = groups?.wiki_and_archivist || {};
+            const providers = advanced.providers || {};
+            const connectors = sources.connectors || {};
+            const skills = sources.skills || {};
             setTextValue('overview-providers', `${(providers.enabled || []).length}/${providers.total || 0}`);
             setTextValue('overview-connectors', `${(connectors.enabled || []).length}/${connectors.total || 0}`);
             setTextValue('overview-skills', `${skills.enabled ? 'on' : 'off'} / ${skills.total || 0}`);
             setTextValue('overview-okf', wiki.okf_target || '-');
+            setFieldValue('overview-what-happened', multilineFromValue(overview.what_happened || []));
+            setFieldValue(
+                'overview-what-stuck',
+                (overview.what_is_stuck || []).length > 0
+                    ? multilineFromValue(overview.what_is_stuck)
+                    : 'Nothing currently reported'
+            );
+            setFieldValue('overview-run-next', multilineFromValue(overview.what_should_run_next || []));
         }
 
         function renderPiSkillOptions(piSkills) {
@@ -2083,49 +2337,580 @@
         }
 
         function formatConnectorRuntimeSummary(group) {
-            const connectors = group?.items || group?.connectors || [];
+            const connectorGroup = group?.connectors && !Array.isArray(group.connectors)
+                ? group.connectors
+                : group;
+            const connectors = connectorGroup?.items || connectorGroup?.connectors || [];
             if (!Array.isArray(connectors) || connectors.length === 0) {
-                return group?.error ? `ERROR: ${group.error}` : 'No connector metadata loaded';
+                return connectorGroup?.error ? `ERROR: ${connectorGroup.error}` : 'No connector metadata loaded';
             }
             return connectors.map(connector => {
                 const artifacts = (connector.artifact_types || []).join(', ') || 'none';
+                const inputs = (connector.inputs || []).join(', ') || 'none';
+                const outputs = (connector.outputs || []).join(', ') || 'none';
                 const capabilities = (connector.capabilities || []).join(', ') || 'none';
+                const sideEffects = (connector.allowed_side_effects || []).join(', ') || 'none';
                 const configuredKeys = connector.configured_keys || [];
                 const configKeys = connector.config_keys || [];
                 const authStatus = connector.auth_status || {};
                 const authText = authStatus.keys?.length
                     ? `${authStatus.configured?.length || 0}/${authStatus.keys.length} auth keys configured`
                     : 'no auth required';
+                const budgetText = formatConnectorBudgetSummary(connector.budgets || {});
                 return [
                     `${connector.name}: ${connector.enabled ? 'enabled' : 'disabled'}`,
                     `  artifacts: ${artifacts}`,
+                    `  inputs: ${inputs}`,
+                    `  outputs: ${outputs}`,
                     `  capabilities: ${capabilities}`,
+                    `  safety: ${connector.safety_mode || 'unknown'}`,
+                    `  queue: ${connector.queue_behavior || (connector.queue_capability ? 'queue capable' : 'direct')}`,
+                    `  side effects: ${sideEffects}`,
+                    `  budget: ${budgetText}`,
                     `  config: ${configuredKeys.length}/${configKeys.length} keys configured`,
                     `  auth: ${authText}`
                 ].join('\n');
             }).join('\n\n');
         }
 
+        function formatConnectorBudgetSummary(budgets) {
+            if (budgets?.error) return `ERROR: ${budgets.error}`;
+            const limits = budgets?.limits || {};
+            const cost = budgets?.cost || {};
+            const maxCost = cost.max_estimated_cost == null ? 'unlimited' : `$${cost.max_estimated_cost}`;
+            return [
+                `files<=${limits.max_files_per_run ?? 'unlimited'}`,
+                `file_bytes<=${limits.max_bytes_per_file ?? 'unlimited'}`,
+                `run_bytes<=${limits.max_bytes_per_run ?? 'unlimited'}`,
+                `input_tokens<=${limits.max_input_tokens_per_run ?? 'unlimited'}`,
+                `output_tokens<=${limits.max_output_tokens_per_run ?? 'unlimited'}`,
+                `transcript_chunks<=${limits.max_transcript_chunks_per_run ?? 'unlimited'}`,
+                `cost<=${maxCost}`
+            ].join(', ');
+        }
+
+        function formatSecurityRuntimeSummary(security) {
+            const auth = security?.connector_auth || [];
+            const authSummary = auth.length > 0
+                ? auth.map(item => [
+                    `${item.name}: ${item.enabled ? 'enabled' : 'disabled'}`,
+                    `  configured: ${(item.configured || []).length}/${item.total || 0}`,
+                    `  missing: ${joinList(item.missing || [])}`
+                ].join('\n')).join('\n\n')
+                : 'No connector auth requirements reported';
+
+            const prompt = security?.prompt_security || {};
+            const promptSummary = [
+                `threat scanner: ${prompt.threat_scanner || 'not reported'}`,
+                `sensitive redaction: ${prompt.sensitive_redaction || 'not reported'}`,
+                `configured prompt groups: ${joinList(prompt.configured_prompt_groups || [])}`
+            ].join('\n');
+
+            const sideEffects = [
+                `safety modes: ${joinList(security?.safety_modes || [])}`,
+                `allowed side effects: ${joinList(security?.allowed_side_effects || [])}`
+            ].join('\n');
+
+            return { authSummary, promptSummary, sideEffects };
+        }
+
+        function formatCountMap(values) {
+            const entries = Object.entries(values || {});
+            if (entries.length === 0) return 'None';
+            return entries
+                .map(([key, value]) => `${key}: ${value}`)
+                .join('\n');
+        }
+
+        function renderSecuritySourceFindings(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No prompt-security findings are recorded by source.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th>Total</th>
+                            <th>Patterns</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.source || 'unknown')}</td>
+                                <td>${escapeHtml(row.total ?? 0)}</td>
+                                <td>${escapeHtml(formatCountMap(row.patterns || {}))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderSecurityArtifacts(rows, emptyText) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return `<div class="security-empty">${escapeHtml(emptyText)}</div>`;
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Artifact</th>
+                            <th>Source</th>
+                            <th>Status</th>
+                            <th>Policy</th>
+                            <th>Patterns</th>
+                            <th>Redactions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.artifact_id || '')}<br><span class="stat-label">${escapeHtml(row.artifact_type || '')}</span></td>
+                                <td>${escapeHtml(row.source || '')}</td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.policy_status || '')}<br><span class="stat-label">${escapeHtml(row.policy_reason || '')}</span></td>
+                                <td>${escapeHtml(joinList(row.strict_pattern_ids?.length ? row.strict_pattern_ids : row.pattern_ids || []))}</td>
+                                <td>${escapeHtml(formatCountMap(row.redaction_categories || {}))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderSecurityDashboard(security) {
+            const dashboard = security?.dashboard || {};
+            const counts = dashboard.counts || {};
+            setTextValue('security-artifacts-total', counts.total ?? 0);
+            setTextValue('security-findings-total', counts.findings ?? 0);
+            setTextValue('security-quarantined-total', counts.quarantined ?? 0);
+            setTextValue('security-strict-total', counts.strict_failures ?? 0);
+            setHtmlValue(
+                'security-findings-by-source',
+                renderSecuritySourceFindings(dashboard.findings_by_source || [])
+            );
+            setHtmlValue(
+                'security-quarantine-list',
+                renderSecurityArtifacts(
+                    dashboard.quarantined_artifacts || [],
+                    'No quarantined artifacts are recorded.'
+                )
+            );
+            setHtmlValue(
+                'security-strict-failures',
+                renderSecurityArtifacts(
+                    dashboard.strict_failures || [],
+                    'No strict security failures are recorded.'
+                )
+            );
+            const redactions = dashboard.redactions || {};
+            setFieldValue(
+                'security-redactions',
+                [
+                    `total: ${redactions.total || 0}`,
+                    formatCountMap(redactions.by_category || {})
+                ].join('\n')
+            );
+        }
+
+        function renderHealthSources(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No capture sources are recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th>Status</th>
+                            <th>Events</th>
+                            <th>Sessions</th>
+                            <th>Last Event</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.source_name || row.source_id || '')}<br><span class="stat-label">${escapeHtml(row.source_type || '')}</span></td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.event_count ?? 0)}</td>
+                                <td>${escapeHtml(row.session_count ?? 0)}<br><span class="stat-label">open ${escapeHtml(row.open_session_count ?? 0)}</span></td>
+                                <td>${escapeHtml(formatOptionalDate(row.last_event_at))}</td>
+                                <td>${escapeHtml(row.reason || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderHealthSessions(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No capture sessions are recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Session</th>
+                            <th>Source</th>
+                            <th>Status</th>
+                            <th>Events</th>
+                            <th>Started</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.session_id || '')}<br><span class="stat-label">${escapeHtml(row.session_type || '')}</span></td>
+                                <td>${escapeHtml(row.source_name || row.source_id || '')}</td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.event_count ?? 0)}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.started_at))}</td>
+                                <td>${escapeHtml(row.reason || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderHealthCompiler(status) {
+            const archivistRuns = status?.compiler_runs?.archivist?.recent || [];
+            const capturePages = status?.compiler_runs?.capture_wiki?.recent_pages || [];
+            const rows = [
+                ...archivistRuns.map(row => ({
+                    kind: 'archivist',
+                    id: row.topic_id,
+                    status: row.status,
+                    last: row.last_run_at || row.force_requested_at,
+                    count: row.last_candidate_count ?? 0,
+                    reason: row.reason || row.force_reason || ''
+                })),
+                ...capturePages.map(row => ({
+                    kind: `capture:${row.page_type || ''}`,
+                    id: row.slug || row.page_path,
+                    status: row.change_reason || 'compiled',
+                    last: row.updated_at,
+                    count: row.event_count ?? 0,
+                    reason: row.audit?.reason || ''
+                }))
+            ];
+            if (rows.length === 0) {
+                return '<div class="security-empty">No compiler run metadata is recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Compiler</th>
+                            <th>Record</th>
+                            <th>Status</th>
+                            <th>Count</th>
+                            <th>Last</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.kind || '')}</td>
+                                <td>${escapeHtml(row.id || '')}</td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.count ?? 0)}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.last))}</td>
+                                <td>${escapeHtml(row.reason || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderHealthStuck(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No stuck work is recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Kind</th>
+                            <th>ID</th>
+                            <th>Status</th>
+                            <th>Source</th>
+                            <th>Updated</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.kind || '')}</td>
+                                <td>${escapeHtml(row.id || '')}</td>
+                                <td>${escapeHtml(row.status || '')}</td>
+                                <td>${escapeHtml(row.source || row.artifact_type || '')}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.updated_at))}</td>
+                                <td>${escapeHtml(row.reason || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderLineagePages(lineage) {
+            const rows = lineage?.recent_pages || [];
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No wiki lineage metadata is recorded.</div>';
+            }
+            const previewList = (items, key, limit = 3) => {
+                if (!Array.isArray(items) || items.length === 0) return '-';
+                const labels = items.slice(0, limit).map(item => item?.[key] || '');
+                const extra = items.length > limit ? ` +${items.length - limit}` : '';
+                return `${labels.filter(Boolean).join(', ')}${extra}` || '-';
+            };
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Wiki Page</th>
+                            <th>Why Changed</th>
+                            <th>Local Files</th>
+                            <th>Capture</th>
+                            <th>Artifacts</th>
+                            <th>Semantic</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => {
+                            const summary = row.relation_summary || {};
+                            const captureText = `${summary.capture_events || 0} event(s), ${summary.raw_refs || 0} raw ref(s)`;
+                            return `
+                                <tr>
+                                    <td>${escapeHtml(row.title || row.slug || '')}<br><span class="stat-label">${escapeHtml(row.page_type || '')} · ${escapeHtml(formatOptionalDate(row.updated_at))}</span></td>
+                                    <td>${escapeHtml(row.why_changed || '')}<br><span class="stat-label">${escapeHtml(row.input_hash || 'no input hash')}</span></td>
+                                    <td>${escapeHtml(previewList(row.local_files, 'source_path'))}<br><span class="stat-label">${escapeHtml(summary.local_files ?? 0)} file(s)</span></td>
+                                    <td>${escapeHtml(captureText)}<br><span class="stat-label">${escapeHtml(previewList(row.raw_refs, 'raw_ref_id', 2))}</span></td>
+                                    <td>${escapeHtml(previewList(row.artifacts, 'artifact_id'))}<br><span class="stat-label">${escapeHtml(summary.artifacts ?? 0)} artifact(s)</span></td>
+                                    <td>${escapeHtml(previewList(row.semantic_candidates, 'candidate_id'))}<br><span class="stat-label">${escapeHtml(summary.semantic_candidates ?? 0)} candidate(s)</span></td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderLLMExpensiveRuns(rows) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return '<div class="security-empty">No LLM usage has been recorded.</div>';
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>Run</th>
+                            <th>Source</th>
+                            <th>Tasks</th>
+                            <th>Calls</th>
+                            <th>Tokens</th>
+                            <th>Cost</th>
+                            <th>Last</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row.run_id || '')}</td>
+                                <td>${escapeHtml(row.source_connector || 'direct')}</td>
+                                <td>${escapeHtml((row.tasks || []).join(', ') || '-')}</td>
+                                <td>${escapeHtml(row.call_count ?? 0)}<br><span class="stat-label">cache ${escapeHtml(row.cache_hits ?? 0)}</span></td>
+                                <td>${escapeHtml(row.total_tokens_estimate ?? 0)}</td>
+                                <td>${escapeHtml(formatUsd(row.cost_estimate_usd))}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.last_recorded_at))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderLLMTotals(rows, key, emptyText) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return `<div class="security-empty">${escapeHtml(emptyText)}</div>`;
+            }
+            return `
+                <table class="security-table">
+                    <thead>
+                        <tr>
+                            <th>${key === 'task' ? 'Task' : 'Source'}</th>
+                            <th>Calls</th>
+                            <th>Cache Hits</th>
+                            <th>Tokens</th>
+                            <th>Cost</th>
+                            <th>Last</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                <td>${escapeHtml(row[key] || 'direct')}</td>
+                                <td>${escapeHtml(row.call_count ?? 0)}</td>
+                                <td>${escapeHtml(row.cache_hits ?? 0)}</td>
+                                <td>${escapeHtml(row.total_tokens_estimate ?? 0)}</td>
+                                <td>${escapeHtml(formatUsd(row.cost_estimate_usd))}</td>
+                                <td>${escapeHtml(formatOptionalDate(row.last_recorded_at))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderAdminStatusDashboard(status) {
+            const sourceHealth = status?.source_health || {};
+            const events = status?.event_counts || {};
+            const queues = status?.queue_counts || {};
+            const stalePages = status?.stale_pages || {};
+            const compilerRuns = status?.compiler_runs || {};
+            const llmUsage = status?.llm_usage || {};
+            const stuck = status?.stuck_work || {};
+            const lineage = status?.lineage || {};
+            const bookmarkTotal = queues.bookmark_queue?.total || 0;
+            const ingestionTotal = queues.ingestion_queue?.total || 0;
+            const archivistCount = compilerRuns.archivist?.topic_count || 0;
+            const captureCompileCount = compilerRuns.capture_wiki?.compiled_page_count || 0;
+            const lineageRelationCounts = lineage.relation_counts || {};
+
+            setTextValue('health-sources', `${sourceHealth.active || 0}/${sourceHealth.total || 0}`);
+            setTextValue('health-events', events.total ?? 0);
+            setTextValue('health-queues', bookmarkTotal + ingestionTotal);
+            setTextValue('health-stale-pages', stalePages.total ?? 0);
+            setTextValue('health-compiler-runs', archivistCount + captureCompileCount);
+            setTextValue('health-stuck', stuck.total ?? 0);
+            setTextValue('health-lineage-pages', `${lineage.pages_with_lineage || 0}/${lineage.total_pages || 0}`);
+            setTextValue('health-lineage-files', lineageRelationCounts.local_files ?? 0);
+            setTextValue('health-llm-cost', formatUsd(llmUsage.total_cost_estimate_usd));
+            setTextValue('health-llm-calls', llmUsage.call_count ?? 0);
+            setHtmlValue('health-source-table', renderHealthSources(sourceHealth.sources || []));
+            setHtmlValue('health-sessions-table', renderHealthSessions(status?.recent_sessions?.sessions || []));
+            setHtmlValue('health-compiler-list', renderHealthCompiler(status || {}));
+            setHtmlValue('health-stuck-list', renderHealthStuck(stuck.items || []));
+            setHtmlValue('health-lineage-list', renderLineagePages(lineage));
+            setHtmlValue('health-llm-expensive-runs', renderLLMExpensiveRuns(llmUsage.recent_expensive_runs || []));
+            setHtmlValue(
+                'health-llm-source-totals',
+                renderLLMTotals(llmUsage.totals_by_source || [], 'source_connector', 'No LLM source totals are recorded.')
+            );
+            setHtmlValue(
+                'health-llm-task-totals',
+                renderLLMTotals(llmUsage.totals_by_task || [], 'task', 'No LLM task totals are recorded.')
+            );
+
+            const errorLines = (status?.errors || []).map(item => {
+                return `${item.section || 'status'}: ${item.reason || 'unknown error'}`;
+            });
+            if (queues.ingestion_queue?.error) {
+                errorLines.push(`ingestion_queue: ${queues.ingestion_queue.error}`);
+            }
+            setFieldValue(
+                'health-errors',
+                errorLines.length > 0 ? errorLines.join('\n') : 'No dashboard errors reported'
+            );
+        }
+
+        function enableLintDownload(kind, href) {
+            const link = document.getElementById(`security-${kind}-lint-download`);
+            if (!link) return;
+            if (href) link.href = href;
+            link.classList.remove('disabled');
+        }
+
+        function renderLintResult(payload) {
+            const summary = payload.summary || {};
+            const issues = Array.isArray(payload.issues) ? payload.issues : [];
+            const issueLines = issues.slice(0, 8).map(issue => {
+                const target = issue.artifact_id || issue.path || issue.page_path || '';
+                return `${issue.severity || 'info'} ${issue.code || 'issue'}${target ? ` (${target})` : ''}`;
+            });
+            const more = issues.length > issueLines.length
+                ? `\n... ${issues.length - issueLines.length} more issue(s) in downloaded JSON`
+                : '';
+            setHtmlValue(
+                'security-lint-result',
+                escapeHtml([
+                    `${(payload.kind || 'lint').toUpperCase()} lint: ${payload.status || 'unknown'}`,
+                    `checked_at: ${payload.checked_at || 'unknown'}`,
+                    `summary: ${JSON.stringify(summary)}`,
+                    issueLines.length > 0 ? `issues:\n${issueLines.join('\n')}${more}` : 'issues: none',
+                    payload.report_path ? `report: ${payload.report_path}` : ''
+                ].filter(Boolean).join('\n'))
+            );
+        }
+
+        async function runSettingsLint(kind) {
+            const button = document.getElementById(`security-${kind}-lint-button`);
+            if (button) button.disabled = true;
+            setTextValue('security-lint-result', `Running ${kind} lint...`);
+            try {
+                const response = await fetch(`${API_BASE}/api/settings/lint/${encodeURIComponent(kind)}`, {
+                    method: 'POST'
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.detail || `Failed to run ${kind} lint`);
+                }
+                renderLintResult(payload);
+                enableLintDownload(kind, payload.download_url);
+                showAlert(`${kind.toUpperCase()} lint complete: ${payload.status}`);
+                if (kind === 'security') {
+                    await loadConfig();
+                }
+            } catch (e) {
+                setTextValue('security-lint-result', `${kind} lint failed: ${e.message}`);
+                showAlert(`${kind} lint failed: ${e.message}`, 'error');
+            } finally {
+                if (button) button.disabled = false;
+            }
+        }
+
         function formatGroupedRuntimeSummary(groups) {
             if (!groups || typeof groups !== 'object') {
                 return 'Grouped runtime summary unavailable';
             }
-            const providers = groups.providers || {};
-            const connectors = groups.connectors || {};
-            const skills = groups.skills || {};
-            const storage = groups.storage || {};
-            const wiki = groups.wiki || {};
-            const automation = groups.automation || {};
+            const overview = groups.overview || {};
+            const sources = groups.sources_and_skills || {};
+            const connectors = sources.connectors || {};
+            const skills = sources.skills || {};
+            const wiki = groups.wiki_and_archivist || {};
+            const advanced = groups.advanced || {};
+            const providers = advanced.providers || {};
+            const storage = advanced.storage || {};
+            const automation = advanced.automation || {};
             return [
-                `providers: ${(providers.enabled || []).length}/${providers.total || 0} enabled`,
-                `connectors: ${(connectors.enabled || []).length}/${connectors.total || 0} enabled`,
-                `skills: ${skills.enabled ? 'enabled' : 'disabled'} (${skills.total || 0})`,
-                `storage.vault: ${storage.vault_root || storage.error || ''}`,
-                `storage.raw: ${storage.raw_root || ''}`,
-                `storage.system: ${storage.system_root || ''}`,
-                `wiki.root: ${wiki.wiki_root || wiki.error || ''}`,
-                `wiki.okf: ${wiki.okf_target || ''}`,
-                `automation: ${joinList(automation.enabled || [])}`
+                'overview:',
+                `  happened: ${joinList(overview.what_happened || [])}`,
+                `  stuck: ${joinList(overview.what_is_stuck || [])}`,
+                `  run next: ${joinList(overview.what_should_run_next || [])}`,
+                'sources_and_skills:',
+                `  connectors: ${(connectors.enabled || []).length}/${connectors.total || 0} enabled`,
+                `  skills: ${skills.enabled ? 'enabled' : 'disabled'} (${skills.total || 0})`,
+                'wiki_and_archivist:',
+                `  wiki.root: ${wiki.wiki_root || wiki.error || ''}`,
+                `  wiki.okf: ${wiki.okf_target || ''}`,
+                `  archivist topics: ${wiki.archivist_topic_count || 0}`,
+                'security:',
+                `  safety modes: ${joinList(groups.security?.safety_modes || [])}`,
+                'advanced:',
+                `  providers: ${(providers.enabled || []).length}/${providers.total || 0} enabled`,
+                `  storage.vault: ${storage.vault_root || storage.error || ''}`,
+                `  storage.system: ${storage.system_root || ''}`,
+                `  automation: ${joinList(automation.enabled || [])}`
             ].join('\n');
         }
 
@@ -2801,12 +3586,17 @@
                 renderPiSkillOptions(runtime.pi_skills || {});
                 setFieldValue(
                     'runtime-connectors-summary',
-                    formatConnectorRuntimeSummary(runtimeGroups.connectors || runtime.connectors || {})
+                    formatConnectorRuntimeSummary(runtimeGroups.sources_and_skills || runtime.connectors || {})
                 );
                 setFieldValue(
                     'runtime-config-groups',
                     formatGroupedRuntimeSummary(runtimeGroups)
                 );
+                const securitySummary = formatSecurityRuntimeSummary(runtimeGroups.security || {});
+                renderSecurityDashboard(runtimeGroups.security || {});
+                setFieldValue('security-auth-summary', securitySummary.authSummary);
+                setFieldValue('security-prompt-summary', securitySummary.promptSummary);
+                setFieldValue('security-side-effects', securitySummary.sideEffects);
 
                 await refreshXApiStatus();
                 consumeXApiAuthQueryParams();
@@ -3160,6 +3950,7 @@
         async function refreshStats() {
             try {
                 const response = await fetch(`${API_BASE}/api/stats`);
+                if (!response.ok) throw new Error('Failed to load stats');
                 const stats = await response.json();
                 document.getElementById('stat-bookmarks').textContent = stats.realtime_counts?.total || stats.total_bookmarks || 0;
                 document.getElementById('stat-queue').textContent = stats.realtime_counts?.processed || 0;
@@ -3167,6 +3958,16 @@
                 document.getElementById('stat-processed').textContent = stats.queue_counts?.processed || 0;
             } catch (e) {
                 console.error('Failed to load stats:', e);
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/status`);
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.detail || 'Failed to load admin status');
+                renderAdminStatusDashboard(payload);
+            } catch (e) {
+                console.error('Failed to load admin status:', e);
+                setFieldValue('health-errors', `Admin status failed: ${e.message}`);
             }
         }
 

@@ -3,19 +3,54 @@ SQLite Metadata Database - Persistent metadata for efficient re-runs and browser
 Stores tweets, downloads, LLM cache, files index, and more for fast lookups
 """
 
+import hashlib
 import sqlite3
 import json
 import logging
+import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from collections import Counter
+from typing import Any, Dict, List, Mapping, Optional
+from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from .artifact_review_policy import (
+    INGESTION_ACTIVE_REVIEW_STATUSES,
+    INGESTION_CLOSED_REVIEW_STATUSES,
+    INGESTION_REVIEW_STATUSES,
+    append_ingestion_review_event as _append_ingestion_review_event,
+    structural_review_for_ingestion as _ingestion_structural_review,
+)
 from .config import config
 from .path_layout import build_path_layout
+from .prompt_security import (
+    THOTH_REDACTION_METADATA_KEY,
+    THOTH_SECURITY_AUDIT_KEY,
+    THOTH_SECURITY_FINDINGS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
+    THOTH_SECURITY_SCANNED_LENGTH_KEY,
+    PROMPT_SECURITY_POLICY_ALLOWED,
+    PROMPT_SECURITY_POLICY_BLOCKED,
+    PROMPT_SECURITY_POLICY_NEEDS_REVIEW,
+    PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
+    is_strict_prompt_security_source,
+    merge_prompt_security_metadata,
+    merge_prompt_security_policy_metadata,
+    prompt_security_metadata_for_text,
+    prompt_security_policy_for_metadata,
+    prompt_security_requires_review,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _now_iso() -> str:
+    return _now_utc().isoformat().replace("+00:00", "Z")
 
 FILES_INDEX_ALLOWED_TYPES = (
     'media',
@@ -31,6 +66,504 @@ FILES_INDEX_ALLOWED_TYPES = (
     'translation',
 )
 FILES_INDEX_TYPE_CHECK = "', '".join(FILES_INDEX_ALLOWED_TYPES)
+INGESTION_QUEUE_ALLOWED_STATUSES = (
+    'pending',
+    'processing',
+    'processed',
+    'failed',
+    'needs_review',
+    'blocked',
+    'reviewed',
+    'rejected',
+)
+INGESTION_QUEUE_STATUS_CHECK = "', '".join(INGESTION_QUEUE_ALLOWED_STATUSES)
+INGESTION_QUARANTINE_STATUSES = frozenset(
+    {
+        PROMPT_SECURITY_POLICY_NEEDS_REVIEW,
+        PROMPT_SECURITY_POLICY_BLOCKED,
+    }
+)
+SEMANTIC_MEMORY_CANDIDATE_TYPES = (
+    "fact",
+    "claim",
+    "preference",
+    "obligation",
+    "person",
+    "project",
+    "topic",
+)
+SEMANTIC_MEMORY_CANDIDATE_TYPE_CHECK = "', '".join(SEMANTIC_MEMORY_CANDIDATE_TYPES)
+SEMANTIC_MEMORY_CANDIDATE_STATUSES = (
+    "proposed",
+    "confirmed",
+    "rejected",
+    "promoted",
+    "superseded",
+)
+SEMANTIC_MEMORY_CANDIDATE_STATUS_CHECK = "', '".join(SEMANTIC_MEMORY_CANDIDATE_STATUSES)
+CONNECTOR_RUN_ALLOWED_STATUSES = (
+    'running',
+    'completed',
+    'failed',
+)
+CONNECTOR_RUN_STATUS_CHECK = "', '".join(CONNECTOR_RUN_ALLOWED_STATUSES)
+
+
+def _payload_security_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_metadata = payload.get("normalized_metadata")
+    if not isinstance(normalized_metadata, dict):
+        return {}
+    return {
+        key: normalized_metadata[key]
+        for key in (
+            THOTH_SECURITY_FINDINGS_KEY,
+            THOTH_SECURITY_POLICY_KEY,
+            THOTH_SECURITY_AUDIT_KEY,
+            THOTH_REDACTION_METADATA_KEY,
+        )
+        if normalized_metadata.get(key)
+    }
+
+
+def _payload_has_prompt_security_scan(payload: dict[str, Any]) -> bool:
+    normalized_metadata = payload.get("normalized_metadata")
+    return bool(
+        isinstance(normalized_metadata, dict)
+        and (
+            normalized_metadata.get(THOTH_SECURITY_FINDINGS_KEY)
+            or normalized_metadata.get(THOTH_SECURITY_SCANNED_LENGTH_KEY) is not None
+        )
+    )
+
+
+def _ingestion_payload_with_security_metadata(entry: "IngestionQueueEntry") -> str:
+    """Attach reviewable prompt-security metadata inside persisted queue JSON."""
+    try:
+        payload = json.loads(entry.payload_json)
+    except Exception:
+        logger.warning(
+            "Skipping prompt-security metadata for invalid ingestion payload %s",
+            entry.artifact_id,
+        )
+        return entry.payload_json
+    if not isinstance(payload, dict):
+        return entry.payload_json
+    if _payload_has_prompt_security_scan(payload):
+        return entry.payload_json
+
+    content = payload.get("raw_content")
+    if not isinstance(content, str):
+        content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    source_label = f"{entry.artifact_type}:{entry.source}:{entry.artifact_id}"
+    normalized_metadata = payload.get("normalized_metadata")
+    strict_scope = is_strict_prompt_security_source(
+        source_type=entry.source,
+        source_label=source_label,
+        source_path=_payload_source_path(payload),
+        metadata=normalized_metadata if isinstance(normalized_metadata, Mapping) else None,
+    )
+    security_metadata = prompt_security_metadata_for_text(
+        content,
+        source_label=source_label,
+        scope="strict" if strict_scope else "context",
+    )
+    if not security_metadata:
+        return entry.payload_json
+
+    if not isinstance(normalized_metadata, dict):
+        normalized_metadata = {}
+    payload["normalized_metadata"] = merge_prompt_security_metadata(
+        normalized_metadata,
+        security_metadata,
+    )
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _json_payload(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _json_string_tuple(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    try:
+        payload = json.loads(value)
+    except Exception:
+        return ()
+    if not isinstance(payload, list):
+        return ()
+    return tuple(str(item) for item in payload if str(item).strip())
+
+
+def _clean_string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        values = (value,)
+    elif isinstance(value, (list, tuple, set)):
+        values = tuple(value)
+    else:
+        values = (value,)
+    return tuple(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+
+
+def _clean_optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _clean_embedding_provenance(provenance: Mapping[str, Any]) -> dict[str, Any]:
+    from .archivist_retrieval.models import (
+        EMBEDDING_BLOCKED_PRIVACY_CLASSES,
+        EMBEDDING_BLOCKED_SECURITY_STATUSES,
+    )
+
+    if not isinstance(provenance, Mapping):
+        raise ValueError("embedding provenance is required")
+    source_type = str(provenance.get("source_type") or "").strip()
+    if not source_type:
+        raise ValueError("embedding provenance requires source_type")
+    privacy_class = str(provenance.get("privacy_class") or "unspecified").strip().lower()
+    security_state = str(provenance.get("security_state") or "allowed").strip().lower()
+    if privacy_class in EMBEDDING_BLOCKED_PRIVACY_CLASSES:
+        raise ValueError(
+            f"refusing to store embedding for restricted privacy class: {privacy_class}"
+        )
+    if security_state in EMBEDDING_BLOCKED_SECURITY_STATUSES:
+        raise ValueError(
+            f"refusing to store embedding for quarantined security state: {security_state}"
+        )
+    trust_score = float(provenance.get("trust_score") or 0.0)
+    if trust_score <= 0.0:
+        raise ValueError("refusing to store embedding for untrusted source")
+
+    return {
+        "source_type": source_type,
+        "source_id": str(provenance.get("source_id") or "").strip(),
+        "source_key": str(provenance.get("source_key") or "").strip(),
+        "artifact_id": str(provenance.get("artifact_id") or "").strip(),
+        "event_id": str(provenance.get("event_id") or "").strip(),
+        "trust_tier": str(provenance.get("trust_tier") or "untrusted").strip().lower(),
+        "trust_score": trust_score,
+        "trust_reason": str(provenance.get("trust_reason") or "").strip(),
+        "privacy_class": privacy_class or "unspecified",
+        "retention_class": str(
+            provenance.get("retention_class") or "unspecified"
+        ).strip().lower(),
+        "security_state": security_state or "allowed",
+        "security_pattern_ids": _clean_string_tuple(
+            provenance.get("security_pattern_ids")
+        ),
+    }
+
+
+def _row_get(row: sqlite3.Row, key: str, default: Any = None) -> Any:
+    try:
+        if key not in row.keys():
+            return default
+        return row[key]
+    except Exception:
+        return default
+
+
+def _stable_connector_json(value: Mapping[str, Any] | None) -> str:
+    return json.dumps(dict(value or {}), ensure_ascii=False, sort_keys=True, default=str)
+
+
+def connector_checkpoint_key(connector_name: str, inputs: Mapping[str, Any] | None) -> str:
+    """Return a stable idempotency key for a connector input set."""
+    payload = {
+        "connector_name": str(connector_name or "").strip(),
+        "inputs": dict(inputs or {}),
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return digest
+
+
+def _connector_checkpoint_id(connector_name: str, checkpoint_key: str) -> str:
+    digest = hashlib.sha256(
+        f"{connector_name}:{checkpoint_key}".encode("utf-8")
+    ).hexdigest()[:24]
+    return f"connector_checkpoint_{digest}"
+
+
+def _connector_retry_state(
+    *,
+    status: str,
+    attempt: int,
+    max_attempts: int,
+    failure_reason: str | None,
+    next_retry_at: str | None,
+) -> dict[str, Any]:
+    retryable = status == "failed" and bool(next_retry_at)
+    return {
+        "status": status,
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "retryable": retryable,
+        "failure_reason": failure_reason,
+        "next_retry_at": next_retry_at,
+    }
+
+
+def _payload_source_path(payload: Mapping[str, Any]) -> str | None:
+    custom_metadata = payload.get("custom_metadata")
+    normalized_metadata = payload.get("normalized_metadata")
+    candidates: list[Any] = [
+        payload.get("raw_payload_path"),
+        payload.get("source_path"),
+        payload.get("source_relative_path"),
+        payload.get("source_file"),
+    ]
+    if isinstance(custom_metadata, Mapping):
+        candidates.extend(
+            custom_metadata.get(key)
+            for key in (
+                "raw_payload_path",
+                "source_path",
+                "source_relative_path",
+                "skill_output_path",
+            )
+        )
+    if isinstance(normalized_metadata, Mapping):
+        candidates.extend(
+            normalized_metadata.get(key)
+            for key in (
+                "raw_payload_path",
+                "source_path",
+                "source_relative_path",
+                "skill_output_path",
+            )
+        )
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _security_policy_audit_entry(
+    *,
+    action: str,
+    status: str,
+    reason: str,
+    actor: str | None = None,
+    at: str | None = None,
+    previous_status: str | None = None,
+) -> dict[str, str]:
+    entry = {
+        "action": action,
+        "status": status,
+        "reason": reason,
+        "at": at or _now_iso(),
+    }
+    if actor:
+        entry["actor"] = actor
+    if previous_status:
+        entry["previous_status"] = previous_status
+    return entry
+
+
+def _finding_fingerprints(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
+    if not isinstance(metadata, Mapping):
+        return ()
+    findings = metadata.get(THOTH_SECURITY_FINDINGS_KEY)
+    if not isinstance(findings, list):
+        return ()
+    values = []
+    for finding in findings:
+        if not isinstance(finding, Mapping):
+            continue
+        fingerprint = (
+            finding.get("fingerprint")
+            or ":".join(
+                str(finding.get(key) or "")
+                for key in ("scanner", "source_label", "scope", "pattern_id")
+            )
+        )
+        if fingerprint:
+            values.append(str(fingerprint))
+    return tuple(sorted(set(values)))
+
+
+def _ingestion_payload_with_security_policy(
+    entry: "IngestionQueueEntry",
+    payload_json: str,
+    *,
+    existing_payload_json: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Attach quarantine policy metadata based on persisted scanner findings."""
+    payload = _json_payload(payload_json)
+    if not payload:
+        return payload_json, {
+            "status": PROMPT_SECURITY_POLICY_ALLOWED,
+            "reason": "invalid_or_empty_payload",
+        }
+
+    normalized_metadata = payload.get("normalized_metadata")
+    if not isinstance(normalized_metadata, dict):
+        normalized_metadata = {}
+
+    existing_payload = _json_payload(existing_payload_json)
+    existing_metadata = existing_payload.get("normalized_metadata")
+    existing_policy = (
+        existing_metadata.get(THOTH_SECURITY_POLICY_KEY)
+        if isinstance(existing_metadata, Mapping)
+        else None
+    )
+    if (
+        isinstance(existing_policy, Mapping)
+        and existing_policy.get("status") == PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED
+        and _finding_fingerprints(normalized_metadata)
+        == _finding_fingerprints(
+            existing_metadata if isinstance(existing_metadata, Mapping) else None
+        )
+    ):
+        normalized_metadata = merge_prompt_security_policy_metadata(
+            normalized_metadata,
+            existing_policy,
+        )
+        existing_audit = (
+            existing_metadata.get(THOTH_SECURITY_AUDIT_KEY)
+            if isinstance(existing_metadata, Mapping)
+            else None
+        )
+        if isinstance(existing_audit, list) and existing_audit:
+            normalized_metadata[THOTH_SECURITY_AUDIT_KEY] = [
+                dict(item) for item in existing_audit if isinstance(item, Mapping)
+            ]
+        payload["normalized_metadata"] = normalized_metadata
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True), dict(existing_policy)
+
+    source_label = f"{entry.artifact_type}:{entry.source}:{entry.artifact_id}"
+    policy = prompt_security_policy_for_metadata(
+        normalized_metadata,
+        source_type=entry.source,
+        source_label=source_label,
+        source_path=_payload_source_path(payload),
+    )
+    audit_entry = None
+    if policy["status"] in INGESTION_QUARANTINE_STATUSES:
+        audit_entry = _security_policy_audit_entry(
+            action="quarantined",
+            status=str(policy["status"]),
+            reason=str(policy["reason"]),
+        )
+
+    if normalized_metadata.get(THOTH_SECURITY_FINDINGS_KEY) or audit_entry:
+        normalized_metadata = merge_prompt_security_policy_metadata(
+            normalized_metadata,
+            policy,
+            audit_entry=audit_entry,
+        )
+        payload["normalized_metadata"] = normalized_metadata
+
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True), policy
+
+
+def _queue_status_for_security_policy(
+    requested_status: str,
+    policy: Mapping[str, Any],
+) -> str:
+    status = str(policy.get("status") or PROMPT_SECURITY_POLICY_ALLOWED)
+    if status == PROMPT_SECURITY_POLICY_BLOCKED:
+        return "blocked"
+    if status == PROMPT_SECURITY_POLICY_NEEDS_REVIEW:
+        return "needs_review"
+    return requested_status
+
+
+def _security_policy_last_error(policy: Mapping[str, Any]) -> str | None:
+    status = str(policy.get("status") or "")
+    if status == PROMPT_SECURITY_POLICY_BLOCKED:
+        return f"security policy blocked: {policy.get('reason')}"
+    if status == PROMPT_SECURITY_POLICY_NEEDS_REVIEW:
+        return f"security review required: {policy.get('reason')}"
+    return None
+
+
+def _security_findings_for_summary(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, list):
+        return ()
+    findings = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        findings.append(
+            {
+                key: item.get(key)
+                for key in (
+                    "scanner",
+                    "finding_type",
+                    "pattern_id",
+                    "scope",
+                    "severity",
+                    "status",
+                )
+                if item.get(key) is not None
+            }
+        )
+    return tuple(findings)
+
+
+def _redaction_categories(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    categories = value.get("categories")
+    if not isinstance(categories, Mapping):
+        return {}
+    result: dict[str, int] = {}
+    for category, count in categories.items():
+        try:
+            numeric_count = int(count)
+        except (TypeError, ValueError):
+            continue
+        if numeric_count > 0:
+            result[str(category)] = numeric_count
+    return dict(sorted(result.items()))
+
+
+def _redaction_total(value: Any) -> int:
+    if not isinstance(value, Mapping):
+        return 0
+    try:
+        explicit_count = int(value.get("finding_count") or 0)
+    except (TypeError, ValueError):
+        explicit_count = 0
+    return max(explicit_count, sum(_redaction_categories(value).values()))
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
+def _escape_sql_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _safe_dashboard_error(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.startswith("security policy blocked:"):
+        return text
+    if text.startswith("security review required:"):
+        return text
+    if text.startswith("artifact review required:"):
+        return text
+    return "available"
 
 
 @dataclass
@@ -99,6 +632,97 @@ class IngestionQueueEntry:
     created_at: Optional[str] = None
     processed_at: Optional[str] = None
     capabilities_json: Optional[str] = None
+    review_json: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ConnectorRunRecord:
+    """Durable history for one connector execution attempt."""
+
+    run_id: str
+    connector_name: str
+    checkpoint_key: str
+    checkpoint_id: Optional[str]
+    status: str
+    inputs_json: str
+    started_at: str
+    finished_at: Optional[str] = None
+    output_count: int = 0
+    failure_reason: Optional[str] = None
+    attempt: int = 1
+    max_attempts: int = 5
+    next_retry_at: Optional[str] = None
+    retry_state_json: Optional[str] = None
+    resume_token: Optional[str] = None
+    metadata_json: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ConnectorRunOutputRecord:
+    """Artifact and capture-event links emitted by one connector run."""
+
+    run_id: str
+    artifact_id: str
+    artifact_type: str
+    source: str
+    queue_status: str
+    recorded_at: str
+    capture_event_id: Optional[str] = None
+    capture_source_id: Optional[str] = None
+    raw_ref_id: Optional[str] = None
+    artifact_link_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ConnectorCheckpointRecord:
+    """Latest resumable state for a connector input signature."""
+
+    checkpoint_id: str
+    connector_name: str
+    checkpoint_key: str
+    status: str
+    inputs_json: str
+    state_json: str
+    updated_at: str
+    resume_token: Optional[str] = None
+    output_count: int = 0
+    last_run_id: Optional[str] = None
+    failure_reason: Optional[str] = None
+    attempt: int = 0
+    max_attempts: int = 5
+    next_retry_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CanonicalEntityRecord:
+    """A durable canonical entity shared by duplicate artifact ingests."""
+
+    canonical_id: str
+    entity_type: str
+    primary_artifact_id: str
+    primary_artifact_type: str
+    primary_source_type: str
+    display_name: str
+    wiki_slug: Optional[str]
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class CanonicalArtifactLinkRecord:
+    """Link from a source artifact row to its canonical entity."""
+
+    artifact_id: str
+    artifact_type: str
+    source_type: str
+    canonical_id: str
+    entity_type: str
+    match_key: Optional[str]
+    match_reason: Optional[str]
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
 
 
 @dataclass(frozen=True)
@@ -288,16 +912,141 @@ class MetadataDB:
                 artifact_type TEXT NOT NULL,
                 source TEXT NOT NULL,
                 priority INTEGER DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'processed', 'failed')),
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'processed', 'failed', 'needs_review', 'blocked', 'reviewed', 'rejected')),
                 payload_json TEXT NOT NULL,
                 capabilities_json TEXT,
                 attempts INTEGER DEFAULT 0,
                 last_error TEXT,
                 next_attempt_at TEXT,
                 created_at TEXT NOT NULL,
-                processed_at TEXT
+                processed_at TEXT,
+                review_json TEXT
             )
         """)
+        self._ensure_ingestion_queue_statuses(conn)
+
+        # Canonical identity tables for duplicate detection across connectors.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS canonical_entities (
+                canonical_id TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                primary_artifact_id TEXT NOT NULL,
+                primary_artifact_type TEXT NOT NULL,
+                primary_source_type TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                wiki_slug TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS canonical_identity_keys (
+                identity_key TEXT PRIMARY KEY,
+                canonical_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                key_type TEXT NOT NULL,
+                key_value TEXT NOT NULL,
+                source_type TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (canonical_id) REFERENCES canonical_entities (canonical_id),
+                UNIQUE(entity_type, key_type, key_value)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS artifact_canonical_links (
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                canonical_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                match_key TEXT,
+                match_reason TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (artifact_id, artifact_type, source_type),
+                FOREIGN KEY (canonical_id) REFERENCES canonical_entities (canonical_id)
+            )
+        """)
+
+        # Connector run history and checkpoints for idempotent resumable imports.
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS connector_checkpoints (
+                checkpoint_id TEXT PRIMARY KEY,
+                connector_name TEXT NOT NULL,
+                checkpoint_key TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('{CONNECTOR_RUN_STATUS_CHECK}')),
+                inputs_json TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{{}}',
+                resume_token TEXT,
+                output_count INTEGER NOT NULL DEFAULT 0,
+                last_run_id TEXT,
+                failure_reason TEXT,
+                attempt INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 5,
+                next_retry_at TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE(connector_name, checkpoint_key)
+            )
+        """)
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS connector_runs (
+                run_id TEXT PRIMARY KEY,
+                connector_name TEXT NOT NULL,
+                checkpoint_key TEXT NOT NULL,
+                checkpoint_id TEXT,
+                status TEXT NOT NULL CHECK (status IN ('{CONNECTOR_RUN_STATUS_CHECK}')),
+                inputs_json TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                output_count INTEGER NOT NULL DEFAULT 0,
+                failure_reason TEXT,
+                attempt INTEGER NOT NULL DEFAULT 1,
+                max_attempts INTEGER NOT NULL DEFAULT 5,
+                next_retry_at TEXT,
+                retry_state_json TEXT,
+                resume_token TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                FOREIGN KEY (checkpoint_id) REFERENCES connector_checkpoints (checkpoint_id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS connector_run_outputs (
+                run_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                queue_status TEXT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                capture_event_id TEXT,
+                capture_source_id TEXT,
+                raw_ref_id TEXT,
+                artifact_link_id TEXT,
+                PRIMARY KEY (run_id, artifact_id),
+                FOREIGN KEY (run_id) REFERENCES connector_runs (run_id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS connector_checkpoint_outputs (
+                checkpoint_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                first_run_id TEXT NOT NULL,
+                last_run_id TEXT NOT NULL,
+                first_recorded_at TEXT NOT NULL,
+                last_recorded_at TEXT NOT NULL,
+                queue_status TEXT NOT NULL,
+                capture_event_id TEXT,
+                capture_source_id TEXT,
+                raw_ref_id TEXT,
+                artifact_link_id TEXT,
+                PRIMARY KEY (checkpoint_id, artifact_id),
+                FOREIGN KEY (checkpoint_id) REFERENCES connector_checkpoints (checkpoint_id)
+            )
+        """)
+        self._ensure_connector_run_metadata_schema(conn)
 
         # Ensure new columns exist when upgrading from earlier schema
         try:
@@ -310,6 +1059,7 @@ class MetadataDB:
             CREATE TABLE IF NOT EXISTS transcript_chunk_cache (
                 context_id TEXT NOT NULL,
                 chunk_index INTEGER NOT NULL,
+                chunk_id TEXT,
                 content_hash TEXT NOT NULL,
                 result_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -317,6 +1067,10 @@ class MetadataDB:
                 PRIMARY KEY (context_id, chunk_index)
             )
         """)
+        try:
+            conn.execute("ALTER TABLE transcript_chunk_cache ADD COLUMN chunk_id TEXT")
+        except Exception:
+            pass
 
         # Durable automation state for schedulers and probe backoff.
         conn.execute("""
@@ -343,12 +1097,106 @@ class MetadataDB:
             "CREATE INDEX IF NOT EXISTS idx_ingestion_status ON ingestion_queue (status, next_attempt_at)",
             "CREATE INDEX IF NOT EXISTS idx_ingestion_type ON ingestion_queue (artifact_type)",
             "CREATE INDEX IF NOT EXISTS idx_ingestion_priority ON ingestion_queue (priority DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_canonical_entities_type ON canonical_entities (entity_type)",
+            "CREATE INDEX IF NOT EXISTS idx_canonical_keys_entity ON canonical_identity_keys (entity_type, key_type, key_value)",
+            "CREATE INDEX IF NOT EXISTS idx_canonical_keys_canonical ON canonical_identity_keys (canonical_id)",
+            "CREATE INDEX IF NOT EXISTS idx_artifact_canonical_links_canonical ON artifact_canonical_links (canonical_id)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_runs_name_started ON connector_runs (connector_name, started_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_runs_status ON connector_runs (status, next_retry_at)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_runs_checkpoint ON connector_runs (connector_name, checkpoint_key)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_checkpoints_name ON connector_checkpoints (connector_name, updated_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_run_outputs_artifact ON connector_run_outputs (artifact_id)",
+            "CREATE INDEX IF NOT EXISTS idx_connector_checkpoint_outputs_artifact ON connector_checkpoint_outputs (artifact_id)",
             "CREATE INDEX IF NOT EXISTS idx_transcript_chunk_context ON transcript_chunk_cache (context_id)",
+            "CREATE INDEX IF NOT EXISTS idx_transcript_chunk_id ON transcript_chunk_cache (chunk_id)",
             "CREATE INDEX IF NOT EXISTS idx_automation_state_updated_at ON automation_state (updated_at)"
         ]
 
         for index_sql in indexes:
             conn.execute(index_sql)
+
+    def ensure_semantic_memory_tables(self) -> None:
+        """Initialize semantic memory candidate and evidence tables on demand."""
+        with self._get_connection() as conn:
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS semantic_memory_candidates (
+                    candidate_id TEXT PRIMARY KEY,
+                    candidate_type TEXT NOT NULL CHECK (
+                        candidate_type IN ('{SEMANTIC_MEMORY_CANDIDATE_TYPE_CHECK}')
+                    ),
+                    status TEXT NOT NULL DEFAULT 'proposed' CHECK (
+                        status IN ('{SEMANTIC_MEMORY_CANDIDATE_STATUS_CHECK}')
+                    ),
+                    subject TEXT NOT NULL DEFAULT '',
+                    predicate TEXT NOT NULL DEFAULT '',
+                    object_text TEXT NOT NULL DEFAULT '',
+                    text TEXT NOT NULL,
+                    entity_id TEXT NOT NULL DEFAULT '',
+                    entity_type TEXT NOT NULL DEFAULT '',
+                    entity_name TEXT NOT NULL DEFAULT '',
+                    confidence REAL,
+                    privacy_class TEXT NOT NULL DEFAULT 'unspecified',
+                    supersedes_candidate_id TEXT,
+                    superseded_by_candidate_id TEXT,
+                    candidate_fingerprint TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                    write_provenance_json TEXT NOT NULL DEFAULT '{{}}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    status_updated_at TEXT NOT NULL,
+                    FOREIGN KEY (supersedes_candidate_id)
+                        REFERENCES semantic_memory_candidates (candidate_id),
+                    FOREIGN KEY (superseded_by_candidate_id)
+                        REFERENCES semantic_memory_candidates (candidate_id)
+                )
+                """
+            )
+            self._ensure_columns(
+                conn,
+                "semantic_memory_candidates",
+                {"candidate_fingerprint": "candidate_fingerprint TEXT NOT NULL DEFAULT ''"},
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS semantic_memory_evidence (
+                    evidence_id TEXT PRIMARY KEY,
+                    candidate_id TEXT NOT NULL,
+                    artifact_id TEXT,
+                    artifact_type TEXT,
+                    capture_event_id TEXT,
+                    source_path TEXT,
+                    source_timestamp TEXT,
+                    evidence_text TEXT NOT NULL DEFAULT '',
+                    confidence REAL,
+                    privacy_class TEXT NOT NULL DEFAULT 'unspecified',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    write_provenance_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CHECK (
+                        artifact_id IS NOT NULL
+                        OR capture_event_id IS NOT NULL
+                        OR source_path IS NOT NULL
+                    ),
+                    FOREIGN KEY (candidate_id)
+                        REFERENCES semantic_memory_candidates (candidate_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            indexes = [
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_type_status ON semantic_memory_candidates (candidate_type, status)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_rejected_fingerprint ON semantic_memory_candidates (candidate_type, status, candidate_fingerprint)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_entity ON semantic_memory_candidates (entity_type, entity_id)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_candidates_status_updated ON semantic_memory_candidates (status, status_updated_at)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_candidate ON semantic_memory_evidence (candidate_id)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_artifact ON semantic_memory_evidence (artifact_id, artifact_type)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_capture_event ON semantic_memory_evidence (capture_event_id)",
+                "CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_source_path ON semantic_memory_evidence (source_path)",
+            ]
+            for index_sql in indexes:
+                conn.execute(index_sql)
 
     def ensure_research_graph_tables(self) -> None:
         """Initialize research paper graph tables on demand."""
@@ -740,6 +1588,407 @@ class MetadataDB:
         """)
         conn.execute("DROP TABLE files_index")
         conn.execute("ALTER TABLE files_index_new RENAME TO files_index")
+
+    def _ensure_ingestion_queue_statuses(self, conn: sqlite3.Connection):
+        """Expand ingestion queue status constraints for quarantine states."""
+        self._ensure_columns(
+            conn,
+            "ingestion_queue",
+            {
+                "review_json": "review_json TEXT",
+            },
+        )
+        row = conn.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'ingestion_queue'
+            """
+        ).fetchone()
+        current_sql = (row["sql"] or "") if row else ""
+        if all(
+            f"'{allowed_status}'" in current_sql
+            for allowed_status in INGESTION_QUEUE_ALLOWED_STATUSES
+        ):
+            return
+
+        conn.execute("DROP TABLE IF EXISTS ingestion_queue_new")
+        conn.execute(f"""
+            CREATE TABLE ingestion_queue_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                artifact_id TEXT NOT NULL UNIQUE,
+                artifact_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                priority INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('{INGESTION_QUEUE_STATUS_CHECK}')),
+                payload_json TEXT NOT NULL,
+                capabilities_json TEXT,
+                attempts INTEGER DEFAULT 0,
+                last_error TEXT,
+                next_attempt_at TEXT,
+                created_at TEXT NOT NULL,
+                processed_at TEXT,
+                review_json TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO ingestion_queue_new (
+                id,
+                artifact_id,
+                artifact_type,
+                source,
+                priority,
+                status,
+                payload_json,
+                capabilities_json,
+                attempts,
+                last_error,
+                next_attempt_at,
+                created_at,
+                processed_at,
+                review_json
+            )
+            SELECT
+                id,
+                artifact_id,
+                artifact_type,
+                source,
+                priority,
+                status,
+                payload_json,
+                capabilities_json,
+                attempts,
+                last_error,
+                next_attempt_at,
+                created_at,
+                processed_at,
+                review_json
+            FROM ingestion_queue
+        """)
+        conn.execute("DROP TABLE ingestion_queue")
+        conn.execute("ALTER TABLE ingestion_queue_new RENAME TO ingestion_queue")
+
+    def _ensure_connector_run_metadata_schema(self, conn: sqlite3.Connection) -> None:
+        """Add connector run metadata/link columns on databases from older builds."""
+        self._ensure_columns(
+            conn,
+            "connector_runs",
+            {
+                "metadata_json": "metadata_json TEXT NOT NULL DEFAULT '{}'",
+            },
+        )
+        link_columns = {
+            "capture_event_id": "capture_event_id TEXT",
+            "capture_source_id": "capture_source_id TEXT",
+            "raw_ref_id": "raw_ref_id TEXT",
+            "artifact_link_id": "artifact_link_id TEXT",
+        }
+        self._ensure_columns(conn, "connector_run_outputs", link_columns)
+        self._ensure_columns(conn, "connector_checkpoint_outputs", link_columns)
+
+    def _ensure_columns(
+        self,
+        conn: sqlite3.Connection,
+        table_name: str,
+        column_ddls: Mapping[str, str],
+    ) -> None:
+        existing = {
+            str(row["name"])
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        for column_name, ddl in column_ddls.items():
+            if column_name not in existing:
+                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {ddl}")
+
+    def _canonical_entity_from_row(self, row: sqlite3.Row) -> CanonicalEntityRecord:
+        return CanonicalEntityRecord(
+            canonical_id=row["canonical_id"],
+            entity_type=row["entity_type"],
+            primary_artifact_id=row["primary_artifact_id"],
+            primary_artifact_type=row["primary_artifact_type"],
+            primary_source_type=row["primary_source_type"],
+            display_name=row["display_name"] or "",
+            wiki_slug=_row_get(row, "wiki_slug"),
+            metadata=json.loads(row["metadata_json"] or "{}"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _canonical_link_from_row(
+        self,
+        row: sqlite3.Row,
+    ) -> CanonicalArtifactLinkRecord:
+        return CanonicalArtifactLinkRecord(
+            artifact_id=row["artifact_id"],
+            artifact_type=row["artifact_type"],
+            source_type=row["source_type"],
+            canonical_id=row["canonical_id"],
+            entity_type=row["entity_type"],
+            match_key=_row_get(row, "match_key"),
+            match_reason=_row_get(row, "match_reason"),
+            metadata=json.loads(row["metadata_json"] or "{}"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def get_canonical_entity(
+        self,
+        canonical_id: str,
+    ) -> Optional[CanonicalEntityRecord]:
+        """Return one canonical entity by ID."""
+        clean_id = str(canonical_id or "").strip()
+        if not clean_id:
+            return None
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM canonical_entities WHERE canonical_id = ?",
+                    (clean_id,),
+                ).fetchone()
+                return self._canonical_entity_from_row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get canonical entity {canonical_id}: {e}")
+            return None
+
+    def find_canonical_entities_by_identity_keys(
+        self,
+        entity_type: str,
+        identity_keys: tuple[str, ...],
+    ) -> list[CanonicalEntityRecord]:
+        """Find canonical entities already claimed by any identity key."""
+        clean_type = str(entity_type or "").strip()
+        keys = tuple(dict.fromkeys(str(key).strip() for key in identity_keys if str(key).strip()))
+        if not clean_type or not keys:
+            return []
+        placeholders = ",".join("?" for _ in keys)
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT e.*
+                    FROM canonical_entities e
+                    JOIN canonical_identity_keys k
+                        ON k.canonical_id = e.canonical_id
+                    WHERE k.entity_type = ?
+                        AND k.identity_key IN ({placeholders})
+                    ORDER BY e.created_at ASC, e.canonical_id ASC
+                    """,
+                    (clean_type, *keys),
+                ).fetchall()
+                return [self._canonical_entity_from_row(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to find canonical entities for {entity_type}: {e}")
+            return []
+
+    def upsert_canonical_entity(
+        self,
+        *,
+        canonical_id: str,
+        entity_type: str,
+        primary_artifact_id: str,
+        primary_artifact_type: str,
+        primary_source_type: str,
+        display_name: str,
+        identity_keys: tuple[Mapping[str, Any], ...],
+        artifact_id: str,
+        artifact_type: str,
+        source_type: str,
+        match_key: str | None,
+        match_reason: str | None,
+        metadata: Mapping[str, Any] | None = None,
+        link_artifact: bool = True,
+    ) -> CanonicalEntityRecord:
+        """Create/update a canonical entity and link the source artifact to it."""
+        clean_canonical_id = str(canonical_id or "").strip()
+        clean_entity_type = str(entity_type or "").strip()
+        clean_artifact_id = str(artifact_id or "").strip()
+        clean_artifact_type = str(artifact_type or "").strip()
+        clean_source_type = str(source_type or "").strip()
+        if not clean_canonical_id:
+            raise ValueError("canonical_id is required")
+        if not clean_entity_type:
+            raise ValueError("entity_type is required")
+        if not clean_artifact_id:
+            raise ValueError("artifact_id is required")
+        if not clean_artifact_type:
+            raise ValueError("artifact_type is required")
+        if not clean_source_type:
+            raise ValueError("source_type is required")
+
+        now_iso = datetime.now().isoformat()
+        metadata_json = json.dumps(dict(metadata or {}), ensure_ascii=False, sort_keys=True)
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO canonical_entities (
+                        canonical_id, entity_type, primary_artifact_id,
+                        primary_artifact_type, primary_source_type, display_name,
+                        metadata_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(canonical_id) DO UPDATE SET
+                        display_name=CASE
+                            WHEN canonical_entities.display_name = ''
+                            THEN excluded.display_name
+                            ELSE canonical_entities.display_name
+                        END,
+                        metadata_json=CASE
+                            WHEN canonical_entities.metadata_json = '{}'
+                            THEN excluded.metadata_json
+                            ELSE canonical_entities.metadata_json
+                        END,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        clean_canonical_id,
+                        clean_entity_type,
+                        str(primary_artifact_id or clean_artifact_id),
+                        str(primary_artifact_type or clean_artifact_type),
+                        str(primary_source_type or clean_source_type),
+                        str(display_name or ""),
+                        metadata_json,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                for key_record in identity_keys:
+                    identity_key = str(key_record.get("identity_key") or "").strip()
+                    key_type = str(key_record.get("key_type") or "").strip()
+                    key_value = str(key_record.get("key_value") or "").strip()
+                    if not identity_key or not key_type or not key_value:
+                        continue
+                    row = conn.execute(
+                        """
+                        SELECT canonical_id
+                        FROM canonical_identity_keys
+                        WHERE identity_key = ?
+                        """,
+                        (identity_key,),
+                    ).fetchone()
+                    if row and row["canonical_id"] != clean_canonical_id:
+                        raise ValueError(
+                            "canonical identity key already belongs to "
+                            f"{row['canonical_id']}: {identity_key}"
+                        )
+                    conn.execute(
+                        """
+                        INSERT INTO canonical_identity_keys (
+                            identity_key, canonical_id, entity_type, key_type,
+                            key_value, source_type, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(identity_key) DO NOTHING
+                        """,
+                        (
+                            identity_key,
+                            clean_canonical_id,
+                            clean_entity_type,
+                            key_type,
+                            key_value,
+                            clean_source_type,
+                            now_iso,
+                        ),
+                    )
+                if link_artifact:
+                    conn.execute(
+                        """
+                        INSERT INTO artifact_canonical_links (
+                            artifact_id, artifact_type, source_type, canonical_id,
+                            entity_type, match_key, match_reason, metadata_json,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(artifact_id, artifact_type, source_type) DO UPDATE SET
+                            canonical_id=excluded.canonical_id,
+                            entity_type=excluded.entity_type,
+                            match_key=excluded.match_key,
+                            match_reason=excluded.match_reason,
+                            metadata_json=excluded.metadata_json,
+                            updated_at=excluded.updated_at
+                        """,
+                        (
+                            clean_artifact_id,
+                            clean_artifact_type,
+                            clean_source_type,
+                            clean_canonical_id,
+                            clean_entity_type,
+                            match_key,
+                            match_reason,
+                            metadata_json,
+                            now_iso,
+                            now_iso,
+                        ),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM canonical_entities WHERE canonical_id = ?",
+                    (clean_canonical_id,),
+                ).fetchone()
+                return self._canonical_entity_from_row(row)
+        except Exception as e:
+            logger.error(f"Failed to upsert canonical entity {canonical_id}: {e}")
+            raise
+
+    def get_canonical_link_for_artifact(
+        self,
+        artifact_id: str,
+        *,
+        artifact_type: str | None = None,
+        source_type: str | None = None,
+    ) -> Optional[CanonicalArtifactLinkRecord]:
+        """Return the canonical link for one artifact, if recorded."""
+        clean_artifact_id = str(artifact_id or "").strip()
+        if not clean_artifact_id:
+            return None
+        where = ["artifact_id = ?"]
+        params: list[Any] = [clean_artifact_id]
+        if artifact_type:
+            where.append("artifact_type = ?")
+            params.append(str(artifact_type))
+        if source_type:
+            where.append("source_type = ?")
+            params.append(str(source_type))
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM artifact_canonical_links WHERE "
+                    + " AND ".join(where)
+                    + " ORDER BY updated_at DESC LIMIT 1",
+                    tuple(params),
+                ).fetchone()
+                return self._canonical_link_from_row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get canonical link for {artifact_id}: {e}")
+            return None
+
+    def set_canonical_wiki_slug(
+        self,
+        canonical_id: str,
+        wiki_slug: str,
+    ) -> CanonicalEntityRecord:
+        """Persist the wiki slug chosen by the first compile for a canonical."""
+        clean_canonical_id = str(canonical_id or "").strip()
+        clean_slug = str(wiki_slug or "").strip()
+        if not clean_canonical_id:
+            raise ValueError("canonical_id is required")
+        if not clean_slug:
+            raise ValueError("wiki_slug is required")
+        now_iso = datetime.now().isoformat()
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    """
+                    UPDATE canonical_entities
+                    SET wiki_slug=COALESCE(wiki_slug, ?),
+                        updated_at=?
+                    WHERE canonical_id = ?
+                    RETURNING *
+                    """,
+                    (clean_slug, now_iso, clean_canonical_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError(f"canonical entity not found: {canonical_id}")
+                return self._canonical_entity_from_row(row)
+        except Exception as e:
+            logger.error(f"Failed to set canonical wiki slug {canonical_id}: {e}")
+            raise
     
     # GraphQL cache index operations
     def upsert_graphql_cache_entry(self, tweet_id: str, cache_path: str) -> bool:
@@ -912,9 +2161,46 @@ class MetadataDB:
                     size_bytes INTEGER NOT NULL,
                     updated_at TEXT NOT NULL,
                     source_id TEXT,
+                    source_key TEXT NOT NULL DEFAULT '',
+                    source_trust_score REAL NOT NULL DEFAULT 1.0,
+                    source_trust_reason TEXT NOT NULL DEFAULT 'prompt_security_allowed',
+                    source_security_status TEXT NOT NULL DEFAULT 'allowed',
+                    source_security_pattern_ids_json TEXT NOT NULL DEFAULT '[]',
+                    artifact_id TEXT,
+                    event_id TEXT,
+                    privacy_class TEXT NOT NULL DEFAULT 'unspecified',
+                    retention_class TEXT NOT NULL DEFAULT 'unspecified',
                     indexed_at TEXT NOT NULL
                 )
                 """
+            )
+            self._ensure_columns(
+                conn,
+                "archivist_corpus_documents",
+                {
+                    "source_key": "source_key TEXT NOT NULL DEFAULT ''",
+                    "source_trust_score": (
+                        "source_trust_score REAL NOT NULL DEFAULT 1.0"
+                    ),
+                    "source_trust_reason": (
+                        "source_trust_reason TEXT NOT NULL DEFAULT "
+                        "'legacy_unscanned'"
+                    ),
+                    "source_security_status": (
+                        "source_security_status TEXT NOT NULL DEFAULT 'allowed'"
+                    ),
+                    "source_security_pattern_ids_json": (
+                        "source_security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'"
+                    ),
+                    "artifact_id": "artifact_id TEXT",
+                    "event_id": "event_id TEXT",
+                    "privacy_class": (
+                        "privacy_class TEXT NOT NULL DEFAULT 'unspecified'"
+                    ),
+                    "retention_class": (
+                        "retention_class TEXT NOT NULL DEFAULT 'unspecified'"
+                    ),
+                },
             )
             try:
                 conn.execute(
@@ -943,11 +2229,51 @@ class MetadataDB:
                     provider TEXT NOT NULL,
                     model TEXT NOT NULL,
                     source_hash TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL DEFAULT '',
+                    source_key TEXT NOT NULL DEFAULT '',
+                    artifact_id TEXT NOT NULL DEFAULT '',
+                    event_id TEXT NOT NULL DEFAULT '',
+                    trust_tier TEXT NOT NULL,
+                    trust_score REAL NOT NULL,
+                    trust_reason TEXT NOT NULL DEFAULT '',
+                    privacy_class TEXT NOT NULL DEFAULT 'unspecified',
+                    retention_class TEXT NOT NULL DEFAULT 'unspecified',
+                    security_state TEXT NOT NULL DEFAULT 'allowed',
+                    security_pattern_ids_json TEXT NOT NULL DEFAULT '[]',
                     vector_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (candidate_key, provider, model)
                 )
                 """
+            )
+            self._ensure_columns(
+                conn,
+                "archivist_corpus_embeddings",
+                {
+                    "source_type": "source_type TEXT NOT NULL DEFAULT ''",
+                    "source_id": "source_id TEXT NOT NULL DEFAULT ''",
+                    "source_key": "source_key TEXT NOT NULL DEFAULT ''",
+                    "artifact_id": "artifact_id TEXT NOT NULL DEFAULT ''",
+                    "event_id": "event_id TEXT NOT NULL DEFAULT ''",
+                    "trust_tier": "trust_tier TEXT NOT NULL DEFAULT 'trusted'",
+                    "trust_score": "trust_score REAL NOT NULL DEFAULT 1.0",
+                    "trust_reason": (
+                        "trust_reason TEXT NOT NULL DEFAULT 'legacy_unscanned'"
+                    ),
+                    "privacy_class": (
+                        "privacy_class TEXT NOT NULL DEFAULT 'unspecified'"
+                    ),
+                    "retention_class": (
+                        "retention_class TEXT NOT NULL DEFAULT 'unspecified'"
+                    ),
+                    "security_state": (
+                        "security_state TEXT NOT NULL DEFAULT 'allowed'"
+                    ),
+                    "security_pattern_ids_json": (
+                        "security_pattern_ids_json TEXT NOT NULL DEFAULT '[]'"
+                    ),
+                },
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_archivist_docs_scope_path ON archivist_corpus_documents (scope, scope_relative_path)"
@@ -957,6 +2283,12 @@ class MetadataDB:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_archivist_embeddings_model ON archivist_corpus_embeddings (provider, model)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_embeddings_provenance ON archivist_corpus_embeddings (source_type, source_id, artifact_id, event_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_archivist_embeddings_trust ON archivist_corpus_embeddings (trust_tier, trust_score, security_state, privacy_class)"
             )
 
     def upsert_archivist_corpus_document(self, document) -> None:
@@ -982,9 +2314,18 @@ class MetadataDB:
                     size_bytes,
                     updated_at,
                     source_id,
+                    source_key,
+                    source_trust_score,
+                    source_trust_reason,
+                    source_security_status,
+                    source_security_pattern_ids_json,
+                    artifact_id,
+                    event_id,
+                    privacy_class,
+                    retention_class,
                     indexed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(candidate_key) DO UPDATE SET
                     path=excluded.path,
                     scope=excluded.scope,
@@ -999,6 +2340,15 @@ class MetadataDB:
                     size_bytes=excluded.size_bytes,
                     updated_at=excluded.updated_at,
                     source_id=excluded.source_id,
+                    source_key=excluded.source_key,
+                    source_trust_score=excluded.source_trust_score,
+                    source_trust_reason=excluded.source_trust_reason,
+                    source_security_status=excluded.source_security_status,
+                    source_security_pattern_ids_json=excluded.source_security_pattern_ids_json,
+                    artifact_id=excluded.artifact_id,
+                    event_id=excluded.event_id,
+                    privacy_class=excluded.privacy_class,
+                    retention_class=excluded.retention_class,
                     indexed_at=excluded.indexed_at
                 """,
                 (
@@ -1016,6 +2366,15 @@ class MetadataDB:
                     document.size_bytes,
                     document.updated_at,
                     document.source_id,
+                    document.source_key,
+                    float(document.source_trust_score),
+                    document.source_trust_reason,
+                    document.source_security_status,
+                    json.dumps(list(document.source_security_pattern_ids), ensure_ascii=False),
+                    document.artifact_id,
+                    document.event_id,
+                    document.privacy_class,
+                    document.retention_class,
                     indexed_at,
                 ),
             )
@@ -1075,6 +2434,19 @@ class MetadataDB:
                 size_bytes=row["size_bytes"],
                 updated_at=row["updated_at"],
                 source_id=row["source_id"],
+                source_key=row["source_key"] or "",
+                source_trust_score=_float_or_default(row["source_trust_score"], 1.0),
+                source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
+                source_security_status=row["source_security_status"] or "allowed",
+                source_security_pattern_ids=_json_string_tuple(
+                    row["source_security_pattern_ids_json"]
+                ),
+                artifact_id=_row_get(row, "artifact_id"),
+                event_id=_row_get(row, "event_id"),
+                privacy_class=_row_get(row, "privacy_class", "unspecified")
+                or "unspecified",
+                retention_class=_row_get(row, "retention_class", "unspecified")
+                or "unspecified",
             )
 
     def list_archivist_corpus_documents(
@@ -1136,9 +2508,65 @@ class MetadataDB:
                     size_bytes=row["size_bytes"],
                     updated_at=row["updated_at"],
                     source_id=row["source_id"],
+                    source_key=row["source_key"] or "",
+                    source_trust_score=_float_or_default(row["source_trust_score"], 1.0),
+                    source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
+                    source_security_status=row["source_security_status"] or "allowed",
+                    source_security_pattern_ids=_json_string_tuple(
+                        row["source_security_pattern_ids_json"]
+                    ),
+                    artifact_id=_row_get(row, "artifact_id"),
+                    event_id=_row_get(row, "event_id"),
+                    privacy_class=_row_get(row, "privacy_class", "unspecified")
+                    or "unspecified",
+                    retention_class=_row_get(row, "retention_class", "unspecified")
+                    or "unspecified",
                 )
                 for row in rows
             ]
+
+    def list_archivist_corpus_documents_for_sources(
+        self,
+        *,
+        source_ids: tuple[str, ...] = (),
+        paths: tuple[str, ...] = (),
+    ) -> List[Dict[str, Any]]:
+        """List indexed corpus documents that match source ids or known paths."""
+        cleaned_source_ids = tuple(
+            dict.fromkeys(str(item).strip() for item in source_ids if str(item).strip())
+        )
+        cleaned_paths = tuple(
+            dict.fromkeys(str(item).strip() for item in paths if str(item).strip())
+        )
+        if not cleaned_source_ids and not cleaned_paths:
+            return []
+        self.ensure_archivist_corpus_tables()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if cleaned_source_ids:
+            placeholders = ",".join("?" for _ in cleaned_source_ids)
+            clauses.append(f"source_id IN ({placeholders})")
+            params.extend(cleaned_source_ids)
+        if cleaned_paths:
+            placeholders = ",".join("?" for _ in cleaned_paths)
+            clauses.append(
+                f"(scope_relative_path IN ({placeholders}) OR path IN ({placeholders}))"
+            )
+            params.extend(cleaned_paths)
+            params.extend(cleaned_paths)
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT candidate_key, path, scope, scope_relative_path, source_type,
+                    file_type, source_id, source_hash, updated_at
+                FROM archivist_corpus_documents
+                WHERE {" OR ".join(clauses)}
+                ORDER BY updated_at DESC, candidate_key DESC
+                """,
+                tuple(params),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def prune_archivist_corpus_documents(
         self,
@@ -1249,6 +2677,19 @@ class MetadataDB:
                     size_bytes=row["size_bytes"],
                     updated_at=row["updated_at"],
                     source_id=row["source_id"],
+                    source_key=row["source_key"] or "",
+                    source_trust_score=_float_or_default(row["source_trust_score"], 1.0),
+                    source_trust_reason=row["source_trust_reason"] or "prompt_security_allowed",
+                    source_security_status=row["source_security_status"] or "allowed",
+                    source_security_pattern_ids=_json_string_tuple(
+                        row["source_security_pattern_ids_json"]
+                    ),
+                    artifact_id=_row_get(row, "artifact_id"),
+                    event_id=_row_get(row, "event_id"),
+                    privacy_class=_row_get(row, "privacy_class", "unspecified")
+                    or "unspecified",
+                    retention_class=_row_get(row, "retention_class", "unspecified")
+                    or "unspecified",
                 )
                 rank_score = float(row["rank_score"]) if row["rank_score"] is not None else 0.0
                 results.append((document, rank_score))
@@ -1261,10 +2702,12 @@ class MetadataDB:
         provider: str,
         model: str,
         source_hash: str,
+        provenance: Mapping[str, Any],
         vector: list[float],
     ) -> None:
         """Insert or update a semantic embedding for a corpus document."""
         self.ensure_archivist_corpus_tables()
+        clean_provenance = _clean_embedding_provenance(provenance)
         with self._get_connection() as conn:
             conn.execute(
                 """
@@ -1273,12 +2716,36 @@ class MetadataDB:
                     provider,
                     model,
                     source_hash,
+                    source_type,
+                    source_id,
+                    source_key,
+                    artifact_id,
+                    event_id,
+                    trust_tier,
+                    trust_score,
+                    trust_reason,
+                    privacy_class,
+                    retention_class,
+                    security_state,
+                    security_pattern_ids_json,
                     vector_json,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(candidate_key, provider, model) DO UPDATE SET
                     source_hash=excluded.source_hash,
+                    source_type=excluded.source_type,
+                    source_id=excluded.source_id,
+                    source_key=excluded.source_key,
+                    artifact_id=excluded.artifact_id,
+                    event_id=excluded.event_id,
+                    trust_tier=excluded.trust_tier,
+                    trust_score=excluded.trust_score,
+                    trust_reason=excluded.trust_reason,
+                    privacy_class=excluded.privacy_class,
+                    retention_class=excluded.retention_class,
+                    security_state=excluded.security_state,
+                    security_pattern_ids_json=excluded.security_pattern_ids_json,
                     vector_json=excluded.vector_json,
                     updated_at=excluded.updated_at
                 """,
@@ -1287,6 +2754,21 @@ class MetadataDB:
                     provider,
                     model,
                     source_hash,
+                    clean_provenance["source_type"],
+                    clean_provenance["source_id"],
+                    clean_provenance["source_key"],
+                    clean_provenance["artifact_id"],
+                    clean_provenance["event_id"],
+                    clean_provenance["trust_tier"],
+                    clean_provenance["trust_score"],
+                    clean_provenance["trust_reason"],
+                    clean_provenance["privacy_class"],
+                    clean_provenance["retention_class"],
+                    clean_provenance["security_state"],
+                    json.dumps(
+                        list(clean_provenance["security_pattern_ids"]),
+                        ensure_ascii=False,
+                    ),
                     json.dumps(vector, ensure_ascii=False),
                     datetime.now().isoformat(),
                 ),
@@ -1298,30 +2780,213 @@ class MetadataDB:
         candidate_keys: tuple[str, ...],
         provider: str,
         model: str,
+        expected_source_hashes: Mapping[str, str] | None = None,
+        source_types: tuple[str, ...] = (),
+        source_ids: tuple[str, ...] = (),
+        source_keys: tuple[str, ...] = (),
+        artifact_ids: tuple[str, ...] = (),
+        event_ids: tuple[str, ...] = (),
+        trust_tiers: tuple[str, ...] = (),
+        min_trust_score: float | None = None,
+        privacy_classes: tuple[str, ...] = (),
+        retention_classes: tuple[str, ...] = (),
+        security_states: tuple[str, ...] = (),
+        exclude_privacy_classes: tuple[str, ...] | None = None,
+        exclude_security_states: tuple[str, ...] | None = None,
+        exclude_stale: bool = True,
     ) -> dict[str, dict[str, Any]]:
-        """Fetch stored embeddings for a provider/model pair."""
+        """Fetch stored embeddings for a provider/model pair with provenance filters."""
+        from .archivist_retrieval.models import (
+            EMBEDDING_BLOCKED_PRIVACY_CLASSES,
+            EMBEDDING_BLOCKED_SECURITY_STATUSES,
+        )
+
         self.ensure_archivist_corpus_tables()
         if not candidate_keys:
             return {}
-        placeholders = ",".join("?" for _ in candidate_keys)
-        params: list[Any] = [provider, model, *candidate_keys]
+        cleaned_candidate_keys = tuple(
+            dict.fromkeys(str(item).strip() for item in candidate_keys if str(item).strip())
+        )
+        if not cleaned_candidate_keys:
+            return {}
+
+        expected_hashes = {
+            str(key): str(value)
+            for key, value in (expected_source_hashes or {}).items()
+            if str(key).strip() and str(value).strip()
+        }
+        exclude_privacy = (
+            tuple(sorted(EMBEDDING_BLOCKED_PRIVACY_CLASSES))
+            if exclude_privacy_classes is None
+            else _clean_string_tuple(exclude_privacy_classes)
+        )
+        exclude_security = (
+            tuple(sorted(EMBEDDING_BLOCKED_SECURITY_STATUSES))
+            if exclude_security_states is None
+            else _clean_string_tuple(exclude_security_states)
+        )
+
+        placeholders = ",".join("?" for _ in cleaned_candidate_keys)
+        where_clauses = [
+            "provider = ?",
+            "model = ?",
+            f"candidate_key IN ({placeholders})",
+        ]
+        params: list[Any] = [provider, model, *cleaned_candidate_keys]
+
+        def add_in_filter(column: str, values: tuple[str, ...]) -> None:
+            cleaned = _clean_string_tuple(values)
+            if not cleaned:
+                return
+            filter_placeholders = ",".join("?" for _ in cleaned)
+            where_clauses.append(f"{column} IN ({filter_placeholders})")
+            params.extend(cleaned)
+
+        def add_not_in_filter(column: str, values: tuple[str, ...]) -> None:
+            cleaned = _clean_string_tuple(values)
+            if not cleaned:
+                return
+            filter_placeholders = ",".join("?" for _ in cleaned)
+            where_clauses.append(f"{column} NOT IN ({filter_placeholders})")
+            params.extend(cleaned)
+
+        add_in_filter("source_type", source_types)
+        add_in_filter("source_id", source_ids)
+        add_in_filter("source_key", source_keys)
+        add_in_filter("artifact_id", artifact_ids)
+        add_in_filter("event_id", event_ids)
+        add_in_filter("trust_tier", trust_tiers)
+        add_in_filter("privacy_class", privacy_classes)
+        add_in_filter("retention_class", retention_classes)
+        add_in_filter("security_state", security_states)
+        add_not_in_filter("privacy_class", exclude_privacy)
+        add_not_in_filter("security_state", exclude_security)
+        if min_trust_score is not None:
+            where_clauses.append("trust_score >= ?")
+            params.append(float(min_trust_score))
+
         with self._get_connection() as conn:
             rows = conn.execute(
                 f"""
-                SELECT candidate_key, source_hash, vector_json, updated_at
+                SELECT
+                    candidate_key,
+                    source_hash,
+                    source_type,
+                    source_id,
+                    source_key,
+                    artifact_id,
+                    event_id,
+                    trust_tier,
+                    trust_score,
+                    trust_reason,
+                    privacy_class,
+                    retention_class,
+                    security_state,
+                    security_pattern_ids_json,
+                    vector_json,
+                    updated_at
                 FROM archivist_corpus_embeddings
-                WHERE provider = ? AND model = ? AND candidate_key IN ({placeholders})
+                WHERE {" AND ".join(where_clauses)}
                 """,
                 tuple(params),
             ).fetchall()
-            return {
-                row["candidate_key"]: {
+            embeddings: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                candidate_key = row["candidate_key"]
+                expected_hash = expected_hashes.get(candidate_key)
+                is_stale = bool(
+                    expected_hash is not None and row["source_hash"] != expected_hash
+                )
+                if exclude_stale and is_stale:
+                    continue
+                embeddings[candidate_key] = {
                     "source_hash": row["source_hash"],
+                    "source_type": row["source_type"],
+                    "source_id": row["source_id"],
+                    "source_key": row["source_key"],
+                    "artifact_id": row["artifact_id"],
+                    "event_id": row["event_id"],
+                    "trust_tier": row["trust_tier"],
+                    "trust_score": float(row["trust_score"]),
+                    "trust_reason": row["trust_reason"],
+                    "privacy_class": row["privacy_class"],
+                    "retention_class": row["retention_class"],
+                    "security_state": row["security_state"],
+                    "security_pattern_ids": _json_string_tuple(
+                        row["security_pattern_ids_json"]
+                    ),
                     "vector": json.loads(row["vector_json"]),
                     "updated_at": row["updated_at"],
+                    "stale": is_stale,
                 }
-                for row in rows
-            }
+            return embeddings
+
+    def list_archivist_corpus_embeddings_for_candidate_keys(
+        self,
+        candidate_keys: tuple[str, ...],
+    ) -> List[Dict[str, Any]]:
+        """Return all stored embeddings for candidate keys."""
+        cleaned = tuple(
+            dict.fromkeys(str(item).strip() for item in candidate_keys if str(item).strip())
+        )
+        if not cleaned:
+            return []
+        self.ensure_archivist_corpus_tables()
+        placeholders = ",".join("?" for _ in cleaned)
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    candidate_key,
+                    provider,
+                    model,
+                    source_hash,
+                    source_type,
+                    source_id,
+                    source_key,
+                    artifact_id,
+                    event_id,
+                    trust_tier,
+                    trust_score,
+                    trust_reason,
+                    privacy_class,
+                    retention_class,
+                    security_state,
+                    security_pattern_ids_json,
+                    updated_at
+                FROM archivist_corpus_embeddings
+                WHERE candidate_key IN ({placeholders})
+                ORDER BY updated_at DESC, candidate_key, provider, model
+                """,
+                cleaned,
+            ).fetchall()
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                payload = dict(row)
+                payload["security_pattern_ids"] = _json_string_tuple(
+                    row["security_pattern_ids_json"]
+                )
+                results.append(payload)
+            return results
+
+    def delete_archivist_corpus_embedding(
+        self,
+        *,
+        candidate_key: str,
+        provider: str,
+        model: str,
+    ) -> int:
+        """Delete one stored corpus embedding."""
+        self.ensure_archivist_corpus_tables()
+        with self._get_connection() as conn:
+            result = conn.execute(
+                """
+                DELETE FROM archivist_corpus_embeddings
+                WHERE candidate_key = ? AND provider = ? AND model = ?
+                """,
+                (candidate_key, provider, model),
+            )
+            return int(result.rowcount or 0)
 
     def get_archivist_corpus_stats(self) -> Dict[str, Any]:
         """Return corpus inventory counts for diagnostics."""
@@ -1741,18 +3406,718 @@ class MetadataDB:
             logger.error(f"Failed to delete bookmark entry {tweet_id}: {e}")
             return False
 
+    # Connector run history and checkpoint operations
+    def begin_connector_run(
+        self,
+        connector_name: str,
+        *,
+        inputs: Mapping[str, Any] | None = None,
+        checkpoint_key: Optional[str] = None,
+        resume_token: Optional[str] = None,
+        max_attempts: int = 5,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Optional[ConnectorRunRecord]:
+        """Create a connector run attempt and its resumable checkpoint row."""
+        clean_connector = str(connector_name or "").strip()
+        if not clean_connector:
+            raise ValueError("connector_name is required")
+        resolved_inputs = dict(inputs or {})
+        resolved_key = checkpoint_key or connector_checkpoint_key(
+            clean_connector,
+            resolved_inputs,
+        )
+        checkpoint_id = _connector_checkpoint_id(clean_connector, resolved_key)
+        inputs_json = _stable_connector_json(resolved_inputs)
+        metadata_json = _stable_connector_json(metadata)
+        now_iso = datetime.now().isoformat()
+        capped_max_attempts = max(1, int(max_attempts or 1))
+        run_id = f"connector_run_{uuid.uuid4().hex}"
+
+        try:
+            with self._get_connection() as conn:
+                existing_checkpoint = conn.execute(
+                    """
+                    SELECT * FROM connector_checkpoints
+                    WHERE connector_name = ? AND checkpoint_key = ?
+                    """,
+                    (clean_connector, resolved_key),
+                ).fetchone()
+                if existing_checkpoint is None:
+                    conn.execute(
+                        """
+                        INSERT INTO connector_checkpoints (
+                            checkpoint_id, connector_name, checkpoint_key, status,
+                            inputs_json, state_json, resume_token, output_count,
+                            last_run_id, failure_reason, attempt, max_attempts,
+                            next_retry_at, updated_at
+                        ) VALUES (?, ?, ?, 'running', ?, '{}', ?, 0, NULL, NULL, 0, ?, NULL, ?)
+                        """,
+                        (
+                            checkpoint_id,
+                            clean_connector,
+                            resolved_key,
+                            inputs_json,
+                            resume_token,
+                            capped_max_attempts,
+                            now_iso,
+                        ),
+                    )
+                else:
+                    checkpoint_id = existing_checkpoint["checkpoint_id"]
+                    resume_token = resume_token or existing_checkpoint["resume_token"]
+                    conn.execute(
+                        """
+                        UPDATE connector_checkpoints
+                        SET status='running',
+                            inputs_json=?,
+                            resume_token=?,
+                            failure_reason=NULL,
+                            next_retry_at=NULL,
+                            max_attempts=?,
+                            updated_at=?
+                        WHERE checkpoint_id = ?
+                        """,
+                        (
+                            inputs_json,
+                            resume_token,
+                            capped_max_attempts,
+                            now_iso,
+                            checkpoint_id,
+                        ),
+                    )
+
+                attempt_row = conn.execute(
+                    """
+                    SELECT COALESCE(MAX(attempt), 0) + 1 AS next_attempt
+                    FROM connector_runs
+                    WHERE connector_name = ? AND checkpoint_key = ?
+                    """,
+                    (clean_connector, resolved_key),
+                ).fetchone()
+                attempt = int(attempt_row["next_attempt"] or 1)
+                retry_state = _connector_retry_state(
+                    status="running",
+                    attempt=attempt,
+                    max_attempts=capped_max_attempts,
+                    failure_reason=None,
+                    next_retry_at=None,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO connector_runs (
+                        run_id, connector_name, checkpoint_key, checkpoint_id,
+                        status, inputs_json, started_at, finished_at, output_count,
+                        failure_reason, attempt, max_attempts, next_retry_at,
+                        retry_state_json, resume_token, metadata_json
+                    ) VALUES (?, ?, ?, ?, 'running', ?, ?, NULL, 0, NULL, ?, ?, NULL, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        clean_connector,
+                        resolved_key,
+                        checkpoint_id,
+                        inputs_json,
+                        now_iso,
+                        attempt,
+                        capped_max_attempts,
+                        json.dumps(retry_state, ensure_ascii=False, sort_keys=True),
+                        resume_token,
+                        metadata_json,
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE connector_checkpoints
+                    SET last_run_id=?,
+                        attempt=?,
+                        updated_at=?
+                    WHERE checkpoint_id = ?
+                    """,
+                    (run_id, attempt, now_iso, checkpoint_id),
+                )
+
+                row = conn.execute(
+                    "SELECT * FROM connector_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                return self._connector_run_from_row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to begin connector run {clean_connector}: {e}")
+            return None
+
+    def record_connector_run_output(
+        self,
+        run_id: str,
+        *,
+        checkpoint_id: Optional[str] = None,
+        artifact_id: str,
+        artifact_type: str,
+        source: str,
+        queue_status: str = "pending",
+        capture_event_id: Optional[str] = None,
+        capture_source_id: Optional[str] = None,
+        raw_ref_id: Optional[str] = None,
+        artifact_link_id: Optional[str] = None,
+    ) -> bool:
+        """Attach one queued artifact to a connector run and checkpoint."""
+        clean_run_id = str(run_id or "").strip()
+        clean_artifact_id = str(artifact_id or "").strip()
+        if not clean_run_id or not clean_artifact_id:
+            return False
+        now_iso = datetime.now().isoformat()
+        try:
+            with self._get_connection() as conn:
+                run = conn.execute(
+                    "SELECT checkpoint_id FROM connector_runs WHERE run_id = ?",
+                    (clean_run_id,),
+                ).fetchone()
+                if run is None:
+                    return False
+                resolved_checkpoint_id = (
+                    str(checkpoint_id or "").strip()
+                    or run["checkpoint_id"]
+                    or None
+                )
+                conn.execute(
+                    """
+                    INSERT INTO connector_run_outputs (
+                        run_id, artifact_id, artifact_type, source, queue_status,
+                        recorded_at, capture_event_id, capture_source_id,
+                        raw_ref_id, artifact_link_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(run_id, artifact_id) DO UPDATE SET
+                        artifact_type=excluded.artifact_type,
+                        source=excluded.source,
+                        queue_status=excluded.queue_status,
+                        recorded_at=excluded.recorded_at,
+                        capture_event_id=COALESCE(
+                            excluded.capture_event_id,
+                            connector_run_outputs.capture_event_id
+                        ),
+                        capture_source_id=COALESCE(
+                            excluded.capture_source_id,
+                            connector_run_outputs.capture_source_id
+                        ),
+                        raw_ref_id=COALESCE(
+                            excluded.raw_ref_id,
+                            connector_run_outputs.raw_ref_id
+                        ),
+                        artifact_link_id=COALESCE(
+                            excluded.artifact_link_id,
+                            connector_run_outputs.artifact_link_id
+                        )
+                    """,
+                    (
+                        clean_run_id,
+                        clean_artifact_id,
+                        str(artifact_type or "artifact"),
+                        str(source or "unknown"),
+                        str(queue_status or "pending"),
+                        now_iso,
+                        _clean_optional_text(capture_event_id),
+                        _clean_optional_text(capture_source_id),
+                        _clean_optional_text(raw_ref_id),
+                        _clean_optional_text(artifact_link_id),
+                    ),
+                )
+                if resolved_checkpoint_id:
+                    conn.execute(
+                        """
+                        INSERT INTO connector_checkpoint_outputs (
+                            checkpoint_id, artifact_id, artifact_type, source,
+                            first_run_id, last_run_id, first_recorded_at,
+                            last_recorded_at, queue_status, capture_event_id,
+                            capture_source_id, raw_ref_id, artifact_link_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(checkpoint_id, artifact_id) DO UPDATE SET
+                            artifact_type=excluded.artifact_type,
+                            source=excluded.source,
+                            last_run_id=excluded.last_run_id,
+                            last_recorded_at=excluded.last_recorded_at,
+                            queue_status=excluded.queue_status,
+                            capture_event_id=COALESCE(
+                                excluded.capture_event_id,
+                                connector_checkpoint_outputs.capture_event_id
+                            ),
+                            capture_source_id=COALESCE(
+                                excluded.capture_source_id,
+                                connector_checkpoint_outputs.capture_source_id
+                            ),
+                            raw_ref_id=COALESCE(
+                                excluded.raw_ref_id,
+                                connector_checkpoint_outputs.raw_ref_id
+                            ),
+                            artifact_link_id=COALESCE(
+                                excluded.artifact_link_id,
+                                connector_checkpoint_outputs.artifact_link_id
+                            )
+                        """,
+                        (
+                            resolved_checkpoint_id,
+                            clean_artifact_id,
+                            str(artifact_type or "artifact"),
+                            str(source or "unknown"),
+                            clean_run_id,
+                            clean_run_id,
+                            now_iso,
+                            now_iso,
+                            str(queue_status or "pending"),
+                            _clean_optional_text(capture_event_id),
+                            _clean_optional_text(capture_source_id),
+                            _clean_optional_text(raw_ref_id),
+                            _clean_optional_text(artifact_link_id),
+                        ),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE connector_checkpoints
+                        SET output_count = (
+                                SELECT COUNT(*)
+                                FROM connector_checkpoint_outputs
+                                WHERE checkpoint_id = ?
+                            ),
+                            updated_at = ?
+                        WHERE checkpoint_id = ?
+                        """,
+                        (resolved_checkpoint_id, now_iso, resolved_checkpoint_id),
+                    )
+                conn.execute(
+                    """
+                    UPDATE connector_runs
+                    SET output_count = (
+                            SELECT COUNT(*)
+                            FROM connector_run_outputs
+                            WHERE run_id = ?
+                        )
+                    WHERE run_id = ?
+                    """,
+                    (clean_run_id, clean_run_id),
+                )
+                return True
+        except Exception as e:
+            logger.error(
+                f"Failed to record connector output {clean_artifact_id} for {clean_run_id}: {e}"
+            )
+            return False
+
+    def finish_connector_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        output_count: Optional[int] = None,
+        resume_token: Optional[str] = None,
+        state: Mapping[str, Any] | None = None,
+        failure_reason: Optional[str] = None,
+        max_attempts: Optional[int] = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Optional[ConnectorRunRecord]:
+        """Mark a connector run completed or failed and refresh its checkpoint."""
+        clean_run_id = str(run_id or "").strip()
+        clean_status = str(status or "").strip()
+        if clean_status not in CONNECTOR_RUN_ALLOWED_STATUSES:
+            raise ValueError(f"Unsupported connector run status: {status}")
+
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM connector_runs WHERE run_id = ?",
+                    (clean_run_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+
+                finished_at = datetime.now().isoformat()
+                attempt = int(row["attempt"] or 1)
+                resolved_max_attempts = max(
+                    1,
+                    int(max_attempts or row["max_attempts"] or 1),
+                )
+                counted_outputs = conn.execute(
+                    "SELECT COUNT(*) AS count FROM connector_run_outputs WHERE run_id = ?",
+                    (clean_run_id,),
+                ).fetchone()
+                persisted_output_count = int(counted_outputs["count"] or 0)
+                resolved_output_count = max(
+                    persisted_output_count,
+                    int(output_count or 0),
+                )
+                next_retry_at = None
+                clean_failure = str(failure_reason).strip() if failure_reason else None
+                if clean_status == "failed" and attempt < resolved_max_attempts:
+                    delay_seconds = min(3600, 300 * (2 ** max(0, attempt - 1)))
+                    next_retry_at = (
+                        datetime.now() + timedelta(seconds=delay_seconds)
+                    ).isoformat()
+                retry_state = _connector_retry_state(
+                    status=clean_status,
+                    attempt=attempt,
+                    max_attempts=resolved_max_attempts,
+                    failure_reason=clean_failure,
+                    next_retry_at=next_retry_at,
+                )
+                metadata_payload = _json_payload(_row_get(row, "metadata_json"))
+                if isinstance(metadata, Mapping):
+                    metadata_payload.update(dict(metadata))
+                metadata_payload.setdefault("run_started_at", row["started_at"])
+                metadata_payload["run_finished_at"] = finished_at
+                metadata_payload["run_timestamp"] = metadata_payload.get(
+                    "run_timestamp",
+                    row["started_at"],
+                )
+                metadata_payload["status"] = clean_status
+                conn.execute(
+                    """
+                    UPDATE connector_runs
+                    SET status=?,
+                        finished_at=?,
+                        output_count=?,
+                        failure_reason=?,
+                        max_attempts=?,
+                        next_retry_at=?,
+                        retry_state_json=?,
+                        resume_token=COALESCE(?, resume_token),
+                        metadata_json=?
+                    WHERE run_id = ?
+                    """,
+                    (
+                        clean_status,
+                        finished_at,
+                        resolved_output_count,
+                        clean_failure,
+                        resolved_max_attempts,
+                        next_retry_at,
+                        json.dumps(retry_state, ensure_ascii=False, sort_keys=True),
+                        resume_token,
+                        _stable_connector_json(metadata_payload),
+                        clean_run_id,
+                    ),
+                )
+
+                checkpoint_id = row["checkpoint_id"]
+                if checkpoint_id:
+                    checkpoint_count = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM connector_checkpoint_outputs
+                        WHERE checkpoint_id = ?
+                        """,
+                        (checkpoint_id,),
+                    ).fetchone()
+                    checkpoint_output_count = max(
+                        int(checkpoint_count["count"] or 0),
+                        resolved_output_count,
+                    )
+                    conn.execute(
+                        """
+                        UPDATE connector_checkpoints
+                        SET status=?,
+                            state_json=?,
+                            resume_token=COALESCE(?, resume_token),
+                            output_count=?,
+                            failure_reason=?,
+                            attempt=?,
+                            max_attempts=?,
+                            next_retry_at=?,
+                            updated_at=?
+                        WHERE checkpoint_id = ?
+                        """,
+                        (
+                            clean_status,
+                            _stable_connector_json(state),
+                            resume_token,
+                            checkpoint_output_count,
+                            clean_failure,
+                            attempt,
+                            resolved_max_attempts,
+                            next_retry_at,
+                            finished_at,
+                            checkpoint_id,
+                        ),
+                    )
+
+                updated = conn.execute(
+                    "SELECT * FROM connector_runs WHERE run_id = ?",
+                    (clean_run_id,),
+                ).fetchone()
+                return self._connector_run_from_row(updated) if updated else None
+        except Exception as e:
+            logger.error(f"Failed to finish connector run {clean_run_id}: {e}")
+            return None
+
+    def get_connector_run(self, run_id: str) -> Optional[ConnectorRunRecord]:
+        """Fetch one connector run history record."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM connector_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                return self._connector_run_from_row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to read connector run {run_id}: {e}")
+            return None
+
+    def list_connector_runs(
+        self,
+        *,
+        connector_name: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[ConnectorRunRecord]:
+        """List connector run history, newest first."""
+        where: list[str] = []
+        params: list[Any] = []
+        if connector_name:
+            where.append("connector_name = ?")
+            params.append(str(connector_name))
+        if status:
+            where.append("status = ?")
+            params.append(str(status))
+
+        query = "SELECT * FROM connector_runs"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(query, tuple(params)).fetchall()
+                return [self._connector_run_from_row(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list connector runs: {e}")
+            return []
+
+    def connector_run_output_count(self, run_id: str) -> int:
+        """Return the number of distinct artifacts recorded for a run."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS count FROM connector_run_outputs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                return int(row["count"] or 0) if row else 0
+        except Exception as e:
+            logger.error(f"Failed to count connector run outputs {run_id}: {e}")
+            return 0
+
+    def list_connector_run_outputs(
+        self,
+        run_id: str,
+    ) -> List[ConnectorRunOutputRecord]:
+        """List artifact and capture-event links for a connector run."""
+        clean_run_id = str(run_id or "").strip()
+        if not clean_run_id:
+            return []
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT run_id, artifact_id, artifact_type, source, queue_status,
+                           recorded_at, capture_event_id, capture_source_id,
+                           raw_ref_id, artifact_link_id
+                    FROM connector_run_outputs
+                    WHERE run_id = ?
+                    ORDER BY recorded_at ASC, artifact_id ASC
+                    """,
+                    (clean_run_id,),
+                ).fetchall()
+                return [self._connector_run_output_from_row(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list connector run outputs {clean_run_id}: {e}")
+            return []
+
+    def get_connector_checkpoint(
+        self,
+        connector_name: str,
+        checkpoint_key: str,
+    ) -> Optional[ConnectorCheckpointRecord]:
+        """Fetch checkpoint state for one connector input signature."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT * FROM connector_checkpoints
+                    WHERE connector_name = ? AND checkpoint_key = ?
+                    """,
+                    (connector_name, checkpoint_key),
+                ).fetchone()
+                return self._connector_checkpoint_from_row(row) if row else None
+        except Exception as e:
+            logger.error(
+                f"Failed to read connector checkpoint {connector_name}:{checkpoint_key}: {e}"
+            )
+            return None
+
+    def list_connector_checkpoints(
+        self,
+        *,
+        connector_name: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[ConnectorCheckpointRecord]:
+        """List latest connector checkpoints, newest first."""
+        where: list[str] = []
+        params: list[Any] = []
+        if connector_name:
+            where.append("connector_name = ?")
+            params.append(str(connector_name))
+        query = "SELECT * FROM connector_checkpoints"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(query, tuple(params)).fetchall()
+                return [self._connector_checkpoint_from_row(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list connector checkpoints: {e}")
+            return []
+
+    def _connector_run_from_row(self, row: sqlite3.Row) -> ConnectorRunRecord:
+        return ConnectorRunRecord(
+            run_id=row["run_id"],
+            connector_name=row["connector_name"],
+            checkpoint_key=row["checkpoint_key"],
+            checkpoint_id=row["checkpoint_id"],
+            status=row["status"],
+            inputs_json=row["inputs_json"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            output_count=int(row["output_count"] or 0),
+            failure_reason=row["failure_reason"],
+            attempt=int(row["attempt"] or 1),
+            max_attempts=int(row["max_attempts"] or 5),
+            next_retry_at=row["next_retry_at"],
+            retry_state_json=row["retry_state_json"],
+            resume_token=row["resume_token"],
+            metadata_json=_row_get(row, "metadata_json"),
+        )
+
+    def _connector_run_output_from_row(
+        self,
+        row: sqlite3.Row,
+    ) -> ConnectorRunOutputRecord:
+        return ConnectorRunOutputRecord(
+            run_id=row["run_id"],
+            artifact_id=row["artifact_id"],
+            artifact_type=row["artifact_type"],
+            source=row["source"],
+            queue_status=row["queue_status"],
+            recorded_at=row["recorded_at"],
+            capture_event_id=_row_get(row, "capture_event_id"),
+            capture_source_id=_row_get(row, "capture_source_id"),
+            raw_ref_id=_row_get(row, "raw_ref_id"),
+            artifact_link_id=_row_get(row, "artifact_link_id"),
+        )
+
+    def _connector_checkpoint_from_row(
+        self,
+        row: sqlite3.Row,
+    ) -> ConnectorCheckpointRecord:
+        return ConnectorCheckpointRecord(
+            checkpoint_id=row["checkpoint_id"],
+            connector_name=row["connector_name"],
+            checkpoint_key=row["checkpoint_key"],
+            status=row["status"],
+            inputs_json=row["inputs_json"],
+            state_json=row["state_json"],
+            updated_at=row["updated_at"],
+            resume_token=row["resume_token"],
+            output_count=int(row["output_count"] or 0),
+            last_run_id=row["last_run_id"],
+            failure_reason=row["failure_reason"],
+            attempt=int(row["attempt"] or 0),
+            max_attempts=int(row["max_attempts"] or 5),
+            next_retry_at=row["next_retry_at"],
+        )
+
     # Ingestion queue operations
     def upsert_ingestion_entry(self, entry: IngestionQueueEntry) -> bool:
         """Insert or update an ingestion queue entry."""
         try:
+            existing = self.get_ingestion_entry(entry.artifact_id)
+            payload_json = _ingestion_payload_with_security_metadata(entry)
+            payload_json, security_policy = _ingestion_payload_with_security_policy(
+                entry,
+                payload_json,
+                existing_payload_json=existing.payload_json if existing else None,
+            )
+            status = _queue_status_for_security_policy(entry.status, security_policy)
+            last_error = (
+                _security_policy_last_error(security_policy)
+                if status in {"needs_review", "blocked"}
+                else entry.last_error
+            )
+            review_json = (
+                entry.review_json
+                or (existing.review_json if existing else None)
+            )
+            previous_status = existing.status if existing else entry.status
+            structural_review = _ingestion_structural_review(
+                artifact_type=entry.artifact_type,
+                payload_json=payload_json,
+            )
+            if status in {"needs_review", "blocked"}:
+                reason = str(security_policy.get("reason") or last_error or "security review required")
+                if (
+                    not existing
+                    or existing.status != status
+                    or existing.last_error != last_error
+                    or not existing.review_json
+                ):
+                    review_json = _append_ingestion_review_event(
+                        review_json,
+                        action="review_required",
+                        actor="system",
+                        previous_status=previous_status,
+                        status=status,
+                        category="security_policy",
+                        reason=reason,
+                        error=last_error,
+                        error_type="SecurityPolicy",
+                        metadata={
+                            key: security_policy[key]
+                            for key in (
+                                "status",
+                                "reason",
+                                "max_severity",
+                                "strict_source",
+                            )
+                            if key in security_policy
+                        },
+                    )
+            elif structural_review:
+                status = "needs_review"
+                last_error = str(structural_review["error"])
+                if (
+                    not existing
+                    or existing.status != status
+                    or existing.last_error != last_error
+                    or not existing.review_json
+                ):
+                    review_json = _append_ingestion_review_event(
+                        review_json,
+                        action="review_required",
+                        actor="system",
+                        previous_status=previous_status,
+                        status=status,
+                        category=str(structural_review["category"]),
+                        reason=str(structural_review["reason"]),
+                        error=last_error,
+                        error_type=str(structural_review["error_type"]),
+                        metadata=structural_review.get("metadata")
+                        if isinstance(structural_review.get("metadata"), Mapping)
+                        else None,
+                    )
             with self._get_connection() as conn:
                 conn.execute(
                     """
                     INSERT INTO ingestion_queue (
                         artifact_id, artifact_type, source, priority, status,
                         payload_json, capabilities_json, attempts, last_error,
-                        next_attempt_at, created_at, processed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        next_attempt_at, created_at, processed_at, review_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(artifact_id) DO UPDATE SET
                         artifact_type=excluded.artifact_type,
                         source=excluded.source,
@@ -1764,21 +4129,27 @@ class MetadataDB:
                         last_error=excluded.last_error,
                         next_attempt_at=excluded.next_attempt_at,
                         created_at=excluded.created_at,
-                        processed_at=excluded.processed_at
+                        processed_at=excluded.processed_at,
+                        review_json=excluded.review_json
                     """,
                     (
                         entry.artifact_id,
                         entry.artifact_type,
                         entry.source,
                         entry.priority,
-                        entry.status,
-                        entry.payload_json,
+                        status,
+                        payload_json,
                         entry.capabilities_json,
                         entry.attempts,
-                        entry.last_error,
-                        entry.next_attempt_at or entry.created_at or datetime.now().isoformat(),
-                        entry.created_at or datetime.now().isoformat(),
-                        entry.processed_at
+                        last_error,
+                        None
+                        if status in INGESTION_REVIEW_STATUSES
+                        else entry.next_attempt_at
+                        or entry.created_at
+                        or _now_iso(),
+                        entry.created_at or _now_iso(),
+                        entry.processed_at,
+                        review_json,
                     )
                 )
                 return True
@@ -1796,7 +4167,7 @@ class MetadataDB:
                     SET status='processing',
                         attempts=attempts + 1,
                         next_attempt_at=NULL
-                    WHERE artifact_id = ? AND status IN ('pending', 'processing', 'failed')
+                    WHERE artifact_id = ? AND status IN ('pending', 'processing')
                     """,
                     (artifact_id,)
                 )
@@ -1809,15 +4180,15 @@ class MetadataDB:
         """Mark an artifact as processed."""
         try:
             with self._get_connection() as conn:
-                conn.execute(
+                result = conn.execute(
                     """
                     UPDATE ingestion_queue
                     SET status='processed', processed_at=?, last_error=NULL, next_attempt_at=NULL
-                    WHERE artifact_id = ?
+                    WHERE artifact_id = ? AND status NOT IN ('needs_review', 'blocked', 'failed', 'reviewed', 'rejected')
                     """,
-                    (datetime.now().isoformat(), artifact_id)
+                    (_now_iso(), artifact_id)
                 )
-                return True
+                return (result.rowcount or 0) > 0
         except Exception as e:
             logger.error(f"Failed to mark ingestion {artifact_id} processed: {e}")
             return False
@@ -1828,6 +4199,8 @@ class MetadataDB:
             entry = self.get_ingestion_entry(artifact_id)
             if not entry:
                 return None
+            if entry.status in INGESTION_REVIEW_STATUSES:
+                return entry
 
             attempts = entry.attempts
             delay_seconds = min(3600, 300 * (2 ** max(0, attempts - 1)))
@@ -1836,8 +4209,22 @@ class MetadataDB:
 
             if attempts < max_attempts:
                 status = 'pending'
-                next_attempt_time = datetime.now() + timedelta(seconds=delay_seconds)
-                next_attempt_at = next_attempt_time.isoformat()
+                next_attempt_time = _now_utc() + timedelta(seconds=delay_seconds)
+                next_attempt_at = next_attempt_time.isoformat().replace("+00:00", "Z")
+
+            review_json = entry.review_json
+            if status == "failed":
+                review_json = _append_ingestion_review_event(
+                    review_json,
+                    action="review_required",
+                    actor="system",
+                    previous_status=entry.status,
+                    status="failed",
+                    category="processing_failed",
+                    reason=f"processing failed after {attempts} attempt(s)",
+                    error=error,
+                    error_type="ProcessingError",
+                )
 
             with self._get_connection() as conn:
                 conn.execute(
@@ -1846,16 +4233,307 @@ class MetadataDB:
                     SET status=?,
                         last_error=?,
                         next_attempt_at=?,
-                        processed_at=NULL
+                        processed_at=NULL,
+                        review_json=?
                     WHERE artifact_id = ?
                     """,
-                    (status, error, next_attempt_at, artifact_id)
+                    (status, error, next_attempt_at, review_json, artifact_id)
                 )
 
             return self.get_ingestion_entry(artifact_id)
         except Exception as e:
             logger.error(f"Failed to mark ingestion {artifact_id} failed: {e}")
             return None
+
+    def mark_ingestion_review_required(
+        self,
+        artifact_id: str,
+        *,
+        category: str,
+        reason: str,
+        error: str | None = None,
+        error_type: str | None = None,
+        actor: str | None = "system",
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Optional[IngestionQueueEntry]:
+        """Move an ingestion row to the active operator review queue."""
+        try:
+            entry = self.get_ingestion_entry(artifact_id)
+            if not entry:
+                return None
+            now_iso = _now_iso()
+            last_error = str(error or reason)
+            review_json = _append_ingestion_review_event(
+                entry.review_json,
+                action="review_required",
+                actor=actor,
+                previous_status=entry.status,
+                status="needs_review",
+                category=category,
+                reason=reason,
+                error=last_error,
+                error_type=error_type,
+                metadata=metadata,
+                at=now_iso,
+            )
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE ingestion_queue
+                    SET status='needs_review',
+                        last_error=?,
+                        next_attempt_at=NULL,
+                        processed_at=NULL,
+                        review_json=?
+                    WHERE artifact_id = ?
+                    """,
+                    (last_error, review_json, artifact_id),
+                )
+            return self.get_ingestion_entry(artifact_id)
+        except Exception as e:
+            logger.error(f"Failed to mark ingestion {artifact_id} review required: {e}")
+            return None
+
+    def transition_ingestion_review(
+        self,
+        artifact_id: str,
+        *,
+        action: str,
+        status: str,
+        actor: str,
+        reason: str,
+        clear_error: bool = False,
+        reset_attempts: bool = False,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Optional[IngestionQueueEntry]:
+        """Apply an audited operator transition to a review-queue row."""
+        clean_actor = str(actor or "").strip()
+        clean_reason = str(reason or "").strip()
+        clean_status = str(status or "").strip()
+        clean_action = str(action or "").strip()
+        if clean_status not in {"pending", *INGESTION_CLOSED_REVIEW_STATUSES}:
+            raise ValueError(f"Unsupported ingestion review target status: {status}")
+        if not clean_action:
+            raise ValueError("Ingestion review transition requires action")
+        if not clean_actor:
+            raise ValueError("Ingestion review transition requires actor")
+        if not clean_reason:
+            raise ValueError("Ingestion review transition requires reason")
+
+        try:
+            entry = self.get_ingestion_entry(artifact_id)
+            if not entry:
+                return None
+            now_iso = _now_iso()
+            review_json = _append_ingestion_review_event(
+                entry.review_json,
+                action=clean_action,
+                actor=clean_actor,
+                previous_status=entry.status,
+                status=clean_status,
+                category="operator_review",
+                reason=clean_reason,
+                error=entry.last_error,
+                error_type=None,
+                metadata=metadata,
+                at=now_iso,
+            )
+            last_error = None if clear_error else entry.last_error
+            next_attempt_at = now_iso if clean_status == "pending" else None
+            attempts = 0 if reset_attempts else entry.attempts
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE ingestion_queue
+                    SET status=?,
+                        attempts=?,
+                        last_error=?,
+                        next_attempt_at=?,
+                        processed_at=NULL,
+                        review_json=?
+                    WHERE artifact_id = ?
+                    """,
+                    (
+                        clean_status,
+                        attempts,
+                        last_error,
+                        next_attempt_at,
+                        review_json,
+                        artifact_id,
+                    ),
+                )
+            return self.get_ingestion_entry(artifact_id)
+        except Exception as e:
+            logger.error(f"Failed to transition ingestion review {artifact_id}: {e}")
+            return None
+
+    def retry_ingestion_review(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Optional[IngestionQueueEntry]:
+        """Move a reviewed artifact back to the pending queue."""
+        return self.transition_ingestion_review(
+            artifact_id,
+            action="retry",
+            status="pending",
+            actor=actor,
+            reason=reason,
+            clear_error=True,
+            reset_attempts=True,
+            metadata=metadata,
+        )
+
+    def reject_ingestion_review(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Optional[IngestionQueueEntry]:
+        """Move a bad artifact to the rejected terminal review state."""
+        return self.transition_ingestion_review(
+            artifact_id,
+            action="reject",
+            status="rejected",
+            actor=actor,
+            reason=reason,
+            metadata=metadata,
+        )
+
+    def mark_ingestion_reviewed(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Optional[IngestionQueueEntry]:
+        """Mark a review-queue artifact as reviewed without retrying it."""
+        return self.transition_ingestion_review(
+            artifact_id,
+            action="mark_reviewed",
+            status="reviewed",
+            actor=actor,
+            reason=reason,
+            metadata=metadata,
+        )
+
+    def approve_ingestion_security_override(
+        self,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> Optional[IngestionQueueEntry]:
+        """Move a quarantined ingestion back to pending with audited operator approval."""
+        clean_actor = str(actor or "").strip()
+        clean_reason = str(reason or "").strip()
+        if not clean_actor:
+            raise ValueError("Security override requires actor")
+        if not clean_reason:
+            raise ValueError("Security override requires reason")
+
+        entry = self.get_ingestion_entry(artifact_id)
+        if not entry:
+            return None
+
+        payload = _json_payload(entry.payload_json)
+        normalized_metadata = payload.get("normalized_metadata")
+        if not isinstance(normalized_metadata, dict):
+            normalized_metadata = {}
+        current_policy = prompt_security_policy_for_metadata(
+            normalized_metadata,
+            source_type=entry.source,
+            source_label=f"{entry.artifact_type}:{entry.source}:{entry.artifact_id}",
+            source_path=_payload_source_path(payload),
+        )
+        previous_status = str(current_policy.get("status") or entry.status)
+        if previous_status not in {
+            PROMPT_SECURITY_POLICY_NEEDS_REVIEW,
+            PROMPT_SECURITY_POLICY_BLOCKED,
+            "needs_review",
+            "blocked",
+        }:
+            return entry
+
+        now_iso = _now_iso()
+        approved_policy = {
+            **current_policy,
+            "status": PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
+            "reason": "operator_override",
+            "override_actor": clean_actor,
+            "override_reason": clean_reason,
+            "override_at": now_iso,
+        }
+        normalized_metadata = merge_prompt_security_policy_metadata(
+            normalized_metadata,
+            approved_policy,
+            audit_entry=_security_policy_audit_entry(
+                action="override_approved",
+                status=PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
+                reason=clean_reason,
+                actor=clean_actor,
+                at=now_iso,
+                previous_status=previous_status,
+            ),
+        )
+        payload["normalized_metadata"] = normalized_metadata
+        payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        review_json = _append_ingestion_review_event(
+            entry.review_json,
+            action="security_override_approved",
+            actor=clean_actor,
+            previous_status=entry.status,
+            status="pending",
+            category="security_policy",
+            reason=clean_reason,
+            error=entry.last_error,
+            error_type="SecurityPolicy",
+            metadata={
+                "previous_policy_status": previous_status,
+                "policy_status": PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
+            },
+            at=now_iso,
+        )
+
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE ingestion_queue
+                    SET status='pending',
+                        payload_json=?,
+                        last_error=NULL,
+                        next_attempt_at=?,
+                        processed_at=NULL,
+                        review_json=?
+                    WHERE artifact_id = ?
+                    """,
+                    (payload_json, now_iso, review_json, artifact_id),
+                )
+            return self.get_ingestion_entry(artifact_id)
+        except Exception as e:
+            logger.error(f"Failed to approve ingestion security override {artifact_id}: {e}")
+            return None
+
+    def ingestion_entry_requires_security_review(self, artifact_id: str) -> bool:
+        """Return True when an ingestion entry must be excluded by default."""
+        entry = self.get_ingestion_entry(artifact_id)
+        if not entry:
+            return False
+        if entry.status in INGESTION_REVIEW_STATUSES:
+            return True
+        payload = _json_payload(entry.payload_json)
+        normalized_metadata = payload.get("normalized_metadata")
+        return bool(
+            isinstance(normalized_metadata, Mapping)
+            and prompt_security_requires_review(normalized_metadata)
+        )
 
     def get_ingestion_entry(self, artifact_id: str) -> Optional[IngestionQueueEntry]:
         """Fetch single ingestion queue entry."""
@@ -1879,7 +4557,8 @@ class MetadataDB:
                     next_attempt_at=row['next_attempt_at'],
                     created_at=row['created_at'],
                     processed_at=row['processed_at'],
-                    capabilities_json=row['capabilities_json']
+                    capabilities_json=row['capabilities_json'],
+                    review_json=_row_get(row, "review_json"),
                 )
         except Exception as e:
             logger.error(f"Failed to get ingestion entry {artifact_id}: {e}")
@@ -1894,7 +4573,7 @@ class MetadataDB:
                     "WHERE status='pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?) "
                     "ORDER BY priority DESC, created_at ASC"
                 )
-                params: List[Any] = [datetime.now().isoformat()]
+                params: List[Any] = [_now_iso()]
                 if limit:
                     query += " LIMIT ?"
                     params.append(limit)
@@ -1912,7 +4591,8 @@ class MetadataDB:
                         next_attempt_at=row['next_attempt_at'],
                         created_at=row['created_at'],
                         processed_at=row['processed_at'],
-                        capabilities_json=row['capabilities_json']
+                        capabilities_json=row['capabilities_json'],
+                        review_json=_row_get(row, "review_json"),
                     )
                     for row in rows
                 ]
@@ -1963,13 +4643,280 @@ class MetadataDB:
                         next_attempt_at=row['next_attempt_at'],
                         created_at=row['created_at'],
                         processed_at=row['processed_at'],
-                        capabilities_json=row['capabilities_json']
+                        capabilities_json=row['capabilities_json'],
+                        review_json=_row_get(row, "review_json"),
                     )
                     for row in rows
                 ]
         except Exception as e:
             logger.error(f"Failed to list ingestion entries: {e}")
             return []
+
+    def get_ingestion_queue_counts(self) -> Dict[str, Any]:
+        """Return operational counts for the generalized ingestion queue."""
+        empty_status_counts = {
+            status: 0 for status in INGESTION_QUEUE_ALLOWED_STATUSES
+        }
+        try:
+            with self._get_connection() as conn:
+                status_rows = conn.execute(
+                    "SELECT status, COUNT(*) AS count FROM ingestion_queue GROUP BY status"
+                ).fetchall()
+                type_rows = conn.execute(
+                    """
+                    SELECT artifact_type, status, COUNT(*) AS count
+                    FROM ingestion_queue
+                    GROUP BY artifact_type, status
+                    ORDER BY artifact_type, status
+                    """
+                ).fetchall()
+                source_rows = conn.execute(
+                    """
+                    SELECT source, status, COUNT(*) AS count
+                    FROM ingestion_queue
+                    GROUP BY source, status
+                    ORDER BY source, status
+                    """
+                ).fetchall()
+        except Exception as e:
+            logger.error(f"Failed to get ingestion queue counts: {e}")
+            return {
+                "by_status": empty_status_counts,
+                "by_artifact_type": {},
+                "by_source": {},
+                "total": 0,
+                "error": str(e),
+            }
+
+        by_status = dict(empty_status_counts)
+        for row in status_rows:
+            by_status[str(row["status"])] = int(row["count"] or 0)
+
+        by_artifact_type: dict[str, dict[str, int]] = {}
+        for row in type_rows:
+            bucket = by_artifact_type.setdefault(str(row["artifact_type"]), {})
+            bucket[str(row["status"])] = int(row["count"] or 0)
+
+        by_source: dict[str, dict[str, int]] = {}
+        for row in source_rows:
+            bucket = by_source.setdefault(str(row["source"]), {})
+            bucket[str(row["status"])] = int(row["count"] or 0)
+
+        return {
+            "by_status": by_status,
+            "by_artifact_type": by_artifact_type,
+            "by_source": by_source,
+            "total": sum(by_status.values()),
+        }
+
+    def list_ingestion_review_entries(
+        self,
+        *,
+        status: Optional[str] = None,
+        include_closed: bool = False,
+        limit: int = 50,
+    ) -> List[IngestionQueueEntry]:
+        """List artifacts in active or closed operator review states."""
+        if status:
+            statuses = [str(status)]
+        else:
+            statuses = list(INGESTION_ACTIVE_REVIEW_STATUSES)
+            if include_closed:
+                statuses.extend(INGESTION_CLOSED_REVIEW_STATUSES)
+        statuses = [item for item in statuses if item in INGESTION_REVIEW_STATUSES]
+        if not statuses:
+            return []
+
+        placeholders = ",".join("?" for _ in statuses)
+        query = (
+            "SELECT * FROM ingestion_queue "
+            f"WHERE status IN ({placeholders}) "
+            "ORDER BY created_at DESC, priority DESC LIMIT ?"
+        )
+        params: list[Any] = [*statuses, max(1, int(limit))]
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(query, tuple(params)).fetchall()
+                return [
+                    IngestionQueueEntry(
+                        artifact_id=row['artifact_id'],
+                        artifact_type=row['artifact_type'],
+                        source=row['source'],
+                        payload_json=row['payload_json'],
+                        priority=row['priority'],
+                        status=row['status'],
+                        attempts=row['attempts'],
+                        last_error=row['last_error'],
+                        next_attempt_at=row['next_attempt_at'],
+                        created_at=row['created_at'],
+                        processed_at=row['processed_at'],
+                        capabilities_json=row['capabilities_json'],
+                        review_json=_row_get(row, "review_json"),
+                    )
+                    for row in rows
+                ]
+        except Exception as e:
+            logger.error(f"Failed to list ingestion review entries: {e}")
+            return []
+
+    def get_ingestion_security_summary(self, *, limit: int = 25) -> Dict[str, Any]:
+        """Return sanitized ingestion security state for operator dashboards."""
+        capped_limit = max(1, min(int(limit), 100))
+        empty_counts = {
+            "total": 0,
+            "with_findings": 0,
+            "findings": 0,
+            "redacted": 0,
+            "redactions": 0,
+            "quarantined": 0,
+            "strict_failures": 0,
+            "by_status": {},
+            "by_source": {},
+            "by_finding_type": {},
+            "by_pattern": {},
+            "by_redaction_category": {},
+        }
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT artifact_id, artifact_type, source, status, payload_json,
+                           attempts, last_error, created_at, processed_at
+                    FROM ingestion_queue
+                    ORDER BY created_at DESC, artifact_id ASC
+                    """
+                ).fetchall()
+        except Exception as e:
+            logger.error(f"Failed to summarize ingestion security state: {e}")
+            return {
+                "error": str(e),
+                "counts": empty_counts,
+                "quarantined_artifacts": [],
+                "strict_failures": [],
+                "redactions": {"total": 0, "by_category": {}},
+                "findings_by_source": [],
+            }
+
+        status_counts: Counter[str] = Counter()
+        source_counts: Counter[str] = Counter()
+        finding_type_counts: Counter[str] = Counter()
+        pattern_counts: Counter[str] = Counter()
+        redaction_counts: Counter[str] = Counter()
+        findings_by_source: dict[str, Counter[str]] = {}
+        quarantined_artifacts: list[dict[str, Any]] = []
+        strict_failures: list[dict[str, Any]] = []
+        quarantined_total = 0
+        strict_failure_total = 0
+        total_findings = 0
+        with_findings = 0
+        redacted_entries = 0
+
+        for row in rows:
+            artifact_id = str(row["artifact_id"] or "")
+            artifact_type = str(row["artifact_type"] or "")
+            source = str(row["source"] or "unknown")
+            status = str(row["status"] or "unknown")
+            status_counts[status] += 1
+            source_counts[source] += 1
+
+            payload = _json_payload(row["payload_json"])
+            metadata = payload.get("normalized_metadata")
+            if not isinstance(metadata, Mapping):
+                metadata = {}
+
+            findings = _security_findings_for_summary(
+                metadata.get(THOTH_SECURITY_FINDINGS_KEY)
+            )
+            if findings:
+                with_findings += 1
+            total_findings += len(findings)
+
+            for finding in findings:
+                finding_type = str(finding.get("finding_type") or "prompt_security")
+                pattern_id = str(finding.get("pattern_id") or "unknown")
+                finding_type_counts[finding_type] += 1
+                pattern_counts[pattern_id] += 1
+                findings_by_source.setdefault(source, Counter())[pattern_id] += 1
+
+            redaction = metadata.get(THOTH_REDACTION_METADATA_KEY)
+            redaction_total = _redaction_total(redaction)
+            if redaction_total:
+                redacted_entries += 1
+                for category, count in _redaction_categories(redaction).items():
+                    redaction_counts[category] += count
+
+            policy = prompt_security_policy_for_metadata(
+                metadata,
+                source_type=source,
+                source_label=f"{artifact_type}:{source}:{artifact_id}",
+                source_path=_payload_source_path(payload),
+            )
+            policy_status = str(policy.get("status") or status)
+            is_quarantined = status in INGESTION_QUARANTINE_STATUSES or (
+                policy_status in INGESTION_QUARANTINE_STATUSES
+            )
+            is_strict_failure = policy_status == PROMPT_SECURITY_POLICY_BLOCKED or (
+                bool(policy.get("strict_source"))
+                and bool(policy.get("strict_pattern_ids") or policy.get("pattern_ids"))
+                and status in INGESTION_QUARANTINE_STATUSES
+            )
+            if is_quarantined:
+                quarantined_total += 1
+            if is_strict_failure:
+                strict_failure_total += 1
+
+            artifact_summary = {
+                "artifact_id": artifact_id,
+                "artifact_type": artifact_type,
+                "source": source,
+                "status": status,
+                "policy_status": policy_status,
+                "policy_reason": str(policy.get("reason") or ""),
+                "max_severity": str(policy.get("max_severity") or "none"),
+                "pattern_ids": list(policy.get("pattern_ids") or []),
+                "strict_pattern_ids": list(policy.get("strict_pattern_ids") or []),
+                "redaction_categories": _redaction_categories(redaction),
+                "redaction_count": redaction_total,
+                "attempts": int(row["attempts"] or 0),
+                "last_error": _safe_dashboard_error(row["last_error"]),
+                "created_at": row["created_at"],
+                "processed_at": row["processed_at"],
+            }
+            if is_quarantined and len(quarantined_artifacts) < capped_limit:
+                quarantined_artifacts.append(artifact_summary)
+            if is_strict_failure and len(strict_failures) < capped_limit:
+                strict_failures.append(artifact_summary)
+
+        return {
+            "counts": {
+                "total": len(rows),
+                "with_findings": with_findings,
+                "findings": total_findings,
+                "redacted": redacted_entries,
+                "redactions": sum(redaction_counts.values()),
+                "quarantined": quarantined_total,
+                "strict_failures": strict_failure_total,
+                "by_status": dict(sorted(status_counts.items())),
+                "by_source": dict(sorted(source_counts.items())),
+                "by_finding_type": dict(sorted(finding_type_counts.items())),
+                "by_pattern": dict(sorted(pattern_counts.items())),
+                "by_redaction_category": dict(sorted(redaction_counts.items())),
+            },
+            "quarantined_artifacts": quarantined_artifacts,
+            "strict_failures": strict_failures,
+            "redactions": {
+                "total": sum(redaction_counts.values()),
+                "by_category": dict(sorted(redaction_counts.items())),
+            },
+            "findings_by_source": [
+                {
+                    "source": source,
+                    "total": sum(counter.values()),
+                    "patterns": dict(sorted(counter.items())),
+                }
+                for source, counter in sorted(findings_by_source.items())
+            ],
+        }
     
     def delete_tweet(self, tweet_id: str) -> bool:
         """Delete tweet metadata."""
@@ -2213,31 +5160,102 @@ class MetadataDB:
             logger.error(f"Failed to summarize llm cache: {exc}")
             return {}
 
+    def list_llm_cache_entries_for_contexts(
+        self,
+        contexts: tuple[str, ...],
+    ) -> List[Dict[str, Any]]:
+        """Return LLM cache rows whose cache key or legacy context matches contexts."""
+        cleaned = tuple(dict.fromkeys(str(item).strip() for item in contexts if str(item).strip()))
+        if not cleaned:
+            return []
+        try:
+            with self._get_connection() as conn:
+                columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(llm_cache)").fetchall()
+                }
+                clauses = []
+                params: list[Any] = []
+                for context in cleaned:
+                    pattern = f"%{_escape_sql_like(context)}%"
+                    clauses.append("cache_key LIKE ? ESCAPE '\\'")
+                    params.append(pattern)
+                    if "context" in columns:
+                        clauses.append("context LIKE ? ESCAPE '\\'")
+                        params.append(pattern)
+                selected_columns = [
+                    "cache_key",
+                    "task_type",
+                    "content_hash",
+                    "created_at",
+                    "model_provider",
+                ]
+                if "context" in columns:
+                    selected_columns.append("context")
+                rows = conn.execute(
+                    f"""
+                    SELECT {", ".join(selected_columns)}
+                    FROM llm_cache
+                    WHERE {" OR ".join(clauses)}
+                    ORDER BY created_at DESC, cache_key
+                    """,
+                    tuple(params),
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except Exception as exc:
+            logger.error(f"Failed to list LLM cache entries for retention: {exc}")
+            return []
+
+    def delete_llm_cache_entries(self, cache_keys: tuple[str, ...]) -> int:
+        """Delete LLM cache rows by key and return the number removed."""
+        cleaned = tuple(dict.fromkeys(str(item).strip() for item in cache_keys if str(item).strip()))
+        if not cleaned:
+            return 0
+        placeholders = ",".join("?" for _ in cleaned)
+        try:
+            with self._get_connection() as conn:
+                result = conn.execute(
+                    f"DELETE FROM llm_cache WHERE cache_key IN ({placeholders})",
+                    cleaned,
+                )
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            logger.error(f"Failed to delete LLM cache entries for retention: {exc}")
+            return 0
+
     def get_transcript_chunk_stats(self) -> Dict[str, Any]:
         """Summarize transcript chunk cache health."""
         try:
             with self._get_connection() as conn:
                 rows = conn.execute(
-                    "SELECT context_id, chunk_index, content_hash, result_json, updated_at "
+                    "SELECT context_id, chunk_index, chunk_id, content_hash, result_json, updated_at, model_provider "
                     "FROM transcript_chunk_cache"
                 ).fetchall()
 
                 contexts: Dict[str, Dict[str, Any]] = {}
+                by_provider: Dict[str, int] = {}
+                recent_entries: list[dict[str, Any]] = []
                 for row in rows:
                     context_id = row['context_id']
                     chunk_index = row['chunk_index']
+                    chunk_id = row['chunk_id']
                     updated_at = row['updated_at']
+                    provider = row['model_provider'] or 'unknown'
+                    by_provider[provider] = by_provider.get(provider, 0) + 1
                     context = contexts.setdefault(context_id, {
                         'entries': 0,
                         'chunks_total': 0,
-                        'chunks_processed': 0,
+                        'successful_chunks': set(),
                         'failed_chunks': set(),
+                        'chunk_ids': [],
                         'fallback': False,
                         'last_updated': updated_at
                     })
                     context['entries'] += 1
                     context['last_updated'] = max(context['last_updated'], updated_at)
                     context['chunks_total'] = max(context['chunks_total'], chunk_index or 0)
+                    if chunk_id:
+                        context['chunk_ids'].append(chunk_id)
 
                     data = {}
                     try:
@@ -2248,13 +5266,16 @@ class MetadataDB:
                     if isinstance(data, dict) and data.get('status') == 'failed':
                         context['failed_chunks'].add(chunk_index)
                         context['fallback'] = True
-                        continue
+                    else:
+                        context['successful_chunks'].add(chunk_index)
 
                     if isinstance(data, dict):
                         meta = data.get('chunk_metadata') or {}
                         if meta:
                             context['chunks_total'] = max(context['chunks_total'], meta.get('chunks_total', 0) or context['chunks_total'])
-                            context['chunks_processed'] = max(context['chunks_processed'], meta.get('chunks_processed', 0) or 0)
+                            for item in meta.get('chunk_ids') or ():
+                                if item:
+                                    context['chunk_ids'].append(str(item))
                             failed = meta.get('chunks_failed', 0) or 0
                             if failed:
                                 failed_chunks = meta.get('failed_chunks') or []
@@ -2264,39 +5285,100 @@ class MetadataDB:
                                     context['failed_chunks'].add(chunk_index)
                             if meta.get('fallback_used'):
                                 context['fallback'] = True
+                    recent_entries.append({
+                        'context_id': context_id,
+                        'chunk_index': chunk_index,
+                        'chunk_id': chunk_id,
+                        'content_hash': row['content_hash'],
+                        'model_provider': row['model_provider'],
+                        'updated_at': updated_at,
+                        'status': 'failed' if isinstance(data, dict) and data.get('status') == 'failed' else 'cached',
+                    })
 
                 total_contexts = len(contexts)
                 total_chunks = len(rows)
                 contexts_with_failures = sum(1 for ctx in contexts.values() if ctx['failed_chunks'])
                 contexts_with_fallback = sum(1 for ctx in contexts.values() if ctx['fallback'])
                 total_failed_chunks = sum(len(ctx['failed_chunks']) for ctx in contexts.values())
+                total_successful_chunks = sum(len(ctx['successful_chunks']) for ctx in contexts.values())
 
                 context_details = []
                 for context_id, ctx in contexts.items():
-                    if ctx['failed_chunks'] or ctx['fallback']:
-                        context_details.append({
-                            'context_id': context_id,
-                            'chunks_total': ctx['chunks_total'],
-                            'chunks_processed': ctx['chunks_processed'],
-                            'failed_count': len(ctx['failed_chunks']),
-                            'fallback': ctx['fallback'],
-                            'failed_chunks': sorted(ctx['failed_chunks']),
-                            'last_updated': ctx['last_updated']
-                        })
+                    chunk_ids = sorted(set(ctx['chunk_ids']))
+                    context_details.append({
+                        'context_id': context_id,
+                        'chunks_total': ctx['chunks_total'],
+                        'chunks_processed': len(ctx['successful_chunks']),
+                        'successful_count': len(ctx['successful_chunks']),
+                        'failed_count': len(ctx['failed_chunks']),
+                        'fallback': ctx['fallback'],
+                        'failed_chunks': sorted(ctx['failed_chunks']),
+                        'chunk_ids': chunk_ids,
+                        'last_updated': ctx['last_updated']
+                    })
 
                 context_details.sort(key=lambda item: item['last_updated'], reverse=True)
+                recent_entries.sort(key=lambda item: item['updated_at'], reverse=True)
 
                 return {
                     'total_contexts': total_contexts,
                     'total_chunks': total_chunks,
+                    'total_successful_chunks': total_successful_chunks,
                     'total_failed_chunks': total_failed_chunks,
                     'contexts_with_failures': contexts_with_failures,
                     'contexts_with_fallback': contexts_with_fallback,
-                    'context_details': context_details
+                    'by_provider': by_provider,
+                    'context_details': context_details,
+                    'recent_entries': recent_entries[:10],
                 }
         except Exception as exc:
             logger.error(f"Failed to summarize transcript chunks: {exc}")
             return {}
+
+    def list_transcript_chunks_for_contexts(
+        self,
+        context_ids: tuple[str, ...],
+    ) -> List[Dict[str, Any]]:
+        """Return transcript chunk cache rows for matching context ids."""
+        cleaned = tuple(dict.fromkeys(str(item).strip() for item in context_ids if str(item).strip()))
+        if not cleaned:
+            return []
+        placeholders = ",".join("?" for _ in cleaned)
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT context_id, chunk_index, chunk_id, content_hash, updated_at, model_provider
+                    FROM transcript_chunk_cache
+                    WHERE context_id IN ({placeholders})
+                    ORDER BY context_id, chunk_index
+                    """,
+                    cleaned,
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except Exception as exc:
+            logger.error(f"Failed to list transcript chunks for retention: {exc}")
+            return []
+
+    def delete_transcript_chunks_for_contexts(
+        self,
+        context_ids: tuple[str, ...],
+    ) -> int:
+        """Delete transcript chunk cache rows for context ids."""
+        cleaned = tuple(dict.fromkeys(str(item).strip() for item in context_ids if str(item).strip()))
+        if not cleaned:
+            return 0
+        placeholders = ",".join("?" for _ in cleaned)
+        try:
+            with self._get_connection() as conn:
+                result = conn.execute(
+                    f"DELETE FROM transcript_chunk_cache WHERE context_id IN ({placeholders})",
+                    cleaned,
+                )
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            logger.error(f"Failed to delete transcript chunks for retention: {exc}")
+            return 0
     
     # Database maintenance
     def vacuum(self) -> bool:
@@ -2394,12 +5476,13 @@ class MetadataDB:
         try:
             with self._get_connection() as conn:
                 row = conn.execute(
-                    "SELECT content_hash, result_json, model_provider, updated_at FROM transcript_chunk_cache WHERE context_id = ? AND chunk_index = ?",
+                    "SELECT chunk_id, content_hash, result_json, model_provider, updated_at FROM transcript_chunk_cache WHERE context_id = ? AND chunk_index = ?",
                     (context_id, chunk_index)
                 ).fetchone()
                 if not row:
                     return None
                 return {
+                    'chunk_id': row['chunk_id'],
                     'content_hash': row['content_hash'],
                     'result_json': row['result_json'],
                     'model_provider': row['model_provider'],
@@ -2415,22 +5498,32 @@ class MetadataDB:
         chunk_index: int,
         content_hash: str,
         result_json: str,
-        model_provider: Optional[str]
+        model_provider: Optional[str],
+        chunk_id: Optional[str] = None,
     ) -> bool:
         """Persist a transcript chunk result."""
         try:
             with self._get_connection() as conn:
                 conn.execute(
                     """
-                    INSERT INTO transcript_chunk_cache (context_id, chunk_index, content_hash, result_json, updated_at, model_provider)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO transcript_chunk_cache (context_id, chunk_index, chunk_id, content_hash, result_json, updated_at, model_provider)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(context_id, chunk_index) DO UPDATE SET
+                        chunk_id = excluded.chunk_id,
                         content_hash = excluded.content_hash,
                         result_json = excluded.result_json,
                         updated_at = excluded.updated_at,
                         model_provider = excluded.model_provider
                     """,
-                    (context_id, chunk_index, content_hash, result_json, datetime.now().isoformat(), model_provider)
+                    (
+                        context_id,
+                        chunk_index,
+                        chunk_id,
+                        content_hash,
+                        result_json,
+                        datetime.now().isoformat(),
+                        model_provider,
+                    )
                 )
                 return True
         except Exception as exc:
@@ -2449,6 +5542,27 @@ class MetadataDB:
         except Exception as exc:
             logger.debug(f"Failed to clear transcript chunk cache for {context_id}: {exc}")
             return False
+
+    def prune_transcript_chunks(
+        self,
+        context_id: str,
+        *,
+        max_chunk_index: int,
+    ) -> int:
+        """Remove transcript chunk rows outside the current deterministic chunk set."""
+        try:
+            with self._get_connection() as conn:
+                result = conn.execute(
+                    """
+                    DELETE FROM transcript_chunk_cache
+                    WHERE context_id = ? AND chunk_index > ?
+                    """,
+                    (context_id, max_chunk_index),
+                )
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            logger.debug(f"Failed to prune transcript chunk cache for {context_id}: {exc}")
+            return 0
 
 
 # Global metadata database instance

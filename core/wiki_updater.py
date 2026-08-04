@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
 from .artifacts import (
     KnowledgeArtifact,
+    MarkdownArtifact,
     PaperArtifact,
     RepositoryArtifact,
     TranscriptArtifact,
@@ -19,10 +19,31 @@ from .artifacts import (
     VideoArtifact,
     WebClipperArtifact,
 )
+from .capture_event_store import CaptureEventStore
+from .canonical_identity import CanonicalArtifactIdentity, CanonicalIdentityService
+from .wiki_capture_compiler import CaptureWikiCompiler
 from .config import Config
 from .metadata_db import MetadataDB
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import (
+    THOTH_SECURITY_FINDINGS_KEY,
+    THOTH_SECURITY_POLICY_KEY,
+    prompt_security_policy_for_metadata,
+    prompt_security_requires_review,
+)
 from .research_graph import ResearchGraphService
+from .research_wiki_context import (
+    research_citation_lines,
+    research_context_lines,
+)
+from .semantic_memory import SemanticMemoryStore
+from .semantic_wiki_compiler import SemanticMemoryWikiCompiler
+from .time_utils import utc_now_iso as _now_iso
+from .wiki_change_provenance import (
+    change_provenance,
+    influence_with_input_hashes,
+    source_file_snapshot,
+)
 from .wiki_contract import (
     WikiContract,
     WikiPageSpec,
@@ -34,10 +55,6 @@ from .wiki_scaffold import (
     append_wiki_log_entry,
     ensure_wiki_scaffold,
 )
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -70,6 +87,17 @@ def _read_frontmatter(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _frontmatter_string_values(
+    frontmatter: Mapping[str, Any],
+    *keys: str,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    for key in keys:
+        if key in frontmatter:
+            values.extend(_string_values(frontmatter[key]))
+    return tuple(dict.fromkeys(values))
+
+
 def _render_frontmatter(data: dict[str, Any]) -> str:
     return "---\n" + yaml.safe_dump(
         data,
@@ -77,6 +105,108 @@ def _render_frontmatter(data: dict[str, Any]) -> str:
         allow_unicode=True,
         default_flow_style=False,
     ) + "---\n"
+
+
+_EVENT_ID_KEYS = (
+    "thoth_event_id",
+    "thoth_event_ids",
+    "event_id",
+    "event_ids",
+    "capture_event_id",
+    "capture_event_ids",
+)
+_SECURITY_FINDING_KEYS = (
+    "thoth_security_findings",
+    "security_findings",
+    "prompt_security_findings",
+)
+_SECURITY_REPORT_KEYS = (
+    "security",
+    "prompt_security",
+    "redaction",
+    "redaction_metadata",
+    "sensitive_redaction",
+)
+def _as_sequence(value: Any) -> tuple[Any, ...]:
+    if value is None:
+        return tuple()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, Mapping):
+        return (value,)
+    if isinstance(value, (list, tuple, set)):
+        return tuple(value)
+    return (value,)
+
+
+def _string_values(value: Any) -> tuple[str, ...]:
+    values: list[str] = []
+    if isinstance(value, Mapping):
+        for key in ("id", "event_id", "capture_event_id"):
+            if key in value:
+                values.extend(_string_values(value[key]))
+        return tuple(values)
+
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            values.extend(_string_values(item))
+            continue
+        text = str(item).strip()
+        if text:
+            values.append(text)
+    return tuple(values)
+
+
+def _mapping_has_security_findings(value: Mapping[str, Any]) -> bool:
+    findings = value.get("findings")
+    if _as_sequence(findings):
+        return True
+
+    finding_count = value.get("finding_count")
+    if isinstance(finding_count, int) and finding_count > 0:
+        return True
+    if (
+        isinstance(finding_count, str)
+        and finding_count.isdigit()
+        and int(finding_count) > 0
+    ):
+        return True
+
+    if value.get("redacted") is True or value.get("has_findings") is True:
+        return True
+
+    categories = value.get("categories")
+    return isinstance(categories, Mapping) and bool(categories)
+
+
+def _has_security_findings(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return _mapping_has_security_findings(value)
+    if isinstance(value, str):
+        return bool(value.strip())
+    return bool(_as_sequence(value))
+
+
+def _security_finding_entries(source_key: str, value: Any) -> tuple[Any, ...]:
+    if isinstance(value, Mapping):
+        findings = value.get("findings")
+        if _as_sequence(findings):
+            return tuple(_security_finding_entries(source_key, findings))
+        return ({**value, "source": value.get("source") or source_key},)
+
+    entries: list[Any] = []
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            entries.append({**item, "source": item.get("source") or source_key})
+        else:
+            text = str(item).strip()
+            if text:
+                entries.append({"source": source_key, "finding": text})
+    return tuple(entries)
+
+
+def _frontmatter_requires_security_review(frontmatter: Mapping[str, Any]) -> bool:
+    return prompt_security_requires_review(frontmatter)
 
 
 @dataclass(frozen=True)
@@ -106,14 +236,21 @@ class CompiledWikiUpdater:
         self.contract = contract or WikiContract(root=self.layout.wiki_root)
         self.db = db or MetadataDB(str(self.layout.database_path))
         self._legacy_pages_pruned = False
+        self._canonical_identity_service = None
         self.scaffold = ensure_wiki_scaffold(
             config,
             project_root=self.layout.vault_root.parent,
         )
 
+    @property
+    def canonical_identity_service(self) -> CanonicalIdentityService:
+        if self._canonical_identity_service is None:
+            self._canonical_identity_service = CanonicalIdentityService(self.db)
+        return self._canonical_identity_service
+
     def supports_artifact(self, artifact: KnowledgeArtifact) -> bool:
         """Return True when an artifact should compile into the wiki layer."""
-        return not isinstance(artifact, TweetArtifact)
+        return not isinstance(artifact, (MarkdownArtifact, TweetArtifact))
 
     def prune_legacy_tweet_pages(self) -> tuple[Path, ...]:
         """Delete legacy generated tweet pages from the wiki pages directory."""
@@ -152,10 +289,80 @@ class CompiledWikiUpdater:
             raise ValueError(
                 f"Compiled wiki pages are not supported for {artifact.__class__.__name__}"
             )
-        spec = self._page_spec_for_artifact(artifact)
+        security_policy = self._security_policy_for_artifact(artifact)
+        if security_policy and prompt_security_requires_review(
+            {THOTH_SECURITY_POLICY_KEY: security_policy}
+        ):
+            raise ValueError(
+                f"Artifact {artifact.source_type}:{artifact.id} requires security review"
+            )
+        canonical_identity = self._canonical_identity_for_artifact(artifact)
+        spec = self._page_spec_for_artifact(
+            artifact,
+            canonical_identity=canonical_identity,
+        )
+        if canonical_identity and canonical_identity.wiki_slug:
+            spec = replace(spec, slug=canonical_identity.wiki_slug)
         page_path = self.contract.page_path_for(spec)
         existing = _read_frontmatter(page_path)
         created_at = str(existing.get("created_at") or spec.created_at or _now_iso())
+        updated_at = _now_iso()
+        source_paths = tuple(
+            dict.fromkeys(
+                (
+                    *_frontmatter_string_values(
+                        existing,
+                        "thoth_source_paths",
+                        "source_paths",
+                    ),
+                    *spec.source_paths,
+                )
+            )
+        )
+        event_ids = tuple(
+            dict.fromkeys(
+                (
+                    *_frontmatter_string_values(existing, "thoth_event_ids"),
+                    *spec.event_ids,
+                )
+            )
+        )
+        artifact_ids = tuple(
+            dict.fromkeys(
+                (
+                    *_frontmatter_string_values(
+                        existing,
+                        "thoth_artifact_ids",
+                        "thoth_artifact_id",
+                    ),
+                    *spec.artifact_ids,
+                    *(tuple([spec.artifact_id]) if spec.artifact_id else tuple()),
+                )
+            )
+        )
+        primary_artifact_id = (
+            canonical_identity.primary_artifact_id
+            if canonical_identity is not None
+            else spec.artifact_id
+        )
+        if primary_artifact_id and primary_artifact_id not in artifact_ids:
+            artifact_ids = (primary_artifact_id, *artifact_ids)
+        existing_influence_sources = existing.get("thoth_influence_sources")
+        if not isinstance(existing_influence_sources, list):
+            existing_influence_sources = existing.get("influence_sources")
+        if not isinstance(existing_influence_sources, list):
+            existing_influence_sources = []
+        input_snapshot = source_file_snapshot(
+            self.layout,
+            source_paths,
+            source_type=artifact.source_type,
+            artifact_id=primary_artifact_id or artifact.id,
+        )
+        previous_manifest = existing.get("thoth_input_manifest")
+        if not isinstance(previous_manifest, list):
+            previous_manifest = existing.get("input_manifest")
+        if not isinstance(previous_manifest, list):
+            previous_manifest = []
         updated_spec = WikiPageSpec(
             title=spec.title,
             slug=spec.slug,
@@ -163,19 +370,54 @@ class CompiledWikiUpdater:
             okf_type=spec.okf_type,
             summary=spec.summary,
             aliases=spec.aliases,
-            source_paths=spec.source_paths,
+            source_paths=source_paths,
+            influence_sources=influence_with_input_hashes(
+                (
+                    *(
+                        item
+                        for item in existing_influence_sources
+                        if isinstance(item, Mapping)
+                    ),
+                    *spec.influence_sources,
+                ),
+                input_snapshot,
+            ),
             related_slugs=spec.related_slugs,
             language=spec.language,
             translated_from=spec.translated_from,
             created_at=created_at,
-            updated_at=_now_iso(),
+            updated_at=updated_at,
             resource=spec.resource,
-            artifact_id=spec.artifact_id,
+            artifact_id=primary_artifact_id or spec.artifact_id,
+            artifact_ids=artifact_ids,
             source_type=spec.source_type,
+            canonical_id=spec.canonical_id,
+            canonical_entity_type=spec.canonical_entity_type,
+            canonical_identity_keys=spec.canonical_identity_keys,
+            event_ids=event_ids,
+            security_findings=spec.security_findings,
+            security_policy=spec.security_policy,
+            input_hash=input_snapshot.input_hash,
+            input_manifest=input_snapshot.input_manifest,
+            change_provenance=change_provenance(
+                previous_hash=(
+                    str(existing.get("thoth_input_hash") or existing.get("input_hash"))
+                    if existing.get("thoth_input_hash") or existing.get("input_hash")
+                    else None
+                ),
+                previous_manifest=previous_manifest,
+                current_snapshot=input_snapshot,
+                compiled_at=updated_at,
+            ),
         )
         content = self._render_page(updated_spec, artifact, dispatch_details=dispatch_details)
         action = "updated" if page_path.exists() else "created"
         _atomic_write_text(page_path, content)
+        if canonical_identity and not canonical_identity.wiki_slug:
+            self.canonical_identity_service.set_wiki_slug(
+                canonical_identity.canonical_id,
+                updated_spec.slug,
+            )
         self.refresh_index()
         append_wiki_log_entry(
             self.scaffold,
@@ -188,6 +430,76 @@ class CompiledWikiUpdater:
             action=action,
         )
 
+    def update_from_capture_events(
+        self,
+        event_store: CaptureEventStore,
+        *,
+        source_id: str | None = None,
+        session_id: str | None = None,
+        include_restricted_events: bool = False,
+        audit_reason: str | None = None,
+    ) -> tuple[WikiUpdateResult, ...]:
+        """Compile daily/source/entity wiki pages from capture events."""
+        compiled = CaptureWikiCompiler(
+            layout=self.layout,
+            contract=self.contract,
+        ).compile(
+            event_store,
+            source_id=source_id,
+            session_id=session_id,
+            include_restricted_events=include_restricted_events,
+            audit_reason=audit_reason,
+        )
+        results = tuple(
+            WikiUpdateResult(
+                slug=result.slug,
+                page_path=result.page_path,
+                source_paths=result.source_paths,
+                action=result.action,
+            )
+            for result in compiled
+        )
+        self.refresh_index()
+        if results:
+            append_wiki_log_entry(
+                self.scaffold,
+                "Compiled capture event wiki pages: "
+                + ", ".join(f"`{result.slug}`" for result in results)
+                + ".",
+            )
+        return results
+
+    def update_from_semantic_memory(
+        self,
+        store: SemanticMemoryStore | None = None,
+    ) -> tuple[WikiUpdateResult, ...]:
+        """Compile confirmed/promoted semantic memory facts into wiki pages."""
+        memory_store = store or SemanticMemoryStore(self.db)
+        compiled = SemanticMemoryWikiCompiler(
+            layout=self.layout,
+            contract=self.contract,
+        ).compile(memory_store)
+        results = tuple(
+            WikiUpdateResult(
+                slug=result.slug,
+                page_path=result.page_path,
+                source_paths=result.source_paths,
+                action=result.action,
+            )
+            for result in compiled
+        )
+        self.refresh_index()
+        if results:
+            append_wiki_log_entry(
+                self.scaffold,
+                "Compiled semantic memory wiki pages: "
+                + ", ".join(
+                    f"`{result.slug}` ({result.action})" for result in results
+                )
+                + ".",
+            )
+        return results
+
     def refresh_index(self) -> Path:
         self.prune_legacy_tweet_pages()
         entries = []
@@ -199,6 +511,8 @@ class CompiledWikiUpdater:
                 or page_path.stem
             )
             if is_legacy_tweet_slug(slug):
+                continue
+            if _frontmatter_requires_security_review(frontmatter):
                 continue
             title = str(frontmatter.get("title") or page_path.stem)
             summary = _truncate_summary(
@@ -233,22 +547,71 @@ class CompiledWikiUpdater:
         _atomic_write_text(self.contract.index_path, "\n".join(lines) + "\n")
         return self.contract.index_path
 
-    def _page_spec_for_artifact(self, artifact: KnowledgeArtifact) -> WikiPageSpec:
+    def _canonical_identity_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+    ) -> CanonicalArtifactIdentity | None:
+        return self.canonical_identity_service.canonicalize_artifact(
+            artifact,
+            artifact_type=self._artifact_type_for_artifact(artifact),
+        )
+
+    def _page_spec_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        canonical_identity: CanonicalArtifactIdentity | None = None,
+    ) -> WikiPageSpec:
         title, slug, kind, summary, aliases = self._title_slug_and_summary(artifact)
+        source_paths = self._source_paths_for_artifact(artifact)
         return WikiPageSpec(
             title=title,
             slug=slug,
             kind=kind,
             summary=summary,
             aliases=aliases,
-            source_paths=self._source_paths_for_artifact(artifact),
+            source_paths=source_paths,
+            influence_sources=self._influence_sources_for_artifact(
+                artifact,
+                source_paths=source_paths,
+            ),
             language=self._language_for_artifact(artifact),
             created_at=_now_iso(),
             updated_at=_now_iso(),
             resource=self._resource_for_artifact(artifact),
             artifact_id=artifact.id,
+            artifact_ids=(artifact.id,),
             source_type=artifact.source_type,
+            canonical_id=canonical_identity.canonical_id
+            if canonical_identity is not None
+            else None,
+            canonical_entity_type=canonical_identity.entity_type
+            if canonical_identity is not None
+            else None,
+            canonical_identity_keys=canonical_identity.key_records
+            if canonical_identity is not None
+            else (),
+            event_ids=self._event_ids_for_artifact(artifact),
+            security_findings=self._security_findings_for_artifact(artifact),
+            security_policy=self._security_policy_for_artifact(artifact),
         )
+
+    def _artifact_type_for_artifact(self, artifact: KnowledgeArtifact) -> str:
+        if isinstance(artifact, PaperArtifact):
+            return "paper"
+        if isinstance(artifact, RepositoryArtifact):
+            return "repository"
+        if isinstance(artifact, WebClipperArtifact):
+            return "web_clipper"
+        if isinstance(artifact, MarkdownArtifact):
+            return "markdown"
+        if isinstance(artifact, VideoArtifact):
+            return "video"
+        if isinstance(artifact, TranscriptArtifact):
+            return "transcript"
+        if isinstance(artifact, TweetArtifact):
+            return "tweet"
+        return "artifact"
 
     def _title_slug_and_summary(
         self, artifact: KnowledgeArtifact
@@ -336,7 +699,7 @@ class CompiledWikiUpdater:
                 candidates.append(self.layout.vault_root / artifact.source_relative_path)
             elif artifact.source_path:
                 candidates.append(Path(artifact.source_path))
-            for managed_path in artifact.output_paths.values():
+            for _kind, managed_path in sorted(artifact.output_paths.items()):
                 if managed_path:
                     candidates.append(Path(managed_path))
         elif isinstance(artifact, VideoArtifact):
@@ -345,7 +708,7 @@ class CompiledWikiUpdater:
                 candidates.append(
                     archive_path if archive_path.is_absolute() else self.layout.vault_root / archive_path
                 )
-            for managed_path in artifact.output_paths.values():
+            for _kind, managed_path in sorted(artifact.output_paths.items()):
                 if managed_path:
                     path = Path(managed_path)
                     candidates.append(path if path.is_absolute() else self.layout.vault_root / path)
@@ -355,7 +718,7 @@ class CompiledWikiUpdater:
                 candidates.append(
                     transcript_path if transcript_path.is_absolute() else self.layout.vault_root / transcript_path
                 )
-            for managed_path in artifact.output_paths.values():
+            for _kind, managed_path in sorted(artifact.output_paths.items()):
                 if managed_path:
                     path = Path(managed_path)
                     candidates.append(path if path.is_absolute() else self.layout.vault_root / path)
@@ -370,6 +733,78 @@ class CompiledWikiUpdater:
                 continue
         deduped = dict.fromkeys(normalized)
         return tuple(deduped.keys())
+
+    def _influence_sources_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        source_paths: tuple[str, ...],
+    ) -> tuple[dict[str, Any], ...]:
+        records: list[dict[str, Any]] = []
+        for source_path in sorted(source_paths):
+            record = {
+                "source_path": source_path,
+                "source_type": artifact.source_type,
+                "artifact_id": artifact.id,
+            }
+            records.append({key: value for key, value in record.items() if value})
+        return tuple(records)
+
+    def _metadata_mappings_for_artifact(
+        self, artifact: KnowledgeArtifact
+    ) -> tuple[Mapping[str, Any], ...]:
+        mappings: list[Mapping[str, Any]] = []
+        for value in (artifact.normalized_metadata, artifact.custom_metadata):
+            if isinstance(value, Mapping):
+                mappings.append(value)
+        canonical_record = artifact.canonical_record()
+        for key in ("normalized_metadata", "provenance", "raw_payload", "source_identity"):
+            value = canonical_record.get(key)
+            if isinstance(value, Mapping):
+                mappings.append(value)
+        return tuple(mappings)
+
+    def _event_ids_for_artifact(self, artifact: KnowledgeArtifact) -> tuple[str, ...]:
+        event_ids: list[str] = []
+        for metadata in self._metadata_mappings_for_artifact(artifact):
+            for key in _EVENT_ID_KEYS:
+                if key in metadata:
+                    event_ids.extend(_string_values(metadata[key]))
+        return tuple(dict.fromkeys(event_ids))
+
+    def _security_findings_for_artifact(self, artifact: KnowledgeArtifact) -> tuple[Any, ...]:
+        findings: list[Any] = []
+        for metadata in self._metadata_mappings_for_artifact(artifact):
+            for key in _SECURITY_FINDING_KEYS:
+                if key in metadata and _has_security_findings(metadata[key]):
+                    findings.extend(_security_finding_entries(key, metadata[key]))
+            for key in _SECURITY_REPORT_KEYS:
+                if key in metadata and _has_security_findings(metadata[key]):
+                    findings.extend(_security_finding_entries(key, metadata[key]))
+        return tuple(findings)
+
+    def _security_policy_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+    ) -> dict[str, Any] | None:
+        source_label = f"{artifact.source_type}:{artifact.id}" if artifact.id else artifact.source_type
+        for metadata in self._metadata_mappings_for_artifact(artifact):
+            policy = metadata.get(THOTH_SECURITY_POLICY_KEY)
+            if isinstance(policy, Mapping):
+                return dict(policy)
+        for metadata in self._metadata_mappings_for_artifact(artifact):
+            if metadata.get(THOTH_SECURITY_FINDINGS_KEY):
+                return prompt_security_policy_for_metadata(
+                    metadata,
+                    source_type=artifact.source_type,
+                    source_label=source_label,
+                    source_path=(
+                        artifact.raw_payload.path
+                        if getattr(artifact, "raw_payload", None)
+                        else None
+                    ),
+                )
+        return None
 
     def _resource_for_artifact(self, artifact: KnowledgeArtifact) -> str | None:
         if isinstance(artifact, PaperArtifact):
@@ -402,6 +837,7 @@ class CompiledWikiUpdater:
         *,
         dispatch_details: dict[str, Any] | None,
     ) -> str:
+        research_context = self._research_context_for_artifact(artifact)
         frontmatter = self.contract.frontmatter_for(spec)
         lines = [
             _render_frontmatter(frontmatter).rstrip(),
@@ -419,6 +855,13 @@ class CompiledWikiUpdater:
                 f"- Source: `{artifact.source_type}`",
             ]
         )
+        if spec.canonical_id:
+            lines.append(f"- Canonical ID: `{spec.canonical_id}`")
+        if spec.artifact_ids:
+            lines.append(
+                "- Linked Artifact IDs: "
+                + ", ".join(f"`{artifact_id}`" for artifact_id in spec.artifact_ids)
+            )
         if artifact.created_at:
             lines.append(f"- Created At: `{artifact.created_at}`")
         if artifact.processing_status:
@@ -431,7 +874,10 @@ class CompiledWikiUpdater:
             lines.extend(detail_lines)
             lines.append("")
 
-        research_context_lines = self._research_context_lines(artifact)
+        research_context_lines = self._research_context_lines(
+            artifact,
+            research_context=research_context,
+        )
         if research_context_lines:
             lines.extend(["## Research Context", ""])
             lines.extend(research_context_lines)
@@ -451,7 +897,10 @@ class CompiledWikiUpdater:
                 lines.append(f"- [{source_path}]({relative_link})")
             lines.append("")
 
-        citation_lines = self._citation_lines(spec)
+        citation_lines = self._citation_lines(
+            spec,
+            research_context=research_context,
+        )
         if citation_lines:
             lines.extend(["# Citations", ""])
             lines.extend(citation_lines)
@@ -459,7 +908,12 @@ class CompiledWikiUpdater:
 
         return "\n".join(lines) + "\n"
 
-    def _citation_lines(self, spec: WikiPageSpec) -> list[str]:
+    def _citation_lines(
+        self,
+        spec: WikiPageSpec,
+        *,
+        research_context: Mapping[str, Any] | None = None,
+    ) -> list[str]:
         citations: list[str] = []
         if spec.resource:
             citations.append(
@@ -469,6 +923,12 @@ class CompiledWikiUpdater:
             absolute_source = self.layout.vault_root / source_path
             relative_link = os.path.relpath(absolute_source, self.contract.pages_dir)
             citations.append(f"[{len(citations) + 1}] [{source_path}]({relative_link})")
+        citations.extend(
+            research_citation_lines(
+                research_context,
+                start_index=len(citations) + 1,
+            )
+        )
         return citations
 
     def _artifact_detail_lines(self, artifact: KnowledgeArtifact) -> list[str]:
@@ -480,7 +940,10 @@ class CompiledWikiUpdater:
             if artifact.language:
                 lines.append(f"- Language: `{artifact.language}`")
             if artifact.topics:
-                lines.append(f"- Topics: {', '.join(f'`{topic}`' for topic in artifact.topics)}")
+                topics = sorted(
+                    {str(topic).strip() for topic in artifact.topics if str(topic).strip()}
+                )
+                lines.append(f"- Topics: {', '.join(f'`{topic}`' for topic in topics)}")
             return lines
 
         if isinstance(artifact, PaperArtifact):
@@ -549,7 +1012,10 @@ class CompiledWikiUpdater:
             if artifact.summary:
                 lines.append(f"- Summary: {artifact.summary}")
             if artifact.tags:
-                lines.append(f"- Tags: {', '.join(f'`{tag}`' for tag in artifact.tags)}")
+                tags = sorted(
+                    {str(tag).strip() for tag in artifact.tags if str(tag).strip()}
+                )
+                lines.append(f"- Tags: {', '.join(f'`{tag}`' for tag in tags)}")
             transcript = artifact.processed_transcript or artifact.raw_transcript
             if transcript:
                 lines.append(f"- Transcript: {_truncate_summary(transcript)}")
@@ -557,49 +1023,24 @@ class CompiledWikiUpdater:
 
         return []
 
-    def _research_context_lines(self, artifact: KnowledgeArtifact) -> list[str]:
+    def _research_context_for_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+    ) -> dict[str, Any] | None:
+        if not isinstance(artifact, PaperArtifact):
+            return None
+        return ResearchGraphService(
+            self.db,
+            config=self.config,
+            layout=self.layout,
+        ).paper_context(artifact)
+
+    def _research_context_lines(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        research_context: Mapping[str, Any] | None = None,
+    ) -> list[str]:
         if not isinstance(artifact, PaperArtifact):
             return []
-
-        context = ResearchGraphService(self.db).paper_context(artifact)
-
-        referenced_by = context.get("referenced_by") or []
-        references = context.get("references") or []
-        co_referenced = context.get("co_referenced") or []
-        lines: list[str] = []
-
-        if referenced_by:
-            lines.append(
-                f"- Why it matters: `{len(referenced_by)}` local paper(s) reference this work."
-            )
-            lines.append("- Local papers referencing this:")
-            for item in referenced_by[:10]:
-                lines.append(
-                    f"  - `{item['paper_id']}` - {item['title']}"
-                )
-        elif references:
-            missing_count = sum(1 for item in references if not item.get("collected"))
-            local_count = len(references) - missing_count
-            lines.append(
-                "- Why it matters: this paper adds local context through "
-                f"`{local_count}` collected reference(s) and `{missing_count}` missing candidate(s)."
-            )
-        else:
-            lines.append(
-                "- Why it matters: this paper is a collected research source with no graph references discovered yet."
-            )
-
-        if references:
-            lines.append("- References discovered from this paper:")
-            for item in references[:15]:
-                status = "local" if item.get("collected") else "missing"
-                lines.append(
-                    f"  - `{item['paper_id']}` ({status}) - {item['title']}"
-                )
-
-        if co_referenced:
-            lines.append("- Co-referenced local papers:")
-            for item in co_referenced[:10]:
-                lines.append(f"  - `{item['paper_id']}` - {item['title']}")
-
-        return lines
+        return research_context_lines(research_context or {})

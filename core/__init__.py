@@ -58,6 +58,27 @@ from .archivist_compiler import (
     ArchivistCompilerError,
 )
 from .agent_surface import AgentSurfaceError, AgentSurfaceService
+from .agent_response import (
+    AGENT_QUERY_RESPONSE_TYPE,
+    AGENT_QUERY_RESPONSE_VERSION,
+    agent_query_action_boundary,
+    build_agent_query_response,
+)
+from .capture_lifecycle import (
+    CaptureLifecycleConfigError,
+    CaptureLifecycleError,
+    CaptureLifecycleResult,
+    CaptureLifecycleService,
+    get_capture_lifecycle_service,
+)
+from .capture_surface import (
+    CaptureSurfaceConfigError,
+    CaptureSurfaceError,
+    CaptureSurfaceNotFoundError,
+    CaptureSurfaceService,
+    open_capture_surface,
+)
+from .retention_service import CaptureRetentionService, RetentionServiceError
 from .mcp_server import ThothMCPServer
 from .archivist_runtime import (
     ARCHIVIST_JOB_NAME,
@@ -108,6 +129,13 @@ from .wiki_contract import (
 )
 from .wiki_io import WikiDocument, atomic_write_text, read_document, read_frontmatter, render_frontmatter, truncate_summary
 from .wiki_lint import WikiLintIssue, WikiLintReport, WikiLintRunner
+from .legacy_artifact_lint import (
+    LegacyArtifactLintIssue,
+    LegacyArtifactLintReport,
+    LegacyArtifactLintRunner,
+    LegacyArtifactMigrationAction,
+    legacy_artifact_lint_report_payload,
+)
 from .okf import OKFLintIssue, OKFLintReport, OKFLintRunner
 from .connector_registry import (
     ConnectorManifest,
@@ -116,6 +144,36 @@ from .connector_registry import (
     load_connector_registry,
 )
 from .research_graph import ResearchGraphService
+from .semantic_memory import (
+    SemanticMemoryCandidate,
+    SemanticMemoryError,
+    SemanticMemoryEvidence,
+    SemanticMemoryPromotionConfigError,
+    SemanticMemoryPromotionDecision,
+    SemanticMemoryPromotionPolicy,
+    SemanticMemoryStore,
+    SemanticMemoryTransitionError,
+    SemanticMemoryValidationError,
+)
+from .semantic_memory_review import (
+    SEMANTIC_MEMORY_REVIEW_METADATA_KEY,
+    SemanticMemoryReviewError,
+    SemanticMemoryReviewNotFoundError,
+    SemanticMemoryReviewService,
+)
+from .semantic_wiki_compiler import (
+    SEMANTIC_WIKI_ALLOWED_STATUSES,
+    SEMANTIC_WIKI_PAGE_MARKER,
+    SEMANTIC_WIKI_PAGE_TYPE_KEY,
+    SemanticMemoryWikiCompiler,
+    SemanticWikiPageResult,
+)
+from .hybrid_search import (
+    HybridSearchFilters,
+    HybridSearchHit,
+    HybridSearchResult,
+    HybridSearchService,
+)
 from .wiki_query import WikiQueryHit, WikiQueryResult, WikiQueryRunner, WikiQueryWriteBackResult
 from .wiki_scaffold import (
     WikiScaffold,
@@ -184,6 +242,22 @@ __all__ = [
     'ArchivistCompilerError',
     'AgentSurfaceError',
     'AgentSurfaceService',
+    'AGENT_QUERY_RESPONSE_TYPE',
+    'AGENT_QUERY_RESPONSE_VERSION',
+    'agent_query_action_boundary',
+    'build_agent_query_response',
+    'CaptureLifecycleConfigError',
+    'CaptureLifecycleError',
+    'CaptureLifecycleResult',
+    'CaptureLifecycleService',
+    'get_capture_lifecycle_service',
+    'CaptureSurfaceConfigError',
+    'CaptureSurfaceError',
+    'CaptureSurfaceNotFoundError',
+    'CaptureSurfaceService',
+    'open_capture_surface',
+    'CaptureRetentionService',
+    'RetentionServiceError',
     'ThothMCPServer',
     'ARCHIVIST_JOB_NAME',
     'ArchivistRuntimeError',
@@ -234,6 +308,11 @@ __all__ = [
     'WikiLintIssue',
     'WikiLintReport',
     'WikiLintRunner',
+    'LegacyArtifactLintIssue',
+    'LegacyArtifactLintReport',
+    'LegacyArtifactLintRunner',
+    'LegacyArtifactMigrationAction',
+    'legacy_artifact_lint_report_payload',
     'OKFLintIssue',
     'OKFLintReport',
     'OKFLintRunner',
@@ -242,6 +321,28 @@ __all__ = [
     'ConnectorRegistry',
     'load_connector_registry',
     'ResearchGraphService',
+    'SemanticMemoryCandidate',
+    'SemanticMemoryError',
+    'SemanticMemoryEvidence',
+    'SemanticMemoryPromotionConfigError',
+    'SemanticMemoryPromotionDecision',
+    'SemanticMemoryPromotionPolicy',
+    'SemanticMemoryStore',
+    'SemanticMemoryTransitionError',
+    'SemanticMemoryValidationError',
+    'SEMANTIC_MEMORY_REVIEW_METADATA_KEY',
+    'SemanticMemoryReviewError',
+    'SemanticMemoryReviewNotFoundError',
+    'SemanticMemoryReviewService',
+    'SEMANTIC_WIKI_ALLOWED_STATUSES',
+    'SEMANTIC_WIKI_PAGE_MARKER',
+    'SEMANTIC_WIKI_PAGE_TYPE_KEY',
+    'SemanticMemoryWikiCompiler',
+    'SemanticWikiPageResult',
+    'HybridSearchFilters',
+    'HybridSearchHit',
+    'HybridSearchResult',
+    'HybridSearchService',
     'WikiQueryHit',
     'WikiQueryResult',
     'WikiQueryRunner',

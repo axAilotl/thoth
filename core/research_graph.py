@@ -11,14 +11,15 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 from .artifacts import PaperArtifact
-from .config import Config
+from .capture_event_store import CaptureEventStore
+from .config import Config, config as runtime_config
 from .metadata_db import (
-    IngestionQueueEntry,
     MetadataDB,
     ResearchPaperEdge,
     ResearchPaperRecord,
     get_metadata_db,
 )
+from .path_layout import PathLayout, build_path_layout
 from .wiki_contract import normalize_wiki_slug
 
 
@@ -68,9 +69,22 @@ class ResearchGraphService:
         db: MetadataDB | None = None,
         *,
         metadata_provider: "ResearchMetadataProvider | None" = None,
+        config: Config | None = None,
+        layout: PathLayout | None = None,
+        capture_event_store: CaptureEventStore | None = None,
     ):
+        self.config = config or runtime_config
+        self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
         self.metadata_provider = metadata_provider
+        from .connector_capture import ConnectorCaptureQueue
+
+        self.capture_queue = ConnectorCaptureQueue(
+            self.config,
+            layout=self.layout,
+            db=self.db,
+            capture_event_store=capture_event_store,
+        )
 
     def record_paper_artifact(
         self,
@@ -187,34 +201,107 @@ class ResearchGraphService:
         )
         queued: list[str] = []
         skipped: list[str] = []
-        for candidate in report["high_confidence"]:
-            artifact = paper_artifact_from_missing_candidate(candidate)
-            queue_id = f"research_graph:{candidate['paper_id']}"
-            if self.db.get_ingestion_entry(queue_id):
-                skipped.append(queue_id)
-                continue
-            entry = IngestionQueueEntry(
-                artifact_id=queue_id,
-                artifact_type="paper",
-                source="research_graph",
-                payload_json=json.dumps(artifact.to_dict(), ensure_ascii=False),
-                capabilities_json=json.dumps(list(artifact.capabilities)),
-                created_at=datetime.now().isoformat(),
-                priority=int(candidate["referenced_by_count"]),
-            )
-            if not self.db.upsert_ingestion_entry(entry):
-                raise RuntimeError(f"Failed to queue missing paper candidate: {queue_id}")
-            queued.append(queue_id)
+        run_id = datetime.now().isoformat()
+        with self.capture_queue.lifecycle() as lifecycle:
+            for candidate in report["high_confidence"]:
+                artifact = paper_artifact_from_missing_candidate(candidate)
+                queue_id = f"research_graph:{candidate['paper_id']}"
+                if self.db.get_ingestion_entry(queue_id):
+                    skipped.append(queue_id)
+                    continue
+                self._queue_missing_paper_candidate(
+                    artifact,
+                    candidate=candidate,
+                    queue_id=queue_id,
+                    lifecycle=lifecycle,
+                    run_id=run_id,
+                )
+                queued.append(queue_id)
         return {"queued": queued, "skipped": skipped, "report": report}
+
+    def _queue_missing_paper_candidate(
+        self,
+        artifact: PaperArtifact,
+        *,
+        candidate: Mapping[str, Any],
+        queue_id: str,
+        lifecycle,
+        run_id: str,
+    ) -> None:
+        raw_path = None
+        if lifecycle.capture_event_store is not None:
+            from .connector_capture import write_connector_raw_json
+
+            raw_path = write_connector_raw_json(
+                self.layout,
+                connector_name="research_graph",
+                subdir="missing_papers",
+                native_id=str(candidate.get("paper_id") or queue_id),
+                payload=dict(candidate),
+                captured_at=artifact.ingested_at,
+            )
+
+        self.capture_queue.queue_payload(
+            lifecycle,
+            artifact_type="paper",
+            payload=artifact.to_dict(),
+            source={
+                "source_name": "research_graph",
+                "source_type": "research_graph",
+                "collector": "research_graph",
+                "native_source_id": str(candidate.get("paper_id") or queue_id),
+                "base_uri": "research_graph://missing-papers",
+                "metadata": {
+                    "candidate_status": candidate.get("status"),
+                    "referenced_by_count": candidate.get("referenced_by_count"),
+                },
+            },
+            session={
+                "session_type": "research_graph_missing_papers",
+                "native_session_id": f"research_graph:{run_id}",
+                "started_at": run_id,
+                "metadata": {
+                    "min_references": candidate.get("min_references"),
+                },
+            },
+            event={
+                "event_type": "research_graph_missing_paper",
+                "native_event_id": str(candidate.get("paper_id") or queue_id),
+                "captured_at": artifact.ingested_at,
+                "privacy": {"classification": "public"},
+                "provenance": {"collector": "research_graph"},
+            },
+            raw_path=raw_path,
+            queue_artifact_id=queue_id,
+            priority=int(candidate["referenced_by_count"]),
+            capabilities=artifact.capabilities,
+        )
+        if self.db.get_ingestion_entry(queue_id) is None:
+            raise RuntimeError(f"Failed to queue missing paper candidate: {queue_id}")
 
     def paper_context(self, artifact_or_paper_id: PaperArtifact | str) -> dict[str, Any]:
         """Return graph context for wiki/API consumers."""
+        artifact = (
+            artifact_or_paper_id
+            if isinstance(artifact_or_paper_id, PaperArtifact)
+            else None
+        )
         paper_id = (
             paper_record_from_artifact(artifact_or_paper_id, collected=True).paper_id
-            if isinstance(artifact_or_paper_id, PaperArtifact)
+            if artifact is not None
             else str(artifact_or_paper_id)
         )
-        return self.db.get_research_paper_context(paper_id)
+        context = self.db.get_research_paper_context(paper_id)
+        record = self.db.get_research_paper(paper_id)
+        if record is not None:
+            context["paper"] = _research_paper_context_record(record)
+        local_context = _local_research_context(
+            artifact=artifact,
+            record=record,
+        )
+        if local_context:
+            context["local"] = local_context
+        return context
 
     def _derive_co_referenced_edges(self, source_paper_id: str) -> int:
         inserted = 0
@@ -267,6 +354,10 @@ def paper_record_from_artifact(
         arxiv_id=artifact.arxiv_id,
         title=artifact.title,
     )
+    raw_payload = artifact.canonical_record()
+    if artifact.custom_metadata:
+        raw_payload["custom_metadata"] = dict(artifact.custom_metadata)
+
     return ResearchPaperRecord(
         paper_id=paper_id,
         title=artifact.title,
@@ -279,9 +370,224 @@ def paper_record_from_artifact(
         published_at=artifact.published_at or artifact.created_at,
         source_provider=artifact.source_provider or artifact.source_type,
         collected=collected,
-        raw_payload=artifact.canonical_record(),
+        raw_payload=raw_payload,
         updated_at=artifact.ingested_at or datetime.now().isoformat(),
     )
+
+
+def _research_paper_context_record(record: ResearchPaperRecord) -> dict[str, Any]:
+    return {
+        "paper_id": record.paper_id,
+        "title": record.title or record.paper_id,
+        "authors": list(record.authors),
+        "doi": record.doi,
+        "arxiv_id": record.arxiv_id,
+        "pdf_url": record.pdf_url,
+        "venue": record.venue,
+        "published_at": record.published_at,
+        "source_provider": record.source_provider,
+        "collected": record.collected,
+        "updated_at": record.updated_at,
+    }
+
+
+def _local_research_context(
+    *,
+    artifact: PaperArtifact | None,
+    record: ResearchPaperRecord | None,
+) -> dict[str, Any]:
+    mappings: list[Mapping[str, Any]] = []
+    if record and isinstance(record.raw_payload, Mapping):
+        mappings.extend(_metadata_mappings_from_payload(record.raw_payload))
+    if artifact is not None:
+        mappings.extend(_metadata_mappings_from_artifact(artifact))
+
+    projects = _project_refs_from_mappings(mappings)
+    events = _event_refs_from_mappings(mappings)
+    source_paths = _source_paths_from_mappings(mappings)
+
+    context: dict[str, Any] = {}
+    if projects:
+        context["projects"] = projects
+    if events:
+        context["events"] = events
+    if source_paths:
+        context["source_paths"] = source_paths
+    return context
+
+
+def _metadata_mappings_from_artifact(
+    artifact: PaperArtifact,
+) -> list[Mapping[str, Any]]:
+    mappings: list[Mapping[str, Any]] = []
+    for value in (artifact.normalized_metadata, artifact.custom_metadata):
+        if isinstance(value, Mapping):
+            mappings.append(value)
+    mappings.extend(_metadata_mappings_from_payload(artifact.canonical_record()))
+    return mappings
+
+
+def _metadata_mappings_from_payload(
+    payload: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    mappings: list[Mapping[str, Any]] = [payload]
+    for key in (
+        "custom_metadata",
+        "normalized_metadata",
+        "provenance",
+        "raw_payload",
+        "source_identity",
+        "timestamps",
+    ):
+        value = payload.get(key)
+        if isinstance(value, Mapping):
+            mappings.append(value)
+    provenance = payload.get("provenance")
+    if isinstance(provenance, Mapping):
+        raw_payload = provenance.get("raw_payload")
+        source_identity = provenance.get("source_identity")
+        if isinstance(raw_payload, Mapping):
+            mappings.append(raw_payload)
+        if isinstance(source_identity, Mapping):
+            mappings.append(source_identity)
+    return mappings
+
+
+_EVENT_METADATA_KEYS = (
+    "thoth_event_id",
+    "thoth_event_ids",
+    "event_id",
+    "event_ids",
+    "capture_event_id",
+    "capture_event_ids",
+)
+_PROJECT_METADATA_KEYS = ("projects", "repositories")
+_PROJECT_SINGLE_METADATA_KEYS = ("project", "repository", "repo_name")
+
+
+def _event_refs_from_mappings(
+    mappings: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    source = _first_mapping_string(
+        mappings,
+        "source_name",
+        "source_type",
+        "source",
+        "collector",
+    )
+    timestamp = _first_mapping_string(
+        mappings,
+        "captured_at",
+        "ingested_at",
+        "occurred_at",
+        "created_at",
+        "published_at",
+        "updated_at",
+    )
+    events: dict[str, dict[str, Any]] = {}
+    for mapping in mappings:
+        for key in _EVENT_METADATA_KEYS:
+            for event_id in _string_values(mapping.get(key)):
+                events.setdefault(
+                    event_id,
+                    {
+                        "event_id": event_id,
+                        "source": source,
+                        "timestamp": timestamp,
+                    },
+                )
+    return [events[key] for key in sorted(events)]
+
+
+def _project_refs_from_mappings(
+    mappings: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    projects: dict[str, dict[str, Any]] = {}
+    for mapping in mappings:
+        for key in _PROJECT_METADATA_KEYS:
+            for value in _as_sequence(mapping.get(key)):
+                project = _project_ref_from_value(value)
+                if project:
+                    projects.setdefault(project["slug"], project)
+        for key in _PROJECT_SINGLE_METADATA_KEYS:
+            project = _project_ref_from_value(mapping.get(key))
+            if project:
+                projects.setdefault(project["slug"], project)
+    return [projects[key] for key in sorted(projects)]
+
+
+def _project_ref_from_value(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        label = _first_string(
+            value,
+            "name",
+            "title",
+            "label",
+            "full_name",
+            "repo_name",
+            "id",
+            "slug",
+        )
+        identifier = _first_string(value, "id", "slug", "repo_name", "full_name", "name")
+    else:
+        label = str(value).strip()
+        identifier = label
+    if not label:
+        return None
+    slug_source = identifier or label
+    try:
+        slug = normalize_wiki_slug(slug_source)
+    except ValueError:
+        return None
+    return {
+        "id": identifier,
+        "label": label,
+        "slug": slug,
+    }
+
+
+def _source_paths_from_mappings(
+    mappings: list[Mapping[str, Any]],
+) -> list[str]:
+    paths: dict[str, None] = {}
+    for mapping in mappings:
+        for key in ("source_path", "source_paths", "path", "evidence_paths"):
+            for value in _string_values(mapping.get(key)):
+                paths.setdefault(value, None)
+    return sorted(paths)
+
+
+def _string_values(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return tuple()
+    if isinstance(value, Mapping):
+        values: list[str] = []
+        for key in ("id", "event_id", "capture_event_id", "path"):
+            if key in value:
+                values.extend(_string_values(value[key]))
+        return tuple(values)
+    values: list[str] = []
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            values.extend(_string_values(item))
+            continue
+        text = str(item).strip()
+        if text:
+            values.append(text)
+    return tuple(values)
+
+
+def _first_mapping_string(
+    mappings: list[Mapping[str, Any]],
+    *keys: str,
+) -> str | None:
+    for mapping in mappings:
+        value = _first_string(mapping, *keys)
+        if value:
+            return value
+    return None
 
 
 def paper_artifact_from_missing_candidate(candidate: Mapping[str, Any]) -> PaperArtifact:

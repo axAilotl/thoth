@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 from pathlib import Path
 
 RETRIEVAL_MODES = {"literal", "full_text", "semantic", "hybrid"}
 FILTER_MODES = {"required", "query", "off"}
+EMBEDDING_BLOCKED_PRIVACY_CLASSES = {"restricted", "secret", "sensitive"}
+EMBEDDING_BLOCKED_SECURITY_STATUSES = {
+    "blocked",
+    "failed",
+    "needs_review",
+    "quarantined",
+    "rejected",
+}
 
 
 @dataclass(frozen=True)
@@ -24,6 +34,8 @@ class ArchivistRetrievalPolicy:
     semantic_weight: float = 0.55
     full_text_weight: float = 0.35
     recency_weight: float = 0.10
+    max_per_source: int = 3
+    max_source_share: float = 0.5
     source_type_weights: tuple[tuple[str, float], ...] = ()
 
     def weight_for_source_type(self, source_type: str) -> float:
@@ -66,6 +78,15 @@ class ArchivistCorpusDocument:
     size_bytes: int
     updated_at: str
     source_id: str | None = None
+    source_key: str = ""
+    source_trust_score: float = 1.0
+    source_trust_reason: str = "prompt_security_allowed"
+    source_security_status: str = "allowed"
+    source_security_pattern_ids: tuple[str, ...] = field(default_factory=tuple)
+    artifact_id: str | None = None
+    event_id: str | None = None
+    privacy_class: str = "unspecified"
+    retention_class: str = "unspecified"
 
     def search_corpus(self) -> str:
         parts = [
@@ -76,8 +97,60 @@ class ArchivistCorpusDocument:
             self.source_type,
             self.file_type,
             self.source_id or "",
+            self.artifact_id or "",
+            self.event_id or "",
         ]
         return " ".join(part for part in parts if part).lower()
+
+    @property
+    def source_trust_tier(self) -> str:
+        status = self.source_security_status.strip().lower()
+        score = max(0.0, min(1.0, float(self.source_trust_score)))
+        if status == "override_approved":
+            return "reviewed"
+        if score >= 0.9:
+            return "trusted"
+        if score >= 0.5:
+            return "low_risk"
+        return "untrusted"
+
+    @property
+    def embedding_security_state(self) -> str:
+        return self.source_security_status.strip().lower() or "allowed"
+
+    def embedding_is_allowed(self) -> bool:
+        privacy_class = self.privacy_class.strip().lower()
+        if privacy_class in EMBEDDING_BLOCKED_PRIVACY_CLASSES:
+            return False
+        if self.embedding_security_state in EMBEDDING_BLOCKED_SECURITY_STATUSES:
+            return False
+        return float(self.source_trust_score) > 0.0
+
+    def embedding_provenance(self) -> dict[str, object]:
+        return {
+            "source_type": self.source_type,
+            "source_id": self.source_id or "",
+            "source_key": self.source_key,
+            "artifact_id": self.artifact_id or "",
+            "event_id": self.event_id or "",
+            "trust_tier": self.source_trust_tier,
+            "trust_score": round(float(self.source_trust_score), 6),
+            "trust_reason": self.source_trust_reason,
+            "privacy_class": self.privacy_class,
+            "retention_class": self.retention_class,
+            "security_state": self.embedding_security_state,
+            "security_pattern_ids": list(self.source_security_pattern_ids),
+        }
+
+    def embedding_source_hash(self) -> str:
+        """Return a cache key that includes source trust/provenance metadata."""
+
+        payload = {
+            "source_hash": self.source_hash,
+            **self.embedding_provenance(),
+        }
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)

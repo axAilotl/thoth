@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
+import json
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 from collectors.web_clipper_layout import (
     WebClipperSourceContract,
@@ -17,6 +18,12 @@ from collectors.web_clipper_parser import parse_web_clipper_markdown
 from ..config import Config
 from ..metadata_db import MetadataDB, get_metadata_db
 from ..path_layout import PathLayout, build_path_layout
+from ..prompt_security import (
+    THOTH_SECURITY_POLICY_KEY,
+    prompt_security_metadata_for_text,
+    prompt_security_policy_for_metadata,
+    prompt_security_requires_review,
+)
 from ..wiki_io import read_document
 from .models import (
     ArchivistCandidate,
@@ -214,6 +221,11 @@ def materialize_candidate(
         size_bytes=document.size_bytes,
         updated_at=document.updated_at,
         source_id=document.source_id,
+        source_key=document.source_key,
+        source_trust_score=document.source_trust_score,
+        source_trust_reason=document.source_trust_reason,
+        source_security_status=document.source_security_status,
+        source_security_pattern_ids=document.source_security_pattern_ids,
         retrieval_score=retrieval_score,
         retrieval_sources=retrieval_sources,
         full_text_score=full_text_score,
@@ -254,9 +266,21 @@ def _load_or_parse_document(
         and existing.size_bytes == stat.st_size
         and existing.path == path
     ):
-        return existing, True
+        secured_existing = _apply_source_trust_metadata(
+            existing,
+            path=path,
+            suffix=suffix,
+            db=db,
+        )
+        if secured_existing is None:
+            return None, False
+        if secured_existing != existing:
+            db.upsert_archivist_corpus_document(secured_existing)
+        return secured_existing, True
 
     source_id = _lookup_source_id(path, layout=layout, db=db)
+    if _is_security_excluded_path(path, suffix=suffix, db=db, source_id=source_id):
+        return None, False
     if suffix in SUPPORTED_TEXT_EXTENSIONS:
         title, content_text, tags, source_type, file_type, source_hash = _read_text_document(
             path,
@@ -291,8 +315,16 @@ def _load_or_parse_document(
         updated_at=updated_at,
         source_id=source_id,
     )
-    db.upsert_archivist_corpus_document(document)
-    return document, False
+    secured_document = _apply_source_trust_metadata(
+        document,
+        path=path,
+        suffix=suffix,
+        db=db,
+    )
+    if secured_document is None:
+        return None, False
+    db.upsert_archivist_corpus_document(secured_document)
+    return secured_document, False
 
 
 def _lookup_source_id(path: Path, *, layout: PathLayout, db: MetadataDB) -> str | None:
@@ -310,6 +342,258 @@ def _lookup_source_id(path: Path, *, layout: PathLayout, db: MetadataDB) -> str 
             return entry.source_id
 
     return None
+
+
+def _is_security_excluded_path(
+    path: Path,
+    *,
+    suffix: str,
+    db: MetadataDB,
+    source_id: str | None,
+) -> bool:
+    if source_id and db.ingestion_entry_requires_security_review(source_id):
+        return True
+    if suffix not in {".md", ".markdown"}:
+        return False
+    document = read_document(path)
+    frontmatter = document.frontmatter if isinstance(document.frontmatter, dict) else {}
+    if prompt_security_requires_review(frontmatter):
+        return True
+    artifact_id = str(
+        frontmatter.get("thoth_artifact_id")
+        or frontmatter.get("artifact_id")
+        or ""
+    ).strip()
+    return bool(artifact_id and db.ingestion_entry_requires_security_review(artifact_id))
+
+
+def _apply_source_trust_metadata(
+    document: ArchivistCorpusDocument,
+    *,
+    path: Path,
+    suffix: str,
+    db: MetadataDB,
+) -> ArchivistCorpusDocument | None:
+    source_label = _source_label_for_document(document)
+    metadata = prompt_security_metadata_for_text(
+        document.content_text,
+        source_label=source_label,
+        scope="context",
+    )
+    frontmatter = _prompt_security_frontmatter(path, suffix=suffix)
+    existing_policy = frontmatter.get(THOTH_SECURITY_POLICY_KEY)
+    if existing_policy:
+        metadata = {
+            **metadata,
+            THOTH_SECURITY_POLICY_KEY: existing_policy,
+        }
+    policy = prompt_security_policy_for_metadata(
+        metadata,
+        source_type=document.source_type,
+        source_label=source_label,
+        source_path=document.scope_relative_path,
+    )
+    if prompt_security_requires_review({THOTH_SECURITY_POLICY_KEY: policy}):
+        return None
+
+    trust_score, trust_reason = _source_trust_for_policy(policy)
+    pattern_ids = tuple(str(item) for item in policy.get("pattern_ids") or ())
+    secured = replace(
+        document,
+        source_key=_source_key_for_document(document),
+        source_trust_score=trust_score,
+        source_trust_reason=trust_reason,
+        source_security_status=str(policy.get("status") or "allowed"),
+        source_security_pattern_ids=pattern_ids,
+    )
+    return _apply_embedding_provenance_metadata(
+        secured,
+        frontmatter=frontmatter,
+        db=db,
+    )
+
+
+def _apply_embedding_provenance_metadata(
+    document: ArchivistCorpusDocument,
+    *,
+    frontmatter: Mapping[str, Any],
+    db: MetadataDB,
+) -> ArchivistCorpusDocument:
+    entry_payload: dict[str, Any] = {}
+    entry_artifact_id: str | None = None
+    if document.source_id:
+        entry = db.get_ingestion_entry(document.source_id)
+        if entry is not None:
+            entry_artifact_id = entry.artifact_id
+            try:
+                loaded = json.loads(entry.payload_json)
+            except Exception:
+                loaded = {}
+            if isinstance(loaded, dict):
+                entry_payload = loaded
+
+    mappings = _provenance_mappings(frontmatter, entry_payload)
+    artifact_id = (
+        _first_metadata_text(
+            mappings,
+            "thoth_artifact_id",
+            "artifact_id",
+            "queue_artifact_id",
+            "canonical_artifact_id",
+        )
+        or entry_artifact_id
+    )
+    event_id = _first_metadata_text(
+        mappings,
+        "thoth_event_id",
+        "thoth_event_ids",
+        "event_id",
+        "event_ids",
+        "capture_event_id",
+        "capture_event_ids",
+    )
+    privacy_class = _first_nested_metadata_text(
+        mappings,
+        mapping_keys=("thoth_privacy", "privacy"),
+        value_keys=("privacy_class", "classification", "class"),
+    ) or _first_metadata_text(
+        mappings,
+        "thoth_privacy_class",
+        "privacy_class",
+        "classification",
+    )
+    retention_class = _first_nested_metadata_text(
+        mappings,
+        mapping_keys=("thoth_retention", "retention"),
+        value_keys=("retention_class", "policy_name", "policy", "class"),
+    ) or _first_metadata_text(
+        mappings,
+        "thoth_retention_class",
+        "retention_class",
+        "policy_name",
+        "policy",
+    )
+
+    return replace(
+        document,
+        artifact_id=artifact_id,
+        event_id=event_id,
+        privacy_class=privacy_class or "unspecified",
+        retention_class=retention_class or "unspecified",
+    )
+
+
+def _provenance_mappings(
+    frontmatter: Mapping[str, Any],
+    entry_payload: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...]:
+    mappings: list[Mapping[str, Any]] = []
+    for value in (frontmatter, entry_payload):
+        if isinstance(value, Mapping):
+            mappings.append(value)
+            for key in (
+                "normalized_metadata",
+                "custom_metadata",
+                "provenance",
+                "source_identity",
+                "raw_payload",
+                "metadata",
+            ):
+                nested = value.get(key)
+                if isinstance(nested, Mapping):
+                    mappings.append(nested)
+            manifest = value.get("thoth_input_manifest") or value.get("input_manifest")
+            if isinstance(manifest, (list, tuple)):
+                mappings.extend(item for item in manifest if isinstance(item, Mapping))
+    return tuple(mappings)
+
+
+def _first_metadata_text(
+    mappings: tuple[Mapping[str, Any], ...],
+    *keys: str,
+) -> str | None:
+    for mapping in mappings:
+        for key in keys:
+            if key not in mapping:
+                continue
+            value = _first_text_value(mapping[key])
+            if value:
+                return value
+    return None
+
+
+def _first_nested_metadata_text(
+    mappings: tuple[Mapping[str, Any], ...],
+    *,
+    mapping_keys: tuple[str, ...],
+    value_keys: tuple[str, ...],
+) -> str | None:
+    for mapping in mappings:
+        for key in mapping_keys:
+            nested = mapping.get(key)
+            if isinstance(nested, Mapping):
+                value = _first_metadata_text((nested,), *value_keys)
+                if value:
+                    return value
+    return None
+
+
+def _first_text_value(value: Any) -> str | None:
+    if isinstance(value, Mapping):
+        for key in (
+            "id",
+            "artifact_id",
+            "event_id",
+            "capture_event_id",
+            "classification",
+            "privacy_class",
+            "retention_class",
+            "policy_name",
+            "policy",
+            "class",
+        ):
+            if key in value:
+                text = _first_text_value(value[key])
+                if text:
+                    return text
+        return None
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            text = _first_text_value(item)
+            if text:
+                return text
+        return None
+    text = str(value or "").strip()
+    return text or None
+
+
+def _prompt_security_frontmatter(path: Path, *, suffix: str) -> dict[str, Any]:
+    if suffix not in {".md", ".markdown"}:
+        return {}
+    document = read_document(path)
+    return document.frontmatter if isinstance(document.frontmatter, dict) else {}
+
+
+def _source_key_for_document(document: ArchivistCorpusDocument) -> str:
+    if document.source_id:
+        return f"{document.source_type}:{document.source_id}"
+    return f"file:{document.scope}:{document.scope_relative_path}"
+
+
+def _source_label_for_document(document: ArchivistCorpusDocument) -> str:
+    if document.source_id:
+        return f"{document.source_type}:{document.source_id}"
+    return f"{document.source_type}:{document.scope_relative_path}"
+
+
+def _source_trust_for_policy(policy: Mapping[str, Any]) -> tuple[float, str]:
+    status = str(policy.get("status") or "allowed")
+    reason = str(policy.get("reason") or "no_prompt_security_findings")
+    if status == "override_approved":
+        return 0.9, "prompt_security_override_approved"
+    if reason == "low_risk_wrapped":
+        return 0.65, "prompt_security_low_risk_wrapped"
+    return 1.0, f"prompt_security_{reason}"
 
 
 def _read_text_document(

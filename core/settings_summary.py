@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Protocol
 
 from .archivist_topics import load_archivist_topic_registry, resolve_archivist_topics_path
 from .config import Config
-from .connector_registry import load_connector_registry
+from .connector_budgets import resolve_connector_budget
+from .connector_registry import (
+    ConnectorManifestError,
+    load_connector_registry,
+    validate_allowed_side_effects,
+    validate_manifest_outputs,
+)
 from .metadata_db import MetadataDB
 from .path_layout import build_path_layout
 
@@ -132,7 +139,10 @@ def _summarize_connectors(config: ConfigLike, *, project_root: Path) -> dict[str
         registry = load_connector_registry(config, project_root=project_root)
     except Exception as exc:
         return {"error": str(exc), "connectors": [], "total": 0}
-    summary = registry.to_dict(config=config)
+    try:
+        summary = registry.to_dict(config=config)
+    except Exception as exc:
+        return {"error": str(exc), "connectors": [], "total": 0}
     for connector in summary["connectors"]:
         config_keys = list(connector.get("config_keys") or [])
         auth_keys = list(connector.get("auth") or [])
@@ -193,6 +203,34 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
                 "model": str(source_config.get("default_model") or "archivist_agent"),
             }
         )
+    route_identities = [
+        _summarize_pi_route_identity(config, source_config, route) for route in routes
+    ]
+    try:
+        budgets = resolve_connector_budget(config, "pi_skills").to_dict()
+    except Exception as exc:
+        budgets = {"error": str(exc)}
+
+    try:
+        skills = [
+            _summarize_pi_skill_manifest(item, source_config=source_config)
+            for item in skill_items
+            if item.get("id")
+        ]
+    except (ConnectorManifestError, ValueError) as exc:
+        return {
+            "enabled": bool(source_config.get("enabled", True)),
+            "output_dir": str(output_path),
+            "safety_mode": "no_tools_json",
+            "default_provider": str(source_config.get("default_provider") or "pi"),
+            "default_model": str(source_config.get("default_model") or "archivist_agent"),
+            "routes": routes,
+            "route_identities": route_identities,
+            "budgets": budgets,
+            "total": 0,
+            "skills": [],
+            "error": str(exc),
+        }
 
     return {
         "enabled": bool(source_config.get("enabled", True)),
@@ -201,18 +239,205 @@ def _summarize_pi_skills(config: ConfigLike, *, project_root: Path) -> dict[str,
         "default_provider": str(source_config.get("default_provider") or "pi"),
         "default_model": str(source_config.get("default_model") or "archivist_agent"),
         "routes": routes,
-        "total": len(skill_items),
-        "skills": [
-            {
-                "id": str(item.get("id") or ""),
-                "description": str(item.get("description") or ""),
-                "artifact_types": list(item.get("artifact_types") or []),
-                "source_name": str(item.get("source_name") or ""),
-            }
-            for item in skill_items
-            if item.get("id")
-        ],
+        "route_identities": route_identities,
+        "budgets": budgets,
+        "total": len(skills),
+        "skills": skills,
     }
+
+
+def _summarize_pi_skill_manifest(
+    item: dict[str, Any],
+    *,
+    source_config: dict[str, Any],
+) -> dict[str, Any]:
+    skill_id = str(item.get("id") or "").strip()
+    if not skill_id:
+        raise ValueError("Pi skill definition missing id")
+    artifact_types = _required_manifest_list(item, "artifact_types", skill_id=skill_id)
+    inputs = _required_manifest_list(item, "inputs", skill_id=skill_id)
+    outputs = _required_manifest_list(item, "outputs", skill_id=skill_id)
+    try:
+        validate_manifest_outputs(outputs, origin=f"Pi skill {skill_id!r}")
+    except ConnectorManifestError as exc:
+        raise ValueError(str(exc)) from exc
+    auth = _required_manifest_list(item, "auth", skill_id=skill_id, allow_empty=True)
+    safety_mode = _required_manifest_string(item, "safety_mode", skill_id=skill_id)
+    queue_behavior = _required_manifest_string(item, "queue_behavior", skill_id=skill_id)
+    allowed_side_effects = _required_manifest_list(
+        item,
+        "allowed_side_effects",
+        skill_id=skill_id,
+        allow_empty=True,
+    )
+    try:
+        validate_allowed_side_effects(
+            allowed_side_effects,
+            origin=f"Pi skill {skill_id!r}",
+        )
+    except ConnectorManifestError as exc:
+        raise ValueError(str(exc)) from exc
+    return {
+        "id": skill_id,
+        "description": str(item.get("description") or ""),
+        "artifact_types": list(artifact_types),
+        "inputs": list(inputs),
+        "outputs": list(outputs),
+        "auth": list(auth),
+        "safety_mode": safety_mode,
+        "queue_behavior": queue_behavior,
+        "allowed_side_effects": list(allowed_side_effects),
+        "source_name": str(item.get("source_name") or ""),
+        "allowlist": _pi_skill_allowlist_status(skill_id, source_config),
+    }
+
+
+def _pi_skill_allowlist_status(
+    skill_id: str,
+    source_config: dict[str, Any],
+) -> dict[str, Any]:
+    allowlist = _optional_string_set(source_config.get("allowlist"))
+    if allowlist is None:
+        return {
+            "configured": False,
+            "allowed": True,
+            "matched": [],
+        }
+    matched = [skill_id] if skill_id in allowlist else []
+    return {
+        "configured": True,
+        "allowed": bool(matched),
+        "matched": matched,
+    }
+
+
+def _summarize_pi_route_identity(
+    config: ConfigLike,
+    source_config: dict[str, Any],
+    route: dict[str, str],
+) -> dict[str, Any]:
+    provider = str(route.get("provider") or "")
+    provider_cfg = config.get(f"llm.providers.{provider}", {}) or {}
+    if not isinstance(provider_cfg, dict):
+        provider_cfg = {}
+    command = str(provider_cfg.get("command") or "pi")
+    model_alias = str(route.get("model") or "")
+    model = _pi_model_id(provider_cfg, model_alias) or model_alias or None
+    identity = {
+        "provider": provider,
+        "configured_command": command,
+        "resolved_command": _resolve_command_path(command),
+        "pi_provider": str(provider_cfg.get("pi_provider") or "") or None,
+        "model": model,
+        "install_if_missing": bool(provider_cfg.get("install_if_missing", False)),
+        "install_command_configured": bool(provider_cfg.get("install_command")),
+    }
+    pin = _pi_command_pin(source_config, provider_cfg, provider)
+    drift = []
+    if pin:
+        field_map = {
+            "command": "configured_command",
+            "configured_command": "configured_command",
+            "resolved_command": "resolved_command",
+            "pi_provider": "pi_provider",
+            "model": "model",
+        }
+        for pin_field, identity_field in field_map.items():
+            if pin_field not in pin:
+                continue
+            expected = pin.get(pin_field)
+            actual = identity.get(identity_field)
+            if expected != actual:
+                drift.append(
+                    {
+                        "field": pin_field,
+                        "expected": expected,
+                        "actual": actual,
+                    }
+                )
+    identity["pin"] = dict(pin) if pin else {}
+    identity["pinned"] = bool(pin)
+    identity["drift"] = drift
+    return identity
+
+
+def _pi_command_pin(
+    source_config: dict[str, Any],
+    provider_cfg: dict[str, Any],
+    provider: str,
+) -> dict[str, Any]:
+    pins = source_config.get("command_pins") or {}
+    if isinstance(pins, dict) and isinstance(pins.get(provider), dict):
+        return pins[provider]
+    provider_pin = provider_cfg.get("command_pin")
+    if isinstance(provider_pin, dict):
+        return provider_pin
+    return {}
+
+
+def _pi_model_id(provider_cfg: dict[str, Any], model: str | None) -> str | None:
+    models = provider_cfg.get("models")
+    if not isinstance(models, dict):
+        return model
+    if model and isinstance(models.get(model), dict):
+        return str(models[model].get("id") or model)
+    if model:
+        return model
+    default_model = models.get("default")
+    if isinstance(default_model, dict):
+        return str(default_model.get("id") or "") or None
+    return None
+
+
+def _resolve_command_path(command: str) -> str | None:
+    resolved = shutil.which(command)
+    if resolved:
+        return str(Path(resolved).resolve())
+    command_path = Path(command).expanduser()
+    if command_path.exists():
+        return str(command_path.resolve())
+    return None
+
+
+def _optional_string_set(value: Any) -> set[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return {item.strip() for item in value.split(",") if item.strip()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item).strip() for item in value if str(item).strip()}
+    raise ValueError("allowlist must be an array or string")
+
+
+def _required_manifest_string(
+    item: dict[str, Any],
+    field_name: str,
+    *,
+    skill_id: str,
+) -> str:
+    text = str(item.get(field_name) or "").strip()
+    if not text:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    return text
+
+
+def _required_manifest_list(
+    item: dict[str, Any],
+    field_name: str,
+    *,
+    skill_id: str,
+    allow_empty: bool = False,
+) -> tuple[str, ...]:
+    if field_name not in item:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    value = item.get(field_name)
+    if isinstance(value, (list, tuple)):
+        values = [str(part).strip() for part in value if str(part).strip()]
+    else:
+        raise ValueError(f"Pi skill {skill_id!r} {field_name} must be an array")
+    if not values and not allow_empty:
+        raise ValueError(f"Pi skill {skill_id!r} requires {field_name}")
+    return tuple(values)
 
 
 def _summarize_providers(config: ConfigLike) -> dict[str, Any]:
@@ -322,37 +547,302 @@ def _summarize_automation(config: ConfigLike) -> dict[str, Any]:
     }
 
 
+def _connector_group(connectors_summary: dict[str, Any]) -> dict[str, Any]:
+    connectors = connectors_summary.get("connectors", [])
+    return {
+        "total": connectors_summary.get("total", 0),
+        "enabled": [
+            item["name"]
+            for item in connectors
+            if item.get("enabled")
+        ],
+        "items": connectors,
+        "error": connectors_summary.get("error"),
+    }
+
+
+def _skills_group(pi_skills_summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": bool(pi_skills_summary.get("enabled", False)),
+        "total": pi_skills_summary.get("total", 0),
+        "items": pi_skills_summary.get("skills", []),
+        "safety_mode": pi_skills_summary.get("safety_mode"),
+        "output_dir": pi_skills_summary.get("output_dir"),
+        "routes": pi_skills_summary.get("routes", []),
+        "route_identities": pi_skills_summary.get("route_identities", []),
+        "budgets": pi_skills_summary.get("budgets", {}),
+        "error": pi_skills_summary.get("error"),
+    }
+
+
+def _summarize_sources_and_skills(
+    connectors_summary: dict[str, Any],
+    pi_skills_summary: dict[str, Any],
+    web_clipper_summary: dict[str, Any],
+) -> dict[str, Any]:
+    connectors = _connector_group(connectors_summary)
+    skills = _skills_group(pi_skills_summary)
+    return {
+        "connectors": connectors,
+        "skills": skills,
+        "web_clipper": {
+            "enabled": bool(web_clipper_summary.get("enabled", False)),
+            "configured": bool(web_clipper_summary.get("configured", False)),
+            "watch_dirs": list(web_clipper_summary.get("watch_dirs") or []),
+            "error": web_clipper_summary.get("error"),
+        },
+    }
+
+
+def _summarize_wiki_and_archivist(
+    layout_summary: dict[str, Any],
+    archivist_summary: dict[str, Any],
+    automation_summary: dict[str, Any],
+) -> dict[str, Any]:
+    wiki = _summarize_wiki_group(layout_summary, archivist_summary)
+    corpus = archivist_summary.get("corpus") or {}
+    return {
+        **wiki,
+        "archivist_configured": bool(archivist_summary.get("configured", False)),
+        "archivist_exists": bool(archivist_summary.get("exists", False)),
+        "archivist_error": archivist_summary.get("error"),
+        "corpus_error": archivist_summary.get("corpus_error"),
+        "corpus": corpus,
+        "automation": (automation_summary.get("jobs") or {}).get("archivist", {}),
+    }
+
+
+def _summarize_security(
+    config: ConfigLike,
+    *,
+    layout_summary: dict[str, Any],
+    providers_summary: dict[str, Any],
+    connectors_summary: dict[str, Any],
+    pi_skills_summary: dict[str, Any],
+) -> dict[str, Any]:
+    connector_auth = []
+    for connector in connectors_summary.get("connectors", []):
+        auth_status = connector.get("auth_status") or {}
+        auth_keys = list(auth_status.get("keys") or [])
+        if not auth_keys:
+            continue
+        connector_auth.append(
+            {
+                "name": connector.get("name"),
+                "enabled": bool(connector.get("enabled", False)),
+                "configured": list(auth_status.get("configured") or []),
+                "missing": list(auth_status.get("missing") or []),
+                "total": len(auth_keys),
+            }
+        )
+
+    provider_auth = [
+        {
+            "name": provider["name"],
+            "enabled": provider["enabled"],
+            "has_api_key_env": provider["has_api_key_env"],
+        }
+        for provider in providers_summary.get("providers", [])
+    ]
+
+    side_effects = set()
+    safety_modes = set()
+    for connector in connectors_summary.get("connectors", []):
+        side_effects.update(connector.get("allowed_side_effects") or [])
+        if connector.get("safety_mode"):
+            safety_modes.add(str(connector["safety_mode"]))
+    for skill in pi_skills_summary.get("skills", []):
+        side_effects.update(skill.get("allowed_side_effects") or [])
+        if skill.get("safety_mode"):
+            safety_modes.add(str(skill["safety_mode"]))
+
+    prompts = config.get("llm.prompts", {}) or {}
+    prompt_groups = sorted(prompts.keys()) if isinstance(prompts, dict) else []
+    return {
+        "connector_auth": connector_auth,
+        "provider_auth": provider_auth,
+        "prompt_security": {
+            "threat_scanner": "available",
+            "sensitive_redaction": "available",
+            "configured_prompt_groups": prompt_groups,
+        },
+        "dashboard": _summarize_security_dashboard(layout_summary),
+        "safety_modes": sorted(safety_modes),
+        "allowed_side_effects": sorted(side_effects),
+    }
+
+
+def _empty_security_dashboard(
+    *,
+    database_path: str | None = None,
+    exists: bool = False,
+) -> dict[str, Any]:
+    return {
+        "database_path": database_path,
+        "exists": exists,
+        "counts": {
+            "total": 0,
+            "with_findings": 0,
+            "findings": 0,
+            "redacted": 0,
+            "redactions": 0,
+            "quarantined": 0,
+            "strict_failures": 0,
+            "by_status": {},
+            "by_source": {},
+            "by_finding_type": {},
+            "by_pattern": {},
+            "by_redaction_category": {},
+        },
+        "quarantined_artifacts": [],
+        "strict_failures": [],
+        "redactions": {"total": 0, "by_category": {}},
+        "findings_by_source": [],
+    }
+
+
+def _summarize_security_dashboard(layout_summary: dict[str, Any]) -> dict[str, Any]:
+    database_path = str(layout_summary.get("database_path") or "").strip()
+    if not database_path:
+        return _empty_security_dashboard()
+    db_path = Path(database_path)
+    if not db_path.exists():
+        return _empty_security_dashboard(database_path=database_path, exists=False)
+    try:
+        summary = MetadataDB(str(db_path)).get_ingestion_security_summary(limit=25)
+    except Exception as exc:
+        return {
+            **_empty_security_dashboard(database_path=database_path, exists=True),
+            "error": str(exc),
+        }
+    return {
+        **summary,
+        "database_path": database_path,
+        "exists": True,
+    }
+
+
+def _summarize_overview(
+    *,
+    providers_summary: dict[str, Any],
+    sources_and_skills: dict[str, Any],
+    wiki_and_archivist: dict[str, Any],
+    security_summary: dict[str, Any],
+    automation_summary: dict[str, Any],
+    layout_summary: dict[str, Any],
+) -> dict[str, Any]:
+    connectors = sources_and_skills["connectors"]
+    skills = sources_and_skills["skills"]
+    what_happened = [
+        (
+            f"{len(providers_summary.get('enabled') or [])}/"
+            f"{providers_summary.get('total', 0)} providers enabled"
+        ),
+        f"{len(connectors.get('enabled') or [])}/{connectors.get('total', 0)} sources enabled",
+        f"{skills.get('total', 0)} Pi skills configured",
+        f"{wiki_and_archivist.get('archivist_topic_count', 0)} archivist topics loaded",
+    ]
+    security_dashboard = security_summary.get("dashboard") or {}
+    security_counts = security_dashboard.get("counts") or {}
+    if security_dashboard.get("exists"):
+        what_happened.append(
+            f"{security_counts.get('findings', 0)} security findings across "
+            f"{security_counts.get('with_findings', 0)} artifacts"
+        )
+
+    stuck = []
+    for summary in (layout_summary, connectors, skills, sources_and_skills["web_clipper"]):
+        if summary.get("error"):
+            stuck.append(str(summary["error"]))
+    if wiki_and_archivist.get("archivist_error"):
+        stuck.append(str(wiki_and_archivist["archivist_error"]))
+    if wiki_and_archivist.get("corpus_error"):
+        stuck.append(str(wiki_and_archivist["corpus_error"]))
+    if security_dashboard.get("error"):
+        stuck.append(str(security_dashboard["error"]))
+
+    for connector in connectors.get("items", []):
+        auth_status = connector.get("auth_status") or {}
+        if connector.get("enabled") and auth_status.get("missing"):
+            missing = ", ".join(auth_status["missing"])
+            stuck.append(f"{connector['name']} missing auth: {missing}")
+    quarantined = int(security_counts.get("quarantined") or 0)
+    strict_failures = int(security_counts.get("strict_failures") or 0)
+    if quarantined:
+        stuck.append(f"{quarantined} artifact(s) quarantined for security review")
+    if strict_failures:
+        stuck.append(f"{strict_failures} strict security failure(s) blocked")
+
+    run_next = []
+    jobs = automation_summary.get("jobs") or {}
+    for key in automation_summary.get("enabled") or []:
+        interval = jobs.get(key, {}).get("interval_hours")
+        suffix = f" every {interval}h" if interval else ""
+        run_next.append(f"{key}{suffix}")
+    if not run_next:
+        run_next.append("No background jobs enabled")
+
+    return {
+        "what_happened": what_happened,
+        "what_is_stuck": stuck,
+        "what_should_run_next": run_next,
+        "counts": {
+            "providers_enabled": len(providers_summary.get("enabled") or []),
+            "providers_total": providers_summary.get("total", 0),
+            "sources_enabled": len(connectors.get("enabled") or []),
+            "sources_total": connectors.get("total", 0),
+            "skills_total": skills.get("total", 0),
+            "archivist_topics": wiki_and_archivist.get("archivist_topic_count", 0),
+        },
+    }
+
+
 def _summarize_grouped_config(
     config: ConfigLike,
     *,
     layout_summary: dict[str, Any],
     archivist_summary: dict[str, Any],
     connectors_summary: dict[str, Any],
+    web_clipper_summary: dict[str, Any],
     pi_skills_summary: dict[str, Any],
 ) -> dict[str, Any]:
+    providers_summary = _summarize_providers(config)
+    automation_summary = _summarize_automation(config)
+    sources_and_skills = _summarize_sources_and_skills(
+        connectors_summary,
+        pi_skills_summary,
+        web_clipper_summary,
+    )
+    wiki_and_archivist = _summarize_wiki_and_archivist(
+        layout_summary,
+        archivist_summary,
+        automation_summary,
+    )
+    security = _summarize_security(
+        config,
+        layout_summary=layout_summary,
+        providers_summary=providers_summary,
+        connectors_summary=connectors_summary,
+        pi_skills_summary=pi_skills_summary,
+    )
     return {
-        "providers": _summarize_providers(config),
-        "connectors": {
-            "total": connectors_summary.get("total", 0),
-            "enabled": [
-                item["name"]
-                for item in connectors_summary.get("connectors", [])
-                if item.get("enabled")
-            ],
-            "items": connectors_summary.get("connectors", []),
-            "error": connectors_summary.get("error"),
+        "overview": _summarize_overview(
+            providers_summary=providers_summary,
+            sources_and_skills=sources_and_skills,
+            wiki_and_archivist=wiki_and_archivist,
+            security_summary=security,
+            automation_summary=automation_summary,
+            layout_summary=layout_summary,
+        ),
+        "sources_and_skills": sources_and_skills,
+        "wiki_and_archivist": wiki_and_archivist,
+        "security": security,
+        "advanced": {
+            "providers": providers_summary,
+            "task_routing": providers_summary.get("tasks", {}),
+            "storage": _summarize_storage(layout_summary),
+            "automation": automation_summary,
         },
-        "skills": {
-            "enabled": bool(pi_skills_summary.get("enabled", False)),
-            "total": pi_skills_summary.get("total", 0),
-            "items": pi_skills_summary.get("skills", []),
-            "safety_mode": pi_skills_summary.get("safety_mode"),
-            "output_dir": pi_skills_summary.get("output_dir"),
-            "error": pi_skills_summary.get("error"),
-        },
-        "storage": _summarize_storage(layout_summary),
-        "wiki": _summarize_wiki_group(layout_summary, archivist_summary),
-        "automation": _summarize_automation(config),
     }
 
 
@@ -394,6 +884,7 @@ def build_settings_runtime_summary(
             layout_summary=layout_summary,
             archivist_summary=archivist_summary,
             connectors_summary=connectors_summary,
+            web_clipper_summary=web_clipper_summary,
             pi_skills_summary=pi_skills_summary,
         ),
     }

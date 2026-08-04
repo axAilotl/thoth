@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 from .artifacts import (
     KnowledgeArtifact,
+    MarkdownArtifact,
     PaperArtifact,
     RepositoryArtifact,
     TranscriptArtifact,
@@ -23,11 +24,19 @@ from .artifacts import (
     VideoArtifact,
     WebClipperArtifact,
 )
+from .bounded_workers import map_bounded, resolve_worker_concurrency
 from .bookmark_contract import normalize_bookmark_payload, validate_tweet_id
+from .canonical_identity import CanonicalArtifactIdentity, CanonicalIdentityService
 from .config import Config, config
 from .data_models import Tweet
-from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
+from .metadata_db import (
+    INGESTION_REVIEW_STATUSES,
+    IngestionQueueEntry,
+    MetadataDB,
+    get_metadata_db,
+)
 from .path_layout import PathLayout, build_path_layout
+from .prompt_security import prompt_security_requires_review
 from .translation_companion import EnglishCompanionPublisher, TranslationCompanionResult
 from .wiki_updater import CompiledWikiUpdater
 
@@ -88,6 +97,23 @@ def _capabilities_from_queue(value: str | None) -> tuple[str, ...] | None:
     return tuple(str(item) for item in payload if str(item).strip())
 
 
+def _reviewable_artifact_error(exc: Exception) -> bool:
+    return isinstance(exc, (IngestionRuntimeError, ValueError, TypeError))
+
+
+def _review_category_for_error(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "invalid json" in message or "decode" in message:
+        return "malformed_payload"
+    if "missing" in message:
+        return "incomplete_payload"
+    if "unsupported" in message:
+        return "unsupported_artifact"
+    if "security review" in message:
+        return "security_policy"
+    return "runtime_validation"
+
+
 class KnowledgeArtifactRuntime:
     """Shared runtime for bookmark and ingestion queue processing."""
 
@@ -105,6 +131,7 @@ class KnowledgeArtifactRuntime:
         self._pipeline = None
         self._wiki_updater = None
         self._companion_publisher = None
+        self._canonical_identity_service = None
 
     @property
     def pipeline(self):
@@ -134,6 +161,12 @@ class KnowledgeArtifactRuntime:
             )
         return self._companion_publisher
 
+    @property
+    def canonical_identity_service(self) -> CanonicalIdentityService:
+        if self._canonical_identity_service is None:
+            self._canonical_identity_service = CanonicalIdentityService(self.db)
+        return self._canonical_identity_service
+
     def materialize_artifact(self, entry: IngestionQueueEntry) -> KnowledgeArtifact:
         """Convert a queue row into a typed artifact."""
         payload = _json_loads_maybe(entry.payload_json)
@@ -149,6 +182,8 @@ class KnowledgeArtifactRuntime:
             artifact = RepositoryArtifact.from_queue_payload(payload)
         elif artifact_type == "web_clipper":
             artifact = WebClipperArtifact.from_queue_payload(payload)
+        elif artifact_type == "markdown":
+            artifact = MarkdownArtifact.from_queue_payload(payload)
         elif artifact_type == "video":
             artifact = VideoArtifact.from_queue_payload(payload)
         elif artifact_type == "transcript":
@@ -182,14 +217,39 @@ class KnowledgeArtifactRuntime:
         updater.prune_legacy_tweet_pages()
 
     async def process_pending_ingestions_once(
-        self, *, limit: int | None = None
+        self,
+        *,
+        limit: int | None = None,
+        concurrency: int | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> list[IngestionDispatchResult]:
         """Process all due ingestion rows once."""
         entries = self.db.get_pending_ingestions(limit=limit)
-        results: list[IngestionDispatchResult] = []
-        for entry in entries:
-            results.append(await self.process_ingestion_entry(entry))
-        return results
+        if not entries:
+            return []
+
+        worker_count = (
+            self._ingestion_worker_concurrency()
+            if concurrency is None
+            else resolve_worker_concurrency(
+                concurrency,
+                setting_name="processing.ingestion.concurrent_workers",
+            )
+        )
+        if worker_count <= 1:
+            results: list[IngestionDispatchResult] = []
+            for entry in entries:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                results.append(await self.process_ingestion_entry(entry))
+            return results
+
+        return await map_bounded(
+            entries,
+            self.process_ingestion_entry,
+            concurrency=worker_count,
+            cancel_event=cancel_event,
+        )
 
     async def run_background(
         self,
@@ -201,7 +261,11 @@ class KnowledgeArtifactRuntime:
         """Poll the ingestion queue until shutdown."""
         while not shutdown_event.is_set():
             try:
-                results = await self.process_pending_ingestions_once(limit=batch_size)
+                results = await self.process_pending_ingestions_once(
+                    limit=batch_size,
+                    concurrency=self._ingestion_worker_concurrency(),
+                    cancel_event=shutdown_event,
+                )
                 if not results:
                     await asyncio.wait_for(
                         shutdown_event.wait(), timeout=poll_interval_seconds
@@ -220,22 +284,61 @@ class KnowledgeArtifactRuntime:
                 except asyncio.TimeoutError:
                     continue
 
+    def _ingestion_worker_concurrency(self) -> int:
+        return resolve_worker_concurrency(
+            self.config.get("processing.ingestion.concurrent_workers", 1),
+            default=1,
+            setting_name="processing.ingestion.concurrent_workers",
+        )
+
     async def process_ingestion_entry(
         self, entry: IngestionQueueEntry
     ) -> IngestionDispatchResult:
         """Process a single ingestion queue row."""
-        artifact = self.materialize_artifact(entry)
+        if entry.status in INGESTION_REVIEW_STATUSES:
+            raise IngestionRuntimeError(
+                f"Ingestion artifact {entry.artifact_id} requires security review "
+                "or operator review"
+            )
+        try:
+            artifact = self.materialize_artifact(entry)
+            if prompt_security_requires_review(artifact.normalized_metadata):
+                raise IngestionRuntimeError(
+                    f"Ingestion artifact {entry.artifact_id} requires security review"
+                )
+            canonical_identity = self._canonicalize_artifact(
+                artifact,
+                artifact_type=entry.artifact_type,
+            )
+        except Exception as exc:
+            if _reviewable_artifact_error(exc):
+                return self._route_entry_to_review(entry, exc, stage="materialize")
+            raise
         self.db.mark_ingestion_processing(entry.artifact_id)
 
         try:
             result = await self.dispatch_artifact(artifact)
+            if canonical_identity is not None:
+                result.details.setdefault("canonical_id", canonical_identity.canonical_id)
+                result.details.setdefault(
+                    "canonical_entity_type",
+                    canonical_identity.entity_type,
+                )
             self._sync_wiki_for_artifact(
                 artifact,
                 dispatch_details=result.details,
             )
             self.db.mark_ingestion_processed(entry.artifact_id)
             return result
+        except asyncio.CancelledError:
+            self.db.mark_ingestion_failed(
+                entry.artifact_id,
+                "processing cancelled before completion",
+            )
+            raise
         except Exception as exc:
+            if _reviewable_artifact_error(exc):
+                return self._route_entry_to_review(entry, exc, stage="dispatch")
             failure = self.db.mark_ingestion_failed(entry.artifact_id, str(exc))
             if failure and failure.status == "pending" and failure.next_attempt_at:
                 logger.info(
@@ -244,6 +347,48 @@ class KnowledgeArtifactRuntime:
                     exc,
                 )
             raise
+
+    def _route_entry_to_review(
+        self,
+        entry: IngestionQueueEntry,
+        exc: Exception,
+        *,
+        stage: str,
+    ) -> IngestionDispatchResult:
+        error = f"artifact review required: {exc}"
+        updated = self.db.mark_ingestion_review_required(
+            entry.artifact_id,
+            category=_review_category_for_error(exc),
+            reason=str(exc),
+            error=error,
+            error_type=exc.__class__.__name__,
+            metadata={"stage": stage},
+        )
+        status = updated.status if updated else "needs_review"
+        return IngestionDispatchResult(
+            artifact_id=entry.artifact_id,
+            artifact_type=entry.artifact_type,
+            source=entry.source,
+            status=status,
+            processed_at=_now_iso(),
+            details={
+                "review_required": True,
+                "stage": stage,
+                "error": str(exc),
+                "error_type": exc.__class__.__name__,
+            },
+        )
+
+    def _canonicalize_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        artifact_type: str,
+    ) -> CanonicalArtifactIdentity | None:
+        return self.canonical_identity_service.canonicalize_artifact(
+            artifact,
+            artifact_type=artifact_type,
+        )
 
     async def dispatch_artifact(self, artifact: KnowledgeArtifact) -> IngestionDispatchResult:
         """Dispatch a typed artifact to the existing processors."""
@@ -255,6 +400,8 @@ class KnowledgeArtifactRuntime:
             return await self._process_repository_artifact(artifact)
         if isinstance(artifact, WebClipperArtifact):
             return await self._process_web_clipper_artifact(artifact)
+        if isinstance(artifact, MarkdownArtifact):
+            return await self._process_markdown_artifact(artifact)
         if isinstance(artifact, VideoArtifact):
             return await self._process_video_artifact(artifact)
         if isinstance(artifact, TranscriptArtifact):
@@ -588,6 +735,24 @@ class KnowledgeArtifactRuntime:
                 "source_url": artifact.source_url,
                 "source_language": artifact.source_language,
                 "file_type": artifact.file_type,
+            },
+        )
+
+    async def _process_markdown_artifact(
+        self, artifact: MarkdownArtifact
+    ) -> IngestionDispatchResult:
+        """Record imported markdown as capture-only evidence."""
+        return IngestionDispatchResult(
+            artifact_id=artifact.id,
+            artifact_type="markdown",
+            source=artifact.source_type,
+            status="skipped",
+            processed_at=_now_iso(),
+            details={
+                "reason": "capture_only",
+                "title": artifact.title,
+                "source_path": artifact.source_path,
+                "source_relative_path": artifact.source_relative_path,
             },
         )
 

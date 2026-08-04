@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from math import ceil
 
 from ..archivist_topics import ArchivistTopicDefinition
 from ..config import Config
@@ -55,6 +56,7 @@ async def select_archivist_candidates_async(
         for document in inventory.documents
         if _passes_required_filters(document, topic)
         and _passes_exclusion_filters(document, topic)
+        and _passes_source_trust(document)
     )
 
     if topic.retrieval.mode == "literal":
@@ -94,8 +96,7 @@ async def select_archivist_candidates_async(
             llm_interface=llm_interface,
         )
 
-    if topic.max_sources is not None:
-        candidates = candidates[: topic.max_sources]
+    candidates = _apply_candidate_defenses(candidates, topic)
 
     return ArchivistSelectionResult(
         topic_id=topic.id,
@@ -316,6 +317,52 @@ def _passes_exclusion_filters(
     return True
 
 
+def _passes_source_trust(document: ArchivistCorpusDocument) -> bool:
+    if document.source_security_status in {"needs_review", "blocked"}:
+        return False
+    return float(document.source_trust_score) > 0.0
+
+
+def _apply_candidate_defenses(
+    candidates: list[ArchivistCandidate],
+    topic: ArchivistTopicDefinition,
+) -> list[ArchivistCandidate]:
+    trusted = [candidate for candidate in candidates if _passes_source_trust(candidate)]
+    return _diversify_candidates(trusted, topic)
+
+
+def _diversify_candidates(
+    candidates: list[ArchivistCandidate],
+    topic: ArchivistTopicDefinition,
+) -> list[ArchivistCandidate]:
+    if not candidates:
+        return []
+    limit = topic.max_sources if topic.max_sources is not None else len(candidates)
+    if limit <= 0:
+        return []
+    per_source_cap = _per_source_cap(topic, limit=limit)
+    selected: list[ArchivistCandidate] = []
+    source_counts: dict[str, int] = {}
+    for candidate in candidates:
+        source_key = _candidate_source_key(candidate)
+        if source_counts.get(source_key, 0) >= per_source_cap:
+            continue
+        selected.append(candidate)
+        source_counts[source_key] = source_counts.get(source_key, 0) + 1
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _per_source_cap(topic: ArchivistTopicDefinition, *, limit: int) -> int:
+    share_cap = max(1, ceil(limit * topic.retrieval.max_source_share))
+    return max(1, min(topic.retrieval.max_per_source, share_cap))
+
+
+def _candidate_source_key(candidate: ArchivistCandidate) -> str:
+    return candidate.source_key or candidate.source_id or candidate.candidate_key
+
+
 def _literal_query_score(
     document: ArchivistCorpusDocument,
     topic: ArchivistTopicDefinition,
@@ -359,10 +406,11 @@ def _apply_topic_weight(
     topic: ArchivistTopicDefinition,
 ) -> float:
     weighted = float(score) * topic.retrieval.weight_for_source_type(document.source_type)
-    return weighted + _recency_score(
+    scored = weighted + _recency_score(
         document.updated_at,
         recency_weight=topic.retrieval.recency_weight,
     )
+    return scored * max(0.0, min(1.0, float(document.source_trust_score)))
 
 
 def _recency_score(updated_at: str, *, recency_weight: float) -> float:

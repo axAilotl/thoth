@@ -8,12 +8,13 @@ baseline file seeding, and append-only maintenance logging.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 import os
 import re
 
 from .config import Config
+from .time_utils import utc_now, utc_now_iso
 from .wiki_contract import WikiContract, build_wiki_contract
 
 WIKI_INDEX_TITLE = "Thoth Wiki"
@@ -27,7 +28,7 @@ class WikiScaffoldError(RuntimeError):
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 def _date_from_timestamp(value: str) -> str:
@@ -37,7 +38,7 @@ def _date_from_timestamp(value: str) -> str:
     except ValueError:
         if _ISO_DATE_RE.fullmatch(value.strip()):
             return value.strip()
-        return datetime.now(timezone.utc).date().isoformat()
+        return utc_now().date().isoformat()
 
 
 def _atomic_write_text(path: Path, content: str) -> None:

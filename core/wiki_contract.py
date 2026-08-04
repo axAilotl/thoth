@@ -8,10 +8,11 @@ That belongs in the wiki scaffold/maintenance layer.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 from .config import Config
 from .path_layout import build_path_layout
@@ -55,6 +56,17 @@ def normalize_wiki_slug(raw_value: str, max_length: int = WIKI_SLUG_MAX_LENGTH) 
     return value
 
 
+def wiki_slug_component(value: str, fallback: str) -> str:
+    """Return a safe slug component, falling back to a stable default."""
+    try:
+        return normalize_wiki_slug(value)
+    except ValueError:
+        try:
+            return normalize_wiki_slug(fallback)
+        except ValueError:
+            return "unknown"
+
+
 def is_legacy_tweet_slug(raw_value: str) -> bool:
     """Return True when a page slug matches the legacy compiled tweet-page pattern."""
     value = str(raw_value or "").strip().lower()
@@ -66,6 +78,58 @@ def okf_type_for_wiki_page(kind: str, record_type: str = "wiki_page") -> str:
     if record_type in OKF_TYPE_BY_RECORD_TYPE:
         return OKF_TYPE_BY_RECORD_TYPE[record_type]
     return OKF_TYPE_BY_WIKI_KIND.get(kind, "Reference")
+
+
+def _stable_unique_strings(values: Tuple[str, ...]) -> Tuple[str, ...]:
+    cleaned = (str(value).strip() for value in values)
+    return tuple(sorted({value for value in cleaned if value}))
+
+
+def _stable_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _stable_metadata_value(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+        }
+    if isinstance(value, (list, tuple, set)):
+        normalized = [_stable_metadata_value(item) for item in value]
+        return sorted(normalized, key=_metadata_sort_key)
+    return value
+
+
+def _metadata_sort_key(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def _stable_security_findings(values: Tuple[Any, ...]) -> Tuple[Any, ...]:
+    normalized = [
+        _stable_metadata_value(value)
+        for value in values
+        if value not in (None, {}, [], ())
+    ]
+    deduped = {_metadata_sort_key(value): value for value in normalized}
+    return tuple(deduped[key] for key in sorted(deduped))
+
+
+def _stable_influence_sources(values: Tuple[Any, ...]) -> Tuple[Dict[str, Any], ...]:
+    records: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        record = {
+            str(key): _stable_metadata_value(item)
+            for key, item in value.items()
+            if item not in (None, "", [], {})
+        }
+        if not record:
+            continue
+        fingerprint = _metadata_sort_key(record)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        records.append(record)
+    return tuple(records)
 
 
 @dataclass(frozen=True)
@@ -80,6 +144,7 @@ class WikiPageSpec:
     summary: str = ""
     aliases: Tuple[str, ...] = field(default_factory=tuple)
     source_paths: Tuple[str, ...] = field(default_factory=tuple)
+    influence_sources: Tuple[Any, ...] = field(default_factory=tuple)
     related_slugs: Tuple[str, ...] = field(default_factory=tuple)
     language: str = "en"
     translated_from: str | None = None
@@ -91,14 +156,75 @@ class WikiPageSpec:
     updated_at: str | None = None
     resource: str | None = None
     artifact_id: str | None = None
+    artifact_ids: Tuple[str, ...] = field(default_factory=tuple)
     source_type: str | None = None
+    canonical_id: str | None = None
+    canonical_entity_type: str | None = None
+    canonical_identity_keys: Tuple[Any, ...] = field(default_factory=tuple)
+    event_ids: Tuple[str, ...] = field(default_factory=tuple)
+    source_ids: Tuple[str, ...] = field(default_factory=tuple)
+    session_ids: Tuple[str, ...] = field(default_factory=tuple)
+    capture_page_type: str | None = None
+    capture_page_key: str | None = None
+    capture_event_count: int | None = None
+    capture_audit: Mapping[str, Any] | None = None
+    semantic_page_type: str | None = None
+    semantic_candidate_ids: Tuple[str, ...] = field(default_factory=tuple)
+    semantic_evidence_ids: Tuple[str, ...] = field(default_factory=tuple)
+    security_findings: Tuple[Any, ...] = field(default_factory=tuple)
+    security_policy: Mapping[str, Any] | None = None
+    input_hash: str | None = None
+    input_manifest: Tuple[Any, ...] = field(default_factory=tuple)
+    change_provenance: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "aliases", _stable_unique_strings(self.aliases))
+        object.__setattr__(self, "source_paths", _stable_unique_strings(self.source_paths))
+        object.__setattr__(
+            self,
+            "influence_sources",
+            _stable_influence_sources(self.influence_sources),
+        )
+        object.__setattr__(self, "related_slugs", _stable_unique_strings(self.related_slugs))
+        object.__setattr__(self, "query_terms", _stable_unique_strings(self.query_terms))
+        object.__setattr__(self, "event_ids", _stable_unique_strings(self.event_ids))
+        object.__setattr__(self, "source_ids", _stable_unique_strings(self.source_ids))
+        object.__setattr__(self, "session_ids", _stable_unique_strings(self.session_ids))
+        object.__setattr__(
+            self,
+            "semantic_candidate_ids",
+            _stable_unique_strings(self.semantic_candidate_ids),
+        )
+        object.__setattr__(
+            self,
+            "semantic_evidence_ids",
+            _stable_unique_strings(self.semantic_evidence_ids),
+        )
+        object.__setattr__(self, "artifact_ids", _stable_unique_strings(self.artifact_ids))
+        object.__setattr__(
+            self,
+            "security_findings",
+            _stable_security_findings(self.security_findings),
+        )
+        object.__setattr__(
+            self,
+            "canonical_identity_keys",
+            _stable_security_findings(self.canonical_identity_keys),
+        )
+        object.__setattr__(
+            self,
+            "input_manifest",
+            _stable_security_findings(self.input_manifest),
+        )
 
     def frontmatter(self) -> Dict[str, Any]:
         """Render a frontmatter dictionary for the compiled wiki page."""
         okf_type = self.okf_type or okf_type_for_wiki_page(self.kind, self.record_type)
         data = {
             "type": okf_type,
+            "id": self.slug,
             "thoth_type": self.record_type,
+            "thoth_id": self.slug,
             "title": self.title,
             "description": self.summary,
             "resource": self.resource,
@@ -109,6 +235,7 @@ class WikiPageSpec:
             "thoth_summary": self.summary,
             "thoth_aliases": list(self.aliases),
             "thoth_source_paths": list(self.source_paths),
+            "thoth_influence_sources": list(self.influence_sources),
             "thoth_related_slugs": list(self.related_slugs),
             "thoth_language": self.language,
             "thoth_translated_from": self.translated_from,
@@ -119,7 +246,33 @@ class WikiPageSpec:
             "thoth_created_at": self.created_at,
             "thoth_updated_at": self.updated_at,
             "thoth_artifact_id": self.artifact_id,
+            "thoth_artifact_ids": list(self.artifact_ids) or None,
             "thoth_source_type": self.source_type,
+            "thoth_canonical_id": self.canonical_id,
+            "thoth_canonical_entity_type": self.canonical_entity_type,
+            "thoth_canonical_identity_keys": list(self.canonical_identity_keys) or None,
+            "thoth_event_ids": list(self.event_ids) or None,
+            "thoth_source_ids": list(self.source_ids) or None,
+            "thoth_session_ids": list(self.session_ids) or None,
+            "thoth_capture_page_type": self.capture_page_type,
+            "thoth_capture_page_key": self.capture_page_key,
+            "thoth_capture_event_count": self.capture_event_count,
+            "thoth_capture_audit": _stable_metadata_value(self.capture_audit)
+            if self.capture_audit
+            else None,
+            "thoth_semantic_memory_page": True if self.semantic_page_type else None,
+            "thoth_semantic_page_type": self.semantic_page_type,
+            "thoth_semantic_candidate_ids": list(self.semantic_candidate_ids) or None,
+            "thoth_semantic_evidence_ids": list(self.semantic_evidence_ids) or None,
+            "thoth_security_findings": list(self.security_findings) or None,
+            "thoth_security_policy": _stable_metadata_value(self.security_policy)
+            if self.security_policy
+            else None,
+            "thoth_input_hash": self.input_hash,
+            "thoth_input_manifest": list(self.input_manifest) or None,
+            "thoth_change_provenance": _stable_metadata_value(self.change_provenance)
+            if self.change_provenance
+            else None,
             # Legacy aliases retained so existing local readers and hand-authored
             # pages keep working while new metadata has namespaced equivalents.
             "slug": self.slug,
@@ -127,6 +280,7 @@ class WikiPageSpec:
             "summary": self.summary,
             "aliases": list(self.aliases),
             "source_paths": list(self.source_paths),
+            "influence_sources": list(self.influence_sources),
             "related_slugs": list(self.related_slugs),
             "language": self.language,
             "translated_from": self.translated_from,
@@ -196,6 +350,28 @@ class WikiContract:
         for source_path in spec.source_paths:
             if not source_path or not source_path.strip():
                 raise ValueError("Wiki page source_paths cannot contain empty entries")
+        for influence in spec.influence_sources:
+            if not isinstance(influence, Mapping):
+                raise ValueError("Wiki page influence_sources entries must be objects")
+            forbidden = {
+                key
+                for key in influence
+                if any(marker in str(key).lower() for marker in ("content", "excerpt", "secret"))
+            }
+            if forbidden:
+                raise ValueError("Wiki page influence_sources cannot include source content")
+        if spec.input_hash and not spec.input_hash.strip():
+            raise ValueError("Wiki page input_hash cannot be empty")
+        for input_record in spec.input_manifest:
+            if not isinstance(input_record, Mapping):
+                raise ValueError("Wiki page input_manifest entries must be objects")
+            forbidden = {
+                key
+                for key in input_record
+                if any(marker in str(key).lower() for marker in ("content", "excerpt", "secret"))
+            }
+            if forbidden:
+                raise ValueError("Wiki page input_manifest cannot include source content")
         for related_slug in spec.related_slugs:
             self.validate_slug(related_slug)
 

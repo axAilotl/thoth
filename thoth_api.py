@@ -9,7 +9,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple, Callable, Mapping
+from typing import Dict, Any, Optional, List, Tuple, Callable, Mapping, Union
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +29,8 @@ from core import (
     ArchivistAdminError,
     ArchivistCompilerError,
     ArchivistRuntimeError,
+    CaptureSurfaceError,
+    CaptureSurfaceNotFoundError,
     Tweet,
     ARCHIVIST_JOB_NAME,
     build_archivist_admin_payload,
@@ -60,12 +62,19 @@ from core import (
     run_archivist_topics,
     save_archivist_registry_text,
     ResearchGraphService,
+    SemanticMemoryError,
+    SemanticMemoryReviewError,
+    SemanticMemoryReviewNotFoundError,
+    SemanticMemoryReviewService,
+    open_capture_surface,
 )
 from core.bookmark_ingest import (
     build_bookmark_queue_payload,
     build_realtime_bookmark_record,
     merge_realtime_bookmark_record,
 )
+from core.admin_lint import admin_lint_report_path, run_admin_lint
+from core.admin_status import build_admin_status_dashboard
 from core.config import Config
 from core.ingestion_runtime import get_knowledge_artifact_runtime
 from core.metadata_db import MetadataDB, get_metadata_db, BookmarkQueueEntry
@@ -742,6 +751,46 @@ class ConnectorRunRequest(BaseModel):
     options: Dict[str, Any] = Field(default_factory=dict)
 
 
+class CaptureIngestRequest(BaseModel):
+    """Request payload for manually capturing an artifact."""
+
+    artifact_type: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    source: Union[str, Dict[str, Any]] = "manual"
+    session: Optional[Dict[str, Any]] = None
+    event: Optional[Dict[str, Any]] = None
+    raw_path: Optional[str] = None
+    queue_artifact_id: Optional[str] = None
+    priority: int = 0
+    capabilities: Optional[List[str]] = None
+
+
+class CaptureRetentionExpireRequest(BaseModel):
+    """Request payload for expiring eligible capture data."""
+
+    delete_raw: bool = False
+    delete_distilled: bool = False
+    execute: bool = False
+    reason: Optional[str] = None
+    actor: Optional[str] = None
+    as_of: Optional[str] = None
+
+
+class SemanticMemoryReviewRequest(BaseModel):
+    """Request payload for semantic memory candidate review actions."""
+
+    actor: Optional[str] = None
+    reason: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SemanticMemorySupersedeRequest(SemanticMemoryReviewRequest):
+    """Request payload for superseding one candidate with another."""
+
+    superseded_by_candidate_id: str
+
+
 class BookmarkStatusRequest(BaseModel):
     """Request body for bookmark status lookups."""
 
@@ -1018,6 +1067,61 @@ async def get_settings():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/admin/status")
+async def get_admin_status():
+    """Return operational capture/compile health dashboard data."""
+    try:
+        return build_admin_status_dashboard(
+            load_runtime_settings(),
+            project_root=BASE_CONFIG_PATH.parent,
+        )
+    except Exception as e:
+        logger.error(f"Error loading admin status dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/settings/lint/{lint_kind}")
+async def run_settings_lint(lint_kind: str):
+    """Run an operator lint action and persist a downloadable JSON report."""
+    try:
+        return run_admin_lint(
+            load_runtime_settings(),
+            project_root=BASE_CONFIG_PATH.parent,
+            lint_kind=lint_kind,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error running {lint_kind} lint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/settings/lint/{lint_kind}/download")
+async def download_settings_lint(lint_kind: str):
+    """Download the most recent persisted operator lint report."""
+    normalized_kind = str(lint_kind or "").strip().lower()
+    if normalized_kind not in {"legacy-artifacts", "okf", "wiki", "security"}:
+        raise HTTPException(
+            status_code=400,
+            detail="lint kind must be one of: legacy-artifacts, okf, wiki, security",
+        )
+    try:
+        report_path = admin_lint_report_path(
+            load_runtime_settings(),
+            project_root=BASE_CONFIG_PATH.parent,
+            lint_kind=normalized_kind,
+        )
+    except Exception as e:
+        logger.error(f"Error resolving {normalized_kind} lint report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="Lint report has not been run yet")
+    return FileResponse(
+        report_path,
+        media_type="application/json",
+        filename=report_path.name,
+    )
+
 @app.post("/api/settings/config")
 async def update_config(updates: Dict[str, Any]):
     """Update control.json with new settings (deep merge)."""
@@ -1077,6 +1181,288 @@ async def update_env_vars(env_updates: Dict[str, str]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def open_api_capture_surface():
+    """Open the capture event surface using API runtime configuration."""
+    runtime_config = Config()
+    runtime_config.data = load_runtime_settings()
+    layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+    return open_capture_surface(
+        runtime_config,
+        layout=layout,
+        db=MetadataDB(str(layout.database_path)),
+    )
+
+
+def open_api_semantic_memory_review_service() -> SemanticMemoryReviewService:
+    """Open the semantic memory review service using API runtime configuration."""
+    runtime_config = Config()
+    runtime_config.data = load_runtime_settings()
+    layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+    return SemanticMemoryReviewService(db=MetadataDB(str(layout.database_path)))
+
+
+def semantic_memory_review_kwargs(
+    request: SemanticMemoryReviewRequest,
+) -> dict[str, Any]:
+    """Convert a review request body into service keyword arguments."""
+    return {
+        "actor": request.actor,
+        "reason": request.reason,
+        "reviewed_at": request.reviewed_at,
+        "metadata": request.metadata,
+    }
+
+
+@app.get("/api/capture/sources")
+def get_capture_sources():
+    """List configured capture sources."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.list_sources()
+    except CaptureSurfaceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing capture sources: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/capture/events")
+def list_capture_events(
+    source_id: Optional[str] = Query(default=None),
+    session_id: Optional[str] = Query(default=None),
+    limit: Optional[int] = Query(default=None, gt=0),
+):
+    """List capture events with provenance, raw refs, and policy state."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.list_events(
+                source_id=source_id,
+                session_id=session_id,
+                limit=limit,
+            )
+    except (CaptureSurfaceError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing capture events: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/capture/events/{event_id}")
+def get_capture_event(event_id: str):
+    """Return capture event detail with attached capture metadata."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.get_event(event_id)
+    except CaptureSurfaceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except CaptureSurfaceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error reading capture event {event_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/capture/retention")
+def inspect_capture_retention(
+    event_id: Optional[str] = Query(default=None),
+    source_id: Optional[str] = Query(default=None),
+    session_id: Optional[str] = Query(default=None),
+    as_of: Optional[str] = Query(default=None),
+):
+    """Inspect retention classes and expiry eligibility for capture data."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.inspect_retention(
+                event_id=event_id,
+                source_id=source_id,
+                session_id=session_id,
+                as_of=as_of,
+            )
+    except (CaptureSurfaceError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error inspecting capture retention: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/capture/events/{event_id}/expire")
+def expire_capture_event_retention(
+    event_id: str,
+    request: CaptureRetentionExpireRequest,
+):
+    """Expire eligible raw or distilled capture data with audit records."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.expire_retention(
+                event_id=event_id,
+                delete_raw=request.delete_raw,
+                delete_distilled=request.delete_distilled,
+                dry_run=not request.execute,
+                reason=request.reason,
+                actor=request.actor,
+                as_of=request.as_of,
+            )
+    except (CaptureSurfaceError, ValueError, FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error expiring capture event {event_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/capture/ingest")
+def ingest_capture_event(request: CaptureIngestRequest):
+    """Manually capture an artifact through the shared lifecycle service."""
+    try:
+        with open_api_capture_surface() as surface:
+            return surface.ingest_manual(
+                artifact_type=request.artifact_type,
+                payload=request.payload,
+                source=request.source,
+                session=request.session,
+                event=request.event,
+                raw_path=request.raw_path,
+                queue_artifact_id=request.queue_artifact_id,
+                priority=request.priority,
+                capabilities=request.capabilities,
+            )
+    except (CaptureSurfaceError, ValueError, FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error manually ingesting capture artifact: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/memory/candidates")
+def list_semantic_memory_candidates(
+    candidate_type: Optional[str] = Query(default=None, alias="type"),
+    status: Optional[str] = Query(default=None),
+    entity_id: Optional[str] = Query(default=None),
+    entity_type: Optional[str] = Query(default=None),
+    artifact_id: Optional[str] = Query(default=None),
+    artifact_type: Optional[str] = Query(default=None),
+    capture_event_id: Optional[str] = Query(default=None),
+    limit: Optional[int] = Query(default=None, gt=0),
+):
+    """List semantic memory candidates for operator review."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.list_candidates(
+            candidate_type=candidate_type,
+            status=status,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            capture_event_id=capture_event_id,
+            limit=limit,
+        )
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing semantic memory candidates: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/memory/candidates/{candidate_id}")
+def get_semantic_memory_candidate(candidate_id: str):
+    """Return semantic memory candidate detail and evidence."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.get_candidate(candidate_id)
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error reading semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/candidates/{candidate_id}/confirm")
+def confirm_semantic_memory_candidate(
+    candidate_id: str,
+    request: SemanticMemoryReviewRequest,
+):
+    """Confirm a semantic memory candidate with review audit metadata."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.confirm_candidate(
+            candidate_id,
+            **semantic_memory_review_kwargs(request),
+        )
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error confirming semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/candidates/{candidate_id}/reject")
+def reject_semantic_memory_candidate(
+    candidate_id: str,
+    request: SemanticMemoryReviewRequest,
+):
+    """Reject a semantic memory candidate with review audit metadata."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.reject_candidate(
+            candidate_id,
+            **semantic_memory_review_kwargs(request),
+        )
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error rejecting semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/candidates/{candidate_id}/supersede")
+def supersede_semantic_memory_candidate(
+    candidate_id: str,
+    request: SemanticMemorySupersedeRequest,
+):
+    """Supersede a semantic memory candidate with review audit metadata."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.supersede_candidate(
+            candidate_id,
+            superseded_by_candidate_id=request.superseded_by_candidate_id,
+            **semantic_memory_review_kwargs(request),
+        )
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error superseding semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/candidates/{candidate_id}/promote")
+def promote_semantic_memory_candidate(
+    candidate_id: str,
+    request: SemanticMemoryReviewRequest,
+):
+    """Promote a semantic memory candidate through the evidence gate."""
+    try:
+        service = open_api_semantic_memory_review_service()
+        return service.promote_candidate(
+            candidate_id,
+            **semantic_memory_review_kwargs(request),
+        )
+    except SemanticMemoryReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (SemanticMemoryError, SemanticMemoryReviewError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error promoting semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/api/connectors/{connector_name}/run")
 def run_connector_endpoint(connector_name: str, request: ConnectorRunRequest):
     """Plan or execute a connector through the shared agent surface."""
@@ -1098,6 +1484,34 @@ def run_connector_endpoint(connector_name: str, request: ConnectorRunRequest):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.error(f"Error running connector {connector_name}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/connectors/runs")
+def list_connector_runs_endpoint(
+    connector_name: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=200),
+):
+    """Return connector run history and checkpoint state."""
+    try:
+        runtime_config = Config()
+        runtime_config.data = load_runtime_settings()
+        layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+        service = AgentSurfaceService(
+            runtime_config,
+            layout=layout,
+            db=MetadataDB(str(layout.database_path)),
+        )
+        return service.list_connector_runs(
+            connector_name=connector_name,
+            status=status,
+            limit=limit,
+        )
+    except (AgentSurfaceError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing connector runs: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -1590,6 +2004,70 @@ async def bookmark_status(request: BookmarkStatusRequest):
             }
 
     return {"statuses": response}
+
+
+@app.get("/api/query/wiki")
+def query_wiki_endpoint(
+    query: str = Query(..., min_length=1),
+    limit: int = Query(default=10, ge=1, le=100),
+    include_quarantined: bool = Query(default=False),
+    result_types: Optional[List[str]] = Query(default=None),
+    source_types: Optional[List[str]] = Query(default=None),
+    source_ids: Optional[List[str]] = Query(default=None),
+    source_paths: Optional[List[str]] = Query(default=None),
+    artifact_types: Optional[List[str]] = Query(default=None),
+    event_types: Optional[List[str]] = Query(default=None),
+    wiki_kinds: Optional[List[str]] = Query(default=None),
+    tags: Optional[List[str]] = Query(default=None),
+    exclude_tags: Optional[List[str]] = Query(default=None),
+    security_statuses: Optional[List[str]] = Query(default=None),
+    min_trust_score: Optional[float] = Query(default=None),
+    time_after: Optional[str] = Query(default=None),
+    time_before: Optional[str] = Query(default=None),
+    created_after: Optional[str] = Query(default=None),
+    created_before: Optional[str] = Query(default=None),
+    updated_after: Optional[str] = Query(default=None),
+    updated_before: Optional[str] = Query(default=None),
+    use_embedding: bool = Query(default=False),
+):
+    """Search Thoth knowledge surfaces using the shared agent-safe response."""
+    try:
+        runtime_config = Config()
+        runtime_config.data = load_runtime_settings()
+        layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+        service = AgentSurfaceService(
+            runtime_config,
+            layout=layout,
+            db=MetadataDB(str(layout.database_path)),
+        )
+        return service.query_wiki(
+            query,
+            limit=limit,
+            include_quarantined=include_quarantined,
+            result_types=result_types,
+            source_types=source_types,
+            source_ids=source_ids,
+            source_paths=source_paths,
+            artifact_types=artifact_types,
+            event_types=event_types,
+            wiki_kinds=wiki_kinds,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            security_statuses=security_statuses,
+            min_trust_score=min_trust_score,
+            time_after=time_after,
+            time_before=time_before,
+            created_after=created_after,
+            created_before=created_before,
+            updated_after=updated_after,
+            updated_before=updated_before,
+            use_embedding=use_embedding,
+        )
+    except (AgentSurfaceError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error querying wiki: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/research/missing-papers")

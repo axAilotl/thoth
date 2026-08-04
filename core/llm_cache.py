@@ -12,8 +12,11 @@ from datetime import datetime
 
 from .config import config
 from .path_layout import build_path_layout
+from .sensitive_redaction import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
+
+_CACHE_KEY_VERSION = "v2"
 
 
 class LLMCache:
@@ -30,12 +33,16 @@ class LLMCache:
         self.hits = 0
         self.misses = 0
     
+    def _redact_cache_material(self, content: str) -> tuple[str, dict[str, Any] | None]:
+        redaction = redact_sensitive_text(content)
+        metadata = redaction.to_metadata() if redaction.has_findings else None
+        return redaction.redacted_text, metadata
+
     def _generate_cache_key(self, content: str, task_type: str, model: str = "") -> str:
         """Generate cache key from content hash and task parameters"""
-        # Create hash from content + task type + model
-        hash_input = f"{content}|{task_type}|{model}"
-        content_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()[:16]
-        return f"{task_type}_{content_hash}"
+        hash_input = f"{_CACHE_KEY_VERSION}|{content}|{task_type}|{model}"
+        content_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()[:32]
+        return f"{task_type}_{_CACHE_KEY_VERSION}_{content_hash}"
     
     def get(self, content: str, task_type: str, model: str = "") -> Optional[Dict[str, Any]]:
         """Get cached result if available"""
@@ -49,7 +56,23 @@ class LLMCache:
                 
                 self.hits += 1
                 logger.debug(f"LLM cache HIT for {task_type}: {cache_key}")
-                return cached_data.get('result')
+                result = cached_data.get('result')
+                try:
+                    from .llm_usage import record_llm_cache_hit
+
+                    record_llm_cache_hit(
+                        task_type=task_type,
+                        model_provider=model,
+                        content=content,
+                        result=result,
+                    )
+                except Exception as usage_error:
+                    logger.warning(
+                        "Failed to record LLM cache usage for %s: %s",
+                        task_type,
+                        redact_sensitive_text(str(usage_error)).redacted_text,
+                    )
+                return result
             else:
                 self.misses += 1
                 logger.debug(f"LLM cache MISS for {task_type}: {cache_key}")
@@ -63,18 +86,22 @@ class LLMCache:
     def set(self, content: str, task_type: str, result: Dict[str, Any], model: str = ""):
         """Cache an LLM result"""
         try:
+            redacted_content, redaction_metadata = self._redact_cache_material(content)
             cache_key = self._generate_cache_key(content, task_type, model)
             cache_file = self.cache_dir / f"{cache_key}.json"
-            
+
             cache_data = {
                 'task_type': task_type,
                 'model': model,
-                'content_hash': hashlib.sha256(content.encode('utf-8')).hexdigest()[:16],
+                'content_hash': hashlib.sha256(redacted_content.encode('utf-8')).hexdigest()[:16],
+                'cache_key_version': _CACHE_KEY_VERSION,
                 'result': result,
                 'cached_at': datetime.now().isoformat(),
-                'content_length': len(content)
+                'content_length': len(redacted_content)
             }
-            
+            if redaction_metadata:
+                cache_data['redaction'] = redaction_metadata
+
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(cache_data, f, indent=2, ensure_ascii=False)
             
@@ -109,20 +136,39 @@ class LLMCache:
         # Get cache size
         total_size = sum(f.stat().st_size for f in self.cache_dir.glob("*.json"))
         
-        # Count by task type
+        # Count by task type and provider from cache metadata.
         task_counts = {}
+        model_counts = {}
+        recent_entries = []
         for cache_file in self.cache_dir.glob("*.json"):
             try:
-                task_type = cache_file.stem.split('_')[0]
+                with open(cache_file, 'r', encoding='utf-8') as handle:
+                    payload = json.load(handle)
+                task_type = payload.get('task_type') or cache_file.stem.split('_')[0]
                 task_counts[task_type] = task_counts.get(task_type, 0) + 1
+                model = payload.get('model') or 'unknown'
+                model_counts[model] = model_counts.get(model, 0) + 1
+                recent_entries.append({
+                    'cache_key': cache_file.stem,
+                    'task_type': task_type,
+                    'model': model,
+                    'cached_at': payload.get('cached_at'),
+                    'content_length': payload.get('content_length'),
+                })
             except Exception:
                 pass
-        
+        recent_entries.sort(
+            key=lambda item: item.get('cached_at') or '',
+            reverse=True,
+        )
+
         return {
             **stats,
             'cache_size_bytes': total_size,
             'cache_size_mb': round(total_size / (1024 * 1024), 2),
             'task_type_counts': task_counts,
+            'model_counts': model_counts,
+            'recent_entries': recent_entries[:10],
             'cache_dir': str(self.cache_dir)
         }
 

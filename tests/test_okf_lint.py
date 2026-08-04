@@ -52,7 +52,10 @@ def test_okf_lint_accepts_generated_scaffold_and_concept_page(tmp_path: Path, mo
                 source_paths=("stars/owner_repo_summary.md",),
                 updated_at="2026-04-04T00:00:00Z",
             ),
-            "# Owner Repo\n\nRepository notes.\n\n# Citations\n\n[1] [summary](../../vault/stars/owner_repo_summary.md)",
+            "# Owner Repo\n\n"
+            "Repository notes.\n\n"
+            "# Citations\n\n"
+            "[1] [summary](../../vault/stars/owner_repo_summary.md)",
         )
 
         report = OKFLintRunner(config, layout=layout, contract=contract).lint()
@@ -104,5 +107,55 @@ def test_okf_lint_reports_missing_type_and_reserved_frontmatter(
         assert "missing-type" in codes
         assert "reserved-frontmatter" in codes
         assert "invalid-log-date" in codes
+    finally:
+        config.data = original
+
+
+def test_okf_lint_reports_invalid_frontmatter(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    original = make_config(tmp_path)
+    try:
+        layout = build_path_layout(config, project_root=tmp_path)
+        contract = build_wiki_contract(config, project_root=tmp_path)
+        ensure_wiki_scaffold(config, project_root=tmp_path)
+
+        atomic_write_text(
+            contract.pages_dir / "invalid-frontmatter.md",
+            "---\n"
+            "type: [unterminated\n"
+            "---\n\n"
+            "# Invalid Frontmatter\n",
+        )
+
+        report = OKFLintRunner(config, layout=layout, contract=contract).lint()
+
+        assert report.has_errors
+        assert {issue.code for issue in report.issues} == {"invalid-frontmatter"}
+    finally:
+        config.data = original
+
+
+def test_okf_lint_tolerates_broken_markdown_links(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    original = make_config(tmp_path)
+    try:
+        layout = build_path_layout(config, project_root=tmp_path)
+        contract = build_wiki_contract(config, project_root=tmp_path)
+        ensure_wiki_scaffold(config, project_root=tmp_path)
+
+        atomic_write_text(
+            contract.pages_dir / "broken-link.md",
+            "---\n"
+            "type: Topic\n"
+            "id: broken-link\n"
+            "---\n\n"
+            "# Broken Link\n\n"
+            "This OKF concept links to [missing evidence](does-not-exist.md).\n",
+        )
+
+        report = OKFLintRunner(config, layout=layout, contract=contract).lint()
+
+        assert report.concepts_checked == 1
+        assert report.issues == ()
     finally:
         config.data = original
