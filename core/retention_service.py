@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
+import logging
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -16,9 +17,12 @@ from .capture_event_store import (
     RawArtifactRef,
     RetentionPolicy,
 )
+from .collection_utils import group_by_optional_attr
 from .metadata_db import MetadataDB
 from .path_layout import PathLayout
 from .wiki_io import read_frontmatter_cached
+
+logger = logging.getLogger(__name__)
 
 
 class RetentionServiceError(RuntimeError):
@@ -319,12 +323,12 @@ class CaptureRetentionService:
             retention_policies_by_target = None
 
         return _RetentionPrefetch(
-            raw_refs_by_event=_group_by_optional_attr(raw_refs, "event_id"),
-            artifact_links_by_event=_group_by_optional_attr(
+            raw_refs_by_event=group_by_optional_attr(raw_refs, "event_id"),
+            artifact_links_by_event=group_by_optional_attr(
                 artifact_links,
                 "event_id",
             ),
-            privacy_annotations_by_event=_group_by_optional_attr(
+            privacy_annotations_by_event=group_by_optional_attr(
                 privacy_annotations,
                 "event_id",
             ),
@@ -349,7 +353,12 @@ class CaptureRetentionService:
         for page_path in sorted(pages_dir.glob("*.md")):
             try:
                 frontmatter = read_frontmatter_cached(page_path)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Skipping wiki page with unreadable frontmatter: %s (%s)",
+                    page_path,
+                    exc,
+                )
                 continue
             event_values = frontmatter.get("thoth_event_ids") or frontmatter.get(
                 "event_ids"
@@ -1296,15 +1305,6 @@ def _select_policy(
     if immediate is not None:
         return immediate
     return policy_list[0]
-
-
-def _group_by_optional_attr(items: Iterable[Any], attr_name: str) -> dict[str, tuple[Any, ...]]:
-    grouped: dict[str, list[Any]] = {}
-    for item in items:
-        key = str(getattr(item, attr_name, "") or "").strip()
-        if key:
-            grouped.setdefault(key, []).append(item)
-    return {key: tuple(values) for key, values in grouped.items()}
 
 
 def _group_policies_by_target(

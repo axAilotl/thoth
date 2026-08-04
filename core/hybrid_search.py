@@ -18,6 +18,7 @@ from .capture_event_store import (
     RawArtifactRef,
     SecurityFinding,
 )
+from .collection_utils import first_present_value, group_by_optional_attr
 from .metadata_db import IngestionQueueEntry, MetadataDB
 from .prompt_security import (
     THOTH_REDACTION_METADATA_KEY,
@@ -524,17 +525,17 @@ class HybridSearchService:
         sources_by_id = {
             source.source_id: source for source in self.event_store.list_sources()
         }
-        raw_refs_by_event = _group_by_optional_attr(
+        raw_refs_by_event = group_by_optional_attr(
             self.event_store.list_raw_refs(),
             "event_id",
         )
-        links_by_event = _group_by_optional_attr(
+        links_by_event = group_by_optional_attr(
             self.event_store.list_artifact_links(),
             "event_id",
         )
         findings = self.event_store.list_security_findings()
-        findings_by_event = _group_by_optional_attr(findings, "event_id")
-        findings_by_raw_ref = _group_by_optional_attr(findings, "raw_ref_id")
+        findings_by_event = group_by_optional_attr(findings, "event_id")
+        findings_by_raw_ref = group_by_optional_attr(findings, "raw_ref_id")
 
         hits: list[HybridSearchHit] = []
         for event in events:
@@ -896,13 +897,6 @@ def _optional_string(value: Any) -> str | None:
     return text or None
 
 
-def _first_present_value(payload: Mapping[str, Any], *keys: str) -> Any:
-    for key in keys:
-        if key in payload and payload[key] is not None:
-            return payload[key]
-    return None
-
-
 def _first_string(value: Any) -> str | None:
     values = _normalize_strings(value)
     return values[0] if values else None
@@ -1122,7 +1116,7 @@ def _artifact_trust(
     security: Mapping[str, Any],
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    explicit_score = _first_present_value(
+    explicit_score = first_present_value(
         payload,
         "source_trust_score",
         "trust_score",
@@ -1153,7 +1147,7 @@ def _capture_trust(
     event: CaptureEvent,
     security: Mapping[str, Any],
 ) -> dict[str, Any]:
-    explicit_score = _first_present_value(
+    explicit_score = first_present_value(
         event.provenance,
         "source_trust_score",
         "trust_score",
@@ -1255,11 +1249,3 @@ def _dedupe_by_attr(items: Iterable[Any], attr_name: str) -> list[Any]:
         deduped.append(item)
     return deduped
 
-
-def _group_by_optional_attr(items: Iterable[Any], attr_name: str) -> dict[str, tuple[Any, ...]]:
-    grouped: dict[str, list[Any]] = {}
-    for item in items:
-        key = str(getattr(item, attr_name, "") or "").strip()
-        if key:
-            grouped.setdefault(key, []).append(item)
-    return {key: tuple(values) for key, values in grouped.items()}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any, Mapping
@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from .archivist_selection import ArchivistCandidate
 from .archivist_topics import ArchivistTopicDefinition
 from .metadata_db import MetadataDB, get_metadata_db
+from .time_utils import utc_now, utc_now_iso
 
 ARCHIVIST_STATE_KEY_PREFIX = "archivist.topic."
 
@@ -109,7 +110,7 @@ def request_archivist_topic_force(
         last_candidate_count=existing.last_candidate_count,
         last_model_provider=existing.last_model_provider,
         last_model=existing.last_model,
-        force_requested_at=requested_at or _now_iso(),
+        force_requested_at=requested_at or utc_now_iso(),
         force_reason=reason,
     )
     _store_archivist_topic_state(updated, db=metadata_db)
@@ -190,7 +191,7 @@ def evaluate_archivist_dirty_check(
     provider = route[0] if route else None
     model = route[1] if route else None
     next_due_at = _compute_next_due_at(state.last_success_at, topic.cadence_hours)
-    now_dt = now or datetime.now()
+    now_dt = now or utc_now()
 
     if state.force_requested_at:
         return ArchivistDirtyCheckResult(
@@ -244,7 +245,9 @@ def evaluate_archivist_dirty_check(
             model=model,
         )
 
-    if next_due_at is not None and now_dt >= _parse_datetime(next_due_at):
+    if next_due_at is not None and _coerce_utc(now_dt) >= _coerce_utc(
+        _parse_datetime(next_due_at)
+    ):
         return ArchivistDirtyCheckResult(
             should_run=True,
             reason="cadence_due",
@@ -286,7 +289,7 @@ def record_archivist_topic_run(
     snapshot = snapshot_archivist_candidates(tuple(candidates))
     provider = route[0] if route else None
     model = route[1] if route else None
-    recorded_at = run_at or _now_iso()
+    recorded_at = run_at or utc_now_iso()
 
     updated = ArchivistTopicState(
         topic_id=topic.id,
@@ -392,11 +395,14 @@ def _parse_datetime(value: str) -> datetime:
         raise ArchivistTopicStateError(f"Invalid archivist timestamp: {value}") from exc
 
 
+def _coerce_utc(value: datetime) -> datetime:
+    """Treat naive datetimes (legacy persisted state) as UTC for comparison."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 def _optional_text(value: Any) -> str | None:
     if value in (None, ""):
         return None
     return str(value)
-
-
-def _now_iso() -> str:
-    return datetime.now().isoformat()

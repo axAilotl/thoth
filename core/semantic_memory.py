@@ -369,7 +369,6 @@ class SemanticMemoryStore:
                 raise SemanticMemoryTransitionError(
                     "semantic memory status changes require transition_candidate"
                 )
-            _validate_status_transition(existing.status, candidate.status)
             candidate = self._candidate_with_timestamps(candidate, existing=existing)
             self._validate_candidate_links(conn, candidate)
             if existing.status != "rejected":
@@ -823,14 +822,15 @@ class SemanticMemoryStore:
             for evidence_item in evidence_items
         }
         rejected_source_keys: set[str] = set()
-        for rejected_candidate in rejected_candidates:
-            rejected_source_keys.update(
-                self._evidence_source_key(evidence_item)
-                for evidence_item in self._list_evidence_in_connection(
-                    conn,
-                    rejected_candidate.candidate_id,
-                )
-            )
+        rejected_ids = tuple(
+            rejected_candidate.candidate_id
+            for rejected_candidate in rejected_candidates
+        )
+        for evidence_item in self._list_evidence_for_candidates_in_connection(
+            conn,
+            rejected_ids,
+        ):
+            rejected_source_keys.add(self._evidence_source_key(evidence_item))
         if new_source_keys.difference(rejected_source_keys):
             return
         raise SemanticMemoryValidationError(
@@ -949,6 +949,28 @@ class SemanticMemoryStore:
             WHERE candidate_id = ?
             """,
             (_clean_required(candidate_id, "candidate_id"),),
+        ).fetchall()
+        return tuple(self._evidence_from_row(row) for row in rows)
+
+    def _list_evidence_for_candidates_in_connection(
+        self,
+        conn: sqlite3.Connection,
+        candidate_ids: tuple[str, ...],
+    ) -> tuple[SemanticMemoryEvidence, ...]:
+        candidate_ids = tuple(
+            _clean_required(candidate_id, "candidate_id")
+            for candidate_id in candidate_ids
+        )
+        if not candidate_ids:
+            return ()
+        placeholders = ", ".join("?" for _ in candidate_ids)
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM semantic_memory_evidence
+            WHERE candidate_id IN ({placeholders})
+            """,
+            candidate_ids,
         ).fetchall()
         return tuple(self._evidence_from_row(row) for row in rows)
 

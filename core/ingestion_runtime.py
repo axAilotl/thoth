@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, Mapping
 
 from .artifacts import (
@@ -37,6 +36,7 @@ from .metadata_db import (
 )
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import prompt_security_requires_review
+from .time_utils import utc_now_iso
 from .translation_companion import EnglishCompanionPublisher, TranslationCompanionResult
 from .wiki_updater import CompiledWikiUpdater
 
@@ -73,10 +73,6 @@ class BookmarkDispatchResult:
     url_mapping_count: int
     pipeline_result: Any
     processed_at: str
-
-
-def _now_iso() -> str:
-    return datetime.now().isoformat()
 
 
 def _json_loads_maybe(value: Any) -> Any:
@@ -370,7 +366,7 @@ class KnowledgeArtifactRuntime:
             artifact_type=entry.artifact_type,
             source=entry.source,
             status=status,
-            processed_at=_now_iso(),
+            processed_at=utc_now_iso(),
             details={
                 "review_required": True,
                 "stage": stage,
@@ -492,7 +488,7 @@ class KnowledgeArtifactRuntime:
             cache_file=str(cache_file) if cache_file else None,
             url_mapping_count=len(url_mappings),
             pipeline_result=pipeline_result,
-            processed_at=_now_iso(),
+            processed_at=utc_now_iso(),
         )
 
     async def publish_english_companion(
@@ -559,7 +555,7 @@ class KnowledgeArtifactRuntime:
                     artifact_type="paper",
                     source=artifact.source_type,
                     status="skipped",
-                    processed_at=_now_iso(),
+                    processed_at=utc_now_iso(),
                     details={
                         "reason": "missing_pdf_url",
                         "research_graph": graph_result,
@@ -584,7 +580,7 @@ class KnowledgeArtifactRuntime:
                     artifact_type="paper",
                     source=artifact.source_type,
                     status="skipped",
-                    processed_at=_now_iso(),
+                    processed_at=utc_now_iso(),
                     details={
                         "reason": f"download_failed: {exc}",
                         "pdf_url": artifact.pdf_url,
@@ -614,7 +610,7 @@ class KnowledgeArtifactRuntime:
                 artifact_type="paper",
                 source=artifact.source_type,
                 status="skipped",
-                processed_at=_now_iso(),
+                processed_at=utc_now_iso(),
                 details={
                     "reason": "download_skipped",
                     "pdf_url": artifact.pdf_url,
@@ -627,7 +623,7 @@ class KnowledgeArtifactRuntime:
             artifact_type="paper",
             source=artifact.source_type,
             status="processed" if getattr(document, "downloaded", False) else "skipped",
-            processed_at=_now_iso(),
+            processed_at=utc_now_iso(),
             details={
                 "filename": getattr(document, "filename", None),
                 "downloaded": getattr(document, "downloaded", False),
@@ -659,7 +655,7 @@ class KnowledgeArtifactRuntime:
                 artifact_type="repository",
                 source="github",
                 status="processed" if processed else "skipped",
-                processed_at=_now_iso(),
+                processed_at=utc_now_iso(),
                 details={
                     "repo_name": repo.full_name,
                     "stargazers_count": repo.stargazers_count,
@@ -701,7 +697,7 @@ class KnowledgeArtifactRuntime:
                 artifact_type="repository",
                 source="huggingface",
                 status="processed" if processed else "skipped",
-                processed_at=_now_iso(),
+                processed_at=utc_now_iso(),
                 details={
                     "repo_name": repo.full_name,
                     "likes": repo.likes,
@@ -727,7 +723,7 @@ class KnowledgeArtifactRuntime:
             artifact_type="web_clipper",
             source=artifact.source_type,
             status="processed",
-            processed_at=_now_iso(),
+            processed_at=utc_now_iso(),
             details={
                 "title": artifact.title,
                 "source_path": artifact.source_path,
@@ -747,7 +743,7 @@ class KnowledgeArtifactRuntime:
             artifact_type="markdown",
             source=artifact.source_type,
             status="skipped",
-            processed_at=_now_iso(),
+            processed_at=utc_now_iso(),
             details={
                 "reason": "capture_only",
                 "title": artifact.title,
@@ -765,7 +761,7 @@ class KnowledgeArtifactRuntime:
             artifact_type="video",
             source=artifact.source_type,
             status="processed",
-            processed_at=_now_iso(),
+            processed_at=utc_now_iso(),
             details={
                 "video_id": artifact.video_id,
                 "title": artifact.title,
@@ -784,7 +780,7 @@ class KnowledgeArtifactRuntime:
             artifact_type="transcript",
             source=artifact.source_type,
             status="processed",
-            processed_at=_now_iso(),
+            processed_at=utc_now_iso(),
             details={
                 "transcript_id": artifact.transcript_id,
                 "video_id": artifact.video_id,
