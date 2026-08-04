@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import logging
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -33,6 +34,8 @@ from .skill_output_connector import (
     SkillOutputConnector,
     reject_direct_wiki_write_claims,
 )
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_SOURCE_NAME = "pi_skill"
@@ -342,6 +345,13 @@ class PiSkillConnector:
             )
             artifact_types_defaulted = not raw_artifact_types
             artifact_types = raw_artifact_types or tuple(sorted(SUPPORTED_ARTIFACT_TYPES))
+            if artifact_types_defaulted:
+                logger.warning(
+                    "Pi skill %r does not declare artifact_types; "
+                    "defaulting to all supported types: %s",
+                    skill_id,
+                    ", ".join(artifact_types),
+                )
             unsupported = set(artifact_types) - SUPPORTED_ARTIFACT_TYPES
             if unsupported:
                 raise ValueError(
