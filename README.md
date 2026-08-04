@@ -4,7 +4,15 @@
 
 # Thoth
 
-Thoth is the evolution of the earlier `xmarks` system. `xmarks` handled high-volume raw capture and bookmark ingestion; Thoth keeps that ingestion layer, adds stronger storage boundaries, and builds a compiled knowledge layer on top. The wiki side is explicitly inspired by Andrej Karpathy's persistent LLM wiki idea, but adapted to a larger historical corpus and a more automated ingest stack.
+Thoth is a personal knowledge system that turns the firehose of things you save — X bookmarks, arXiv papers, GitHub stars, HuggingFace likes, web clippings, YouTube videos, voice transcripts — into a **compiled, queryable wiki you can actually trust**. Raw captures flow in, get enriched by LLMs into markdown artifacts in a synced vault, and a topic-scoped archivist compiles curated wiki pages on top. You browse the result in Obsidian; agents query it over a read-only MCP server.
+
+It is the evolution of the earlier `xmarks` system. `xmarks` handled high-volume raw capture and bookmark ingestion; Thoth keeps that ingestion layer, adds stronger storage boundaries, and builds a compiled knowledge layer on top. The wiki side is explicitly inspired by Andrej Karpathy's persistent LLM wiki idea, but adapted to a larger historical corpus and a more automated ingest stack.
+
+The problem Thoth solves is not capture — it's that captured knowledge rots. Bookmarks pile up unread, summaries can't be checked, and an LLM digest fed on untrusted web content is one prompt-injection away from garbage. Thoth's answer is three design commitments:
+
+- **Trust: every claim is traceable.** The archivist must cite every concrete claim inline as `[S#]` source labels, and the compiler rejects pages with invalid or untrusted citations. Every artifact carries structural provenance (source identity, SHA-256 raw payload refs, queue lineage); every wiki page records a hash of its full input manifest and why it recompiled, so lineage tooling can answer "where did this come from" for any page. Agents inherit this via provenance-inspection tools over MCP.
+- **Security: untrusted content is treated as hostile.** All ingested content is scanned for prompt-injection patterns (instruction overrides, fake citations, secret exfiltration, invisible Unicode, multilingual attacks) and quarantined or blocked fail-closed before it reaches an LLM. Secrets and PII are redacted before LLM calls, model output is parsed fail-closed, and the local Pi provider runs generation-only with no tools or session.
+- **Human-in-the-loop: nothing becomes durable knowledge without review.** Malformed or quarantined captures land in a review queue with an append-only audit trail; extracted semantic-memory facts only reach the wiki after operator confirmation plus multi-source corroboration, with every gate decision recorded.
 
 Thoth separates:
 - pipeline source and generated material in the vault
@@ -12,6 +20,8 @@ Thoth separates:
 - local operational state in `.thoth_system`
 
 That split is the core contract. Raw sources stay raw. Generated artifacts stay traceable. Local metadata, caches, auth, and temp state do not get synced with the vault.
+
+See [`docs/project_overview.md`](docs/project_overview.md) for the full architecture overview and data-flow diagram.
 
 ## Operating Model
 
