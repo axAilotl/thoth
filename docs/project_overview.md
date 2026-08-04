@@ -29,6 +29,17 @@ The problem it solves is not capture — it's that captured knowledge rots. Book
 2. **Processing** — `core/ingestion_runtime.py` dispatches queued artifacts to `processors/`: tweet/thread enrichment, document processing (papers, PDFs, READMEs), transcription (Whisper/Deepgram), and LLM tasks (tags, summaries, alt-text, translation) via a routed multi-provider `LLMInterface` with caching.
 3. **Archivist / Analyst** — Topic-scoped compilation: `archivist_retrieval/` selects sources via full-text + pgvector semantic search, the compiler synthesizes cited wiki pages, and agents query the result through `AgentSurfaceService` (API + MCP).
 
+## The Universal Loop
+
+The layers are not a one-way pipeline — they form a loop that compounds:
+
+1. **Capture** — bookmarks, papers, clippings, and transcripts flow in raw.
+2. **Compile** — processors and the archivist turn them into cited wiki pages.
+3. **Query** — you and agents read the compiled layer.
+4. **Feed back** — `wiki-query --write-back` persists curated query results as new wiki pages, the archivist recompiles topics when their input manifest changes (`core/wiki_change_provenance.py`), and digests resurface unread material — which drives the next round of capture.
+
+Each pass makes the wiki a better source for the next one, without raw material ever being rewritten.
+
 ## Storage contract (the core design rule)
 
 - `knowledge_vault/` — synced vault: raw + generated artifacts (`tweets/`, `threads/`, `library/`, `pdfs/`, `repos/`, `transcripts/`, `media/`, `_digests/`).
