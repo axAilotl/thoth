@@ -431,6 +431,17 @@ class Archive:
         )
 
     # ------------------------------------------------------------------
+    # Projections
+    # ------------------------------------------------------------------
+
+    @property
+    def projections(self):
+        """Projection service entrypoint (spec 10): rebuilds and reads."""
+        from ccf.projections.service import ProjectionService
+
+        return ProjectionService(settings=self._settings, archive_id=self.archive_id)
+
+    # ------------------------------------------------------------------
     # Verification and inspection
     # ------------------------------------------------------------------
 

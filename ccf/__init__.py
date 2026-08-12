@@ -11,7 +11,11 @@ Implements the vendored spec package at ``spec/ccf/0.1.1/``:
 - canonical admission (phase 3): genesis, the serialized archive-head
   transaction with origin-tuple idempotency, lineage compare-and-swap and
   derivation cycle checks, signed Merkle commits, and prefix-integrity
-  chain verification.
+  chain verification;
+- projections (phase 5, :mod:`ccf.projections`): current Link state, the
+  active ``derived_from`` closure, entity clusters, tsvector full-text,
+  caller-supplied pgvector embeddings, wiki rebuild, generation-fence
+  invalidation, checkpoints, and the cross-projection snapshot pin.
 
 The vendored package is authoritative; published executable vectors take
 precedence over prose on any contradiction (spec section 0.4).

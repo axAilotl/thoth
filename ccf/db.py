@@ -32,6 +32,8 @@ from core.postgres_migrations import (
     quote_identifier,
 )
 
+from ccf.projections.schema import CCF_PROJECTION_MIGRATION
+
 
 DEFAULT_CCF_SCHEMA = "ccf"
 DEFAULT_CCF_DSN_ENV = "THOTH_CCF_POSTGRES_DSN"
@@ -365,6 +367,8 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
             """,
         ),
     ),
+    # Projection tables and machinery (spec 10): additive, rebuildable.
+    CCF_PROJECTION_MIGRATION,
 )
 
 

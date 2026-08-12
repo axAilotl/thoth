@@ -435,6 +435,14 @@ def commit_objects(
             archive["archive_id"],
         ),
     )
+    # Projection invalidation (spec 10.4): canonical mutations record
+    # causes and advance coarse projection.* fences synchronously, inside
+    # the same serialized transaction as the commit itself.
+    from ccf.projections.invalidation import record_commit_effects
+
+    record_commit_effects(
+        conn, archive_id=archive["archive_id"], objects=objects, sequence=sequence
+    )
     return sequence, commit.commit_hash
 
 
