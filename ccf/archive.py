@@ -60,6 +60,7 @@ class Archive:
         signer,
         clock=now_timestamp,
         salt_fn=None,
+        package_root: str | Path | None = None,
     ) -> None:
         if parse_id(archive_id).kind != "archive":
             raise ArchiveError(f"archive_id must be an archive URN: {archive_id!r}")
@@ -70,6 +71,7 @@ class Archive:
         self.schemas = schemas
         self._signer = signer
         self.clock = clock
+        self.package_root = Path(package_root) if package_root is not None else None
         from ccf.objects import new_salt
 
         self._salt_fn = salt_fn or new_salt
@@ -116,6 +118,7 @@ class Archive:
             signer=signer,
             clock=clock,
             salt_fn=salt_fn,
+            package_root=package_root,
         )
         from ccf.journal import build_commit_record
 
@@ -227,6 +230,7 @@ class Archive:
             signer=signer,
             clock=clock,
             salt_fn=salt_fn,
+            package_root=package_root,
         )
 
     # ------------------------------------------------------------------
@@ -471,6 +475,17 @@ class Archive:
     def settings(self) -> CcfPostgresSettings:
         """The store settings this archive was opened with."""
         return self._settings
+
+    @property
+    def signer(self):
+        """The archive signing key (internal sync/merge use only)."""
+        return self._signer
+
+    def sync(self):
+        """The sync-and-packs service bound to this archive (spec 6.7, 11)."""
+        from ccf.sync.service import SyncService
+
+        return SyncService(self)
 
     def governance(self):
         """The contextual-authorization engine bound to this archive."""

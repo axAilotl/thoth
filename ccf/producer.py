@@ -201,18 +201,45 @@ class Producer:
         links: list[dict] | None = None,
         blobs: list[dict] | None = None,
         blob_transfers: list[dict] | None = None,
+        blob_data: dict[str, bytes] | None = None,
     ) -> dict:
         """Sign and durably spool the next batch on this producer's chain.
 
         The spool insert and the producer-head advance commit atomically,
         so a crash either leaves the batch fully spooled (replayable) or
-        not spooled at all (safe to rebuild and re-sign).
+        not spooled at all (safe to rebuild and re-sign). ``blob_data``
+        maps Blob submission IDs to their raw bytes; the bytes are verified
+        against each submission's declared length and salted content
+        commitment, then spooled durably next to the batch so they survive
+        restart and feed resumable transfer (spec sections 6.7, 11.4).
         """
         records = list(records or [])
         links = list(links or [])
         blobs = list(blobs or [])
+        blob_data = dict(blob_data or {})
         if not records and not links and not blobs:
             raise ProducerError("refusing to create an empty producer batch")
+        blob_ids = {sub["id"] for sub in blobs}
+        unknown = set(blob_data) - blob_ids
+        if unknown:
+            raise ProducerError(
+                f"blob_data IDs without a blob submission: {sorted(unknown)}"
+            )
+        for sub in blobs:
+            data = blob_data.get(sub["id"])
+            if data is None:
+                continue
+            if str(len(data)) != sub["byte_length"]:
+                raise ProducerError(
+                    f"blob {sub['id']} byte_length {sub['byte_length']} != "
+                    f"spooled {len(data)}"
+                )
+            if blob_content_commitment(sub["content_salt"], data) != (
+                sub["content_commitment"]
+            ):
+                raise ProducerError(
+                    f"blob {sub['id']} bytes do not match its content commitment"
+                )
 
         with open_ccf_connection(self._settings) as conn:
             with conn.transaction():
@@ -258,7 +285,16 @@ class Producer:
                     what="producer batch",
                 )
                 spool.spool_batch(conn, batch, spooled_at=self.clock())
+                if blob_data:
+                    spool.spool_blob_payloads(
+                        conn, batch["batch_id"], blob_data, spooled_at=self.clock()
+                    )
         return batch
+
+    def spooled_blob_bytes(self, batch_id: str) -> dict[str, bytes]:
+        """Reload durably spooled Blob bytes for one batch (post-restart)."""
+        with open_ccf_connection(self._settings) as conn:
+            return spool.load_blob_payloads(conn, batch_id)
 
     # ------------------------------------------------------------------
     # Provisional state and replay
@@ -279,11 +315,17 @@ class Producer:
 
         Replaying an already-answered batch returns the stored result; the
         archive's idempotency rules make re-admission of a committed batch
-        a no-op. Returns one batch result per pending batch.
+        a no-op. When ``blob_bytes`` is not given, durably spooled Blob
+        payloads for each pending batch are attached automatically, so
+        bytes survive restarts between spool and sync. Returns one batch
+        result per pending batch.
         """
         results = []
         for batch in self.pending_batches():
-            results.append(archive.admit_batch(batch, blob_bytes=blob_bytes))
+            effective = blob_bytes
+            if effective is None and batch["blobs"]:
+                effective = self.spooled_blob_bytes(batch["batch_id"])
+            results.append(archive.admit_batch(batch, blob_bytes=effective))
         return results
 
 

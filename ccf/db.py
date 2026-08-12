@@ -490,6 +490,48 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
             """,
         ),
     ),
+    # Sync and packs (spec 6.7, 11): durable producer-side Blob payloads and
+    # foreign-custody / fork evidence.
+    PostgresMigration(
+        version=5,
+        name="0005_sync_and_packs",
+        statements=(
+            # Producer-side durable Blob payload spool: raw bytes stored next
+            # to the signed batch so they survive restart and feed resumable
+            # transfer. ``content_digest`` is a plain SHA-256 of the payload
+            # for corruption detection on reload (the portable salted
+            # commitment lives in the batch's Blob submission).
+            """
+            CREATE TABLE IF NOT EXISTS producer_blob_spool (
+                batch_id                text NOT NULL REFERENCES producer_batch(batch_id),
+                blob_id                 text NOT NULL,
+                byte_length             numeric(20,0) NOT NULL,
+                content_digest          text NOT NULL,
+                payload                 bytea NOT NULL,
+                spooled_at              text NOT NULL,
+                PRIMARY KEY (batch_id, blob_id)
+            )
+            """,
+            # Foreign custody proofs (spec 11.3) and fork heads (spec 11.7):
+            # an imported foreign chain's genesis/head and its ordered commit
+            # summaries, preserved as evidence. A fork is a custody row whose
+            # source_archive_id equals the local archive_id with a divergent
+            # head — both heads are preserved, no winner is invented.
+            """
+            CREATE TABLE IF NOT EXISTS foreign_custody (
+                archive_id              text NOT NULL REFERENCES archive(archive_id),
+                source_archive_id       text NOT NULL,
+                pack_id                 text,
+                genesis_commit_hash     text NOT NULL,
+                head_commit_hash        text NOT NULL,
+                head_sequence           numeric(20,0) NOT NULL,
+                commits_json            jsonb NOT NULL,
+                received_at             text NOT NULL,
+                PRIMARY KEY (archive_id, source_archive_id, head_commit_hash)
+            )
+            """,
+        ),
+    ),
 )
 
 

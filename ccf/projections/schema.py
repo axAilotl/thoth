@@ -144,7 +144,12 @@ CCF_PROJECTION_MIGRATION = PostgresMigration(
         """
         DO $$
         BEGIN
-            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+            -- to_regtype resolves through the current search_path: when the
+            -- extension already exists but its type lives in another schema
+            -- (a second CCF schema in the same database), the type is not
+            -- visible here and the optional table is skipped, exactly as
+            -- when the extension is absent entirely.
+            IF to_regtype('vector') IS NOT NULL THEN
                 CREATE TABLE IF NOT EXISTS projection_embedding (
                     archive_id                text NOT NULL REFERENCES archive(archive_id),
                     object_id                 text NOT NULL REFERENCES object_header(id),

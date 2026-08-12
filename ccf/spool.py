@@ -191,6 +191,62 @@ def provisional_objects(conn, producer_id: str) -> list[dict]:
     return objects
 
 
+# ---------------------------------------------------------------------------
+# Producer-side durable Blob payload spool (spec sections 6.7 / 11.4)
+# ---------------------------------------------------------------------------
+
+
+def spool_blob_payloads(
+    conn, batch_id: str, blob_data: dict[str, bytes], *, spooled_at: str
+) -> None:
+    """Persist raw Blob bytes next to their signed batch, same transaction.
+
+    Bytes survive restart and feed resumable transfer; the plain SHA-256
+    content digest is verified on every reload so a corrupted spool fails
+    closed instead of transferring bad bytes under a good commitment.
+    """
+    from ccf.hashing import digest_string
+
+    for blob_id, payload in sorted(blob_data.items()):
+        conn.execute(
+            """
+            INSERT INTO producer_blob_spool (
+                batch_id, blob_id, byte_length, content_digest, payload, spooled_at
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (batch_id, blob_id) DO NOTHING
+            """,
+            (
+                batch_id,
+                blob_id,
+                len(payload),
+                digest_string(payload),
+                payload,
+                spooled_at,
+            ),
+        )
+
+
+def load_blob_payloads(conn, batch_id: str) -> dict[str, bytes]:
+    """Reload spooled Blob bytes for a batch; fail closed on corruption."""
+    from ccf.hashing import digest_string
+
+    payloads: dict[str, bytes] = {}
+    for blob_id, byte_length, content_digest, payload in conn.execute(
+        """
+        SELECT blob_id, byte_length, content_digest, payload
+        FROM producer_blob_spool WHERE batch_id = %s ORDER BY blob_id
+        """,
+        (batch_id,),
+    ).fetchall():
+        data = bytes(payload)
+        if len(data) != int(byte_length) or digest_string(data) != content_digest:
+            raise SpoolError(
+                f"spooled blob payload {blob_id} of batch {batch_id} is corrupted"
+            )
+        payloads[blob_id] = data
+    return payloads
+
+
 def _jsonb(value):
     from psycopg.types.json import Jsonb
 
