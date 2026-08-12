@@ -161,25 +161,35 @@ def _require(condition: bool, message: str) -> None:
         raise JournalError(message)
 
 
-def _fetch_envelope(conn, object_id: str, compartment: str) -> dict | None:
+def _fetch_envelope(conn, object_id: str, compartment: str) -> tuple[str | None, dict | None]:
+    """(state, envelope) for a compartment; envelope only when plaintext."""
     row = conn.execute(
         """
-        SELECT format, salt, plaintext_json FROM compartment
-        WHERE object_id = %s AND compartment = %s AND state = 'plaintext'
+        SELECT state, format, salt, plaintext_json FROM compartment
+        WHERE object_id = %s AND compartment = %s
         """,
         (object_id, compartment),
     ).fetchone()
     if row is None:
-        return None
-    return {
-        "format": row[0],
-        "salt": encode_b64url(bytes(row[1])),
-        "content": row[2],
+        return None, None
+    if row[0] != "plaintext":
+        return row[0], None
+    return row[0], {
+        "format": row[1],
+        "salt": encode_b64url(bytes(row[2])),
+        "content": row[3],
     }
 
 
 def _verify_object(conn, object_id: str, expected_hash: str, context: str) -> None:
-    """Recompute an admitted object's commitments and object hash."""
+    """Recompute an admitted object's commitments and object hash.
+
+    An erased or withheld compartment is no longer inspectable: its
+    commitment in the header is historical (spec 3.10) and cannot be
+    recomputed, so verification skips the recomputation for that
+    compartment. The object hash — which binds the commitment values — is
+    still always recomputed, so a forged post-erasure header is detected.
+    """
     from ccf.hashing import compartment_commitment, parse_digest
 
     row = conn.execute(
@@ -193,17 +203,30 @@ def _verify_object(conn, object_id: str, expected_hash: str, context: str) -> No
     _require(row is not None, f"{context}: object {object_id} missing")
     kind, spec, hash_profile, structural_c, semantic_c, stored_hash = row
     _require(stored_hash == expected_hash, f"{context}: object hash mismatch for {object_id}")
-    structural = _fetch_envelope(conn, object_id, "structural")
-    _require(structural is not None, f"{context}: structural compartment unavailable for {object_id}")
-    semantic = _fetch_envelope(conn, object_id, "semantic")
-    recomputed_structural = compartment_commitment(kind, "structural", structural)
+    structural_state, structural = _fetch_envelope(conn, object_id, "structural")
     _require(
-        recomputed_structural == structural_c,
-        f"{context}: structural commitment mismatch for {object_id}",
+        structural_state is not None,
+        f"{context}: structural compartment unavailable for {object_id}",
     )
-    recomputed_semantic = (
-        compartment_commitment(kind, "semantic", semantic) if semantic is not None else None
-    )
+    if structural_state == "plaintext":
+        recomputed_structural = compartment_commitment(kind, "structural", structural)
+        _require(
+            recomputed_structural == structural_c,
+            f"{context}: structural commitment mismatch for {object_id}",
+        )
+    else:
+        _require(
+            structural_state in ("withheld", "erased"),
+            f"{context}: structural compartment state {structural_state!r} "
+            f"is not verifiable for {object_id}",
+        )
+    semantic_state, semantic = _fetch_envelope(conn, object_id, "semantic")
+    if semantic_state == "plaintext":
+        recomputed_semantic = compartment_commitment(kind, "semantic", semantic)
+    elif semantic_state in ("withheld", "erased"):
+        recomputed_semantic = semantic_c  # historical commitment, not inspectable
+    else:
+        recomputed_semantic = None
     _require(
         recomputed_semantic == semantic_c,
         f"{context}: semantic commitment mismatch for {object_id}",
@@ -288,8 +311,11 @@ def verify_chain(
             f"{context}: commit_hash does not match commit Record object hash",
         )
 
-        envelope = _fetch_envelope(conn, record_id, "structural")
-        _require(envelope is not None, f"{context}: commit structural compartment unavailable")
+        envelope_state, envelope = _fetch_envelope(conn, record_id, "structural")
+        _require(
+            envelope_state == "plaintext",
+            f"{context}: commit structural compartment unavailable",
+        )
         content = envelope["content"]
         payload = content.get("structural_payload", {})
         _require(content.get("type") == "integrity.commit", f"{context}: not an integrity.commit")

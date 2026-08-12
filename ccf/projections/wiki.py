@@ -8,7 +8,9 @@ markdown — an ``index.md`` navigation root plus one page per
 caller-chosen staging directory (never the live ``wiki/``).
 
 Output is a pure function of canonical state: same archive, same bytes.
-Page frontmatter follows the repo's compiled-wiki shape (see
+Entities whose semantic compartment is erased or withheld produce no page
+— the rebuild skips them rather than fabricating empty content
+(spec 3.6). Page frontmatter follows the repo's compiled-wiki shape (see
 ``tests/fixtures/wiki/pages/``) and carries ``source_records`` with the
 exact CCF Record URNs the page derives from. If a page is ever preserved
 as a generated artifact rather than regenerated, it must be admitted as a
@@ -81,7 +83,7 @@ def rebuild_wiki(conn, archive_id: str, staging_dir: str | Path) -> dict:
         FROM object_header oh
         JOIN compartment s
           ON s.object_id = oh.id AND s.compartment = 'structural'
-        LEFT JOIN compartment sem
+        JOIN compartment sem
           ON sem.object_id = oh.id AND sem.compartment = 'semantic'
              AND sem.state = 'plaintext'
         JOIN admission a ON a.archive_id = oh.archive_id AND a.object_id = oh.id

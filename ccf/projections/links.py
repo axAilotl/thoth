@@ -11,6 +11,10 @@ disposition head targeting it into one current-state row:
 - ``invalidate_selector`` → still ``active`` with
   ``selector_available = false``.
 
+``selector_available`` is also false whenever the Link's semantic
+compartment is not plaintext (selectors erase independently of the
+structurally retained endpoints; spec 5.3, 3.10).
+
 Rebuild reads only canonical state: object headers, plaintext structural
 compartments, and ``lineage_head``. Rebuilding after destroying the table
 loses nothing (spec 8.7).
@@ -77,10 +81,13 @@ def rebuild(conn, archive_id: str) -> int:
         SELECT oh.id,
                c.plaintext_json ->> 'type',
                c.plaintext_json ->> 'from_id',
-               c.plaintext_json ->> 'to_id'
+               c.plaintext_json ->> 'to_id',
+               sem.state
         FROM object_header oh
         JOIN compartment c
           ON c.object_id = oh.id AND c.compartment = 'structural'
+        LEFT JOIN compartment sem
+          ON sem.object_id = oh.id AND sem.compartment = 'semantic'
         WHERE oh.archive_id = %s AND oh.object_kind = 'link'
           AND c.state = 'plaintext'
         ORDER BY oh.id
@@ -88,7 +95,7 @@ def rebuild(conn, archive_id: str) -> int:
         (archive_id,),
     ).fetchall()
     dispositions = _disposition_heads(conn, archive_id)
-    for link_id, type_name, from_id, to_id in links:
+    for link_id, type_name, from_id, to_id, semantic_state in links:
         disposition = dispositions.get(link_id)
         if disposition is None:
             state, selector_available = "active", True
@@ -100,6 +107,11 @@ def rebuild(conn, archive_id: str) -> int:
             state, selector_available = _ACTION_STATES[action]
             disposition_record_id = disposition["disposition_record_id"]
             replacement_link_id = disposition["replacement_link_id"]
+        # Selectors and explanatory material live in the semantic
+        # compartment; an erased/withheld one means no selector is
+        # available regardless of disposition state (spec 5.3, 3.10).
+        if semantic_state != "plaintext":
+            selector_available = False
         conn.execute(
             """
             INSERT INTO projection_link_state (

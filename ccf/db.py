@@ -39,6 +39,7 @@ DEFAULT_CCF_SCHEMA = "ccf"
 DEFAULT_CCF_DSN_ENV = "THOTH_CCF_POSTGRES_DSN"
 DEFAULT_CCF_DEVICE_KEY_ENV = "THOTH_CCF_DEVICE_KEY"
 DEFAULT_CCF_ARCHIVE_KEY_ENV = "THOTH_CCF_ARCHIVE_KEY"
+DEFAULT_CCF_SUPPRESSION_KEY_ENV = "THOTH_CCF_SUPPRESSION_KEY"
 DEFAULT_CCF_APPLICATION_NAME = "thoth-ccf-archive"
 DEFAULT_CCF_MIGRATION_LOCK_ID = 840729146
 
@@ -60,6 +61,7 @@ class CcfPostgresSettings:
     migration_lock_id: int = DEFAULT_CCF_MIGRATION_LOCK_ID
     device_key_path: str | None = None
     archive_key_path: str | None = None
+    suppression_key_path: str | None = None
 
 
 def _ccf_store_config(config_obj) -> dict:
@@ -128,6 +130,9 @@ def resolve_ccf_postgres_settings(
     archive_key_path = store.get("archive_key_path") or env.get(
         DEFAULT_CCF_ARCHIVE_KEY_ENV
     )
+    suppression_key_path = store.get("suppression_key_path") or env.get(
+        DEFAULT_CCF_SUPPRESSION_KEY_ENV
+    )
 
     return CcfPostgresSettings(
         enabled=enabled,
@@ -139,6 +144,7 @@ def resolve_ccf_postgres_settings(
         migration_lock_id=parsed_lock_id,
         device_key_path=device_key_path or None,
         archive_key_path=archive_key_path or None,
+        suppression_key_path=suppression_key_path or None,
     )
 
 
@@ -416,6 +422,70 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
                 expires_at              text NOT NULL,
                 created_at              text NOT NULL,
                 updated_at              text NOT NULL
+            )
+            """,
+        ),
+    ),
+    PostgresMigration(
+        version=4,
+        name="0004_erasure_operations",
+        statements=(
+            # Durable erasure saga state (spec 3.8): one row per erasure
+            # operation, mirroring
+            # ``schemas/operational/erasure-operation.schema.json``. The
+            # stage machine is request -> decision -> block -> destroy ->
+            # verify -> receipt (``failed`` from any stage); each stage
+            # transition commits in the same transaction as that stage's
+            # effects, so a crash resumes from durable state and never
+            # reports destroyed content as recoverable.
+            # ``targets`` holds the schema-faithful object URN list and
+            # ``profile`` the CCF profile name; the retention-checked
+            # per-target plans live in ``plans`` and the assurance level
+            # (``logical`` / ``storage_verified``) in ``assurance``.
+            # ``purged`` records every controlled store the destroy stage
+            # purged (projection tables, checkpoints, capabilities,
+            # generated plaintext).
+            """
+            CREATE TABLE IF NOT EXISTS erasure_operation (
+                operation_id            text PRIMARY KEY,
+                archive_id              text NOT NULL REFERENCES archive(archive_id),
+                request_id              text,
+                decision_id             text NOT NULL,
+                stage                   text NOT NULL CHECK (stage IN
+                    ('request','decision','block','destroy','verify','receipt','failed')),
+                targets                 jsonb NOT NULL,
+                profile                 text NOT NULL,
+                assurance               text NOT NULL CHECK (assurance IN
+                    ('logical','storage_verified')),
+                plans                   jsonb NOT NULL,
+                purged                  jsonb NOT NULL,
+                receipt_id              text,
+                lineage_id              text NOT NULL,
+                stage_head_id           text NOT NULL,
+                decision                text NOT NULL,
+                actor                   jsonb NOT NULL,
+                authorized_producers    jsonb NOT NULL,
+                started_at              text NOT NULL,
+                updated_at              text NOT NULL,
+                last_error              text
+            )
+            """,
+            # Suppression after erasure (spec 12.7): keyed (HMAC)
+            # commitments for erased origin tuples and erased content,
+            # preventing silent reintroduction. Commitments are keyed
+            # digests only — never plaintext origin tuples or content —
+            # because plain unsalted fingerprints are insufficient for
+            # low-entropy content.
+            """
+            CREATE TABLE IF NOT EXISTS suppression_entry (
+                archive_id              text NOT NULL REFERENCES archive(archive_id),
+                commitment              text NOT NULL,
+                kind                    text NOT NULL CHECK (kind IN ('origin','content')),
+                operation_id            text NOT NULL
+                    REFERENCES erasure_operation(operation_id),
+                authorized_producers    jsonb NOT NULL,
+                created_at              text NOT NULL,
+                PRIMARY KEY (archive_id, commitment)
             )
             """,
         ),

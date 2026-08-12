@@ -6,7 +6,9 @@ projection — originals keep their IDs.
 
 Rebuild folds three canonical inputs:
 
-- every ``semantic.entity`` Record is a member (singleton if unlinked);
+- every ``semantic.entity`` Record with an available semantic compartment
+  is a member (singleton if unlinked) — an erased or withheld entity is
+  not served by the projection (spec 3.6);
 - active ``ccf.same_as`` Links union members into clusters
   (retracted/superseded/tombstoned Links do not);
 - the latest active resolution head covering a member names the cluster's
@@ -90,14 +92,18 @@ def rebuild(conn, archive_id: str) -> int:
         SELECT oh.id FROM object_header oh
         JOIN compartment c
           ON c.object_id = oh.id AND c.compartment = 'structural'
+        JOIN compartment sem
+          ON sem.object_id = oh.id AND sem.compartment = 'semantic'
         WHERE oh.archive_id = %s AND oh.object_kind = 'record'
           AND c.state = 'plaintext'
+          AND sem.state = 'plaintext'
           AND c.plaintext_json ->> 'type' = 'semantic.entity'
         ORDER BY oh.id
         """,
         (archive_id,),
     ).fetchall()
-    for (entity_id,) in entities:
+    live = {entity_id for (entity_id,) in entities}
+    for entity_id in live:
         uf.find(entity_id)
 
     actions = current_link_actions(conn, archive_id)
@@ -118,7 +124,8 @@ def rebuild(conn, archive_id: str) -> int:
     for link_id, from_id, to_id in same_as_links:
         if actions.get(link_id) in DEACTIVATING_ACTIONS:
             continue
-        if from_id and to_id:
+        # Only live (available) members join clusters.
+        if from_id in live and to_id in live:
             uf.union(from_id, to_id)
 
     canonical_choice: dict[str, str] = {}

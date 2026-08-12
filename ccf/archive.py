@@ -241,7 +241,14 @@ class Archive:
         The whole admission — validation, object writes, signed commit, head
         advancement, and the spool receipt — is one serialized transaction.
         A crash rolls it back entirely; replaying the batch is idempotent.
+
+        The suppression-after-erasure check (spec 12.7) runs inside this
+        transaction; when suppression entries exist but no suppression key
+        is configured, admission fails closed.
         """
+        from ccf.erasure import suppression
+
+        suppression_key = suppression.load_suppression_key(self._settings)
         with open_ccf_connection(self._settings) as conn:
             with conn.transaction():
                 archive = load_archive(conn, self.archive_id)
@@ -256,6 +263,7 @@ class Archive:
                     clock=self.clock,
                     blob_bytes=blob_bytes,
                     salt_fn=self._salt_fn,
+                    suppression_key=suppression_key,
                 )
 
     def admit_bootstrap(self, records: list[dict]) -> dict:
@@ -469,6 +477,21 @@ class Archive:
         from ccf.governance.engine import GovernanceEngine
 
         return GovernanceEngine.from_archive(self)
+
+    # ------------------------------------------------------------------
+    # Erasure (spec sections 3.6-3.10, 12.7)
+    # ------------------------------------------------------------------
+
+    def erasure(self, *, wiki_staging_dir=None):
+        """The erasure saga facade bound to this archive.
+
+        ``wiki_staging_dir`` names the generated-plaintext wiki staging
+        directory the destroy/verify stages purge and rebuild; omit it
+        only when no wiki projection is in use.
+        """
+        from ccf.erasure.service import ErasureService
+
+        return ErasureService.from_archive(self, wiki_staging_dir=wiki_staging_dir)
 
     # ------------------------------------------------------------------
     # Verification and inspection

@@ -574,12 +574,17 @@ def admit_producer_batch(
     clock=now_timestamp,
     blob_bytes: dict[str, bytes] | None = None,
     salt_fn=None,
+    suppression_key: bytes | None = None,
 ) -> dict:
     """Admit one signed producer batch in the serialized head transaction.
 
     Caller must hold an open transaction; this function commits nothing on
     its own. Never raises for expected outcomes — those are batch results;
     raises only for infrastructure failures.
+
+    ``suppression_key`` keys the suppression-after-erasure check (spec
+    12.7); when the archive holds suppression entries and no key is
+    provided, admission fails closed.
     """
     from ccf.objects import new_salt as default_salt
 
@@ -698,6 +703,27 @@ def admit_producer_batch(
                         )
                     )
                 continue
+
+        # Suppression after erasure (spec 12.7, 6.5): an erased origin or
+        # erased content must not be silently reintroduced under a new
+        # revision or object ID. Authorized producers receive a lifecycle
+        # result; everyone else receives a generic refusal.
+        from ccf.erasure import suppression
+
+        suppressed = suppression.admission_outcome(
+            conn,
+            archive_id=archive_id,
+            key=suppression_key,
+            origin=origin,
+            submission_hash=sub_hash,
+            object_id=object_id,
+            producer_id=batch["producer_id"],
+        )
+        if suppressed is not None:
+            if suppressed["status"] == "rejected":
+                conflicts += 1
+            outcomes.append(suppressed)
+            continue
 
         # Registry + payload validation and lineage declaration.
         try:
