@@ -21,7 +21,11 @@ Implements the vendored spec package at ``spec/ccf/0.1.1/``:
   ``governance.*`` generation fences advanced in the admission
   transaction, bounded pending results, fenced egress capabilities,
   consequential receipts, and registry ``required_authority``
-  enforcement at admission.
+  enforcement at admission;
+- sync and packs (phase 8, :mod:`ccf.sync`): sync-head exchange and
+  negotiation, mindpack export/restore, foreign merge with custody
+  proofs, fork preservation, compressed delta packs with verified-chunk
+  resume over file or HTTP, and the durable producer-side Blob spool.
 
 The vendored package is authoritative; published executable vectors take
 precedence over prose on any contradiction (spec section 0.4).

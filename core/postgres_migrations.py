@@ -286,8 +286,16 @@ def quote_identifier(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
-def validate_migration_sequence(migrations: Sequence[PostgresMigration]) -> None:
-    """Validate migration ordering and uniqueness before applying SQL."""
+def validate_migration_sequence(
+    migrations: Sequence[PostgresMigration], *, allow_gaps: bool = False
+) -> None:
+    """Validate migration ordering and uniqueness before applying SQL.
+
+    Versions must be unique, positive, and ascending. Contiguity from 1 is
+    enforced unless ``allow_gaps`` is set — intended for stores whose
+    migration slots are owned by parallel work streams that merge into a
+    contiguous sequence at integration time.
+    """
 
     seen_versions: set[int] = set()
     expected_version = 1
@@ -296,13 +304,19 @@ def validate_migration_sequence(migrations: Sequence[PostgresMigration]) -> None
             raise PostgresMigrationError(
                 f"Duplicate Postgres migration version: {migration.version}"
             )
-        if migration.version != expected_version:
+        if allow_gaps:
+            if migration.version < expected_version:
+                raise PostgresMigrationError(
+                    "Postgres migration versions must be ascending; "
+                    f"found {migration.version} after {expected_version - 1}"
+                )
+        elif migration.version != expected_version:
             raise PostgresMigrationError(
                 "Postgres migration versions must be contiguous starting at 1; "
                 f"expected {expected_version}, found {migration.version}"
             )
         seen_versions.add(migration.version)
-        expected_version += 1
+        expected_version = migration.version + 1
 
 
 def apply_postgres_migrations(
@@ -311,10 +325,11 @@ def apply_postgres_migrations(
     schema: str = DEFAULT_CAPTURE_SCHEMA,
     lock_id: int = DEFAULT_MIGRATION_LOCK_ID,
     migrations: Sequence[PostgresMigration] = CAPTURE_EVENT_STORE_MIGRATIONS,
+    allow_gaps: bool = False,
 ) -> PostgresMigrationReport:
     """Apply capture event-store migrations to a schema-scoped Postgres connection."""
 
-    validate_migration_sequence(migrations)
+    validate_migration_sequence(migrations, allow_gaps=allow_gaps)
     quoted_schema = quote_identifier(schema)
     applied: list[int] = []
     skipped: list[int] = []
