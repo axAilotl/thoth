@@ -15,7 +15,13 @@ Implements the vendored spec package at ``spec/ccf/0.1.1/``:
 - projections (phase 5, :mod:`ccf.projections`): current Link state, the
   active ``derived_from`` closure, entity clusters, tsvector full-text,
   caller-supplied pgvector embeddings, wiki rebuild, generation-fence
-  invalidation, checkpoints, and the cross-projection snapshot pin.
+  invalidation, checkpoints, and the cross-projection snapshot pin;
+- the governance baseline (phase 6, ``ccf.governance``): the pinned
+  ``ccf-deny-overrides-v1`` evaluator over a deterministic policy closure,
+  ``governance.*`` generation fences advanced in the admission
+  transaction, bounded pending results, fenced egress capabilities,
+  consequential receipts, and registry ``required_authority``
+  enforcement at admission.
 
 The vendored package is authoritative; published executable vectors take
 precedence over prose on any contradiction (spec section 0.4).
