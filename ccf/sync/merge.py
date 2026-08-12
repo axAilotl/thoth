@@ -79,6 +79,15 @@ def merge_mindpack(
     # Lineages this merge creates are merge-owned: later imported
     # transitions keep advancing them within the merge transaction.
 
+    # Objects the source declared withheld or erased: an absent compartment
+    # must be recorded as unavailable, never dropped — the destination
+    # header keeps the compartment commitment, and chain verification
+    # fails closed when the row is simply missing.
+    unavailable_ids = set(manifest.get("withheld", [])) | set(
+        manifest.get("erased", [])
+    )
+    unavailable_compartments: list[tuple[str, str]] = []
+
     resolved: list[ResolvedObject] = []
     skipped_existing: list[str] = []
     not_included: list[str] = []
@@ -104,11 +113,25 @@ def merge_mindpack(
                 )
             skipped_existing.append(object_id)
             continue
-        if obj.structural is None:
-            raise MergeError(
-                f"object {object_id} has no structural compartment; "
-                "withheld source material cannot be re-admitted"
-            )
+        for compartment, envelope in (
+            ("structural", obj.structural),
+            ("semantic", obj.semantic),
+        ):
+            if envelope is not None:
+                continue
+            if obj.header.get(f"{compartment}_commitment") is None:
+                continue  # object legitimately lacks this compartment
+            if object_id not in unavailable_ids:
+                raise MergeError(
+                    f"object {object_id} has no {compartment} compartment and is "
+                    "not declared withheld/erased; refusing to fabricate state"
+                )
+            if compartment == "structural":
+                raise MergeError(
+                    f"object {object_id} has no structural compartment; "
+                    "withheld source material cannot be re-admitted"
+                )
+            unavailable_compartments.append((object_id, compartment))
         lineage_update = None
         lineage_block = obj.structural["content"].get("lineage")
         if lineage_block is not None:
@@ -147,6 +170,17 @@ def merge_mindpack(
             signer=signer,
             committed_at=received_at,
             salt_fn=salt_fn,
+        )
+    # Record the unavailable state of declared-withheld/erased compartments
+    # (headers exist once commit_objects ran; same transaction).
+    for object_id, compartment in unavailable_compartments:
+        conn.execute(
+            """
+            INSERT INTO compartment (
+                object_id, compartment, state, updated_at
+            ) VALUES (%s, %s, 'withheld', %s)
+            """,
+            (object_id, compartment, received_at),
         )
 
     # Custody proof: the source chain, preserved as foreign evidence.

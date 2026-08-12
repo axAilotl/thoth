@@ -332,3 +332,63 @@ def test_foreign_merge_preserves_ids_and_custody(
     assert again["status"] == "merged"
     assert again["admitted"] == []
     assert sorted(again["skipped_existing"]) == sorted(report["admitted"])
+
+
+def test_foreign_merge_records_erased_compartments(
+    settings_factory, tmp_path, ccf_package_root
+):
+    """Stage 9 regression: merging a pack with an erased object must record
+    the unavailable compartment, not drop the row (destination headers keep
+    the compartment commitment; a missing row breaks chain verification).
+    """
+    from dataclasses import replace
+
+    from ccf.erasure.suppression import generate_suppression_key
+    from ccf_helpers import authority
+
+    key_path = generate_suppression_key(tmp_path / "suppression.key")
+    rig_a_dir = tmp_path / "a"
+    rig_a_dir.mkdir()
+    rig_a = make_rig(
+        replace(settings_factory(), suppression_key_path=str(key_path)),
+        rig_a_dir,
+        ccf_package_root,
+    )
+    ids = _populate(rig_a)
+    svc = rig_a.archive.erasure()
+    targets = [{"object_id": ids["session"], "compartments": ["semantic"]}]
+    request = svc.submit_request(
+        requester_id=rig_a.person_id,
+        subject_id=rig_a.person_id,
+        requested_scope={"targets": targets},
+        reason="merge regression erasure",
+        authority=authority("first_person_statement", rig_a.person_id, rig_a.person_id),
+    )
+    decided = svc.decide(
+        request_id=request["request_id"],
+        decision="approve",
+        targets=targets,
+        reasoning="approved",
+        decided_by=rig_a.person_id,
+        authority=authority("explicit_authorization", rig_a.person_id, rig_a.person_id),
+        authorized_producers=[rig_a.producer.producer_id],
+    )
+    status = svc.execute(decided["operation_id"])
+    assert status["stage"] == "receipt"
+
+    pack_dir = tmp_path / "erased.mindpack"
+    manifest = rig_a.archive.sync().export_mindpack(pack_dir)
+    assert ids["session"] in manifest["erased"]
+
+    rig_b_dir = tmp_path / "b"
+    rig_b_dir.mkdir()
+    rig_b = make_rig(settings_factory(), rig_b_dir, ccf_package_root)
+    report = rig_b.archive.sync().import_mindpack(pack_dir)
+    assert report["status"] == "merged"
+
+    merged = rig_b.archive.get_object(ids["session"])
+    assert merged is not None
+    semantic = merged["compartments"]["semantic"]
+    assert semantic["state"] == "withheld"
+    assert semantic["envelope"] is None  # no fabricated content
+    rig_b.archive.verify_chain()
