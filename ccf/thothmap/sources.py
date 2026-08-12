@@ -36,13 +36,17 @@ def source_submission(
     *,
     trust_class: str = "unknown",
     revision: str | int | None = None,
+    object_id: str | None = None,
 ) -> MappedSubmissions:
     """Convert one Thoth capture source snapshot to a ``core.source`` Record.
 
     ``trust_class`` is producer-controlled and must be chosen by the caller
     from the registry vocabulary; the conservative default is ``unknown``.
     ``revision`` is accepted for interface symmetry but unused: the source
-    Record is the origin root and carries no origin tuple.
+    Record is the origin root and carries no origin tuple. ``object_id``
+    pins the Record URN (dual-write uses a deterministic archive-derived
+    URN so the origin root stays unique across restarts); when omitted a
+    fresh URN is generated.
     """
     if trust_class not in _SOURCE_TRUST_CLASSES:
         raise ThothMapError(f"unknown trust_class {trust_class!r}")
@@ -69,6 +73,7 @@ def source_submission(
     record = producer.new_record(
         type="core.source",
         claims=claims(ctx, data_classes=["identity_data"]),
+        object_id=object_id,
         payload={
             "kind": source_type,
             "name": display_name,

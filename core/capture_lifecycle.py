@@ -18,6 +18,7 @@ from .capture_event_store import (
     CaptureSource,
     RawArtifactRef,
 )
+from .ccf_dualwrite import dual_write_requested
 from .config import Config, config
 from .ingestion_runtime import (
     IngestionDispatchResult,
@@ -93,6 +94,8 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
     ) -> None:
         super().__init__(runtime_config, layout=layout, db=db)
         self.capture_event_store = capture_event_store
+        self._ccf_dual_write = None
+        self._ccf_dual_write_resolved = False
 
     def capture(
         self,
@@ -344,6 +347,17 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             stored_entry,
             event_id=event_id,
             raw_ref_id=raw_ref_id,
+        )
+        self._mirror_capture_to_ccf(
+            queue_artifact_id=queue_id,
+            source_id=source_id,
+            source_name=source_name,
+            source_type=source_type,
+            source_obj=source_obj,
+            session_obj=session_obj,
+            session_id=session_id,
+            raw_ref=raw_ref,
+            stored_entry=stored_entry,
         )
 
         lifecycle_id = _stable_id(
@@ -751,6 +765,92 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             event_id=event_id,
             raw_ref_id=raw_ref_id,
         )
+
+    # ------------------------------------------------------------------
+    # CCF dual-write mirror (config-gated; legacy stores stay authoritative)
+    # ------------------------------------------------------------------
+
+    def _dual_write_service(self):
+        """Lazily build the CCF dual-write service, or None when disabled.
+
+        Misconfiguration (contradictory flags, missing DSN/keys/package)
+        raises from the resolver — fail closed before any capture is
+        mirrored. When ``database.ccf_archive.dual_write`` is off the
+        ``ccf`` package is never imported.
+        """
+        if self._ccf_dual_write_resolved:
+            return self._ccf_dual_write
+        self._ccf_dual_write_resolved = True
+        self._ccf_dual_write = None
+        if not dual_write_requested(self.config):
+            return None
+        from ccf.dualwrite import CcfDualWriteService, resolve_dual_write_settings
+
+        self._ccf_dual_write = CcfDualWriteService.create_or_open(
+            resolve_dual_write_settings(self.config)
+        )
+        return self._ccf_dual_write
+
+    def _mirror_capture_to_ccf(
+        self,
+        *,
+        queue_artifact_id: str,
+        source_id: str,
+        source_name: str,
+        source_type: str,
+        source_obj: Mapping[str, Any],
+        session_obj: Mapping[str, Any] | None,
+        session_id: str | None,
+        raw_ref: RawArtifactRef | None,
+        stored_entry: IngestionQueueEntry,
+    ) -> None:
+        """Mirror one persisted capture into CCF, co-located with the
+        legacy queue/event-store commit. Mirror failures are logged and
+        ledgered loudly; they never propagate into the legacy write.
+        """
+        service = self._dual_write_service()
+        if service is None or raw_ref is None:
+            return
+        try:
+            payload = json.loads(stored_entry.payload_json or "{}")
+            metadata = payload.get("normalized_metadata")
+            if not isinstance(metadata, Mapping):
+                metadata = {}
+            service.mirror_capture(
+                source={
+                    "source_id": source_id,
+                    "source_name": source_name,
+                    "source_type": source_type,
+                    "collector": _clean_string(source_obj.get("collector")),
+                    "account": _clean_string(source_obj.get("account")),
+                    "native_source_id": _clean_string(
+                        source_obj.get("native_source_id")
+                    ),
+                    "base_uri": _clean_string(
+                        source_obj.get("base_uri") or source_obj.get("uri")
+                    ),
+                    "status": _clean_string(source_obj.get("status")) or "active",
+                },
+                session=(
+                    {**session_obj, "session_id": session_id}
+                    if session_obj and session_id
+                    else None
+                ),
+                raw_ref=asdict(raw_ref),
+                data=Path(raw_ref.path).read_bytes(),
+                findings_metadata=dict(metadata),
+            )
+        except Exception as exc:
+            service.record_error(
+                {
+                    "queue_artifact_id": queue_artifact_id,
+                    "source_id": source_id,
+                    "session_id": session_id,
+                    "raw_ref_id": raw_ref.raw_ref_id,
+                    "raw_path": raw_ref.path,
+                },
+                exc,
+            )
 
 
 def get_capture_lifecycle_service(
