@@ -500,13 +500,27 @@ def _verify_batch_envelope(conn, archive: dict, batch: dict, schemas: SchemaSet)
     except Exception as exc:
         raise _BatchRejected(f"batch signature invalid: {exc}") from exc
 
+    # Chain anchor: the persisted batch with the highest sequence below
+    # this batch's own. The table only ever holds (a) batches the local
+    # producer signed and spooled itself ('queued') and (b) received
+    # batches that passed envelope verification and were answered
+    # ('committed'/'partial'/'conflict', plus content 'rejected') — both
+    # are legitimate members of the producer's signed chain, including a
+    # content-rejected batch the producer rightfully chains past.
+    # Envelope-rejected arrivals are never persisted (see
+    # admit_producer_batch), so a forgery cannot poison the anchor.
+    # Anchoring below the batch's own sequence handles every ordering: a
+    # locally spooled batch chains onto its own predecessor (not its
+    # queued self-row), later spooled batches do not hijack the anchor,
+    # and out-of-order redelivery from a disconnected producer verifies
+    # against its true predecessor.
     last = conn.execute(
         """
         SELECT batch_hash, producer_sequence FROM producer_batch
-        WHERE producer_id = %s AND status IN ('committed', 'partial', 'conflict')
+        WHERE producer_id = %s AND producer_sequence < %s
         ORDER BY producer_sequence DESC LIMIT 1
         """,
-        (batch["producer_id"],),
+        (batch["producer_id"], int(batch["producer_sequence"])),
     ).fetchone()
     if last is None:
         if batch["previous_batch_hash"] is not None:
@@ -604,11 +618,16 @@ def admit_producer_batch(
     try:
         _verify_batch_envelope(conn, archive, batch, schemas)
     except _BatchRejected as exc:
-        result = _batch_result(
+        # Fail closed WITHOUT persisting an outcome row: an envelope
+        # rejection (bad schema, catalog or credential mismatch, invalid
+        # signature, broken chain) is not attributable to the producer's
+        # signed chain — it may be an outright forgery. Persisting it
+        # would let an attacker plant a chain anchor and permanently
+        # brick the honest producer. Replaying the same arrival simply
+        # re-verifies and rejects again, deterministically.
+        return _batch_result(
             batch.get("batch_id", "unknown"), "rejected", archive_id, reason=exc.reason
         )
-        _record_batch_outcome(conn, batch, result, committed_sequence=None)
-        return result
 
     lineage_heads = load_lineage_heads(conn, archive_id)
     acyclic_types = registries.acyclic_link_types()

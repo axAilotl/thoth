@@ -841,6 +841,9 @@ def scenario_10_corrupt_commit_and_catalog(ctx: Stage9Context) -> dict:
         "compartment",
         "commit_journal",
         "commit_member",
+        # verify_chain cross-checks derived admission rows against the
+        # journal; the scratch replica needs them too.
+        "admission",
     )
     with psycopg.connect(ctx.dsn, autocommit=True) as conn:
         conn.execute(f'DROP SCHEMA IF EXISTS "{scratch.schema}" CASCADE')

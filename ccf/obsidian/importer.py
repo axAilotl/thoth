@@ -86,23 +86,54 @@ def media_type_for(relpath: str) -> str:
     return guessed or "application/octet-stream"
 
 
-def _json_safe(value: object) -> object:
+def _json_text(text: str) -> str:
+    """Make derived text storable in Postgres jsonb.
+
+    jsonb rejects NUL code points and unpaired surrogates. Derived fields
+    (title, excerpt, frontmatter values) are search summaries, never
+    evidence — the note's raw bytes stay verbatim in its Blob — so
+    offending code points become U+FFFD here rather than crashing an
+    import run halfway through.
+    """
+    return "".join(
+        "\ufffd" if ch == "\x00" or 0xD800 <= ord(ch) <= 0xDFFF else ch
+        for ch in text
+    )
+
+
+def _json_safe(value: object, *, _depth: int = 0) -> object:
     """Convert YAML-parsed frontmatter into JSON-canonical values.
 
     YAML produces ``datetime``/``date`` scalars that JCS and jsonb cannot
     represent; they become ISO-8601 strings. Anything else exotic becomes
     its ``str`` form — frontmatter is metadata; the note bytes remain the
-    authoritative content.
+    authoritative content. Strings pass through :func:`_json_text` so
+    hostile code points cannot crash admission, and nesting is capped so
+    a pathological document cannot exhaust the call stack.
     """
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, (int, bool)):
         return value
+    if isinstance(value, float):
+        # JCS rejects NaN/Infinity outright (spec 4.2); a non-finite
+        # frontmatter scalar becomes its text form, never an admission
+        # crash.
+        import math
+
+        return value if math.isfinite(value) else str(value)
+    if isinstance(value, str):
+        return _json_text(value)
+    if _depth >= 100:
+        return _json_text(str(value))
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
+        return {
+            _json_text(str(key)): _json_safe(item, _depth=_depth + 1)
+            for key, item in value.items()
+        }
     if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    return str(value)
+        return [_json_safe(item, _depth=_depth + 1) for item in value]
+    return _json_text(str(value))
 
 
 @dataclass
@@ -512,6 +543,8 @@ class ObsidianImporter:
         external_uri = parsed.frontmatter.get("source")
         if not isinstance(external_uri, str) or not external_uri.strip():
             external_uri = None
+        else:
+            external_uri = _json_text(external_uri)
         tags = parsed.frontmatter.get("tags")
         if not isinstance(tags, list):
             tags = [tags] if isinstance(tags, str) else []
@@ -522,9 +555,9 @@ class ObsidianImporter:
             origin=origin(source_id, relpath, revision),
             object_id=reuse["artifact_id"] if reuse else None,
             payload={
-                "name": parsed.title,
+                "name": _json_text(parsed.title),
                 "media_type": "text/markdown",
-                "description": parsed.excerpt or parsed.title,
+                "description": _json_text(parsed.excerpt or parsed.title),
                 "external_uri": external_uri,
                 "artifact_role": "obsidian_note",
                 "extensions": {
@@ -532,7 +565,7 @@ class ObsidianImporter:
                     "obsidian_segment": segment,
                     "obsidian_sha256": sha256,
                     "obsidian_frontmatter": _json_safe(parsed.frontmatter),
-                    "obsidian_tags": [str(tag) for tag in tags],
+                    "obsidian_tags": [_json_text(str(tag)) for tag in tags],
                 },
             },
         )

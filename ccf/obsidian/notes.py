@@ -20,6 +20,22 @@ class NoteParseError(ValueError):
     """Raised when a note cannot be parsed safely (malformed document)."""
 
 
+class _FrontmatterLoader(yaml.SafeLoader):
+    """SafeLoader that refuses anchors and aliases outright.
+
+    YAML alias expansion is a billion-laughs vector: a few hundred bytes
+    of nested anchors expand to gigabytes of composed nodes and minutes of
+    CPU. Obsidian frontmatter has no legitimate need for either, so both
+    fail closed as malformed documents.
+    """
+
+    def fetch_anchor(self):
+        raise yaml.YAMLError("YAML anchors are not allowed in note frontmatter")
+
+    def fetch_alias(self):
+        raise yaml.YAMLError("YAML aliases are not allowed in note frontmatter")
+
+
 @dataclass(frozen=True)
 class NoteLink:
     """One ``[[...]]`` reference inside a note body or frontmatter."""
@@ -82,9 +98,13 @@ def parse_note(text: str, *, fallback_title: str) -> ParsedNote:
             raise NoteParseError("unterminated or malformed frontmatter block")
         raw = match.group(1)
         try:
-            parsed = yaml.safe_load(raw)
+            parsed = yaml.load(raw, Loader=_FrontmatterLoader)
         except yaml.YAMLError as exc:
             raise NoteParseError(f"frontmatter YAML error: {exc}") from exc
+        except RecursionError as exc:
+            raise NoteParseError(
+                "frontmatter nesting exceeds the parser limit"
+            ) from exc
         if parsed is not None and not isinstance(parsed, dict):
             raise NoteParseError(
                 f"frontmatter must be a mapping, got {type(parsed).__name__}"

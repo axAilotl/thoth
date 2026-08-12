@@ -444,6 +444,29 @@ def verify_chain(
         "archive head does not match verified chain tip",
     )
 
+    # The admission table is derived state that serves admission
+    # coordinates to readers; it must mirror the verified journal exactly.
+    # A tampered or partial row is detected here even though the journal
+    # itself still verifies (spec 7.4 covers what readers are served).
+    def _rows(table: str) -> list[tuple]:
+        return [
+            (int(sequence), int(position), kind, object_id, object_hash, admitted_at)
+            for sequence, position, kind, object_id, object_hash, admitted_at in conn.execute(
+                f"""
+                SELECT commit_sequence, commit_position, object_kind,
+                       object_id, object_hash, admitted_at
+                FROM {table} WHERE archive_id = %s
+                ORDER BY commit_sequence, commit_position
+                """,
+                (archive_id,),
+            ).fetchall()
+        ]
+
+    _require(
+        _rows("admission") == _rows("commit_member"),
+        "admission rows do not match the verified commit members",
+    )
+
     return {
         "archive_id": archive_id,
         "epoch_id": epoch_id,
