@@ -27,7 +27,7 @@ from ccf.projections.invalidation import (
 from ccf.projections.rebuild import rebuild_all
 from ccf.projections.vectors import VectorSupportError
 
-from ccf_helpers import make_rig
+from ccf_helpers import authority, make_rig
 
 
 @pytest.fixture()
@@ -111,9 +111,13 @@ def _same_as(rig, a, b):
 
 
 def _resolution(rig, entity_ids, canonical_entity_id):
+    # semantic.entity_resolution requires person_accepted_or_reviewed
+    # authority: the merge is a human adjudication, not runtime output.
+    claims = rig.claims()
+    claims["authority"] = authority("person_accepted", rig.person_id)
     return rig.producer.new_record(
         type="semantic.entity_resolution",
-        claims=rig.claims(),
+        claims=claims,
         lineage={
             "lineage_id": generate_id("lineage"),
             "previous_head_id": None,

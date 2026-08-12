@@ -100,7 +100,7 @@ def finding_submissions(
     finding = producer.new_record(
         type="security.finding",
         type_visibility="sealed",
-        claims=claims(ctx, basis="machine_inference", asserted_by=producer.producer_id),
+        claims=claims(ctx, basis="explicit_authorization", asserted_by=producer.producer_id),
         origin=origin(source_ccf_id, native_id, revision),
         lineage={
             "lineage_id": generate_id("lineage"),
