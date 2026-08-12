@@ -310,3 +310,32 @@ def add_producer(rig: CcfTestRig, tmp_path, name: str) -> None:
         schemas=SchemaSet.load(rig.package_root),
         clock=rig.clock,
     )
+
+
+# ---------------------------------------------------------------------------
+# thothmap test helpers (phase 4)
+# ---------------------------------------------------------------------------
+
+
+def admit_mapped(rig: CcfTestRig, mapped) -> dict:
+    """Sign one batch from a MappedSubmissions and admit it; return the result."""
+    batch = rig.producer.create_batch(
+        records=mapped.records, links=mapped.links, blobs=mapped.blobs
+    )
+    return rig.archive.admit_batch(batch, blob_bytes=mapped.blob_data or None)
+
+
+def compartment(rig: CcfTestRig, object_id: str, name: str) -> dict:
+    """Plaintext compartment content of an admitted object (fails if absent)."""
+    obj = rig.archive.get_object(object_id)
+    assert obj is not None, f"object not admitted: {object_id}"
+    envelope = obj["compartments"][name]["envelope"]
+    assert envelope is not None, f"{name} compartment not inspectable: {object_id}"
+    return envelope["content"]
+
+
+def outcome_for(result: dict, object_id: str) -> dict:
+    for admission in result["admissions"]:
+        if admission["object_id"] == object_id:
+            return admission
+    raise AssertionError(f"no admission outcome for {object_id}: {result['admissions']}")
