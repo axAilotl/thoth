@@ -31,11 +31,23 @@ class PinnedRegistries:
         links: dict,
         blobs: dict,
         state_machines: dict,
+        policy_evaluators: dict,
+        data_classes: dict,
+        authority_bases: dict,
     ) -> None:
         self._types = types
         self._links = links
         self._blobs = blobs
         self._state_machines = state_machines
+        self._policy_evaluators = {
+            entry["name"]: entry for entry in policy_evaluators["entries"]
+        }
+        self._data_classes = {
+            entry["name"] for entry in data_classes["entries"]
+        }
+        self._authority_bases = {
+            entry["name"] for entry in authority_bases["entries"]
+        }
         self._type_entries = {
             (entry["name"], entry["version"]): entry for entry in types["entries"]
         }
@@ -74,6 +86,9 @@ class PinnedRegistries:
             links=_load_verified("ccf.links/0.1.1"),
             blobs=_load_verified("ccf.blobs/0.1.1"),
             state_machines=_load_verified("ccf.state-machines/0.1.1"),
+            policy_evaluators=_load_verified("ccf.policy-evaluators/0.1.1"),
+            data_classes=_load_verified("ccf.data-classes/0.1.1"),
+            authority_bases=_load_verified("ccf.authority-bases/0.1.1"),
         )
 
     def type_entry(self, name: str, version: int = 1) -> dict:
@@ -90,6 +105,10 @@ class PinnedRegistries:
             raise RegistryError(f"unknown Link registry entry: {name}@{version}")
         return entry
 
+    def link_entries(self) -> list[dict]:
+        """All pinned Link registry entries."""
+        return list(self._links["entries"])
+
     @property
     def blob_entry(self) -> dict:
         """The single blob manifest registry entry."""
@@ -101,6 +120,21 @@ class PinnedRegistries:
         if machine is None:
             raise RegistryError(f"unknown state machine: {machine_id!r}")
         return machine
+
+    def policy_evaluator(self, name: str) -> dict:
+        """Policy-evaluator registry entry; fail closed if unknown."""
+        entry = self._policy_evaluators.get(name)
+        if entry is None:
+            raise RegistryError(f"unknown policy evaluator: {name!r}")
+        return entry
+
+    def data_class_names(self) -> frozenset[str]:
+        """Pinned data-class names (ccf.data-classes registry)."""
+        return frozenset(self._data_classes)
+
+    def authority_basis_names(self) -> frozenset[str]:
+        """Pinned authority-basis names (ccf.authority-bases registry)."""
+        return frozenset(self._authority_bases)
 
     def acyclic_link_types(self) -> frozenset[str]:
         """Link types whose active edges must remain acyclic (spec 8.6)."""

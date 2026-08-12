@@ -317,6 +317,20 @@ class Archive:
         object_id = spec_record.get("object_id") or generate_id("record")
         parse_id(object_id)
 
+        # Registry-declared authority classes apply to operator admission
+        # too (spec 5.5); the archive actor satisfies archive-scoped classes.
+        from ccf.governance.authority import check_required_authority
+
+        authority_reason = check_required_authority(
+            entry.get("required_authority"),
+            claim=spec_record.get("authority"),
+            recorded_by=spec_record["recorded_by"],
+            admitted_by_archive=True,
+            registries=self.registries,
+        )
+        if authority_reason is not None:
+            raise ArchiveError(authority_reason)
+
         # Resolve the policy reference against pre-transition lineage state.
         policy_ref = None
         if spec_record.get("policy_hint") is not None:
@@ -377,7 +391,7 @@ class Archive:
         if lineage_block is not None:
             structural_content["lineage"] = lineage_block
 
-        semantic = None
+        semantic_content = None
         if spec_record.get("semantic", True):
             semantic_content = {
                 "recorded_by": spec_record["recorded_by"],
@@ -408,7 +422,7 @@ class Archive:
         structural = _make_envelope("record", "structural", structural_content, self._salt_fn)
         semantic_env = (
             _make_envelope("record", "semantic", semantic_content, self._salt_fn)
-            if semantic is not None
+            if semantic_content is not None
             else None
         )
         header = _make_header("record", object_id, structural, semantic_env)
@@ -429,6 +443,21 @@ class Archive:
             lineage_update=lineage_update,
             blob_data=None,
         )
+
+    # ------------------------------------------------------------------
+    # Governance (spec section 9)
+    # ------------------------------------------------------------------
+
+    @property
+    def settings(self) -> CcfPostgresSettings:
+        """The store settings this archive was opened with."""
+        return self._settings
+
+    def governance(self):
+        """The contextual-authorization engine bound to this archive."""
+        from ccf.governance.engine import GovernanceEngine
+
+        return GovernanceEngine.from_archive(self)
 
     # ------------------------------------------------------------------
     # Verification and inspection

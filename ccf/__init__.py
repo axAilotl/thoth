@@ -11,7 +11,13 @@ Implements the vendored spec package at ``spec/ccf/0.1.1/``:
 - canonical admission (phase 3): genesis, the serialized archive-head
   transaction with origin-tuple idempotency, lineage compare-and-swap and
   derivation cycle checks, signed Merkle commits, and prefix-integrity
-  chain verification.
+  chain verification;
+- the governance baseline (phase 6, ``ccf.governance``): the pinned
+  ``ccf-deny-overrides-v1`` evaluator over a deterministic policy closure,
+  ``governance.*`` generation fences advanced in the admission
+  transaction, bounded pending results, fenced egress capabilities,
+  consequential receipts, and registry ``required_authority``
+  enforcement at admission.
 
 The vendored package is authoritative; published executable vectors take
 precedence over prose on any contradiction (spec section 0.4).

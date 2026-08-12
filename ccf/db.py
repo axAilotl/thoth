@@ -365,6 +365,56 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
             """,
         ),
     ),
+    PostgresMigration(
+        version=2,
+        name="0002_governance_baseline",
+        statements=(
+            # Generation fences (spec section 9.5). Governance mutations bump
+            # the matching ``governance.*`` fence in the admission transaction;
+            # cached decisions record the generation vector they were computed
+            # against and are only served while every generation matches.
+            # ``projection.*`` fences live in the same table (other stream).
+            """
+            CREATE TABLE IF NOT EXISTS generation_fence (
+                archive_id              text NOT NULL REFERENCES archive(archive_id),
+                fence                   text NOT NULL,
+                generation              numeric(20,0) NOT NULL,
+                last_change_sequence    numeric(20,0) NOT NULL,
+                updated_at              text NOT NULL,
+                PRIMARY KEY (archive_id, fence)
+            )
+            """,
+            # Local decision cache keyed by decision-context hash.
+            """
+            CREATE TABLE IF NOT EXISTS governance_decision (
+                decision_context_hash   text PRIMARY KEY,
+                archive_id              text NOT NULL REFERENCES archive(archive_id),
+                decision_json           jsonb NOT NULL,
+                generation_vector       jsonb NOT NULL,
+                head_sequence           numeric(20,0) NOT NULL,
+                valid_until             text,
+                created_at              text NOT NULL
+            )
+            """,
+            # Short-expiry, use-counted egress capabilities (spec section 9.7).
+            """
+            CREATE TABLE IF NOT EXISTS egress_capability (
+                capability_id           text PRIMARY KEY,
+                archive_id              text NOT NULL REFERENCES archive(archive_id),
+                capability_hash         text NOT NULL UNIQUE,
+                decision_context_hash   text NOT NULL,
+                generation_vector       jsonb NOT NULL,
+                head_sequence           numeric(20,0) NOT NULL,
+                object_ids              jsonb NOT NULL,
+                availability            jsonb NOT NULL,
+                remaining_uses          integer NOT NULL CHECK (remaining_uses >= 0),
+                expires_at              text NOT NULL,
+                created_at              text NOT NULL,
+                updated_at              text NOT NULL
+            )
+            """,
+        ),
+    ),
 )
 
 

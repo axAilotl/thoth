@@ -29,6 +29,8 @@ from psycopg.types.json import Jsonb
 from ccf import CCF_SPEC
 from ccf.catalog import SemanticCatalog
 from ccf.credentials import CredentialError, resolve_credential_public_key
+from ccf.governance.authority import check_required_authority
+from ccf.governance.fences import advance_fences, classify_governance_mutations
 from ccf.hashing import (
     blob_content_commitment,
     commit_leaf,
@@ -417,6 +419,14 @@ def commit_objects(
                 committed_at,
                 "sha256:" + commit_leaf(member).hex(),
             ),
+        )
+    # Governance generation fences (spec 9.5): a governance mutation
+    # advances its fences in this same transaction, so no cached decision
+    # computed from the old state can be served afterwards.
+    governance_fences = classify_governance_mutations(conn, objects)
+    if governance_fences:
+        advance_fences(
+            conn, archive["archive_id"], governance_fences, sequence, committed_at
         )
     conn.execute(
         """
@@ -948,6 +958,18 @@ def _resolve_record(
     # Resolve the policy reference against the pre-transition lineage state
     # (a stateful Record's own transition must not become its own policy head).
     claims = sub["claims"]
+    # Registry-declared authority classes are enforced at admission
+    # (spec 5.5): fail closed per object when the claim does not satisfy
+    # the type's required_authority.
+    authority_reason = check_required_authority(
+        entry.get("required_authority"),
+        claim=claims.get("authority"),
+        recorded_by=sub["recorded_by"],
+        admitted_by_archive=False,
+        registries=registries,
+    )
+    if authority_reason is not None:
+        raise _ObjectConflict("rejected", authority_reason)
     policy_ref = None
     if claims.get("policy_hint") is not None:
         policy_ref = _resolve_policy_ref(
