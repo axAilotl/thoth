@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:registries.blob-registry",
+  "title": "CCF Blob Registry",
+  "type": "object",
+  "properties": {
+    "registry": {
+      "const": "ccf.blobs/0.1.1"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/typeName"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "deprecated",
+              "experimental"
+            ]
+          },
+          "profile": {
+            "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/profileName"
+          },
+          "retention_profile": {
+            "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/retentionProfile"
+          },
+          "structural_schema_id": {
+            "type": "string",
+            "format": "uri"
+          },
+          "semantic_schema_id": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "description",
+          "status",
+          "profile",
+          "retention_profile",
+          "structural_schema_id",
+          "semantic_schema_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "registry",
+    "entries"
+  ],
+  "additionalProperties": false
+}

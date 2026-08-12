@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:payload.sync.producer_batch_receipt",
+  "title": "Producer Batch Receipt Payload",
+  "type": "object",
+  "properties": {
+    "batch_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/batchUrn"
+    },
+    "producer_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/recordUrn"
+    },
+    "producer_sequence": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "batch_hash": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+    },
+    "status": {
+      "enum": [
+        "committed",
+        "partial",
+        "rejected",
+        "conflict"
+      ]
+    },
+    "commit_sequence": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "commit_hash": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "result_blob_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/blobUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "batch_id",
+    "producer_id",
+    "producer_sequence",
+    "batch_hash",
+    "status",
+    "commit_sequence",
+    "commit_hash",
+    "result_blob_id",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

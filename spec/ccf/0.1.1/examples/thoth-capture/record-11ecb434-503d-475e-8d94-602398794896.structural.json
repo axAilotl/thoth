@@ -1,0 +1,21 @@
+{
+  "format": "ccf.record-structural/0.1.1",
+  "salt": "DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0",
+  "content": {
+    "type": "process.run",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:48f4b3167c7b66f9b825622b7a724384dd6f447278e67d354d64f61bd655ad53",
+    "registry_entry_digest": "sha256:10f75f2f5b5e1c708e30a2dcbb3f74a8a206fb344a8eb8d9b072771ded1a3ed5",
+    "retention_profile": "payload_erasable",
+    "structural_payload": {},
+    "extensions": {},
+    "lineage": {
+      "lineage_id": "urn:ccf:lineage:11ecb434-503d-475e-8d94-602398794896",
+      "previous_head_id": null,
+      "transition": "succeed",
+      "valid_from": "2026-08-11T21:42:19.000Z",
+      "expires_at": null
+    }
+  }
+}

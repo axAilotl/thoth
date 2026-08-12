@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:structural.lineage.erasure_receipt",
+  "title": "Erasure Receipt Structural Payload",
+  "type": "object",
+  "properties": {
+    "decision_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/recordUrn"
+    },
+    "profile": {
+      "enum": [
+        "logical",
+        "storage_verified",
+        "cryptographic"
+      ]
+    },
+    "verified_at": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+    },
+    "target_count": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "destroyed_key_count": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "status": {
+      "enum": [
+        "verified",
+        "partial",
+        "failed"
+      ]
+    },
+    "membership_link_type": {
+      "const": "ccf.covers"
+    }
+  },
+  "required": [
+    "decision_id",
+    "profile",
+    "verified_at",
+    "target_count",
+    "destroyed_key_count",
+    "status",
+    "membership_link_type"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:payload.core.session",
+  "title": "core.session payload",
+  "type": "object",
+  "properties": {
+    "source_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/recordUrn"
+    },
+    "native_id": {
+      "type": "string"
+    },
+    "channel": {
+      "type": "string"
+    },
+    "started_at": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+    },
+    "ended_at": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/recordUrn"
+      },
+      "uniqueItems": true
+    },
+    "capture_mode": {
+      "type": "string"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "source_id",
+    "native_id",
+    "channel",
+    "started_at",
+    "participants",
+    "capture_mode",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

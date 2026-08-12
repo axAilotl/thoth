@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:structural.integrity.commit",
+  "title": "Integrity Commit Structural Payload",
+  "type": "object",
+  "properties": {
+    "archive_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/archiveUrn"
+    },
+    "epoch_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/lineageUrn"
+    },
+    "sequence": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "parent_commit_hash": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "batch_merkle_root": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+    },
+    "member_count": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "hash_profile": {
+      "const": "ccf-jcs-sha256-v2"
+    },
+    "signature_profile": {
+      "const": "ed25519-jcs-v1"
+    },
+    "signer_key_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/keyUrn"
+    },
+    "semantic_catalog_root": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+    },
+    "active_profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/profileName"
+      },
+      "uniqueItems": true
+    },
+    "committed_at": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+    },
+    "signature": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/base64url"
+    },
+    "signer_public_key": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/base64url"
+    }
+  },
+  "required": [
+    "archive_id",
+    "epoch_id",
+    "sequence",
+    "parent_commit_hash",
+    "batch_merkle_root",
+    "member_count",
+    "hash_profile",
+    "signature_profile",
+    "signer_key_id",
+    "signer_public_key",
+    "semantic_catalog_root",
+    "active_profiles",
+    "committed_at",
+    "signature"
+  ],
+  "additionalProperties": false
+}

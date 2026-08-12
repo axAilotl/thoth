@@ -1,0 +1,14 @@
+{
+  "format": "ccf.record-structural/0.1.1",
+  "salt": "Dg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4",
+  "content": {
+    "type": "experience.utterance",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:b3aaed4d84dce259d6c2c57ba75e624b2dd28e88567a3917f2787ccef1fb0d4f",
+    "registry_entry_digest": "sha256:942db5e90c75c5054c31feb90761f85f60e7af1359a7c579c80f5b6430683f64",
+    "retention_profile": "payload_erasable",
+    "structural_payload": {},
+    "extensions": {}
+  }
+}

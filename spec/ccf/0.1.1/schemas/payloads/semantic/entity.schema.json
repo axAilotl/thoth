@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:payload.semantic.entity",
+  "title": "semantic.entity payload",
+  "type": "object",
+  "properties": {
+    "entity_kind": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "description": {
+      "type": "string"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "entity_kind",
+    "label",
+    "aliases",
+    "description",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

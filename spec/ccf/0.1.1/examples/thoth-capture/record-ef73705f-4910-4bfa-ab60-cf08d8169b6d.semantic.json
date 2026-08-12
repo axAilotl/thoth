@@ -1,0 +1,45 @@
+{
+  "format": "ccf.record-semantic/0.1.1",
+  "salt": "UlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlI",
+  "content": {
+    "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+    "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+    "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+    "recorded_at": "2026-08-11T21:40:00.000Z",
+    "privacy": {
+      "data_subjects": [
+        {
+          "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+          "role": "archive_principal",
+          "identity_state_at_write": "verified"
+        }
+      ],
+      "data_classes": [
+        "identity_data"
+      ],
+      "consent_refs": [],
+      "legal_basis_refs": [],
+      "subject_coverage": "complete"
+    },
+    "policy_ref": {
+      "lineage_id": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+      "head_id_at_write": "urn:ccf:record:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+      "policy_object_hash": "sha256:58efe94b07ee215fee6bd8a26d5a8c19801658e3b3011a0d643d248a7087e564",
+      "evaluator_profile": "ccf-deny-overrides-v1",
+      "semantic_catalog_root": "sha256:1d4986414a6c0e76ee979e654487df739a96604593d7a18f8765643f3c32cc9a"
+    },
+    "authority": {
+      "basis": "first_person_statement",
+      "asserted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+      "accepted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d"
+    },
+    "payload": {
+      "kind": "human",
+      "display_name": "Example Person",
+      "aliases": [],
+      "identity_anchors": [],
+      "extensions": {}
+    },
+    "extensions": {}
+  }
+}

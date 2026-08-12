@@ -1,0 +1,16 @@
+{
+  "format": "ccf.link-structural/0.1.1",
+  "salt": "FxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxc",
+  "content": {
+    "type": "ccf.supersedes",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:37fa245905a8019f8c362316f222ef098833cd680cc5d94f883f29be5ec362db",
+    "registry_entry_digest": "sha256:ca3e81387deb6b17c22a685136352ff22641d639081d477267501dbc3b24e5fd",
+    "retention_profile": "structural_retention_required",
+    "structural_payload": {},
+    "extensions": {},
+    "from_id": "urn:ccf:record:85441aca-60e4-4a94-bf4b-10e71046dbec",
+    "to_id": "urn:ccf:record:2fd2e84a-3d89-47b6-83c2-1be7729ff839"
+  }
+}
