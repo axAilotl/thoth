@@ -221,6 +221,24 @@
             "migration_lock_id": { "type": "integer" }
           },
           "additionalProperties": false
+        },
+        "ccf_archive": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "backend": { "type": "string", "enum": ["postgres"] },
+            "dsn_env": { "type": "string" },
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "connect_timeout_seconds": { "type": "integer", "minimum": 1 },
+            "application_name": { "type": "string", "minLength": 1 },
+            "migration_lock_id": { "type": "integer" },
+            "device_key_path": { "type": "string", "minLength": 1 },
+            "archive_key_path": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

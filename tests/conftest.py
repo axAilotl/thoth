@@ -38,3 +38,102 @@ def load_ccf_json():
         return json.loads(path.read_text(encoding="utf-8"))
 
     return _load
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral Postgres for CCF archive/producer DB tests
+# ---------------------------------------------------------------------------
+
+_CCF_PG_IMAGES = ("pgvector/pgvector:pg16", "postgres:16-alpine", "postgres:16")
+
+
+def _docker_output(*args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["docker", *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+@pytest.fixture(scope="session")
+def ccf_postgres_dsn():
+    """DSN of an ephemeral, tmpfs-backed Postgres container.
+
+    Skips cleanly when docker or a suitable image is unavailable; never
+    touches a pre-existing local Postgres.
+    """
+    import shutil
+    import subprocess
+    import time
+
+    if shutil.which("docker") is None:
+        pytest.skip("docker is not available")
+    try:
+        _docker_output("info")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pytest.skip("docker daemon is not available")
+
+    image = None
+    for candidate in _CCF_PG_IMAGES:
+        try:
+            _docker_output("image", "inspect", candidate)
+            image = candidate
+            break
+        except subprocess.CalledProcessError:
+            continue
+    if image is None:
+        try:
+            _docker_output("pull", _CCF_PG_IMAGES[0])
+            image = _CCF_PG_IMAGES[0]
+        except subprocess.CalledProcessError:
+            pytest.skip("no Postgres image available and pull failed")
+
+    container = _docker_output(
+        "run",
+        "--rm",
+        "-d",
+        "--tmpfs",
+        "/var/lib/postgresql/data",
+        "-e",
+        "POSTGRES_PASSWORD=ccf-test",
+        "-e",
+        "POSTGRES_DB=ccf_test",
+        "-p",
+        "127.0.0.1::5432",
+        image,
+    )
+    try:
+        port = _docker_output("port", container, "5432/tcp").split(":")[-1]
+        dsn = f"postgresql://postgres:ccf-test@127.0.0.1:{port}/ccf_test"
+        deadline = time.monotonic() + 60
+        last_error: Exception | None = None
+        while time.monotonic() < deadline:
+            try:
+                import psycopg
+
+                with psycopg.connect(dsn, connect_timeout=2):
+                    break
+            except Exception as exc:  # container still starting
+                last_error = exc
+                time.sleep(0.5)
+        else:
+            raise RuntimeError(f"ephemeral Postgres never came up: {last_error}")
+        yield dsn
+    finally:
+        subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+
+
+@pytest.fixture()
+def ccf_settings(ccf_postgres_dsn):
+    """Per-test CCF store settings with a unique schema, cleaned up after."""
+    import uuid
+
+    import psycopg
+
+    from ccf.db import CcfPostgresSettings
+
+    schema = f"ccf_test_{uuid.uuid4().hex[:12]}"
+    settings = CcfPostgresSettings(enabled=True, dsn=ccf_postgres_dsn, schema=schema)
+    yield settings
+    with psycopg.connect(ccf_postgres_dsn, autocommit=True) as conn:
+        conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')

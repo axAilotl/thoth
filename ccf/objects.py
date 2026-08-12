@@ -65,6 +65,15 @@ def validate_timestamp(text: str) -> str:
     return text
 
 
+def now_timestamp() -> str:
+    """Current UTC time as a canonical CCF timestamp (millisecond precision)."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
+        "+00:00", "Z"
+    )
+
+
 def validate_decimal_string(text: str) -> str:
     """Validate a canonical unsigned decimal string (section 4.2)."""
     if not isinstance(text, str) or _DECIMAL_RE.match(text) is None:

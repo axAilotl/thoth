@@ -245,6 +245,16 @@ def registry_artifact_digest(registry: dict) -> str:
     return canonical_digest("ccf:registry-artifact:v1", registry)
 
 
+def registry_entry_digest(entry: dict) -> str:
+    """Pinned digest of one registry entry (structural compartment binding).
+
+    Structural compartments bind an object to the exact type/Link registry
+    entry the archive resolved, via ``ccf:registry-entry:v1`` (see
+    ``spec/ccf/0.1.1/tools/build-example.mjs``).
+    """
+    return canonical_digest("ccf:registry-entry:v1", entry)
+
+
 # ---------------------------------------------------------------------------
 # Ed25519 (ed25519-jcs-v1): sign/verify over raw 32-byte digests
 # ---------------------------------------------------------------------------

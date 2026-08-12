@@ -42,3 +42,6 @@ download_tracking.json
 
 # Local backups and nested repos
 xmarks_backup/
+
+# CCF private signing keys must never be committed (public keys are fine)
+*-ed25519-private.pem
