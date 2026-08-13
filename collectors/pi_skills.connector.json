@@ -2,7 +2,8 @@
   "name": "pi_skills",
   "source_name": "pi_skills",
   "source_aliases": [
-    "pi_skill"
+    "pi_skill",
+    "pi_skill_connector"
   ],
   "display_name": "Pi Skills",
   "description": "Run configured local Pi skills and ingest their JSON/JSONL artifact envelopes.",

@@ -3,7 +3,8 @@
   "source_name": "skill_outputs",
   "source_aliases": [
     "external_skill",
-    "last30days-skill"
+    "last30days-skill",
+    "skill_output_connector"
   ],
   "display_name": "External Skill Outputs",
   "description": "Ingest JSON/JSONL output envelopes from external skills through the artifact queue.",

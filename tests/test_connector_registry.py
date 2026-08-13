@@ -49,6 +49,12 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
     assert registry.get("personal_transcripts").name == "omi"
     assert registry.get("last30days-skill").name == "skill_outputs"
     assert registry.get("pi_skill").name == "pi_skills"
+    # The capture source's class-level collector names resolve to the
+    # manifests whose ccf blocks lane the dual-write mirror's artifacts.
+    assert registry.get("skill_output_connector").name == "skill_outputs"
+    assert registry.get("skill_output_connector").ccf.lane == "mixed"
+    assert registry.get("pi_skill_connector").name == "pi_skills"
+    assert registry.get("pi_skill_connector").ccf.lane == "mixed"
 
 
 def test_builtin_manifests_are_colocated_with_collectors(tmp_path: Path):

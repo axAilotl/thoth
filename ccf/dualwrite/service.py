@@ -25,8 +25,11 @@ from typing import Mapping
 
 from core.connector_registry import (
     ConnectorCcfBlock,
+    ConnectorManifestError,
     ConnectorRegistry,
     load_connector_registry,
+    parse_ccf_extensions,
+    validate_ccf_lane,
 )
 
 from ccf.archive import Archive
@@ -365,7 +368,10 @@ class CcfDualWriteService:
         RawArtifactRef fields and ``data`` the raw file bytes.
         ``findings_metadata`` is the queue payload's
         ``normalized_metadata`` block; findings are parsed with the same
-        rules as the legacy event store.
+        rules as the legacy event store, and an optional
+        ``normalized_metadata.ccf`` block (skill output envelope v1.1)
+        overrides the connector manifest's ``ccf`` lane/extensions for
+        this artifact.
 
         Already-mirrored origin tuples are skipped (idempotent re-run).
         Returns a receipt describing what was admitted; raises
@@ -375,6 +381,7 @@ class CcfDualWriteService:
         source_ccf_id = source_record_id(self.archive.archive_id, thoth_source_id)
         origins = self._origin_index(source_ccf_id)
         ccf_block = self._ccf_block_for_source(source)
+        ccf_override = _envelope_ccf_override(findings_metadata)
 
         parts = MappedSubmissions()
         objects: dict[str, object] = {"source_id": source_ccf_id}
@@ -402,6 +409,7 @@ class CcfDualWriteService:
             objects,
             source=source,
             ccf_block=ccf_block,
+            ccf_override=ccf_override,
         )
 
         self._mirror_findings(
@@ -507,6 +515,7 @@ class CcfDualWriteService:
         *,
         source: Mapping,
         ccf_block: ConnectorCcfBlock | None,
+        ccf_override: Mapping | None = None,
     ) -> tuple[str, str]:
         raw_ref_id = _required(raw_ref.get("raw_ref_id"), "raw_ref.raw_ref_id")
         sha256 = _required(raw_ref.get("sha256"), "raw_ref.sha256")
@@ -522,6 +531,17 @@ class CcfDualWriteService:
                 f"blob {'present' if blob_ccf_id else 'missing'}"
             )
         if artifact_ccf_id is None:
+            # Per-envelope (v1.1) fields win over the manifest block
+            # field-by-field; extensions merge with envelope keys winning.
+            override = ccf_override or {}
+            lane = override.get("lane") or (
+                ccf_block.lane if ccf_block is not None else None
+            )
+            extensions: dict = {}
+            if ccf_block is not None:
+                extensions.update(ccf_block.extensions)
+            extensions.update(override.get("extensions") or {})
+            laned = ccf_block is not None or bool(override)
             mapped = thothmap_artifacts.media_submissions(
                 self.producer,
                 self.ctx,
@@ -533,11 +553,9 @@ class CcfDualWriteService:
                 artifact_role=(
                     ccf_block.artifact_role if ccf_block is not None else "raw_capture"
                 ),
-                lane=ccf_block.lane if ccf_block is not None else None,
-                source_snapshot=dict(source) if ccf_block is not None else None,
-                manifest_extensions=(
-                    dict(ccf_block.extensions) if ccf_block is not None else None
-                ),
+                lane=lane,
+                source_snapshot=dict(source) if laned else None,
+                manifest_extensions=extensions or None,
             )
             artifact_ccf_id = mapped.records[0]["id"]
             blob_ccf_id = mapped.blobs[0]["id"]
@@ -634,6 +652,47 @@ class CcfDualWriteService:
             (native_id, revision, kind): object_id
             for native_id, revision, kind, object_id in rows
         }
+
+
+def _envelope_ccf_override(findings_metadata: dict | None) -> dict:
+    """Extract the per-envelope CCF override from queue normalized metadata.
+
+    Skill output envelope v1.1 (``collectors.skill_output_connector``)
+    threads envelope-declared ``lane``/``ccf`` extensions into the queued
+    payload's ``normalized_metadata.ccf`` block. The override wins over the
+    connector manifest's ``ccf`` block field-by-field, which is how
+    ``mixed``-lane connectors get precise per-envelope lanes. Validated
+    with the same fail-closed rules as the manifest block; malformed
+    overrides raise :class:`DualWriteError` (ledgered by the caller, never
+    touching the legacy write).
+    """
+    if not isinstance(findings_metadata, Mapping):
+        return {}
+    raw = findings_metadata.get("ccf")
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise DualWriteError("payload normalized_metadata.ccf must be an object")
+    unknown_fields = sorted(set(raw) - {"lane", "extensions"})
+    if unknown_fields:
+        raise DualWriteError(
+            f"payload normalized_metadata.ccf has unknown fields {unknown_fields}"
+        )
+    override: dict = {}
+    try:
+        if raw.get("lane") is not None:
+            override["lane"] = validate_ccf_lane(
+                raw.get("lane"),
+                origin="payload normalized_metadata.ccf",
+            )
+        if raw.get("extensions") is not None:
+            override["extensions"] = parse_ccf_extensions(
+                raw.get("extensions"),
+                origin="payload normalized_metadata.ccf",
+            )
+    except ConnectorManifestError as exc:
+        raise DualWriteError(str(exc)) from exc
+    return override
 
 
 def _required(value, field: str) -> str:

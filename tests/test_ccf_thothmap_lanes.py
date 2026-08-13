@@ -21,7 +21,7 @@ import pytest
 from core.config import Config
 from core.connector_registry import load_connector_registry
 
-from ccf.dualwrite import CcfDualWriteService, resolve_dual_write_settings
+from ccf.dualwrite import CcfDualWriteService, DualWriteError, resolve_dual_write_settings
 from ccf.thothmap import MapContext
 from ccf.thothmap.artifacts import media_submissions
 from ccf.thothmap.context import ThothMapError
@@ -243,3 +243,92 @@ def test_mirror_without_manifest_or_block_keeps_legacy_behavior(
     payload = _artifact_payload(service, anonymous)
     assert payload["artifact_role"] == "raw_capture"
     assert "thoth_lane" not in payload["extensions"]
+
+
+# ---------------------------------------------------------------------------
+# Per-envelope (skill output v1.1) overrides
+# ---------------------------------------------------------------------------
+
+
+def _dualwrite_service(tmp_path, schema: str) -> CcfDualWriteService:
+    return CcfDualWriteService.create_or_open(
+        resolve_dual_write_settings(_dualwrite_config(tmp_path, schema)),
+        connector_registry=load_connector_registry(),
+    )
+
+
+def test_mirror_envelope_lane_overrides_manifest_mixed(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    service = _dualwrite_service(tmp_path, ccf_settings.schema)
+    # The skill output connector's capture source carries its class-level
+    # collector name; the manifest alias resolves it to skill_outputs,
+    # whose ccf block declares lane "mixed".
+    source = _mirror_source(
+        source_id="src-envelope-lane",
+        source_name="external_skill",
+        source_type="skill_output",
+        collector="skill_output_connector",
+        native_source_id="external_skill",
+    )
+
+    # v1.0 capture (no override): the manifest's "mixed" lane applies.
+    fallback = service.mirror_capture(
+        source=source,
+        session=None,
+        raw_ref=raw_ref(raw_ref_id="raw-ref:envelope-fallback"),
+        data=PDF_BYTES,
+    )
+    payload = _artifact_payload(service, fallback)
+    assert payload["artifact_role"] == "raw_capture"
+    assert payload["extensions"]["thoth_lane"] == "mixed"
+    assert payload["extensions"]["thoth_collector"] == "skill_output_connector"
+
+    # v1.1 envelope: the per-envelope lane overrides the manifest "mixed".
+    override = service.mirror_capture(
+        source=source,
+        session=None,
+        raw_ref=raw_ref(raw_ref_id="raw-ref:envelope-override"),
+        data=PDF_BYTES,
+        findings_metadata={
+            "artifact_id": "laned-skill-output",
+            "ccf": {
+                "lane": "transcript",
+                "extensions": {"acme.channel": "calls"},
+            },
+        },
+    )
+    payload = _artifact_payload(service, override)
+    assert payload["extensions"]["thoth_lane"] == "transcript"
+    assert payload["extensions"]["acme.channel"] == "calls"
+    assert payload["extensions"]["thoth_collector"] == "skill_output_connector"
+
+
+def test_mirror_rejects_malformed_envelope_ccf_override(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    service = _dualwrite_service(tmp_path, ccf_settings.schema)
+    source = _mirror_source(
+        source_id="src-envelope-bad",
+        collector="skill_output_connector",
+    )
+
+    with pytest.raises(DualWriteError, match="unknown ccf lane 'hologram'"):
+        service.mirror_capture(
+            source=source,
+            session=None,
+            raw_ref=raw_ref(raw_ref_id="raw-ref:envelope-bad-lane"),
+            data=PDF_BYTES,
+            findings_metadata={"ccf": {"lane": "hologram"}},
+        )
+
+    with pytest.raises(DualWriteError, match="namespaced"):
+        service.mirror_capture(
+            source=source,
+            session=None,
+            raw_ref=raw_ref(raw_ref_id="raw-ref:envelope-bad-ext"),
+            data=PDF_BYTES,
+            findings_metadata={"ccf": {"extensions": {"lane": "paper"}}},
+        )

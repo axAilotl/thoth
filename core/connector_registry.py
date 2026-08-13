@@ -89,6 +89,49 @@ class ConnectorCcfBlock:
         }
 
 
+def validate_ccf_lane(value: Any, *, origin: str) -> str:
+    """Validate one CCF lane against the closed ``CCF_LANES`` vocabulary.
+
+    Shared by manifest ``ccf`` blocks and skill output envelope v1.1
+    ``lane`` fields so both surfaces enforce identical fail-closed rules.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ConnectorManifestError(f"{origin}: ccf lane must be a non-empty string")
+    lane = value.strip()
+    if lane not in CCF_LANES:
+        raise ConnectorManifestError(
+            f"{origin}: unknown ccf lane {lane!r}; known lanes: {sorted(CCF_LANES)}"
+        )
+    return lane
+
+
+def parse_ccf_extensions(value: Any, *, origin: str) -> dict[str, Any]:
+    """Validate a CCF extensions object (namespaced keys, scalar values).
+
+    Shared by manifest ``ccf`` blocks and skill output envelope v1.1
+    ``ccf`` fields so both surfaces enforce identical fail-closed rules.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ConnectorManifestError(f"{origin}: ccf extensions must be an object")
+    extensions: dict[str, Any] = {}
+    for key, extension_value in value.items():
+        if not isinstance(key, str) or not _CCF_EXTENSION_KEY.fullmatch(key):
+            raise ConnectorManifestError(
+                f"{origin}: ccf extension key {key!r} must be a namespaced "
+                "dotted key (e.g. 'thoth.lane')"
+            )
+        if extension_value is not None and not isinstance(
+            extension_value, (str, int, float, bool)
+        ):
+            raise ConnectorManifestError(
+                f"{origin}: ccf extension {key!r} must be a scalar value"
+            )
+        extensions[key] = extension_value
+    return extensions
+
+
 def _parse_ccf_block(value: Any, *, origin: str) -> "ConnectorCcfBlock | None":
     """Validate the optional manifest ``ccf`` block (fail closed)."""
     if value is None:
@@ -104,16 +147,11 @@ def _parse_ccf_block(value: Any, *, origin: str) -> "ConnectorCcfBlock | None":
             f"{unknown_fields}"
         )
 
-    lane = value.get("lane")
-    if not isinstance(lane, str) or not lane.strip():
+    if not isinstance(value.get("lane"), str) or not value["lane"].strip():
         raise ConnectorManifestError(
             f"{origin}: connector manifest 'ccf' block requires a non-empty lane"
         )
-    lane = lane.strip()
-    if lane not in CCF_LANES:
-        raise ConnectorManifestError(
-            f"{origin}: unknown ccf lane {lane!r}; known lanes: {sorted(CCF_LANES)}"
-        )
+    lane = validate_ccf_lane(value["lane"], origin=origin)
 
     role = value.get("artifact_role")
     if not isinstance(role, str) or not _CCF_ROLE_TOKEN.fullmatch(role.strip()):
@@ -122,30 +160,10 @@ def _parse_ccf_block(value: Any, *, origin: str) -> "ConnectorCcfBlock | None":
             "artifact_role token"
         )
 
-    raw_extensions = value.get("extensions", {})
-    if not isinstance(raw_extensions, Mapping):
-        raise ConnectorManifestError(
-            f"{origin}: connector manifest 'ccf' extensions must be an object"
-        )
-    extensions: dict[str, Any] = {}
-    for key, extension_value in raw_extensions.items():
-        if not isinstance(key, str) or not _CCF_EXTENSION_KEY.fullmatch(key):
-            raise ConnectorManifestError(
-                f"{origin}: ccf extension key {key!r} must be a namespaced "
-                "dotted key (e.g. 'thoth.lane')"
-            )
-        if extension_value is not None and not isinstance(
-            extension_value, (str, int, float, bool)
-        ):
-            raise ConnectorManifestError(
-                f"{origin}: ccf extension {key!r} must be a scalar value"
-            )
-        extensions[key] = extension_value
-
     return ConnectorCcfBlock(
         lane=lane,
         artifact_role=role.strip(),
-        extensions=extensions,
+        extensions=parse_ccf_extensions(value.get("extensions", {}), origin=origin),
     )
 
 
