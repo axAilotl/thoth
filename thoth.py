@@ -1834,22 +1834,46 @@ def cmd_connectors(args):
             )
         return
 
-    registry = load_connector_registry(config, project_root=Path(__file__).parent)
+    try:
+        registry = load_connector_registry(config, project_root=Path(__file__).parent)
+    except ValueError as exc:
+        raise SystemExit(f"connector registry error: {exc}") from exc
     if getattr(args, "json", False):
         print(json.dumps(registry.to_dict(config=config), indent=2, sort_keys=True))
         return
 
     print("Connectors")
     for manifest in registry.list():
-        status = "enabled" if manifest.is_enabled(config) else "disabled"
+        info = manifest.to_dict(config=config)
+        status = "enabled" if info["enabled"] else "disabled"
         artifacts = ", ".join(manifest.artifact_types)
         sources = ", ".join(manifest.source_names)
         queue = "queue" if manifest.queue_capability else "direct"
         command = manifest.cli_command or "-"
+        allowlist = info["policy"]["allowlist"]
+        if allowlist["configured"]:
+            allowlist_text = "allowed" if allowlist["allowed"] else "BLOCKED"
+        else:
+            allowlist_text = "unrestricted"
+        pins = info["policy"]["pins"]
+        if pins["configured"]:
+            drift = pins["drift"]
+            pin_text = "pin=ok" if not drift else f"pin=DRIFT({len(drift)})"
+        else:
+            pin_text = "pin=none"
+        budgets = info["budgets"]
+        limits = budgets["limits"]
+        budget_text = (
+            f"budgets={'custom' if budgets['configured'] else 'defaults'} "
+            f"max_files={limits['max_files_per_run']} "
+            f"max_bytes={limits['max_bytes_per_run']} "
+            f"max_input_tokens={limits['max_input_tokens_per_run']}"
+        )
         print(
-            f"- {manifest.name} [{status}, {queue}] "
+            f"- {manifest.name} [{status}, {queue}, "
+            f"allowlist={allowlist_text}, {pin_text}] "
             f"sources={sources}; artifacts={artifacts}; cli={command}; "
-            f"entrypoint={manifest.entrypoint}"
+            f"entrypoint={manifest.entrypoint}; {budget_text}"
         )
 
 
