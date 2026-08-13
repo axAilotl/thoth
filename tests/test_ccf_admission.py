@@ -23,8 +23,8 @@ from ccf.schemas import SchemaSet
 
 from ccf_helpers import authority, make_clock, make_rig, privacy
 
-SCHEMA_BATCH_RESULT = "urn:ccf:schema:0.1.1:operational.batch-result"
-SCHEMA_ADMISSION = "urn:ccf:schema:0.1.1:operational.admission"
+SCHEMA_BATCH_RESULT = "urn:ccf:schema:0.1.2-rc1:operational.batch-result"
+SCHEMA_ADMISSION = "urn:ccf:schema:0.1.2-rc1:operational.admission"
 
 
 @pytest.fixture()
@@ -152,7 +152,7 @@ def test_exact_retry_returns_stored_result(rig, schemas):
     batch = rig.producer.create_batch(records=[record])
     first = rig.archive.admit_batch(batch)
     _assert_result_conforms(schemas, first)
-    assert first["status"] == "committed"
+    assert first["status"] == "accepted"
     head = rig.archive.head()
 
     retry = rig.archive.admit_batch(batch)
@@ -164,14 +164,14 @@ def test_exact_retry_returns_stored_result(rig, schemas):
 def test_same_object_in_new_batch_is_existing(rig, schemas):
     record = _concept(rig)
     result1 = rig.archive.admit_batch(rig.producer.create_batch(records=[record]))
-    assert result1["status"] == "committed"
+    assert result1["status"] == "accepted"
 
     # A later batch carrying the identical submission (retry after a lost
     # acknowledgement) resolves to the existing object, no new commit.
     batch2 = rig.producer.create_batch(records=[record])
     result2 = rig.archive.admit_batch(batch2)
     _assert_result_conforms(schemas, result2)
-    assert result2["status"] == "committed"
+    assert result2["status"] == "accepted"
     assert result2["commit_sequence"] is None
     admission = result2["admissions"][0]
     assert admission["status"] == "existing"
@@ -185,7 +185,7 @@ def test_origin_revision_conflict(rig, schemas):
 
     session_v1 = _session(rig, source["id"], "boot-1/session-1")
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[session_v1]))
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
 
     changed = _session(rig, source["id"], "boot-1/session-1", channel="focused")
     conflict = rig.archive.admit_batch(rig.producer.create_batch(records=[changed]))
@@ -209,7 +209,7 @@ def test_same_content_from_two_sources_stays_provenance_distinct(rig):
     result = rig.archive.admit_batch(
         rig.producer.create_batch(records=[session_a, session_b])
     )
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     statuses = {a["object_id"]: a["status"] for a in result["admissions"]}
     assert statuses == {session_a["id"]: "admitted", session_b["id"]: "admitted"}
     hash_a = rig.archive.get_object(session_a["id"])["header"]["object_hash"]
@@ -244,7 +244,7 @@ def test_same_batch_cross_references_admit_atomically(rig):
     result = rig.archive.admit_batch(
         rig.producer.create_batch(records=[source, session], links=[link])
     )
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     assert {a["status"] for a in result["admissions"]} == {"admitted"}
     positions = sorted(a["commit_position"] for a in result["admissions"])
     assert positions == [0, 1, 2]
@@ -261,7 +261,7 @@ def test_dangling_reference_rejects_whole_batch(rig):
     result = rig.archive.admit_batch(
         rig.producer.create_batch(records=[record], links=[link])
     )
-    assert result["status"] == "rejected"
+    assert result["status"] == "content_rejected"
     assert "references unknown ID" in result["extensions"]["reason"]
     # Nothing was committed, not even the otherwise-valid record.
     assert rig.archive.get_object(record["id"]) is None
@@ -276,13 +276,13 @@ def test_lineage_cas_full_lifecycle(rig):
     lineage_id = generate_id("lineage")
     run1 = _run_record(rig, lineage_id, None, "start", "running")
     result1 = rig.archive.admit_batch(rig.producer.create_batch(records=[run1]))
-    assert result1["status"] == "committed"
+    assert result1["status"] == "accepted"
 
     # Two transitions on the same predecessor: the first wins, the second
     # gets a lineage conflict; the archive never silently rebases.
     run2 = _run_record(rig, lineage_id, run1["id"], "succeed", "succeeded")
     result2 = rig.archive.admit_batch(rig.producer.create_batch(records=[run2]))
-    assert result2["status"] == "committed"
+    assert result2["status"] == "accepted"
 
     run3 = _run_record(rig, lineage_id, run1["id"], "fail", "failed")
     result3 = rig.archive.admit_batch(rig.producer.create_batch(records=[run3]))
@@ -314,7 +314,7 @@ def test_stale_head_rebase_and_resubmit_succeeds(rig):
     # Caller reads the current head, rebases explicitly, and resubmits.
     rebased = _run_record(rig, lineage_id, run2["id"], "cancel", "cancelled")
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[rebased]))
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     assert result["admissions"][0]["status"] == "admitted"
 
 
@@ -323,7 +323,7 @@ def test_two_transitions_chained_within_one_batch(rig):
     run1 = _run_record(rig, lineage_id, None, "queue", "queued")
     run2 = _run_record(rig, lineage_id, run1["id"], "start", "running")
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[run1, run2]))
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     assert [a["status"] for a in result["admissions"]] == ["admitted", "admitted"]
 
 
@@ -362,7 +362,7 @@ def test_racing_lineage_transitions_one_wins(rig, tmp_path):
     # admissible in either arrival order, so one commits and the other is
     # serialized after it and loses the lineage compare-and-swap.
     statuses = sorted(r["status"] for r in results.values())
-    assert statuses == ["committed", "conflict"]
+    assert statuses == ["accepted", "conflict"]
     loser = next(r for r in results.values() if r["status"] == "conflict")
     assert loser["admissions"][0]["status"] == "lineage_conflict"
     # genesis, two bootstrap commits, the run1 commit, exactly one winner
@@ -383,7 +383,7 @@ def test_racing_identical_batch_admits_exactly_once(rig):
     for thread in threads:
         thread.join()
 
-    assert all(r["status"] == "committed" for r in results)
+    assert all(r["status"] == "accepted" for r in results)
     assert results[0] == results[1]
     assert rig.archive.head()["sequence"] == "2"
     rig.archive.verify_chain()
@@ -429,11 +429,11 @@ def test_cycle_via_restored_edge_rejected(rig):
     disposition_lineage = generate_id("lineage")
     retract = _disposition(rig, edge["id"], "retract", disposition_lineage, None)
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[retract]))
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
 
     reverse = _derived_from(rig, record_b["id"], record_a["id"])
     result = rig.archive.admit_batch(rig.producer.create_batch(links=[reverse]))
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
 
     # Restoring the retracted edge would close a cycle: rejected.
     restore = _disposition(
@@ -462,7 +462,7 @@ def test_cycle_via_restored_edge_rejected(rig):
         previous_disposition_id=retract["id"],
     )
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[restore2]))
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +497,7 @@ def test_bad_signature_rejected(rig):
     tampered = dict(batch)
     tampered["signature"] = batch["signature"][:-2] + "XX"
     result = rig.archive.admit_batch(tampered)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "signature" in result["extensions"]["reason"]
 
 
@@ -505,7 +505,7 @@ def test_unknown_credential_rejected(rig):
     batch = rig.producer.create_batch(records=[_concept(rig)])
     forged = _resigned_batch(rig, batch, credential_id=generate_id("credential"))
     result = rig.archive.admit_batch(forged)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "unknown credential" in result["extensions"]["reason"]
 
 
@@ -605,7 +605,7 @@ def test_expired_credential_rejected(rig, tmp_path):
     )
     batch = producer.create_batch(records=[_concept(rig)])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "expired" in result["extensions"]["reason"]
 
 
@@ -619,7 +619,7 @@ def test_not_yet_valid_credential_rejected(rig, tmp_path):
     )
     batch = producer.create_batch(records=[_concept(rig)])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "not yet valid" in result["extensions"]["reason"]
 
 
@@ -633,7 +633,7 @@ def test_out_of_scope_credential_rejected(rig, tmp_path):
     )
     batch = producer.create_batch(records=[_concept(rig)])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "scope" in result["extensions"]["reason"]
 
 
@@ -642,7 +642,7 @@ def test_catalog_root_mismatch_rejected(rig):
     wrong_root = "sha256:" + "0" * 64
     forged = _resigned_batch(rig, batch, semantic_catalog_root=wrong_root)
     result = rig.archive.admit_batch(forged)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "catalog root mismatch" in result["extensions"]["reason"]
 
 
@@ -651,7 +651,7 @@ def test_producer_chain_gap_rejected(rig):
     batch2 = rig.producer.create_batch(records=[_concept(rig)])
     forged = _resigned_batch(rig, batch2, previous_batch_hash=None)
     result = rig.archive.admit_batch(forged)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "producer chain conflict" in result["extensions"]["reason"]
 
 
@@ -677,9 +677,9 @@ def test_out_of_order_batch_waits_for_exact_predecessor_then_admits(rig):
     assert early["extensions"]["reason"].startswith("predecessor_missing:")
 
     first = rig.archive.admit_batch(batch1)
-    assert first["status"] == "committed", first
+    assert first["status"] == "accepted", first
     retried = rig.archive.admit_batch(batch2)
-    assert retried["status"] == "committed", retried
+    assert retried["status"] == "accepted", retried
     assert int(retried["commit_sequence"]) > int(first["commit_sequence"])
 
 
@@ -694,7 +694,7 @@ def test_unknown_type_fails_closed(rig):
     # type reaches the archive.
     batch = rig.producer.create_batch(records=[record])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "rejected"
+    assert result["status"] == "content_rejected"
     assert "unknown type registry entry" in result["extensions"]["reason"]
 
 
@@ -719,7 +719,7 @@ def test_crash_before_commit_signing_leaves_no_trace(rig, monkeypatch):
 
     assert rig.archive.get_object(record["id"]) is None
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     rig.archive.verify_chain()
 
 
@@ -743,7 +743,7 @@ def test_crash_after_commit_write_rolls_back_and_replays(rig, monkeypatch):
     # exact batch admits cleanly and the chain still verifies.
     assert rig.archive.get_object(record["id"]) is None
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     report = rig.archive.verify_chain()
     assert report["head_sequence"] == "2"
 
@@ -759,7 +759,7 @@ def _copy_test_key(src: str, dst) -> None:
 
 
 def test_thoth_capture_example_end_to_end(
-    ccf_settings, tmp_path, ccf_package_root, ccf_examples_dir, ccf_vectors_dir, schemas
+    ccf_settings, tmp_path, ccf_package_root, ccf_examples_dir, ccf_vectors_dir, schemas, ccf_test_only_keys_dir
 ):
     """Admit the vendored example batch for real and re-verify everything.
 
@@ -776,7 +776,7 @@ def test_thoth_capture_example_end_to_end(
     blob_data = (ccf_examples_dir / "segment-1842.wav").read_bytes()
 
     archive_key = tmp_path / "archive.pem"
-    _copy_test_key(ccf_vectors_dir / "TEST-ONLY-archive-ed25519-private.pem", archive_key)
+    _copy_test_key(ccf_test_only_keys_dir / "TEST-ONLY-archive-ed25519-private.pem", archive_key)
     device_public = load_verification_key(ccf_vectors_dir / "device-ed25519-public.pem")
 
     clock = make_clock("2026-08-12T02:00:00.000Z")
@@ -785,9 +785,9 @@ def test_thoth_capture_example_end_to_end(
         package_root=ccf_package_root,
         archive_key_path=archive_key,
         active_profiles=[
-            "ccf-core-0.1.1",
-            "ccf-local-sync-0.1.1",
-            "ccf-continuity-pack-0.1.1",
+            "ccf-core-0.1.2-rc1",
+            "ccf-local-sync-0.1.2-rc1",
+            "ccf-continuity-pack-0.1.2-rc1",
         ],
         clock=clock,
     )
@@ -815,7 +815,7 @@ def test_thoth_capture_example_end_to_end(
                     "expires_at": None,
                 },
                 "payload": {
-                    "profile": "ccf.policy/0.1.1",
+                    "profile": "ccf.policy/0.1.2-rc1",
                     "evaluator_profile": "ccf-deny-overrides-v1",
                     "combining_algorithm": "deny_overrides_v1",
                     "default_effect": "deny",
@@ -870,7 +870,7 @@ def test_thoth_capture_example_end_to_end(
                 "payload": {
                     "kind": "backend",
                     "name": "Thoth CCF adapter",
-                    "version": "0.1.1-example",
+                    "version": "0.1.2-rc1-example",
                     "instance_id": "thoth-local",
                     "capabilities": ["capture", "transcribe", "extract", "sync"],
                     "operator_id": ids["person"],
@@ -918,7 +918,7 @@ def test_thoth_capture_example_end_to_end(
 
     result = archive.admit_batch(batch, blob_bytes={ids["blob"]: blob_data})
     _assert_result_conforms(schemas, result)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     assert len(result["admissions"]) == (
         len(batch["records"]) + len(batch["links"]) + len(batch["blobs"])
     )

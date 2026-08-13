@@ -45,7 +45,7 @@ def schemas(ccf_package_root):
 def _admit(rig, *, records=None, links=None):
     batch = rig.producer.create_batch(records=records or [], links=links or [])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     return result
 
 
@@ -500,7 +500,7 @@ def test_checkpoint_save_corrupt_and_fallback_replay(rig, schemas):
             conn, archive_id=rig.archive.archive_id, projection_name=LINK_STATE
         )
         schemas.validate(
-            "urn:ccf:schema:0.1.1:operational.projection-checkpoint",
+            "urn:ccf:schema:0.1.2-rc1:operational.projection-checkpoint",
             first,
             what="checkpoint document",
         )

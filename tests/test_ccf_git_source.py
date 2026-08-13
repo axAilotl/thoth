@@ -271,7 +271,7 @@ def test_git_worktree_revision_behavior(rig, repo_vault):
         revision=readme_v1_sha,
         text_override="# forged v1 content\n",
     )
-    assert result["status"] == "rejected", result
+    assert result["status"] == "content_rejected", result
     assert "unknown ID" in result["extensions"]["reason"], result
     # The pure per-object view: the forged record alone gets the precise
     # origin_revision_conflict outcome.
@@ -306,14 +306,13 @@ def test_git_worktree_revision_behavior(rig, repo_vault):
         ]
         assert rig.archive.get_object(still[0][4]) is not None
     # The unchanged note re-scan neither duplicates nor overwrites: the
-    # note2 artifact/blob conflict on their occupied origin tuples, which
-    # leaves their provenance links referencing non-admitted IDs — the
-    # whole notes batch is loudly rejected, and no new artifact lands.
+    # importer recognizes note2's occupied origin tuple and skips the file
+    # outright — no notes batch, no conflict noise, no new artifact.
     pass3_batches = [
         b for b in report.batches
-        if b["purpose"] == "notes" and b["status"] == "rejected"
+        if b["purpose"] == "notes" and b["status"] == "content_rejected"
     ]
-    assert pass3_batches, report.batches
+    assert not pass3_batches, report.batches
     with open_ccf_connection(rig.settings) as conn:
         note_artifacts = conn.execute(
             """

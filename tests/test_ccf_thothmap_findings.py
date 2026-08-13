@@ -83,7 +83,7 @@ def test_finding_maps_sealed_with_exact_evidence(rig, ctx, evidence):
     assert finding["type_visibility"] == "sealed"
     assert finding["lineage"]["transition"] == "create"
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.1:payload.security.finding",
+        "urn:ccf:schema:0.1.2-rc1:payload.security.finding",
         finding["payload"],
         what="security.finding",
     )
@@ -92,7 +92,7 @@ def test_finding_maps_sealed_with_exact_evidence(rig, ctx, evidence):
     assert finding["payload"]["evidence_refs"] == [evidence["artifact_id"]]
 
     result = admit_mapped(rig, mapped)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     # Sealed: the structural compartment carries sealed.record, the exact
     # type and payload stay in the semantic compartment.
     structural = compartment(rig, finding["id"], "structural")

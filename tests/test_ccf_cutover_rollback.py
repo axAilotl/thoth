@@ -103,7 +103,7 @@ def test_gate4_rollback_path(tmp_path, ccf_postgres_dsn, ccf_settings, monkeypat
 
     reopened = Archive.open(
         ccf_settings,
-        package_root=Path(__file__).parent.parent / "spec" / "ccf" / "0.1.1",
+        package_root=Path(__file__).parent.parent / "spec" / "ccf" / "0.1.2-rc1",
         archive_key_path=tmp_path / "ccf" / "archive.pem",
     )
     assert reopened.verify_chain()["commits_verified"] >= 3
@@ -124,7 +124,7 @@ def test_gate4_stale_key_confusion_fails_closed(
 
     opened = Archive.open(
         ccf_settings,
-        package_root=Path(__file__).parent.parent / "spec" / "ccf" / "0.1.1",
+        package_root=Path(__file__).parent.parent / "spec" / "ccf" / "0.1.2-rc1",
         archive_key_path=tmp_path / "ccf" / "archive.pem",
     )
     head_before = opened.head()

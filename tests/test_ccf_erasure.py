@@ -55,7 +55,7 @@ def _source(rig):
         },
     )
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[sub]))
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     return sub["id"]
 
 
@@ -171,7 +171,7 @@ def test_erase_record_semantic_compartment(rig):
     source_id = _source(rig)
     utterance = _utterance(rig, "the quarterly report is ready", source_id=source_id)
     result = _admit(rig, records=[utterance])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     object_id = utterance["id"]
     before = rig.archive.get_object(object_id)
     semantic_commitment = before["header"]["semantic_commitment"]
@@ -212,7 +212,7 @@ def test_fulltext_excludes_erased_semantic(rig):
     keep = _utterance(rig, "a wholly unrelated topic")
     drop = _utterance(rig, "unique erased zebra phrase")
     result = _admit(rig, records=[keep, drop])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     rig.archive.projections.rebuild_all()
     hits = rig.archive.projections.search_text("zebra")
     assert [hit["object_id"] for hit in hits] == [drop["id"]]
@@ -240,7 +240,7 @@ def test_erase_link_selector_endpoints_retained(rig):
         selector={"span": "lines 1-3"},
     )
     result = _admit(rig, records=[ancestor, descendant], links=[link])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     _erase(rig, [{"object_id": link["id"], "compartments": ["semantic"]}])
 
@@ -286,7 +286,7 @@ def test_erase_link_selector_endpoints_retained(rig):
 def test_retention_profile_violations_refused(rig):
     utterance = _utterance(rig, "payload erasable record")
     result = _admit(rig, records=[utterance])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     svc = rig.archive.erasure()
     request = svc.submit_request(
         requester_id=rig.person_id,
@@ -347,7 +347,7 @@ def test_retention_profile_violations_refused(rig):
 def test_crash_after_purge_resumes_and_never_reports_recoverable(rig):
     drop = _utterance(rig, "crash window content")
     result = _admit(rig, records=[drop])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     svc = rig.archive.erasure()
     request = svc.submit_request(
@@ -402,7 +402,7 @@ def test_crash_after_purge_resumes_and_never_reports_recoverable(rig):
 def test_projection_checkpoint_and_wiki_purge(rig, tmp_path):
     entity = _entity(rig, "purge me")
     result = _admit(rig, records=[entity])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     rig.archive.projections.rebuild_all()
     staging = tmp_path / "wiki-staging"
     rig.archive.projections.rebuild_wiki(staging)
@@ -449,7 +449,7 @@ def test_retry_after_erasure_returns_lifecycle_without_bytes(rig):
     source_id = _source(rig)
     utterance = _utterance(rig, "retract this utterance", source_id=source_id)
     result = _admit(rig, records=[utterance])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     _erase(
         rig,
         [{"object_id": utterance["id"], "compartments": ["semantic"]}],
@@ -459,7 +459,7 @@ def test_retry_after_erasure_returns_lifecycle_without_bytes(rig):
     # Same submission retried after erasure (spec 6.5): the authorized
     # producer gets the current lifecycle; no bytes come back.
     retry = _admit(rig, records=[utterance])
-    assert retry["status"] == "committed", retry
+    assert retry["status"] == "accepted", retry
     outcome = retry["admissions"][0]
     assert outcome["status"] == "existing"
     assert outcome["current_lifecycle"] == "erased"
@@ -470,7 +470,7 @@ def test_suppression_blocks_silent_reintroduction(rig, tmp_path):
     source_id = _source(rig)
     original = _utterance(rig, "sensitive capture", source_id=source_id)
     result = _admit(rig, records=[original])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     _erase(
         rig,
         [{"object_id": original["id"], "compartments": ["semantic"]}],
@@ -542,12 +542,12 @@ def test_tombstone_is_terminal(rig):
         claims=rig.claims(),
     )
     result = _admit(rig, records=[ancestor, descendant], links=[link])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     lineage_id = generate_id("lineage")
     tombstone = _disposition(rig, link["id"], "tombstone", lineage_id, None)
     result = _admit(rig, records=[tombstone])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     # A physical/logical erasure tombstone is terminal: restore is refused.
     restore = _disposition(rig, link["id"], "restore", lineage_id, tombstone["id"])
@@ -576,7 +576,7 @@ def test_blob_content_erasure_destroys_salt(rig):
         data=data, media_type="audio/raw", claims=rig.claims()
     )
     result = _admit(rig, blobs=[blob], blob_bytes={blob["id"]: blob_data})
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     _erase(rig, [{"object_id": blob["id"], "compartments": ["content", "semantic"]}])
 
@@ -645,7 +645,7 @@ def test_multi_subject_media_decision_shapes(rig):
 def test_receipt_membership_links(rig):
     drop = _utterance(rig, "covered by a receipt")
     result = _admit(rig, records=[drop])
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     _svc, status = _erase(
         rig, [{"object_id": drop["id"], "compartments": ["semantic"]}]
     )

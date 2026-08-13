@@ -251,7 +251,7 @@ def _verify_commit_chain(
         unsigned_payload = {k: v for k, v in payload.items() if k != "signature"}
         unsigned_content = dict(content, structural_payload=unsigned_payload)
         signing_header = {
-            "spec": "ccf/0.1.1",
+            "spec": "ccf/0.1.2-rc1",
             "object_kind": "record",
             "id": record_id,
             "hash_profile": CCF_HASH_PROFILE,

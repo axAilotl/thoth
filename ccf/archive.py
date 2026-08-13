@@ -36,9 +36,9 @@ from ccf.registry import PinnedRegistries
 from ccf.schemas import SchemaSet
 
 DEFAULT_ACTIVE_PROFILES = [
-    "ccf-core-0.1.1",
-    "ccf-local-sync-0.1.1",
-    "ccf-continuity-pack-0.1.1",
+    "ccf-core-0.1.2-rc1",
+    "ccf-local-sync-0.1.2-rc1",
+    "ccf-continuity-pack-0.1.2-rc1",
 ]
 
 
@@ -421,12 +421,12 @@ class Archive:
             if policy_ref is not None:
                 semantic_content["policy_ref"] = policy_ref
             self.schemas.validate(
-                "urn:ccf:schema:0.1.1:objects.record-semantic-content",
+                "urn:ccf:schema:0.1.2-rc1:objects.record-semantic-content",
                 semantic_content,
                 what="bootstrap semantic content",
             )
         self.schemas.validate(
-            "urn:ccf:schema:0.1.1:objects.record-structural-content",
+            "urn:ccf:schema:0.1.2-rc1:objects.record-structural-content",
             structural_content,
             what="bootstrap structural content",
         )
@@ -539,6 +539,58 @@ class Archive:
                 "commit_hash": row[2],
             }
 
+    def find_origin_object(
+        self,
+        source_id: str,
+        native_id: str,
+        revision: str,
+        object_kind: str,
+    ) -> str | None:
+        """Object ID admitted under one origin tuple, or ``None``.
+
+        Producer-side idempotency probe (spec 6.5): importers use it to
+        skip already-admitted source-native items instead of resubmitting
+        them under fresh object IDs.
+        """
+        parse_id(source_id)
+        result = self.find_origin_objects([(source_id, native_id, revision, object_kind)])
+        return result.get((source_id, native_id, revision, object_kind))
+
+    def find_origin_objects(
+        self, probes: list[tuple[str, str, str, str]]
+    ) -> dict[tuple[str, str, str, str], str]:
+        """Bulk form of :meth:`find_origin_object` over one connection.
+
+        Importers probe whole batches at once: one query per chunk instead
+        of two connections per file, which matters at corpus scale.
+        """
+        if not probes:
+            return {}
+        sources = [probe[0] for probe in probes]
+        natives = [probe[1] for probe in probes]
+        revisions = [probe[2] for probe in probes]
+        kinds = [probe[3] for probe in probes]
+        with open_ccf_connection(self._settings) as conn:
+            rows = conn.execute(
+                """
+                SELECT t.source_id, t.native_id, t.revision, t.object_kind,
+                       o.object_id
+                FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[])
+                     AS t(source_id, native_id, revision, object_kind)
+                JOIN origin_index o
+                  ON o.archive_id = %s
+                 AND o.source_id = t.source_id
+                 AND o.native_id = t.native_id
+                 AND o.revision = t.revision
+                 AND o.object_kind = t.object_kind
+                """,
+                (sources, natives, revisions, kinds, self.archive_id),
+            ).fetchall()
+        return {
+            (source_id, native_id, revision, kind): object_id
+            for source_id, native_id, revision, kind, object_id in rows
+        }
+
     def get_object(self, object_id: str) -> dict | None:
         """Portable view of one admitted object (header + compartments)."""
         parse_id(object_id)
@@ -557,7 +609,7 @@ class Archive:
                 "id": object_id,
                 "object_kind": header_row[0],
                 "header": {
-                    "spec": "ccf/0.1.1",
+                    "spec": "ccf/0.1.2-rc1",
                     "object_kind": header_row[0],
                     "id": object_id,
                     "hash_profile": "ccf-jcs-sha256-v2",
@@ -615,7 +667,7 @@ def _insert_commit_record(conn, archive_id: str, commit, committed_at: str) -> N
             id, archive_id, object_kind, spec, hash_profile,
             structural_commitment, semantic_commitment, object_hash,
             submission_hash
-        ) VALUES (%s, %s, 'record', 'ccf/0.1.1', 'ccf-jcs-sha256-v2',
+        ) VALUES (%s, %s, 'record', 'ccf/0.1.2-rc1', 'ccf-jcs-sha256-v2',
                   %s, NULL, %s, NULL)
         """,
         (

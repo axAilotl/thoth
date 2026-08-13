@@ -31,7 +31,7 @@ def rig(ccf_settings, tmp_path, ccf_package_root):
         },
     )
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[record]))
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     rig._test_record_id = record["id"]
     return rig
 

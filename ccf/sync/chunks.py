@@ -19,7 +19,7 @@ from ccf.sync.packio import PackError
 
 DEFAULT_CHUNK_SIZE = 65536
 SIDECAR_SUFFIX = ".chunks.json"
-SIDECAR_FORMAT = "ccf.delta-pack-chunks/0.1.1"
+SIDECAR_FORMAT = "ccf.delta-pack-chunks/0.1.2-rc1"
 
 
 class ChunkVerificationError(PackError):

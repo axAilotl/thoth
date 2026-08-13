@@ -23,10 +23,10 @@ from ccf.schemas import SchemaSet
 RECEIPT_TYPE = "lineage.erasure_receipt"
 MEMBERSHIP_LINK_TYPE = "ccf.covers"
 
-SCHEMA_RECEIPT_PAYLOAD = "urn:ccf:schema:0.1.1:payload.lineage.erasure_receipt"
-SCHEMA_RECEIPT_STRUCTURAL = "urn:ccf:schema:0.1.1:structural.lineage.erasure_receipt"
-SCHEMA_LINK_STRUCTURAL = "urn:ccf:schema:0.1.1:objects.link-structural-content"
-SCHEMA_LINK_SEMANTIC = "urn:ccf:schema:0.1.1:objects.link-semantic-content"
+SCHEMA_RECEIPT_PAYLOAD = "urn:ccf:schema:0.1.2-rc1:payload.lineage.erasure_receipt"
+SCHEMA_RECEIPT_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:structural.lineage.erasure_receipt"
+SCHEMA_LINK_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:objects.link-structural-content"
+SCHEMA_LINK_SEMANTIC = "urn:ccf:schema:0.1.2-rc1:objects.link-semantic-content"
 
 
 def build_receipt_record_spec(
@@ -40,12 +40,18 @@ def build_receipt_record_spec(
     worker_id: str,
     authority: dict,
     completed_at: str,
+    suppression_commitment: dict,
 ) -> dict:
     """The ``admit_bootstrap``-shaped spec for the erasure receipt Record.
 
     ``selectors_invalidated`` counts selector (Link semantic) erasures.
     ``keys_destroyed`` and ``ciphertexts_deleted`` are honestly zero: this
     is a plaintext-envelope logical erasure (spec 3.7).
+
+    ``suppression_commitment`` commits the receipt to the canonical
+    ``lineage.suppression_set`` lineage (profile, set Record and Blob IDs,
+    entry count, Merkle root, key/profile id, scope commitment) — required
+    by the 0.1.2-rc1 receipt schema (spec 12.7).
     """
     selectors = sum(
         1
@@ -71,6 +77,7 @@ def build_receipt_record_spec(
         "destroyed_key_count": "0",
         "status": "verified",
         "membership_link_type": MEMBERSHIP_LINK_TYPE,
+        "suppression_commitment": suppression_commitment,
     }
     schemas.validate(SCHEMA_RECEIPT_PAYLOAD, payload, what="erasure receipt payload")
     schemas.validate(

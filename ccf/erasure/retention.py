@@ -1,7 +1,7 @@
 """Retention-profile enforcement at erasure time (spec 1.3, 3.10, 5.3).
 
 Type and Link registries declare one of four retention profiles
-(``ccf.retention-profiles/0.1.1``):
+(``ccf.retention-profiles/0.1.2-rc1``):
 
 - ``erasable`` — both compartments (and Blob content) may be removed; the
   header and commitments remain;
@@ -64,6 +64,8 @@ def effective_profile(declared: str | None, registry_profile: str | None) -> str
 
 def load_target(conn, archive_id: str, object_id: str) -> dict:
     """Current storage facts for one erasure target; fail closed if unknown."""
+    from ccf.erasure import suppression
+
     header = conn.execute(
         "SELECT object_kind, submission_hash FROM object_header WHERE id = %s",
         (object_id,),
@@ -86,11 +88,15 @@ def load_target(conn, archive_id: str, object_id: str) -> dict:
         ).fetchall()
     }
     blob_state = None
+    blob_bytes = None
     if header[0] == "blob":
         row = conn.execute(
-            "SELECT state FROM blob_content WHERE blob_id = %s", (object_id,)
+            "SELECT state, plaintext_bytes FROM blob_content WHERE blob_id = %s",
+            (object_id,),
         ).fetchone()
         blob_state = row[0] if row else None
+        if row is not None and row[0] == "plaintext":
+            blob_bytes = bytes(row[1])
     origin = conn.execute(
         """
         SELECT source_id, native_id, revision FROM origin_index
@@ -98,6 +104,25 @@ def load_target(conn, archive_id: str, object_id: str) -> dict:
         """,
         (archive_id, object_id),
     ).fetchone()
+    # Content commitment for the suppression preimage (spec 12.7): the
+    # still-plaintext semantic payload (Records/Links) or raw bytes
+    # (Blobs), so equivalent content is caught even under a fresh origin
+    # tuple. None when the content is already unavailable.
+    content_commitment = None
+    if header[0] == "blob":
+        if blob_bytes is not None:
+            content_commitment = suppression.content_commitment_for_bytes(blob_bytes)
+    elif compartments.get("semantic") == "plaintext":
+        semantic = conn.execute(
+            """
+            SELECT plaintext_json -> 'payload' FROM compartment
+            WHERE object_id = %s AND compartment = 'semantic'
+              AND state = 'plaintext'
+            """,
+            (object_id,),
+        ).fetchone()
+        if semantic is not None and semantic[0] is not None:
+            content_commitment = suppression.content_commitment_for_payload(semantic[0])
     return {
         "object_id": object_id,
         "object_kind": header[0],
@@ -107,6 +132,7 @@ def load_target(conn, archive_id: str, object_id: str) -> dict:
         "structural_state": structural[0] if structural else None,
         "compartments": compartments,
         "blob_state": blob_state,
+        "content_commitment": content_commitment,
         "origin": (
             {"source_id": origin[0], "native_id": origin[1], "revision": origin[2]}
             if origin
@@ -191,6 +217,7 @@ def plan_targets(
                 "erase_content": "content" in parts,
                 "origin": target["origin"],
                 "submission_hash": target["submission_hash"],
+                "content_commitment": target["content_commitment"],
             }
         )
     return plans

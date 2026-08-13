@@ -9,7 +9,7 @@ and invalidation machinery and rebuilding from canonical state must lose
 nothing (spec sections 1.4 and 8.7).
 
 Table shapes follow the vendored reference envelope
-(``spec/ccf/0.1.1/sql/postgres-reference.sql``), trimmed to what phase 5
+(``spec/ccf/0.1.2-rc1/sql/postgres-reference.sql``), trimmed to what phase 5
 needs: single-current-generation rows (older generations are not retained),
 no policy/authorization projections (those belong to the governance
 stream).

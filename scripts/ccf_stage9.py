@@ -1,4 +1,4 @@
-"""CCF 0.1.1 stage 9 torture-run support (checklist section 9).
+"""CCF 0.1.2-rc1 stage 9 torture-run support (checklist section 9).
 
 Importable scenario implementations plus the shared run context. The
 standalone entrypoint is ``python scripts/ccf_stage9.py`` (see
@@ -49,7 +49,7 @@ class ScenarioFailure(AssertionError):
 
 @dataclass
 class Stage9Context:
-    """Shared state threaded through the 11 scenarios, in order."""
+    """Shared state threaded through the 12 scenarios, in order."""
 
     rig: object
     importer: ObsidianImporter
@@ -217,7 +217,7 @@ def scenario_02_exact_retry_after_crash(ctx: Stage9Context) -> dict:
     # batch and its durably spooled Blob bytes, then re-admits.
     replay_bytes = ctx.producer.spooled_blob_bytes(batch["batch_id"])
     result = ctx.archive.admit_batch(batch, blob_bytes=replay_bytes)
-    check(result["status"] == "committed", f"retry status: {result['status']}")
+    check(result["status"] == "accepted", f"retry status: {result['status']}")
     check(
         result.get("commit_sequence") == notes_batch["commit_sequence"],
         "retry did not return the stored commit coordinates",
@@ -250,7 +250,7 @@ def scenario_03_duplicate_and_changed_revision(ctx: Stage9Context) -> dict:
 
     # Same origin tuple + same submission hash -> idempotent existing.
     retry = _admit_mapped(ctx, ctx.importer.remap_note(relpath, reuse_ids=True))
-    check(retry["status"] == "committed", f"dup retry status: {retry['status']}")
+    check(retry["status"] == "accepted", f"dup retry status: {retry['status']}")
     statuses = {a["status"] for a in retry["admissions"]}
     check(statuses == {"existing"}, f"dup retry outcomes: {statuses}")
     check(ctx.archive.head() == head_before, "idempotent retry committed new objects")
@@ -305,7 +305,7 @@ def scenario_04_same_batch_object_graph(ctx: Stage9Context) -> dict:
         host is not None,
         f"mutual pair not committed atomically: {a_path} / {b_path}",
     )
-    check(host["status"] == "committed", f"graph batch status: {host['status']}")
+    check(host["status"] == "accepted", f"graph batch status: {host['status']}")
     check(host["purpose"] == "notes", f"graph batch purpose: {host['purpose']}")
     return {
         "pair": [a_path, b_path],
@@ -396,7 +396,7 @@ def scenario_06_entity_merge_split(ctx: Stage9Context) -> dict:
             source_ccf_id=vault_source,
         )
         result = _admit_mapped(ctx, mapped)
-        check(result["status"] == "committed", f"entity admit: {result['status']}")
+        check(result["status"] == "accepted", f"entity admit: {result['status']}")
         entity_ids.append(mapped.records[0]["id"])
     e1, e2 = entity_ids
 
@@ -432,7 +432,7 @@ def scenario_06_entity_merge_split(ctx: Stage9Context) -> dict:
         },
     )
     result = _admit_mapped(ctx, _combined(records=[resolution], links=[same_as]))
-    check(result["status"] == "committed", f"merge admit: {result['status']}")
+    check(result["status"] == "accepted", f"merge admit: {result['status']}")
 
     # Generation fence: the projection refuses reads until rebuilt.
     stale = False
@@ -474,7 +474,7 @@ def scenario_06_entity_merge_split(ctx: Stage9Context) -> dict:
         type="ccf.distinct_from", from_id=e1, to_id=e2, claims=ctx.rig.claims()
     )
     result = _admit_mapped(ctx, _combined(records=[retract], links=[distinct]))
-    check(result["status"] == "committed", f"split admit: {result['status']}")
+    check(result["status"] == "accepted", f"split admit: {result['status']}")
     stale = False
     try:
         ctx.archive.projections.entity_clusters()
@@ -528,7 +528,7 @@ def scenario_07_review_survival(ctx: Stage9Context) -> dict:
         evidence_ccf_ids=[note.artifact_id],
     )
     result = _admit_mapped(ctx, candidate)
-    check(result["status"] == "committed", f"candidate admit: {result['status']}")
+    check(result["status"] == "accepted", f"candidate admit: {result['status']}")
     candidate_id = candidate.records[0]["id"]
 
     accepted_payload = {
@@ -558,7 +558,7 @@ def scenario_07_review_survival(ctx: Stage9Context) -> dict:
         accepted_payload=accepted_payload,
     )
     result = _admit_mapped(ctx, review)
-    check(result["status"] == "committed", f"review admit: {result['status']}")
+    check(result["status"] == "accepted", f"review admit: {result['status']}")
     decision_id = review.records[0]["id"]
     successor_id = review.records[1]["id"]
 
@@ -702,30 +702,41 @@ def scenario_08_semantic_erasure(ctx: Stage9Context) -> dict:
     )
     check(artifact_outcome.get("payload_available") is False, "bytes returned after erasure")
 
-    # Silent reintroduction under a new revision: suppressed.
+    # Silent reintroduction of the erased content under a NEW revision:
+    # the origin token (which includes the revision) does not fire, but
+    # the content token over the erased payload digest must (0.1.2
+    # suppression profile). The record is suppressed; its blob was never
+    # erased, so the identical bytes stay admissible.
     forged = ctx.importer.remap_note(
         relpath,
         reuse_ids=False,
         revision=f"{note.revision}-recapture",
-        text_override="stage 9 reintroduction attempt",
     )
     result = _admit_mapped(ctx, forged, links=False)
-    suppressed = [
-        a for a in result["admissions"] if a.get("current_lifecycle") == "suppressed"
-    ]
-    check(suppressed, f"reintroduction not suppressed: {result['admissions']}")
-    for admission in result["admissions"]:
-        check(
-            ctx.archive.get_object(admission["object_id"]) is None
-            or admission["status"] == "existing",
-            "suppressed reintroduction was committed",
-        )
+    record_outcome = next(
+        a for a in result["admissions"] if a["object_id"] == forged.records[0]["id"]
+    )
+    check(
+        record_outcome.get("current_lifecycle") == "suppressed",
+        f"erased content reintroduction not suppressed: {record_outcome}",
+    )
+    check(
+        ctx.archive.get_object(forged.records[0]["id"]) is None,
+        "suppressed reintroduction was committed",
+    )
+    blob_outcome = next(
+        a for a in result["admissions"] if a["object_id"] == forged.blobs[0]["id"]
+    )
+    check(
+        blob_outcome["status"] == "admitted",
+        f"never-erased blob bytes must stay admissible: {blob_outcome}",
+    )
     ctx.details["erased_note"] = relpath
     return {
         "erased": relpath,
         "saga": status.get("stage"),
         "retry_lifecycle": artifact_outcome.get("current_lifecycle"),
-        "suppressed": len(suppressed),
+        "suppressed": record_outcome.get("current_lifecycle"),
     }
 
 
@@ -940,14 +951,77 @@ def scenario_10_corrupt_commit_and_catalog(ctx: Stage9Context) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _embedded_mini_archive(ctx: Stage9Context):
+    """Small fully-embedded vault in a fresh archive (no external blobs)."""
+    from dataclasses import replace as dc_replace
+
+    from ccf.erasure.suppression import generate_suppression_key
+
+    vault = ctx.workspace / "embedded_vault"
+    (vault / "notes").mkdir(parents=True, exist_ok=True)
+    (vault / "notes" / "alpha.md").write_text(
+        "---\ntitle: Alpha\n---\nAlpha links to [[beta]].\n", encoding="utf-8"
+    )
+    (vault / "notes" / "beta.md").write_text(
+        "---\ntitle: Beta\n---\nBeta embeds ![[clip.png]].\n", encoding="utf-8"
+    )
+    (vault / "notes" / "clip.png").write_bytes(b"\x89PNG-embedded-fixture")
+    settings = ctx.settings_factory()
+    key = generate_suppression_key(ctx.workspace / "suppression-e.key")
+    rig_dir = ctx.workspace / "rig_embedded"
+    rig_dir.mkdir(exist_ok=True)
+    rig = ccf_helpers.make_rig(
+        dc_replace(settings, suppression_key_path=str(key)),
+        rig_dir,
+        ctx.package_root,
+    )
+    importer = ObsidianImporter(
+        producer=rig.producer,
+        archive=rig.archive,
+        ctx=MapContext(person_id=rig.person_id, policy_hint=rig.policy_lineage_id),
+        vault_root=vault,
+        run_tag=f"stage9-embedded-{int(time.time())}",
+    )
+    mini_report = importer.import_vault()
+    check(
+        not mini_report.admission_errors,
+        f"embedded mini import: {mini_report.admission_errors[:2]}",
+    )
+    check(mini_report.bytes_external == 0, "mini archive must be fully embedded")
+    return rig, rig.archive, mini_report
+
+
 def scenario_11_restore_and_foreign_merge(ctx: Stage9Context) -> dict:
     from ccf.archive import Archive
+    from ccf.sync.export import ExportError
     from ccf.sync.restore import restore_mindpack
 
-    ctx.require_report()
-    head = ctx.archive.head()
+    report = ctx.require_report()
     pack_dir = ctx.workspace / "corpus.mindpack"
-    manifest = ctx.archive.sync().export_mindpack(pack_dir)
+
+    # Complete export fails closed while any compartment is locally
+    # withheld (0.1.2 partial-custody rule): the corpus import deliberately
+    # leaves over-cap binaries as manifest-only external Blobs, and the
+    # manifest must not fabricate an unavailability lineage for them.
+    source_rig = ctx.rig
+    source_archive = ctx.archive
+    source_report = report
+    try:
+        manifest = ctx.archive.sync().export_mindpack(pack_dir)
+        check(
+            report.bytes_external == 0,
+            "export succeeded despite manifest-only external blobs",
+        )
+    except ExportError as exc:
+        check(
+            report.bytes_external > 0 and "withheld" in str(exc),
+            f"export refused for an unexpected reason: {exc}",
+        )
+        # Restore/merge coverage runs on a fully embedded mini archive.
+        pack_dir = ctx.workspace / "embedded.mindpack"
+        source_rig, source_archive, source_report = _embedded_mini_archive(ctx)
+        manifest = source_archive.sync().export_mindpack(pack_dir)
+    head = source_archive.head()
     check(
         manifest["extensions"]["completeness"]["complete"] is True,
         f"pack incomplete: {manifest['extensions']['completeness']['dangling'][:3]}",
@@ -955,16 +1029,16 @@ def scenario_11_restore_and_foreign_merge(ctx: Stage9Context) -> dict:
     check(manifest["head_commit_hash"] == head["commit_hash"], "manifest head mismatch")
 
     settings_b = ctx.settings_factory()
-    report = restore_mindpack(
+    restore_report = restore_mindpack(
         settings_b,
         package_root=ctx.package_root,
         pack_path=pack_dir,
         trusted_genesis_hash=manifest["genesis_commit_hash"],
         trusted_head_hash=manifest["head_commit_hash"],
     )
-    check(report["status"] == "restored", f"restore: {report['status']}")
-    check(report["partial"] is False, "restore was partial")
-    verification = report["verification"]
+    check(restore_report["status"] == "restored", f"restore: {restore_report['status']}")
+    check(restore_report["partial"] is False, "restore was partial")
+    verification = restore_report["verification"]
     check(
         verification["genesis_commit_hash"] == manifest["genesis_commit_hash"]
         and verification["head_commit_hash"] == head["commit_hash"],
@@ -973,7 +1047,7 @@ def scenario_11_restore_and_foreign_merge(ctx: Stage9Context) -> dict:
     replica = Archive.open(
         settings_b,
         package_root=ctx.package_root,
-        archive_key_path=ctx.rig.archive_key_path,
+        archive_key_path=source_rig.archive_key_path,
     )
     check(replica.head() == head, "replica head differs from source")
 
@@ -993,21 +1067,24 @@ def scenario_11_restore_and_foreign_merge(ctx: Stage9Context) -> dict:
     )
     merge = rig_b.archive.sync().import_mindpack(pack_dir)
     check(merge["status"] == "merged", f"merge: {merge.get('status')}")
-    check(merge["source_archive_id"] == ctx.archive.archive_id, "merge source mismatch")
+    check(
+        merge["source_archive_id"] == source_archive.archive_id,
+        "merge source mismatch",
+    )
 
-    sample = ctx.details["review"]["decision_id"]
-    for object_id in (sample, ctx.report.session_id, ctx.report.run_id):
+    sample = next(iter(source_report.notes.values())).artifact_id
+    for object_id in (sample, source_report.session_id, source_report.run_id):
         merged_obj = rig_b.archive.get_object(object_id)
         check(merged_obj is not None, f"merged object missing: {object_id}")
         check(
             merged_obj["header"]["object_hash"]
-            == ctx.archive.get_object(object_id)["header"]["object_hash"],
+            == source_archive.get_object(object_id)["header"]["object_hash"],
             f"object hash changed across merge: {object_id}",
         )
     forks = rig_b.archive.sync().forks()
     check(
         any(
-            f["source_archive_id"] == ctx.archive.archive_id
+            f["source_archive_id"] == source_archive.archive_id
             and f["head_commit_hash"] == head["commit_hash"]
             for f in forks
         ),
@@ -1020,12 +1097,81 @@ def scenario_11_restore_and_foreign_merge(ctx: Stage9Context) -> dict:
         "merge_commit_sequence": merge.get("commit_sequence"),
         "merged_objects": len(merge.get("admitted", [])),
         "custody_proofs": len(forks),
+        "source": "corpus" if source_archive is ctx.archive else "embedded-mini",
     }
 
 
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Scenario 12: cross-instance re-import of the whole corpus (thoth-doz)
+# ---------------------------------------------------------------------------
+
+
+def scenario_12_cross_instance_reimport(ctx: Stage9Context) -> dict:
+    """A brand-new importer instance over the same vault reuses everything.
+
+    Stable source URNs plus origin-index recognition mean the second pass
+    commits only its own session/run — no duplicated sources, no false
+    origin_revision_conflict wall, and scenario 8's erased note stays
+    suppressed (its origin row still resolves, so it is skipped rather
+    than reintroduced).
+    """
+    report = ctx.require_report()
+    fresh = ObsidianImporter(
+        producer=ctx.producer,
+        archive=ctx.archive,
+        ctx=MapContext(
+            person_id=ctx.rig.person_id, policy_hint=ctx.rig.policy_lineage_id
+        ),
+        vault_root=ctx.vault_root,
+        embed_cap_bytes=ctx.importer.embed_cap_bytes,
+        run_tag=f"stage9-reimport-{int(time.time())}",
+    )
+    second = fresh.import_vault()
+    check(
+        not second.admission_errors,
+        f"re-import admission errors: {second.admission_errors[:2]}",
+    )
+    # Pass 1 also admitted the scenario-5 probe segment ("malformed_probe"
+    # + Healthy.md), which is not part of the vault tree — so pass 2 is a
+    # subset of pass 1, and every shared identity must match exactly.
+    for key, urn in second.sources.items():
+        check(
+            report.sources.get(key) == urn,
+            f"source URN drifted across instances: {key}",
+        )
+    check(
+        set(second.notes) <= set(report.notes),
+        "re-import saw notes the first pass did not",
+    )
+    reused = sum(1 for record in second.notes.values() if record.existing)
+    check(
+        reused == len(second.notes),
+        f"re-import re-admitted {len(second.notes) - reused} unchanged notes",
+    )
+    for relpath, record in second.notes.items():
+        check(
+            record.artifact_id == report.notes[relpath].artifact_id,
+            f"artifact identity drifted for {relpath}",
+        )
+    check(
+        second.attachment_blobs == report.attachment_blobs,
+        "attachment identity drifted across instances",
+    )
+    check(
+        second.objects_committed == 2,
+        f"re-import committed {second.objects_committed} objects "
+        "(expected only its session and run)",
+    )
+    return {
+        "notes_reused": reused,
+        "attachments_reused": len(second.attachment_blobs),
+        "objects_committed": second.objects_committed,
+    }
+
 
 SCENARIOS = (
     ("01 fresh import", scenario_01_fresh_import),
@@ -1039,11 +1185,12 @@ SCENARIOS = (
     ("09 full wiki/search/vector rebuild", scenario_09_full_projection_rebuild),
     ("10 corrupt commit and unsupported catalog", scenario_10_corrupt_commit_and_catalog),
     ("11 restore and foreign merge", scenario_11_restore_and_foreign_merge),
+    ("12 cross-instance re-import", scenario_12_cross_instance_reimport),
 )
 
 
 def run_scenarios(ctx: Stage9Context) -> list[dict]:
-    """Run all 11 scenarios in order; returns per-scenario results."""
+    """Run all 12 scenarios in order; returns per-scenario results."""
     results = []
     for name, fn in SCENARIOS:
         started = time.monotonic()
@@ -1071,7 +1218,7 @@ def run_scenarios(ctx: Stage9Context) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Standalone entrypoint: ephemeral Postgres + full 11-scenario report
+# Standalone entrypoint: ephemeral Postgres + full 12-scenario report
 # ---------------------------------------------------------------------------
 
 _CCF_PG_IMAGES = ("pgvector/pgvector:pg16", "postgres:16-alpine", "postgres:16")
@@ -1133,7 +1280,7 @@ def main(argv: list[str] | None = None) -> int:
     import tempfile
 
     parser = argparse.ArgumentParser(
-        description="CCF 0.1.1 checklist stage 9: Obsidian torture run"
+        description="CCF 0.1.2-rc1 checklist stage 9: Obsidian torture run"
     )
     parser.add_argument(
         "--vault",
@@ -1153,7 +1300,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--package-root",
-        default=str(REPO_ROOT / "spec" / "ccf" / "0.1.1"),
+        default=str(REPO_ROOT / "spec" / "ccf" / "0.1.2-rc1"),
         help="vendored CCF package root",
     )
     parser.add_argument("--report", default=None, help="write JSON report here")
@@ -1182,7 +1329,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     passed = sum(1 for r in results if r["status"] == "PASS")
-    print("CCF 0.1.1 stage 9 — Obsidian torture run")
+    print("CCF 0.1.2-rc1 stage 9 — Obsidian torture run")
     print(f"vault: {args.vault}")
     print(f"workspace: {workspace}")
     print("-" * 72)

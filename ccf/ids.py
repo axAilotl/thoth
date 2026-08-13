@@ -11,11 +11,12 @@ IDs leak creation time after erasure, which is why CCF pins UUIDv4
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from dataclasses import dataclass
 
-#: Portable ID kinds defined by CCF 0.1.1 (spec section 2.1).
+#: Portable ID kinds defined by CCF 0.1.2-rc1 (spec section 2.1).
 ID_KINDS: frozenset[str] = frozenset(
     {
         "record",
@@ -56,6 +57,27 @@ def generate_id(kind: str) -> str:
     if kind not in ID_KINDS:
         raise CcfIdError(f"unsupported CCF id kind: {kind!r}")
     return str(CcfId(kind, uuid.uuid4()))
+
+
+def derive_id(namespace: uuid.UUID, kind: str, material: list[str]) -> str:
+    """Derive a deterministic canonical CCF ID from stable material.
+
+    UUIDv5 digest of the JSON-canonical ``material`` under ``namespace``,
+    with the version/variant bits forced to the UUIDv4 / RFC 4122 layout
+    :func:`parse_id` demands — deterministic content with a spec-legal
+    shape. Used ONLY where CCF offers no idempotency key of its own
+    (bootstrap objects, origin-root sources); every origin-bearing object
+    keeps a freshly generated URN and relies on the origin index.
+    """
+    if kind not in ID_KINDS:
+        raise CcfIdError(f"unsupported CCF id kind: {kind!r}")
+    if not material or not all(isinstance(part, str) and part for part in material):
+        raise CcfIdError("deterministic id material must be non-empty strings")
+    canonical = json.dumps(material, ensure_ascii=False, separators=(",", ":"))
+    digest = bytearray(uuid.uuid5(namespace, canonical).bytes)
+    digest[6] = (digest[6] & 0x0F) | 0x40  # version 4
+    digest[8] = (digest[8] & 0x3F) | 0x80  # RFC 4122 variant
+    return str(CcfId(kind, uuid.UUID(bytes=bytes(digest))))
 
 
 def parse_id(urn: str) -> CcfId:

@@ -23,8 +23,8 @@ from ccf.objects import compartment_format, now_timestamp
 from ccf.sync.completeness import classify_references
 from ccf.sync.packio import PackObject, PackWriter
 
-MINDPACK_FORMAT = "ccf.mindpack/0.1.1"
-SCHEMA_MINDPACK_MANIFEST = "urn:ccf:schema:0.1.1:objects.mindpack-manifest"
+MINDPACK_FORMAT = "ccf.mindpack/0.1.2-rc1"
+SCHEMA_MINDPACK_MANIFEST = "urn:ccf:schema:0.1.2-rc1:objects.mindpack-manifest"
 
 
 class ExportError(RuntimeError):
@@ -33,7 +33,7 @@ class ExportError(RuntimeError):
 
 def _header_dict(row) -> dict:
     return {
-        "spec": "ccf/0.1.1",
+        "spec": "ccf/0.1.2-rc1",
         "object_kind": row[1],
         "id": row[0],
         "hash_profile": "ccf-jcs-sha256-v2",
@@ -265,7 +265,7 @@ def export_mindpack(
     writer.write_json(
         "archive.json",
         {
-            "format": "ccf.archive-row/0.1.1",
+            "format": "ccf.archive-row/0.1.2-rc1",
             "archive_id": archive_id,
             "epoch_id": archive["epoch_id"],
             "genesis_commit_hash": archive["genesis_commit_hash"],
@@ -383,6 +383,8 @@ def export_mindpack(
         foreign_ids=foreign_object_ids,
     )
 
+    compartment_availability = _compartment_availability(conn, archive_id, objects)
+
     manifest = {
         "format": MINDPACK_FORMAT,
         "mode": mode,
@@ -407,11 +409,132 @@ def export_mindpack(
         "withheld": sorted(withheld),
         "erased": sorted(erased),
         "foreign_custody_proofs": custody_proofs,
+        "compartment_availability": compartment_availability,
         "extensions": {"completeness": report.to_dict()},
     }
     schemas.validate(SCHEMA_MINDPACK_MANIFEST, manifest, what="mindpack manifest")
     writer.write_json("manifest.json", manifest)
     return manifest
+
+
+def _compartment_availability(conn, archive_id: str, objects: list[PackObject]) -> list[dict]:
+    """Per-compartment availability declarations (0.1.2-rc1 manifest field).
+
+    Every compartment of every packed object is declared with its
+    availability state, commitment, and retention profile. Unavailable
+    (withheld/erased) compartments carry a custody anchor — the object's
+    own admission coordinates — and, for erasures, the erasure receipt
+    Record as the unavailability lineage. A withheld compartment with no
+    derivable lineage fails closed: the manifest must not fabricate one.
+    """
+    coordinates = {
+        row[0]: (int(row[1]), int(row[2]))
+        for row in conn.execute(
+            """
+            SELECT object_id, commit_sequence, commit_position
+            FROM admission WHERE archive_id = %s
+            """,
+            (archive_id,),
+        ).fetchall()
+    }
+    # Erasure receipts cover their targets through ccf.covers membership
+    # Links (receipt -> target).
+    receipt_of: dict[str, str] = {}
+    for target_id, receipt_id in conn.execute(
+        """
+        SELECT l.plaintext_json ->> 'to_id', l.plaintext_json ->> 'from_id'
+        FROM compartment l
+        JOIN compartment r
+          ON r.object_id = (l.plaintext_json ->> 'from_id')
+         AND r.compartment = 'structural' AND r.state = 'plaintext'
+         AND r.plaintext_json ->> 'type' = 'lineage.erasure_receipt'
+        WHERE l.compartment = 'structural' AND l.state = 'plaintext'
+          AND l.plaintext_json ->> 'type' = 'ccf.covers'
+        ORDER BY l.plaintext_json ->> 'from_id'
+        """
+    ).fetchall():
+        receipt_of.setdefault(target_id, receipt_id)
+
+    availability_of = {
+        "plaintext": "available",
+        "encrypted": "withheld",
+        "withheld": "withheld",
+        "erased": "erased",
+    }
+    entries: list[dict] = []
+    for obj in objects:
+        states = dict(obj._states)
+        if obj.object_kind == "blob" and obj._blob_state:
+            states["blob_content"] = obj._blob_state
+        structural_content = (obj.structural or {}).get("content") or {}
+        retention_profile = structural_content.get("retention_profile")
+        if retention_profile is None:
+            if states.get("structural") == "erased":
+                # Only the ``erasable`` profile permits structural erasure,
+                # so the observed state entails the profile.
+                retention_profile = "erasable"
+            else:
+                raise ExportError(
+                    f"cannot determine retention profile for {obj.object_id}: "
+                    "structural compartment is not plaintext"
+                )
+        for compartment in ("structural", "semantic", "blob_content"):
+            if compartment == "blob_content":
+                if obj.object_kind != "blob":
+                    continue
+                commitment = structural_content.get("content_commitment")
+                if commitment is None:
+                    raise ExportError(
+                        f"blob {obj.object_id} has no content commitment"
+                    )
+            elif compartment == "semantic":
+                if obj.header.get("semantic_commitment") is None:
+                    continue  # object legitimately lacks a semantic compartment
+                commitment = obj.header["semantic_commitment"]
+            else:
+                commitment = obj.header["structural_commitment"]
+            state = states.get(compartment)
+            if state is None:
+                raise ExportError(
+                    f"{obj.object_id}/{compartment} has no compartment row"
+                )
+            availability = availability_of[state]
+            custody_proof = None
+            lineage_id = None
+            if availability != "available":
+                position = coordinates.get(obj.object_id)
+                if position is None:
+                    raise ExportError(
+                        f"{obj.object_id} is unavailable but has no admission "
+                        "coordinates to anchor custody"
+                    )
+                custody_proof = f"commit:{position[0]}:{position[1]}"
+                if availability == "erased":
+                    lineage_id = receipt_of.get(obj.object_id)
+                    if lineage_id is None:
+                        raise ExportError(
+                            f"{obj.object_id} is erased but no erasure receipt "
+                            "lineage covers it"
+                        )
+                else:
+                    raise ExportError(
+                        f"{obj.object_id}/{compartment} is withheld; the "
+                        "unavailability lineage is not derivable for a local "
+                        "export (refusing to fabricate one)"
+                    )
+            entries.append(
+                {
+                    "object_kind": obj.object_kind,
+                    "object_id": obj.object_id,
+                    "compartment": compartment,
+                    "availability": availability,
+                    "commitment": commitment,
+                    "retention_profile": retention_profile,
+                    "source_custody_proof": custody_proof,
+                    "unavailability_lineage_id": lineage_id,
+                }
+            )
+    return entries
 
 
 def _has_foreign_custody(conn) -> bool:

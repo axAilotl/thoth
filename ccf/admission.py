@@ -16,8 +16,15 @@ exactly this head lock). Inside that transaction admission:
    commit, then advances the head — all atomically.
 
 Per-object outcomes follow ``schemas/operational/admission.schema.json`` and
-batch outcomes ``batch-result.schema.json``: ``queued`` / ``committed`` /
-``partial`` / ``rejected`` / ``conflict``.
+batch outcomes ``batch-result.schema.json``: ``queued`` / ``accepted`` /
+``partially_accepted`` / ``content_rejected`` / ``quarantined`` /
+``conflict``. A cryptographically valid batch keeps a durable terminal
+disposition and remains a valid chain predecessor even when every content
+item is rejected (spec 6.2); an early batch stays ``queued`` with a
+``predecessor_missing`` reason and is retryable. Envelope-invalid arrivals
+(bad schema, catalog or credential mismatch, invalid signature, broken
+chain) are answered ``quarantined`` and never persisted: they are not
+attributable to the producer's signed chain.
 """
 
 from __future__ import annotations
@@ -58,19 +65,25 @@ from ccf.objects import now_timestamp
 from ccf.registry import PinnedRegistries
 from ccf.schemas import CcfSchemaError, SchemaSet
 
-SCHEMA_PRODUCER_BATCH = "urn:ccf:schema:0.1.1:sync.producer-batch"
-SCHEMA_RECORD_SUBMISSION = "urn:ccf:schema:0.1.1:submissions.record"
-SCHEMA_LINK_SUBMISSION = "urn:ccf:schema:0.1.1:submissions.link"
-SCHEMA_BLOB_SUBMISSION = "urn:ccf:schema:0.1.1:submissions.blob"
-SCHEMA_LINK_SEMANTIC_CONTENT = "urn:ccf:schema:0.1.1:objects.link-semantic-content"
-SCHEMA_RECORD_STRUCTURAL = "urn:ccf:schema:0.1.1:objects.record-structural-content"
-SCHEMA_RECORD_SEMANTIC = "urn:ccf:schema:0.1.1:objects.record-semantic-content"
-SCHEMA_LINK_STRUCTURAL = "urn:ccf:schema:0.1.1:objects.link-structural-content"
-SCHEMA_LINK_SEMANTIC = "urn:ccf:schema:0.1.1:objects.link-semantic-content"
-SCHEMA_BLOB_STRUCTURAL = "urn:ccf:schema:0.1.1:objects.blob-structural-content"
-SCHEMA_BLOB_SEMANTIC = "urn:ccf:schema:0.1.1:objects.blob-semantic-content"
+SCHEMA_PRODUCER_BATCH = "urn:ccf:schema:0.1.2-rc1:sync.producer-batch"
+SCHEMA_RECORD_SUBMISSION = "urn:ccf:schema:0.1.2-rc1:submissions.record"
+SCHEMA_LINK_SUBMISSION = "urn:ccf:schema:0.1.2-rc1:submissions.link"
+SCHEMA_BLOB_SUBMISSION = "urn:ccf:schema:0.1.2-rc1:submissions.blob"
+SCHEMA_LINK_SEMANTIC_CONTENT = "urn:ccf:schema:0.1.2-rc1:objects.link-semantic-content"
+SCHEMA_RECORD_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:objects.record-structural-content"
+SCHEMA_RECORD_SEMANTIC = "urn:ccf:schema:0.1.2-rc1:objects.record-semantic-content"
+SCHEMA_LINK_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:objects.link-structural-content"
+SCHEMA_LINK_SEMANTIC = "urn:ccf:schema:0.1.2-rc1:objects.link-semantic-content"
+SCHEMA_BLOB_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:objects.blob-structural-content"
+SCHEMA_BLOB_SEMANTIC = "urn:ccf:schema:0.1.2-rc1:objects.blob-semantic-content"
 
 DEFAULT_EVALUATOR_PROFILE = "ccf-deny-overrides-v1"
+
+#: Durable terminal batch dispositions (spec 6.2): a batch with any of
+#: these keeps its hash as a valid producer-chain predecessor.
+TERMINAL_BATCH_STATUSES = frozenset(
+    {"accepted", "partially_accepted", "content_rejected", "quarantined", "conflict"}
+)
 
 
 class AdmissionError(RuntimeError):
@@ -112,6 +125,10 @@ def _batch_result(
         "commit_sequence": commit_sequence,
         "commit_hash": commit_hash,
         "admissions": admissions or [],
+        # Top-level machine field per operational.batch-result (0.1.2-rc1
+        # requires it); extensions.reason keeps the same prose for
+        # existing consumers.
+        "reason": reason,
         "extensions": extensions,
     }
 
@@ -620,7 +637,7 @@ def admit_producer_batch(
         "SELECT status, result_json FROM producer_batch WHERE batch_id = %s",
         (batch.get("batch_id"),),
     ).fetchone()
-    if stored is not None and stored[0] in ("committed", "partial", "rejected", "conflict"):
+    if stored is not None and stored[0] in TERMINAL_BATCH_STATUSES:
         return stored[1]
 
     try:
@@ -638,9 +655,11 @@ def admit_producer_batch(
         # signed chain — it may be an outright forgery. Persisting it
         # would let an attacker plant a chain anchor and permanently
         # brick the honest producer. Replaying the same arrival simply
-        # re-verifies and rejects again, deterministically.
+        # re-verifies and rejects again, deterministically. The batch is
+        # answered ``quarantined`` (spec 6.2): not content-evaluated, not
+        # a chain predecessor.
         return _batch_result(
-            batch.get("batch_id", "unknown"), "rejected", archive_id, reason=exc.reason
+            batch.get("batch_id", "unknown"), "quarantined", archive_id, reason=exc.reason
         )
 
     lineage_heads = load_lineage_heads(conn, archive_id)
@@ -648,11 +667,25 @@ def admit_producer_batch(
     active_edges = load_active_acyclic_edges(conn, archive_id, acyclic_types)
     link_actions = current_link_actions(conn, archive_id)
 
+    # Suppression after erasure (spec 12.7): load the canonical suppression
+    # sets once per batch and audit the rebuildable lookup projection
+    # against them — drift (deleted/tampered rows) fails closed before any
+    # object is admitted, so a destroyed projection can never silently
+    # permit reintroduction.
+    from ccf.erasure import suppression
+
+    suppression_state = suppression.prepare_admission_check(
+        conn, archive_id=archive_id, key=suppression_key
+    )
+
     admitted: list[ResolvedObject] = []
     outcomes: list[dict] = []
     conflicts = 0
     admitted_ids: set[str] = set()
     pending: list[tuple[dict, str, str]] = []  # (submission, kind, submission_hash)
+    # Origin tuples claimed earlier in this same batch (their rows are not
+    # in origin_index until the commit writes): tuple -> (sub_hash, id).
+    batch_origins: dict[tuple[str, str, str, str], tuple[str, str]] = {}
 
     # -- Pass 1: schema/registry validation, idempotency, lineage, cycles. --
     for kind, schema_id in (
@@ -667,7 +700,7 @@ def admit_producer_batch(
                 _check_id_kind(sub)
             except (CcfSchemaError, _BatchRejected) as exc:
                 reason = getattr(exc, "reason", str(exc))
-                result = _batch_result(batch["batch_id"], "rejected", archive_id, reason=reason)
+                result = _batch_result(batch["batch_id"], "content_rejected", archive_id, reason=reason)
                 _record_batch_outcome(conn, batch, result, committed_sequence=None)
                 return result
             pending.append((sub, kind[:-1], sub_hash))  # record/link/blob
@@ -700,6 +733,28 @@ def admit_producer_batch(
         # Origin-tuple idempotency (spec 6.5).
         origin = sub.get("origin")
         if origin is not None:
+            origin_key = (
+                origin["source_id"],
+                origin["native_id"],
+                origin["revision"],
+                obj_kind,
+            )
+            claimed = batch_origins.get(origin_key)
+            if claimed is not None:
+                # Same tuple twice in one batch: the earlier submission's
+                # row does not exist yet, so enforce the conflict here.
+                conflicts += 1
+                outcomes.append(
+                    _object_outcome(
+                        object_id,
+                        "origin_revision_conflict",
+                        reason=(
+                            "origin tuple already claimed in this batch "
+                            f"by {claimed[1]}"
+                        ),
+                    )
+                )
+                continue
             row = conn.execute(
                 """
                 SELECT submission_hash, object_id, lifecycle FROM origin_index
@@ -741,17 +796,29 @@ def admit_producer_batch(
         # erased content must not be silently reintroduced under a new
         # revision or object ID. Authorized producers receive a lifecycle
         # result; everyone else receives a generic refusal.
-        from ccf.erasure import suppression
-
-        suppressed = suppression.admission_outcome(
-            conn,
-            archive_id=archive_id,
-            key=suppression_key,
-            origin=origin,
-            submission_hash=sub_hash,
-            object_id=object_id,
-            producer_id=batch["producer_id"],
-        )
+        if suppression_state is not None:
+            if obj_kind == "blob":
+                data = (blob_bytes or {}).get(sub["id"])
+                content_commitment = (
+                    suppression.content_commitment_for_bytes(data)
+                    if data is not None
+                    else None
+                )
+            else:
+                content_commitment = suppression.content_commitment_for_payload(
+                    sub["payload"]
+                )
+            suppressed = suppression.admission_outcome(
+                suppression_state,
+                key=suppression_key,
+                origin=origin,
+                content_commitment=content_commitment,
+                object_kind=obj_kind,
+                object_id=object_id,
+                producer_id=batch["producer_id"],
+            )
+        else:
+            suppressed = None
         if suppressed is not None:
             if suppressed["status"] == "rejected":
                 conflicts += 1
@@ -777,7 +844,7 @@ def admit_producer_batch(
                 blob_bytes=blob_bytes,
             )
         except _BatchRejected as exc:
-            result = _batch_result(batch["batch_id"], "rejected", archive_id, reason=exc.reason)
+            result = _batch_result(batch["batch_id"], "content_rejected", archive_id, reason=exc.reason)
             _record_batch_outcome(conn, batch, result, committed_sequence=None)
             return result
         except _ObjectConflict as exc:
@@ -789,12 +856,14 @@ def admit_producer_batch(
         admitted.append(resolved)
         outcomes.append(resolved)
         admitted_ids.add(object_id)
+        if origin is not None:
+            batch_origins[origin_key] = (sub_hash, object_id)
 
     # -- Pass 2: same-batch / archive reference completeness (spec 2.3). --
     try:
         _validate_references(conn, archive_id, admitted, admitted_ids)
     except _BatchRejected as exc:
-        result = _batch_result(batch["batch_id"], "rejected", archive_id, reason=exc.reason)
+        result = _batch_result(batch["batch_id"], "content_rejected", archive_id, reason=exc.reason)
         _record_batch_outcome(conn, batch, result, committed_sequence=None)
         return result
 
@@ -835,9 +904,9 @@ def admit_producer_batch(
             final.append(entry)
 
     if conflicts:
-        status = "partial" if admitted else "conflict"
+        status = "partially_accepted" if admitted else "conflict"
     else:
-        status = "committed"
+        status = "accepted"
     result = _batch_result(
         batch["batch_id"],
         status,
@@ -975,7 +1044,7 @@ def _resolve_submission(
 
 def _make_envelope(kind: str, compartment: str, content: dict, salt_fn) -> dict:
     return {
-        "format": f"ccf.{kind}-{compartment}/0.1.1",
+        "format": f"ccf.{kind}-{compartment}/0.1.2-rc1",
         "salt": salt_fn(),
         "content": content,
     }

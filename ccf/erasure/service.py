@@ -47,10 +47,10 @@ from ccf.ids import generate_id
 from ccf.lineage import load_lineage_heads
 from ccf.projections import EMBEDDING, WIKI
 
-SCHEMA_REQUEST_PAYLOAD = "urn:ccf:schema:0.1.1:payload.governance.erasure_request"
-SCHEMA_DECISION_PAYLOAD = "urn:ccf:schema:0.1.1:payload.governance.erasure_decision"
-SCHEMA_DISPOSITION_PAYLOAD = "urn:ccf:schema:0.1.1:payload.lineage.link_disposition"
-SCHEMA_DISPOSITION_STRUCTURAL = "urn:ccf:schema:0.1.1:structural.lineage.link_disposition"
+SCHEMA_REQUEST_PAYLOAD = "urn:ccf:schema:0.1.2-rc1:payload.governance.erasure_request"
+SCHEMA_DECISION_PAYLOAD = "urn:ccf:schema:0.1.2-rc1:payload.governance.erasure_decision"
+SCHEMA_DISPOSITION_PAYLOAD = "urn:ccf:schema:0.1.2-rc1:payload.lineage.link_disposition"
+SCHEMA_DISPOSITION_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:structural.lineage.link_disposition"
 
 _REQUEST_TYPE = "governance.erasure_request"
 _DECISION_TYPE = "governance.erasure_decision"
@@ -251,6 +251,22 @@ class ErasureService:
             raise ErasureError(f"decision {decision!r} requires targets")
         if decision not in ("approve", "deny", "restrict", "defer", "partial"):
             raise ErasureError(f"unknown erasure decision {decision!r}")
+        if (
+            decision in ("approve", "partial")
+            and targets
+            and self._suppression_key is None
+        ):
+            # 0.1.2-rc1 (spec 12.7): suppression commitments are canonical,
+            # journal-covered erasure lineage, and the receipt schema
+            # requires the suppression commitment — erasure without a
+            # suppression key cannot complete, so fail before anything is
+            # admitted.
+            raise ErasureError(
+                "erasure requires a configured suppression key "
+                "(database.ccf_archive.suppression_key_path or "
+                "THOTH_CCF_SUPPRESSION_KEY): canonical suppression lineage "
+                "is mandatory (spec 12.7)"
+            )
 
         now = self._archive.clock()
         lineage_id = generate_id("lineage")
@@ -462,15 +478,73 @@ class ErasureService:
                 (row["archive_id"], object_id),
             )
 
-        if self._suppression_key is not None:
+        if row["plans"]:
+            # Canonical suppression (spec 12.7, 0.1.2-rc1): the keyed
+            # tokens are committed as a governed Blob plus a canonical
+            # ``lineage.suppression_set`` Record — journal-covered in this
+            # same commit — and the lookup rows become a rebuildable
+            # projection of that lineage. The key is guaranteed by
+            # ``decide``; double-check rather than skip (fail closed).
+            if self._suppression_key is None:
+                raise ErasureError(
+                    "suppression key missing at block stage; refusing to "
+                    "erase without canonical suppression lineage"
+                )
+            from ccf.erasure import suppression_set
+
+            kind_tokens: list[tuple[str, str]] = []
+            seen_tokens: set[str] = set()
+            for plan in row["plans"]:
+                for kind, token in suppression.tokens_for_plan(
+                    self._suppression_key, plan
+                ):
+                    if token not in seen_tokens:
+                        seen_tokens.add(token)
+                        kind_tokens.append((kind, token))
+            tokens = [token for _, token in kind_tokens]
+            set_record_id = generate_id("record")
+            blob_id = generate_id("blob")
+            archive_row = load_archive(conn, self._archive.archive_id)
+            blob_resolved = suppression_set.build_suppression_blob(
+                tokens,
+                blob_id=blob_id,
+                archive=archive_row,
+                catalog=self._archive.catalog,
+                registries=self._archive.registries,
+                schemas=self._archive.schemas,
+                salt_fn=self._archive._salt_fn,
+            )
+            set_spec = suppression_set.build_suppression_set_spec(
+                tokens,
+                record_id=set_record_id,
+                blob_id=blob_id,
+                plans=row["plans"],
+                worker_id=row["actor"]["recorded_by"],
+                authority=row["actor"]["authority"],
+                recorded_at=now,
+                schemas=self._archive.schemas,
+            )
+        record_specs = [self._stage_marker_spec(row, "block", now)]
+        record_specs.extend(self._disposition_specs(conn, row, now))
+        if row["plans"]:
+            record_specs.append(set_spec)
+            resolved = self._commit_canonical(conn, record_specs, [blob_resolved])
             count = suppression.record_suppression(
                 conn,
                 archive_id=row["archive_id"],
                 operation_id=row["operation_id"],
-                key=self._suppression_key,
-                plans=row["plans"],
+                set_record_id=set_record_id,
+                blob_id=blob_id,
+                key_profile_id=suppression_set.KEY_PROFILE_ID,
+                kind_tokens=kind_tokens,
                 authorized_producers=row["authorized_producers"],
                 created_at=now,
+            )
+            operations.record_suppression_set(
+                conn,
+                operation_id=row["operation_id"],
+                descriptor=suppression_set.set_descriptor(set_spec, blob_id),
+                now=now,
             )
             operations.record_purged(
                 conn,
@@ -478,10 +552,8 @@ class ErasureService:
                 purged=[{"store": "suppression_entry", "rows": count}],
                 now=now,
             )
-
-        record_specs = [self._stage_marker_spec(row, "block", now)]
-        record_specs.extend(self._disposition_specs(conn, row, now))
-        resolved = self._commit_canonical(conn, record_specs)
+        else:
+            resolved = self._commit_canonical(conn, record_specs)
         operations.record_stage_head(
             conn,
             operation_id=row["operation_id"],
@@ -627,9 +699,20 @@ class ErasureService:
         verification = purge.verify_controlled_copies(
             conn, archive_id=row["archive_id"], plans=plans, affected=affected
         )
-        verification["suppression"] = (
-            "configured" if self._suppression_key is not None else "not_configured"
+        # Suppression self-heal (spec 12.7): the lookup projection is
+        # rebuilt from the canonical suppression lineage committed at
+        # block; canonical corruption or projection drift fails the saga
+        # loudly here rather than surfacing as silent reintroduction.
+        from ccf.erasure import suppression_set
+
+        rebuilt_suppression = suppression_set.rebuild_projection(
+            conn, row["archive_id"], now=now
         )
+        suppression_set.audit_projection(conn, row["archive_id"])
+        verification["suppression"] = {
+            "canonical_sets": True,
+            "rebuilt_rows": rebuilt_suppression,
+        }
         operations.record_purged(
             conn,
             operation_id=row["operation_id"],
@@ -660,6 +743,13 @@ class ErasureService:
             raise ErasureError(
                 f"operation {row['operation_id']} has no verification record"
             )
+        suppression_commitment = row["suppression_set"]
+        if suppression_commitment is None:
+            raise ErasureError(
+                f"operation {row['operation_id']} has no canonical "
+                "suppression set descriptor; the receipt cannot commit to "
+                "the suppression lineage (spec 12.7)"
+            )
         receipt_spec = receipts.build_receipt_record_spec(
             schemas=self._archive.schemas,
             operation_id=row["operation_id"],
@@ -670,6 +760,7 @@ class ErasureService:
             worker_id=row["actor"]["recorded_by"],
             authority=row["actor"]["authority"],
             completed_at=now,
+            suppression_commitment=suppression_commitment,
         )
         receipt_id = generate_id("record")
         receipt_spec["object_id"] = receipt_id
@@ -694,6 +785,18 @@ class ErasureService:
         self._commit_canonical(conn, [marker, receipt_spec], link_resolved)
         operations.record_receipt(
             conn, operation_id=row["operation_id"], receipt_id=receipt_id, now=now
+        )
+        # Backfill receipt linkage on the suppression projection rows (the
+        # verify-stage rebuild ran before the receipt existed).
+        from ccf.erasure import suppression_set
+
+        suppression_set.mark_receipt(
+            conn,
+            archive_id=row["archive_id"],
+            set_record_id=suppression_commitment["suppression_set_record_id"],
+            receipt_id=receipt_id,
+            operation_id=row["operation_id"],
+            authorized_producers=row["authorized_producers"],
         )
 
     # ------------------------------------------------------------------

@@ -107,7 +107,7 @@ def decision_archive(rig):
         links=mapped.links,
     )
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     review_decision_id = mapped.records[0]["id"]
 
     # -- entity resolution (human merge adjudication) --------------------
@@ -153,7 +153,7 @@ def decision_archive(rig):
         records=[e1, e2, resolution], links=[same_as]
     )
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     # -- consent lineage (governance.consent) ----------------------------
     consent_claims = rig.claims()
@@ -187,7 +187,7 @@ def decision_archive(rig):
     )
     batch = rig.producer.create_batch(records=[consent])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     # -- link disposition (retract a derived_from link) ------------------
     target_a = rig.producer.new_record(
@@ -242,7 +242,7 @@ def decision_archive(rig):
         links=[derived, active_derived],
     )
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     # -- erasure saga to receipt (lineage.erasure_receipt) ---------------
     utterance = rig.producer.new_record(
@@ -259,7 +259,7 @@ def decision_archive(rig):
     )
     batch = rig.producer.create_batch(records=[utterance])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     svc = rig.archive.erasure()
     request = svc.submit_request(

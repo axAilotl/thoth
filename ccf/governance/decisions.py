@@ -24,8 +24,8 @@ from psycopg.types.json import Jsonb
 
 from ccf.governance.context import parse_timestamp
 
-AUTHORIZATION_DECISION_SCHEMA = "urn:ccf:schema:0.1.1:governance.authorization-decision"
-POLICY_PENDING_SCHEMA = "urn:ccf:schema:0.1.1:operational.policy-pending"
+AUTHORIZATION_DECISION_SCHEMA = "urn:ccf:schema:0.1.2-rc1:governance.authorization-decision"
+POLICY_PENDING_SCHEMA = "urn:ccf:schema:0.1.2-rc1:operational.policy-pending"
 
 DEFAULT_RETRY_AFTER_MS = 250
 

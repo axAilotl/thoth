@@ -21,7 +21,9 @@ class SpoolError(RuntimeError):
     """Raised when spool state is inconsistent with the producer chain."""
 
 
-TERMINAL_STATUSES: frozenset[str] = frozenset({"committed", "partial", "rejected", "conflict"})
+TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {"accepted", "partially_accepted", "content_rejected", "quarantined", "conflict"}
+)
 
 
 def spool_batch(conn, batch: dict, *, spooled_at: str) -> None:

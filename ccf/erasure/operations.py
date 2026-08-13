@@ -19,7 +19,7 @@ from psycopg.types.json import Jsonb
 
 from ccf.erasure.errors import ErasureError
 
-SCHEMA_OPERATION = "urn:ccf:schema:0.1.1:operational.erasure-operation"
+SCHEMA_OPERATION = "urn:ccf:schema:0.1.2-rc1:operational.erasure-operation"
 
 #: Forward stage order; ``failed`` is reachable from any stage.
 STAGE_ORDER = ("decision", "block", "destroy", "verify", "receipt")
@@ -28,7 +28,7 @@ TERMINAL_STAGES = frozenset({"receipt", "failed"})
 
 #: The CCF profile the erasure saga runs under (the operational schema's
 #: ``profile`` is a profile name, not the assurance level).
-OPERATION_PROFILE = "ccf-core-0.1.1"
+OPERATION_PROFILE = "ccf-core-0.1.2-rc1"
 
 
 def next_stage(stage: str) -> str:
@@ -122,7 +122,8 @@ def load_operation(conn, operation_id: str) -> dict:
         SELECT operation_id, archive_id, request_id, decision_id, stage,
                targets, profile, assurance, plans, purged, receipt_id,
                lineage_id, stage_head_id, decision, actor,
-               authorized_producers, started_at, updated_at, last_error
+               authorized_producers, started_at, updated_at, last_error,
+               suppression_set
         FROM erasure_operation WHERE operation_id = %s
         """,
         (operation_id,),
@@ -149,7 +150,22 @@ def load_operation(conn, operation_id: str) -> dict:
         "started_at": row[16],
         "updated_at": row[17],
         "last_error": row[18],
+        "suppression_set": dict(row[19]) if row[19] is not None else None,
     }
+
+
+def record_suppression_set(
+    conn, *, operation_id: str, descriptor: dict, now: str
+) -> None:
+    """Pin the canonical suppression-set descriptor committed at block."""
+    conn.execute(
+        """
+        UPDATE erasure_operation
+        SET suppression_set = %s, updated_at = %s
+        WHERE operation_id = %s
+        """,
+        (Jsonb(descriptor), now, operation_id),
+    )
 
 
 def record_stage_head(conn, *, operation_id: str, stage_head_id: str, now: str) -> None:

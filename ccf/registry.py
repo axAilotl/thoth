@@ -34,6 +34,8 @@ class PinnedRegistries:
         policy_evaluators: dict,
         data_classes: dict,
         authority_bases: dict,
+        authority_classes: dict,
+        suppression_profiles: dict,
     ) -> None:
         self._types = types
         self._links = links
@@ -48,6 +50,12 @@ class PinnedRegistries:
         self._authority_bases = {
             entry["name"] for entry in authority_bases["entries"]
         }
+        self._authority_classes = {
+            entry["class"]: entry for entry in authority_classes["entries"]
+        }
+        self._suppression_profiles = {
+            entry["name"]: entry for entry in suppression_profiles["entries"]
+        }
         self._type_entries = {
             (entry["name"], entry["version"]): entry for entry in types["entries"]
         }
@@ -56,11 +64,9 @@ class PinnedRegistries:
         }
         self._machines = {entry["id"]: entry for entry in state_machines["entries"]}
         blob_entries = blobs.get("entries") or []
-        if len(blob_entries) != 1:
-            raise RegistryError(
-                f"blobs registry must declare exactly one entry, got {len(blob_entries)}"
-            )
-        self._blob_entry = blob_entries[0]
+        self._blob_entries = {entry["name"]: entry for entry in blob_entries}
+        if "blob.manifest" not in self._blob_entries:
+            raise RegistryError("blobs registry must declare a blob.manifest entry")
 
     @classmethod
     def load(
@@ -82,13 +88,15 @@ class PinnedRegistries:
             return document
 
         return cls(
-            types=_load_verified("ccf.types/0.1.1"),
-            links=_load_verified("ccf.links/0.1.1"),
-            blobs=_load_verified("ccf.blobs/0.1.1"),
-            state_machines=_load_verified("ccf.state-machines/0.1.1"),
-            policy_evaluators=_load_verified("ccf.policy-evaluators/0.1.1"),
-            data_classes=_load_verified("ccf.data-classes/0.1.1"),
-            authority_bases=_load_verified("ccf.authority-bases/0.1.1"),
+            types=_load_verified("ccf.types/0.1.2-rc1"),
+            links=_load_verified("ccf.links/0.1.2-rc1"),
+            blobs=_load_verified("ccf.blobs/0.1.2-rc1"),
+            state_machines=_load_verified("ccf.state-machines/0.1.2-rc1"),
+            policy_evaluators=_load_verified("ccf.policy-evaluators/0.1.2-rc1"),
+            data_classes=_load_verified("ccf.data-classes/0.1.2-rc1"),
+            authority_bases=_load_verified("ccf.authority-bases/0.1.2-rc1"),
+            authority_classes=_load_verified("ccf.admission-authority-classes/0.1.2-rc1"),
+            suppression_profiles=_load_verified("ccf.suppression-profiles/0.1.2-rc1"),
         )
 
     def type_entry(self, name: str, version: int = 1) -> dict:
@@ -111,8 +119,15 @@ class PinnedRegistries:
 
     @property
     def blob_entry(self) -> dict:
-        """The single blob manifest registry entry."""
-        return self._blob_entry
+        """The default blob manifest registry entry (``blob.manifest``)."""
+        return self._blob_entries["blob.manifest"]
+
+    def blob_type_entry(self, name: str) -> dict:
+        """Named blob registry entry (e.g. ``blob.suppression_set``)."""
+        entry = self._blob_entries.get(name)
+        if entry is None:
+            raise RegistryError(f"unknown blob registry entry: {name!r}")
+        return entry
 
     def state_machine(self, machine_id: str) -> dict:
         """State-machine declaration; fail closed if unknown."""
@@ -135,6 +150,29 @@ class PinnedRegistries:
     def authority_basis_names(self) -> frozenset[str]:
         """Pinned authority-basis names (ccf.authority-bases registry)."""
         return frozenset(self._authority_bases)
+
+    def authority_class(self, name: str) -> dict:
+        """Admission authority-class entry; fail closed if unknown.
+
+        The pinned ``ccf.admission-authority-classes`` registry (0.1.2-rc1)
+        declares the normative ``failure_reason`` for each class; rejection
+        reasons must emit it verbatim.
+        """
+        entry = self._authority_classes.get(name)
+        if entry is None:
+            raise RegistryError(f"unknown admission authority class: {name!r}")
+        return entry
+
+    def authority_class_names(self) -> frozenset[str]:
+        """Pinned admission authority-class names."""
+        return frozenset(self._authority_classes)
+
+    def suppression_profile(self, name: str) -> dict:
+        """Suppression-profile registry entry; fail closed if unknown."""
+        entry = self._suppression_profiles.get(name)
+        if entry is None:
+            raise RegistryError(f"unknown suppression profile: {name!r}")
+        return entry
 
     def acyclic_link_types(self) -> frozenset[str]:
         """Link types whose active edges must remain acyclic (spec 8.6)."""

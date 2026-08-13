@@ -58,7 +58,7 @@ def _source(rig):
         },
     )
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[sub]))
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     return sub["id"]
 
 
@@ -100,7 +100,7 @@ def test_parallel_producers_race_same_origin_tuple(rig, tmp_path):
         result_b = future_b.result(timeout=60)
 
     outcomes = sorted([result_a["status"], result_b["status"]])
-    assert outcomes == ["committed", "conflict"], (result_a, result_b)
+    assert outcomes == ["accepted", "conflict"], (result_a, result_b)
 
     # Exactly one object was admitted for the raced tuple — no duplicates.
     with open_ccf_connection(rig.settings) as conn:
@@ -125,7 +125,7 @@ def test_identical_batch_race_admits_once(rig):
         results = [f.result(timeout=60) for f in futures]
 
     sequences = {r["commit_sequence"] for r in results}
-    assert {r["status"] for r in results} == {"committed"}, results
+    assert {r["status"] for r in results} == {"accepted"}, results
     assert len(sequences) == 1, results
     with open_ccf_connection(rig.settings) as conn:
         count = conn.execute(
@@ -160,7 +160,7 @@ def _policy(rig, lineage_id, rules, *, previous=None, transition="create"):
             "expires_at": None,
         },
         payload={
-            "profile": "ccf.policy/0.1.1",
+            "profile": "ccf.policy/0.1.2-rc1",
             "evaluator_profile": "ccf-deny-overrides-v1",
             "combining_algorithm": "deny_overrides_v1",
             "default_effect": "deny",
@@ -197,7 +197,7 @@ def test_governance_mutation_never_serves_stale_allow(rig):
     result = rig.archive.admit_batch(
         rig.producer.create_batch(records=[concept, policy])
     )
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     kwargs = {
         "operation": "read_local",
@@ -244,7 +244,7 @@ def test_governance_mutation_never_serves_stale_allow(rig):
     for thread in readers:
         thread.start()
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[tightened]))
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     tightened_committed.set()
     with observed_post_commit:
         observed = observed_post_commit.wait_for(
@@ -285,7 +285,7 @@ def test_concurrent_erasure_never_returns_erased_plaintext(rig):
         },
     )
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[record]))
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     svc = rig.archive.erasure()
     request = svc.submit_request(

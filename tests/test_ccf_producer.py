@@ -191,7 +191,7 @@ def test_provisional_objects_are_never_canonical(ccf_settings, tmp_path, ccf_pac
     assert rig.archive.get_object(record["id"]) is None
 
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     assert rig.producer.provisional_objects() == []
     admitted = rig.archive.get_object(record["id"])
     assert admitted["admission"]["commit_sequence"] == result["commit_sequence"]
