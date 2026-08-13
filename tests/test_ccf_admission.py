@@ -605,7 +605,7 @@ def test_expired_credential_rejected(rig, tmp_path):
     )
     batch = producer.create_batch(records=[_concept(rig)])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "expired" in result["extensions"]["reason"]
 
 
@@ -619,7 +619,7 @@ def test_not_yet_valid_credential_rejected(rig, tmp_path):
     )
     batch = producer.create_batch(records=[_concept(rig)])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "not yet valid" in result["extensions"]["reason"]
 
 
@@ -633,7 +633,7 @@ def test_out_of_scope_credential_rejected(rig, tmp_path):
     )
     batch = producer.create_batch(records=[_concept(rig)])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "scope" in result["extensions"]["reason"]
 
 
