@@ -184,8 +184,14 @@ class _FailingSource:
 
 def _restore_replica(rig, settings, tmp_path, ccf_package_root, name="replica"):
     pack_dir = tmp_path / name
-    rig.archive.sync().export_mindpack(pack_dir)
-    return restore_mindpack(settings, package_root=ccf_package_root, pack_path=pack_dir)
+    manifest = rig.archive.sync().export_mindpack(pack_dir)
+    return restore_mindpack(
+        settings,
+        package_root=ccf_package_root,
+        pack_path=pack_dir,
+        trusted_genesis_hash=manifest["genesis_commit_hash"],
+        trusted_head_hash=manifest["head_commit_hash"],
+    )
 
 
 def test_delta_pack_roundtrip_with_resume(rig, settings_factory, tmp_path, ccf_package_root):

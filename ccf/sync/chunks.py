@@ -10,6 +10,7 @@ identical semantics.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -30,20 +31,26 @@ def chunk_count(total_length: int, chunk_size: int) -> int:
 
 
 def build_sidecar(pack_path: str | Path, *, chunk_size: int = DEFAULT_CHUNK_SIZE) -> dict:
-    """Compute the chunk sidecar for a pack file."""
+    """Compute the chunk sidecar for a pack file (streamed, constant memory)."""
     if chunk_size <= 0:
         raise PackError(f"chunk size must be positive: {chunk_size}")
     pack_path = Path(pack_path)
-    data = pack_path.read_bytes()
-    chunks = [
-        digest_string(data[offset : offset + chunk_size])
-        for offset in range(0, len(data), chunk_size)
-    ]
+    chunks: list[str] = []
+    hasher = hashlib.sha256()
+    total_length = 0
+    with pack_path.open("rb") as fh:
+        while True:
+            block = fh.read(chunk_size)
+            if not block:
+                break
+            chunks.append(digest_string(block))
+            hasher.update(block)
+            total_length += len(block)
     return {
         "format": SIDECAR_FORMAT,
-        "pack_digest": digest_string(data),
+        "pack_digest": "sha256:" + hasher.hexdigest(),
         "chunk_size": chunk_size,
-        "total_length": len(data),
+        "total_length": total_length,
         "chunks": chunks,
     }
 
@@ -97,16 +104,22 @@ def verify_chunk(sidecar: dict, index: int, data: bytes) -> None:
 
 
 def verify_file(pack_path: str | Path, sidecar: dict) -> None:
-    """Verify a complete pack file against its sidecar (fail closed)."""
-    data = Path(pack_path).read_bytes()
-    if len(data) != int(sidecar["total_length"]):
+    """Verify a complete pack file against its sidecar (fail closed).
+
+    Streamed chunk by chunk: memory use stays bounded by the chunk size.
+    """
+    pack_path = Path(pack_path)
+    total = int(sidecar["total_length"])
+    if pack_path.stat().st_size != total:
         raise ChunkVerificationError(
-            f"pack length {len(data)} != sidecar {sidecar['total_length']}"
+            f"pack length {pack_path.stat().st_size} != sidecar {total}"
         )
-    for index in range(len(sidecar["chunks"])):
-        offset = index * int(sidecar["chunk_size"])
-        verify_chunk(
-            sidecar, index, data[offset : offset + int(sidecar["chunk_size"])]
-        )
-    if digest_string(data) != sidecar["pack_digest"]:
+    chunk_size = int(sidecar["chunk_size"])
+    hasher = hashlib.sha256()
+    with pack_path.open("rb") as fh:
+        for index in range(len(sidecar["chunks"])):
+            block = fh.read(chunk_size)
+            verify_chunk(sidecar, index, block)
+            hasher.update(block)
+    if "sha256:" + hasher.hexdigest() != sidecar["pack_digest"]:
         raise ChunkVerificationError("pack digest mismatch (tampered)")

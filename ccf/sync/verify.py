@@ -120,7 +120,38 @@ def verify_commit_chain(
     with ``allow_missing_member_objects`` such members are tolerated (the
     reference-completeness pass reports them) — used by foreign merge of
     partial packs. Restore and delta apply keep the strict default.
+
+    Malformed member/commit fields (missing keys, non-numeric positions)
+    are re-raised as :class:`PackVerificationError`, never raw
+    ``KeyError``/``ValueError``.
     """
+    try:
+        return _verify_commit_chain(
+            commits,
+            members,
+            objects,
+            expected_first_sequence=expected_first_sequence,
+            expected_parent_hash=expected_parent_hash,
+            known_object_hashes=known_object_hashes,
+            allow_missing_member_objects=allow_missing_member_objects,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise PackVerificationError(
+            f"malformed commit or member fields: {exc}"
+        ) from exc
+
+
+def _verify_commit_chain(
+    commits: list[dict],
+    members: list[dict],
+    objects: dict[str, PackObject],
+    *,
+    expected_first_sequence: int = 0,
+    expected_parent_hash: str | None = None,
+    known_object_hashes: dict[str, str] | None = None,
+    allow_missing_member_objects: bool = False,
+) -> dict:
+    """Implementation of :func:`verify_commit_chain`."""
     _require(bool(commits), "pack contains no commits")
     known_object_hashes = known_object_hashes or {}
     members_by_sequence: dict[int, list[dict]] = {}

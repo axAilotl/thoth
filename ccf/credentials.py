@@ -85,12 +85,24 @@ def _credential_payloads(row) -> tuple[str, dict]:
     return row[0], row[1]
 
 
-def resolve_credential_public_key(conn, credential_id: str) -> str:
+def resolve_credential_public_key(
+    conn,
+    credential_id: str,
+    *,
+    required_scope: str,
+    now: str,
+) -> str:
     """Resolve an admitted credential's raw base64url public key.
 
     Fails closed when the credential is unknown, ambiguous, malformed, or
-    its credential lineage head is in the terminal ``revoke`` state.
+    its credential lineage head is in the terminal ``revoke`` state. The
+    payload's lifecycle fields are enforced as well: the credential must
+    carry ``required_scope`` in ``scopes``, and ``now`` must satisfy
+    ``valid_from <= now < expires_at`` (a null ``expires_at`` never
+    expires).
     """
+    from ccf.governance.context import parse_timestamp
+
     rows = conn.execute(
         """
         SELECT oh.id, c.plaintext_json -> 'structural_payload' AS payload
@@ -128,6 +140,32 @@ def resolve_credential_public_key(conn, credential_id: str) -> str:
         )
 
     _, payload = active[0]
+
+    scopes = payload.get("scopes")
+    if not isinstance(scopes, list) or required_scope not in scopes:
+        raise CredentialError(
+            f"credential {credential_id} lacks the required scope "
+            f"{required_scope!r}"
+        )
+    try:
+        now_dt = parse_timestamp(now)
+        valid_from = parse_timestamp(payload["valid_from"])
+        expires_at = payload.get("expires_at")
+        expires_dt = parse_timestamp(expires_at) if expires_at is not None else None
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CredentialError(
+            f"credential {credential_id} has malformed validity fields: {exc}"
+        ) from exc
+    if now_dt < valid_from:
+        raise CredentialError(
+            f"credential {credential_id} is not yet valid "
+            f"(valid_from {payload['valid_from']})"
+        )
+    if expires_dt is not None and now_dt >= expires_dt:
+        raise CredentialError(
+            f"credential {credential_id} expired at {expires_at}"
+        )
+
     try:
         key_text = payload["signing_key"]["public_key"]
         if payload["signing_key"].get("profile") != "ed25519":
