@@ -297,373 +297,10 @@ def _connector_pin_status(
     }
 
 
-BUILTIN_CONNECTOR_MANIFESTS: tuple[dict[str, Any], ...] = (
-    {
-        "name": "x_api",
-        "source_name": "x_api_backfill",
-        "source_aliases": ["browser_extension", "x_api"],
-        "display_name": "X API Bookmarks",
-        "description": "Backfill X/Twitter bookmarks into the bookmark queue.",
-        "artifact_types": ["tweet"],
-        "inputs": ["remote_api:x_bookmarks"],
-        "outputs": ["artifact_queue:tweet"],
-        "capabilities": ["bookmarks", "oauth", "queue"],
-        "config_keys": [
-            "sources.x_api.client_id",
-            "sources.x_api.redirect_uri",
-            "sources.x_api.scopes",
-            "automation.x_api_sync",
-        ],
-        "auth": [
-            "sources.x_api.client_id",
-            "sources.x_api.redirect_uri",
-            "x_api_token_bundle",
-        ],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "network_ingest_queue",
-        "allowed_side_effects": [
-            "network_read",
-            "auth_token_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "core.x_api_bookmark_sync:run_x_api_bookmark_backfill",
-        "cli_command": "x-api-sync",
-        "config_namespace": "sources.x_api",
-        "default_enabled": False,
-    },
-    {
-        "name": "arxiv",
-        "source_name": "arxiv",
-        "source_aliases": ["arxiv_rss"],
-        "display_name": "arXiv",
-        "description": "Discover papers from arXiv search and category feeds.",
-        "artifact_types": ["paper"],
-        "inputs": ["remote_api:arxiv"],
-        "outputs": ["artifact_queue:paper"],
-        "capabilities": ["papers", "metadata", "queue"],
-        "config_keys": [
-            "sources.arxiv.source",
-            "sources.arxiv.feed_format",
-            "sources.arxiv.topics",
-            "sources.arxiv.categories",
-            "sources.arxiv.limit",
-        ],
-        "auth": [],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "network_ingest_queue",
-        "allowed_side_effects": [
-            "network_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.arxiv_collector:ArXivCollector",
-        "cli_command": "arxiv",
-        "config_namespace": "sources.arxiv",
-        "default_enabled": True,
-    },
-    {
-        "name": "github",
-        "source_name": "github",
-        "display_name": "GitHub Stars",
-        "description": "Collect starred GitHub repositories.",
-        "artifact_types": ["repository"],
-        "inputs": ["remote_api:github_stars"],
-        "outputs": ["artifact_queue:repository"],
-        "capabilities": ["repositories", "stars", "queue"],
-        "config_keys": [
-            "sources.github.enabled",
-            "sources.github.username",
-            "sources.github.limit",
-            "sources.github.token",
-        ],
-        "auth": ["sources.github.token", "GITHUB_API", "GITHUB_TOKEN"],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "network_ingest_queue",
-        "allowed_side_effects": [
-            "network_read",
-            "auth_token_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.social_collector:SocialCollector.discover_github_stars",
-        "cli_command": "social",
-        "config_namespace": "sources.github",
-        "default_enabled": True,
-    },
-    {
-        "name": "huggingface",
-        "source_name": "huggingface",
-        "display_name": "Hugging Face Likes",
-        "description": "Collect liked Hugging Face models, datasets, and spaces.",
-        "artifact_types": ["repository"],
-        "inputs": ["remote_api:huggingface_likes"],
-        "outputs": ["artifact_queue:repository"],
-        "capabilities": ["repositories", "likes", "queue"],
-        "config_keys": [
-            "sources.huggingface.enabled",
-            "sources.huggingface.username",
-            "sources.huggingface.limit",
-            "sources.huggingface.token",
-            "sources.huggingface.include_models",
-            "sources.huggingface.include_datasets",
-            "sources.huggingface.include_spaces",
-        ],
-        "auth": [
-            "sources.huggingface.token",
-            "HF_USER",
-            "HF_TOKEN",
-            "HUGGINGFACEHUB_API_TOKEN",
-            "HUGGINGFACE_API_TOKEN",
-        ],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "network_ingest_queue",
-        "allowed_side_effects": [
-            "network_read",
-            "auth_token_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.social_collector:SocialCollector.discover_hf_likes",
-        "cli_command": "social",
-        "config_namespace": "sources.huggingface",
-        "default_enabled": True,
-    },
-    {
-        "name": "web_clipper",
-        "source_name": "web_clipper",
-        "display_name": "Web Clipper",
-        "description": "Index configured Web Clipper notes and staged attachments.",
-        "artifact_types": ["web_clipper"],
-        "inputs": [
-            "local_files:web_clipper_notes",
-            "local_files:web_clipper_attachments",
-        ],
-        "outputs": ["artifact_queue:web_clipper"],
-        "capabilities": ["markdown", "frontmatter", "attachments", "queue"],
-        "config_keys": [
-            "sources.web_clipper.enabled",
-            "sources.web_clipper.note_dirs",
-            "sources.web_clipper.attachment_dirs",
-            "sources.web_clipper.note_extensions",
-            "sources.web_clipper.attachment_extensions",
-        ],
-        "auth": [],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "local_ingest_queue",
-        "allowed_side_effects": [
-            "local_file_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.web_clipper_collector:WebClipperCollector",
-        "cli_command": "web-clipper",
-        "config_namespace": "sources.web_clipper",
-        "default_enabled": True,
-    },
-    {
-        "name": "youtube",
-        "source_name": "youtube",
-        "display_name": "YouTube",
-        "description": "Collect YouTube video metadata and transcripts from URLs, playlists, and local exports.",
-        "artifact_types": ["video", "transcript"],
-        "inputs": [
-            "remote_api:youtube",
-            "remote_media:youtube",
-            "local_files:youtube_exports",
-        ],
-        "outputs": ["artifact_queue:video", "artifact_queue:transcript"],
-        "capabilities": ["video", "transcripts", "playlists", "exports", "queue", "archive"],
-        "config_keys": [
-            "sources.youtube.enabled",
-            "sources.youtube.urls",
-            "sources.youtube.playlist_urls",
-            "sources.youtube.export_paths",
-            "sources.youtube.archive_video",
-            "sources.youtube.api_key",
-            "youtube.enable_transcripts",
-            "youtube.enable_llm_transcript_processing",
-        ],
-        "auth": ["sources.youtube.api_key", "YOUTUBE_API_KEY"],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "network_ingest_queue",
-        "allowed_side_effects": [
-            "network_read",
-            "auth_token_read",
-            "local_file_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.youtube_connector:YouTubeConnector",
-        "cli_command": "connectors run youtube",
-        "config_namespace": "sources.youtube",
-        "default_enabled": True,
-    },
-    {
-        "name": "omi",
-        "source_name": "omi",
-        "source_aliases": ["personal_transcripts", "personal_transcript"],
-        "display_name": "Omi / Personal Transcripts",
-        "description": "Collect Omi conversations or local transcript exports while preserving raw sources and speaker/session/device metadata.",
-        "artifact_types": ["transcript"],
-        "inputs": ["remote_api:omi", "local_files:omi_exports"],
-        "outputs": ["artifact_queue:transcript"],
-        "capabilities": [
-            "transcripts",
-            "personal_data",
-            "speaker_metadata",
-            "session_metadata",
-            "queue",
-        ],
-        "config_keys": [
-            "sources.omi.enabled",
-            "sources.omi.export_paths",
-            "sources.omi.export_dirs",
-            "sources.omi.file_patterns",
-            "sources.omi.api_enabled",
-            "sources.omi.api_key_env",
-            "sources.omi.base_url",
-            "sources.omi.api_limit",
-            "sources.omi.api_page_size",
-            "sources.omi.include_transcript",
-            "sources.omi.source_name",
-            "sources.omi.device_id",
-            "sources.omi.speaker",
-            "sources.omi.language",
-        ],
-        "auth": ["sources.omi.api_key", "OMI_API_KEY"],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "network_ingest_queue",
-        "allowed_side_effects": [
-            "network_read",
-            "auth_token_read",
-            "local_file_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.personal_transcript_connector:PersonalTranscriptConnector",
-        "cli_command": "connectors run omi",
-        "config_namespace": "sources.omi",
-        "default_enabled": True,
-    },
-    {
-        "name": "skill_outputs",
-        "source_name": "skill_outputs",
-        "source_aliases": ["external_skill", "last30days-skill"],
-        "display_name": "External Skill Outputs",
-        "description": "Ingest JSON/JSONL output envelopes from external skills through the artifact queue.",
-        "artifact_types": [
-            "paper",
-            "repository",
-            "transcript",
-            "tweet",
-            "video",
-            "web_clipper",
-        ],
-        "inputs": ["local_files:skill_output_envelopes"],
-        "outputs": ["artifact_queue:*"],
-        "capabilities": ["skills", "envelopes", "queue", "raw_preservation"],
-        "config_keys": [
-            "sources.skill_outputs.enabled",
-            "sources.skill_outputs.output_paths",
-            "sources.skill_outputs.output_dirs",
-            "sources.skill_outputs.file_patterns",
-            "sources.skill_outputs.source_name",
-        ],
-        "auth": [],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "queue_only",
-        "allowed_side_effects": [
-            "local_file_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.skill_output_connector:SkillOutputConnector",
-        "cli_command": "connectors run skill_outputs",
-        "config_namespace": "sources.skill_outputs",
-        "default_enabled": True,
-    },
-    {
-        "name": "pi_skills",
-        "source_name": "pi_skills",
-        "source_aliases": ["pi_skill"],
-        "display_name": "Pi Skills",
-        "description": "Run configured local Pi skills and ingest their JSON/JSONL artifact envelopes.",
-        "artifact_types": [
-            "paper",
-            "repository",
-            "transcript",
-            "tweet",
-            "video",
-            "web_clipper",
-        ],
-        "inputs": ["operator_prompt", "local_files:allowed_input_roots"],
-        "outputs": ["skill_output_envelopes", "artifact_queue:*"],
-        "capabilities": ["skills", "pi", "envelopes", "queue", "raw_preservation"],
-        "config_keys": [
-            "sources.pi_skills.enabled",
-            "sources.pi_skills.skills",
-            "sources.pi_skills.output_dir",
-            "sources.pi_skills.default_provider",
-            "sources.pi_skills.default_model",
-            "sources.pi_skills.fallback",
-        ],
-        "auth": ["llm.providers.pi", "llm.providers.pi_openrouter"],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "no_tools_json",
-        "allowed_side_effects": [
-            "llm_api_call",
-            "subprocess_exec",
-            "local_file_read",
-            "local_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.pi_skill_connector:PiSkillConnector",
-        "cli_command": "connectors run pi_skills",
-        "config_namespace": "sources.pi_skills",
-        "default_enabled": True,
-    },
-    {
-        "name": "imported_markdown",
-        "source_name": "imported_markdown",
-        "source_aliases": ["markdown_import", "manual_import"],
-        "display_name": "Imported Markdown",
-        "description": "Import local markdown files as capture-only artifacts while preserving raw sources.",
-        "artifact_types": ["markdown"],
-        "inputs": ["local_files:markdown_imports"],
-        "outputs": ["artifact_queue:markdown"],
-        "capabilities": ["markdown", "frontmatter", "queue", "raw_preservation"],
-        "config_keys": [
-            "sources.imported_markdown.enabled",
-            "sources.imported_markdown.import_paths",
-            "sources.imported_markdown.import_dirs",
-            "sources.imported_markdown.file_patterns",
-            "sources.imported_markdown.source_name",
-        ],
-        "auth": [],
-        "queue_capability": True,
-        "queue_behavior": "queues_artifacts",
-        "safety_mode": "local_ingest_queue",
-        "allowed_side_effects": [
-            "local_file_read",
-            "raw_file_write",
-            "artifact_queue_write",
-        ],
-        "entrypoint": "collectors.imported_markdown_connector:ImportedMarkdownConnector",
-        "cli_command": "connectors run imported_markdown",
-        "config_namespace": "sources.imported_markdown",
-        "default_enabled": True,
-    },
-)
+# Built-in manifests live next to the collector code and are discovered through
+# the same file machinery as plugin manifests. The path is resolved relative to
+# this package, never the process cwd, so discovery is location-independent.
+BUILTIN_MANIFEST_DIR = Path(__file__).resolve().parent.parent / "collectors"
 
 
 def load_connector_registry(
@@ -675,31 +312,48 @@ def load_connector_registry(
     manifests: list[ConnectorManifest] = []
     names: set[str] = set()
 
-    for payload in BUILTIN_CONNECTOR_MANIFESTS:
-        manifest = ConnectorManifest.from_mapping(payload, origin="builtin")
-        manifests.append(manifest)
-        names.add(manifest.name)
+    for manifest_path in _iter_builtin_manifest_paths():
+        manifest = _load_manifest_file(manifest_path, origin="builtin")
+        _register_manifest(manifests, names, manifest, manifest_path)
+
+    if not manifests:
+        raise ConnectorManifestError(
+            f"{BUILTIN_MANIFEST_DIR}: no built-in connector manifests discovered"
+        )
 
     for manifest_path in _iter_plugin_manifest_paths(config, project_root=project_root):
         manifest = _load_manifest_file(manifest_path)
-        if manifest.name in names:
-            raise ConnectorManifestError(
-                f"{manifest_path}: duplicate connector name {manifest.name!r}"
-            )
-        manifests.append(manifest)
-        names.add(manifest.name)
+        _register_manifest(manifests, names, manifest, manifest_path)
 
     return ConnectorRegistry(manifests)
 
 
-def _load_manifest_file(path: Path) -> ConnectorManifest:
+def _register_manifest(
+    manifests: list[ConnectorManifest],
+    names: set[str],
+    manifest: ConnectorManifest,
+    manifest_path: Path,
+) -> None:
+    if manifest.name in names:
+        raise ConnectorManifestError(
+            f"{manifest_path}: duplicate connector name {manifest.name!r}"
+        )
+    manifests.append(manifest)
+    names.add(manifest.name)
+
+
+def _load_manifest_file(path: Path, *, origin: str | None = None) -> ConnectorManifest:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ConnectorManifestError(f"{path}: invalid connector JSON: {exc}") from exc
     if not isinstance(payload, Mapping):
         raise ConnectorManifestError(f"{path}: connector manifest must be an object")
-    return ConnectorManifest.from_mapping(payload, origin=str(path))
+    return ConnectorManifest.from_mapping(payload, origin=origin or str(path))
+
+
+def _iter_builtin_manifest_paths() -> Iterable[Path]:
+    return _manifest_paths_under(BUILTIN_MANIFEST_DIR)
 
 
 def _iter_plugin_manifest_paths(

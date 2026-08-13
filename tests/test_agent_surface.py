@@ -21,6 +21,11 @@ from core.capture_event_store import (
 )
 from core.config import Config
 from core.connector_registry import load_connector_registry
+from core.connector_runners import (
+    ConnectorRunContext,
+    ConnectorRunnerError,
+    connector_run_handler,
+)
 from core.mcp_server import ThothMCPServer
 from core.metadata_db import IngestionQueueEntry, MetadataDB
 from core.path_layout import build_path_layout
@@ -657,26 +662,160 @@ def test_enabled_builtin_connectors_have_executable_handlers(tmp_path: Path):
     layout = build_path_layout(config, project_root=tmp_path)
     db = MetadataDB(str(layout.database_path))
     registry = load_connector_registry(config, project_root=tmp_path)
+    context = ConnectorRunContext(config=config, layout=layout, db=db)
+
+    failures = []
+    for manifest in registry.list():
+        if manifest.origin != "builtin":
+            continue
+        try:
+            handler = connector_run_handler(manifest, context)
+        except ConnectorRunnerError as exc:
+            failures.append(f"{manifest.name}: {exc}")
+            continue
+        if manifest.is_enabled(config) and not callable(handler):
+            failures.append(f"{manifest.name}: handler is not callable")
+
+    assert failures == []
+    assert registry.get("manual_import").name == "imported_markdown"
+    assert registry.get("manual_import").entrypoint == (
+        "collectors.imported_markdown_connector:ImportedMarkdownConnector"
+    )
+    assert registry.get("personal_transcripts").entrypoint == (
+        "collectors.personal_transcript_connector:PersonalTranscriptConnector"
+    )
+
+
+def _write_drop_in_plugin(plugin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "drop_in_connector.py").write_text(
+        (
+            "class DropInConnector:\n"
+            "    def __init__(self, config, *, layout=None, db=None):\n"
+            "        self.config = config\n"
+            "\n"
+            "    async def collect(self, **options):\n"
+            "        return {\n"
+            "            'queued_count': 1,\n"
+            "            'queued': [\n"
+            "                {'artifact_id': 'drop-in-1', 'artifact_type': 'markdown'}\n"
+            "            ],\n"
+            "            'echo': dict(options),\n"
+            "        }\n"
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "drop_in.connector.json").write_text(
+        json.dumps(
+            {
+                "name": "drop_in",
+                "source_name": "drop_in",
+                "artifact_types": ["markdown"],
+                "inputs": ["local_files:drop_in"],
+                "outputs": ["artifact_queue:markdown"],
+                "auth": [],
+                "queue_capability": True,
+                "queue_behavior": "queues_artifacts",
+                "safety_mode": "local_ingest_queue",
+                "allowed_side_effects": ["local_file_read", "artifact_queue_write"],
+                "entrypoint": "drop_in_connector:DropInConnector",
+                "config_namespace": "sources.drop_in",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(plugin_dir))
+
+
+def test_drop_in_plugin_connector_runs_without_core_edits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    plugin_dir = tmp_path / "plugins"
+    _write_drop_in_plugin(plugin_dir, monkeypatch)
+    config = _config(tmp_path)
+    config.set("connectors.plugin_dirs", [str(plugin_dir)])
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
     service = AgentSurfaceService(config, layout=layout, db=db)
 
-    missing_handlers = [
-        manifest.name
-        for manifest in registry.list()
-        if manifest.origin == "builtin"
-        and manifest.is_enabled(config)
-        and service._connector_handler_for_manifest(manifest) is None
-    ]
+    plan = service.run_connector("drop_in", options={"note": "hello"})
 
-    assert missing_handlers == []
-    assert registry.get("manual_import").name == "imported_markdown"
-    assert (
-        service._connector_handler_for_manifest(registry.get("manual_import"))
-        == service._run_imported_markdown_connector
+    assert plan["status"] == "planned"
+    assert plan["connector"]["origin"] == str(plugin_dir / "drop_in.connector.json")
+
+    result = service.run_connector("drop_in", execute=True, options={"note": "hello"})
+
+    assert result["status"] == "completed"
+    assert result["result"]["echo"] == {"note": "hello"}
+    assert result["result"]["queued_count"] == 1
+    assert result["history"]["run"]["output_count"] == 1
+
+
+def test_connector_run_fails_closed_on_unresolvable_entrypoint(tmp_path: Path):
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    (plugin_dir / "broken.connector.json").write_text(
+        json.dumps(
+            {
+                "name": "broken_entrypoint",
+                "source_name": "broken_entrypoint",
+                "artifact_types": ["markdown"],
+                "inputs": ["local_files:broken"],
+                "outputs": ["artifact_queue:markdown"],
+                "auth": [],
+                "queue_capability": True,
+                "queue_behavior": "queues_artifacts",
+                "safety_mode": "local_ingest_queue",
+                "allowed_side_effects": ["local_file_read", "artifact_queue_write"],
+                "entrypoint": "collectors.arxiv_collector:NoSuchCollector",
+            }
+        ),
+        encoding="utf-8",
     )
-    assert (
-        service._connector_handler_for_manifest(registry.get("personal_transcripts"))
-        == service._run_omi_connector
+    config = _config(tmp_path)
+    config.set("connectors.plugin_dirs", [str(plugin_dir)])
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    with pytest.raises(ConnectorRunnerError, match="has no attribute"):
+        service.run_connector("broken_entrypoint", execute=True)
+
+    assert service.list_connector_runs(connector_name="broken_entrypoint")["runs"] == []
+
+
+def test_connector_run_fails_closed_on_missing_entrypoint_module(tmp_path: Path):
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    (plugin_dir / "ghost.connector.json").write_text(
+        json.dumps(
+            {
+                "name": "ghost_entrypoint",
+                "source_name": "ghost_entrypoint",
+                "artifact_types": ["markdown"],
+                "inputs": ["local_files:ghost"],
+                "outputs": ["artifact_queue:markdown"],
+                "auth": [],
+                "queue_capability": True,
+                "queue_behavior": "queues_artifacts",
+                "safety_mode": "local_ingest_queue",
+                "allowed_side_effects": ["local_file_read", "artifact_queue_write"],
+                "entrypoint": "collectors.no_such_module:GhostConnector",
+            }
+        ),
+        encoding="utf-8",
     )
+    config = _config(tmp_path)
+    config.set("connectors.plugin_dirs", [str(plugin_dir)])
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+
+    with pytest.raises(ConnectorRunnerError, match="failed to import"):
+        service.run_connector("ghost_entrypoint", execute=True)
+
+    assert service.list_connector_runs(connector_name="ghost_entrypoint")["runs"] == []
 
 
 def test_stable_agent_cli_groups_are_wired():

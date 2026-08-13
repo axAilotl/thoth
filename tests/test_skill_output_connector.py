@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from collectors.skill_output_connector import SkillOutputConnector
-from core.agent_surface import AgentSurfaceError, AgentSurfaceService
+from core.agent_surface import AgentSurfaceService
+from core.connector_runners import ConnectorRunnerError
 from core.config import Config
 from core.connector_budgets import ConnectorBudgetError
 from core.ingestion_runtime import KnowledgeArtifactRuntime
@@ -210,5 +211,5 @@ def test_skill_output_agent_surface_requires_output_source(tmp_path: Path):
     db = MetadataDB(str(layout.database_path))
     service = AgentSurfaceService(config, layout=layout, db=db)
 
-    with pytest.raises(AgentSurfaceError, match="requires output_paths or output_dirs"):
+    with pytest.raises(ConnectorRunnerError, match="requires output_paths or output_dirs"):
         service.run_connector("skill_outputs", execute=True)
