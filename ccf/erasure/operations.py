@@ -19,7 +19,7 @@ from psycopg.types.json import Jsonb
 
 from ccf.erasure.errors import ErasureError
 
-SCHEMA_OPERATION = "urn:ccf:schema:0.1.2-rc1:operational.erasure-operation"
+SCHEMA_OPERATION = "urn:ccf:schema:0.1.2:operational.erasure-operation"
 
 #: Forward stage order; ``failed`` is reachable from any stage.
 STAGE_ORDER = ("decision", "block", "destroy", "verify", "receipt")
@@ -28,7 +28,7 @@ TERMINAL_STAGES = frozenset({"receipt", "failed"})
 
 #: The CCF profile the erasure saga runs under (the operational schema's
 #: ``profile`` is a profile name, not the assurance level).
-OPERATION_PROFILE = "ccf-core-0.1.2-rc1"
+OPERATION_PROFILE = "ccf-core-0.1.2"
 
 
 def next_stage(stage: str) -> str:

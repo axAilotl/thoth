@@ -34,7 +34,7 @@ class ProducerError(RuntimeError):
     """Raised when a producer operation cannot be completed safely."""
 
 
-BATCH_FORMAT = "ccf.producer-batch/0.1.2-rc1"
+BATCH_FORMAT = "ccf.producer-batch/0.1.2"
 SIGNATURE_PROFILE = "ed25519-jcs-v1"
 
 
@@ -108,7 +108,7 @@ class Producer:
         if lineage is not None:
             submission["lineage"] = lineage
         self.schemas.validate(
-            "urn:ccf:schema:0.1.2-rc1:submissions.record", submission, what="record submission"
+            "urn:ccf:schema:0.1.2:submissions.record", submission, what="record submission"
         )
         return submission
 
@@ -148,7 +148,7 @@ class Producer:
         if selector is not None:
             submission["selector"] = selector
         self.schemas.validate(
-            "urn:ccf:schema:0.1.2-rc1:submissions.link", submission, what="link submission"
+            "urn:ccf:schema:0.1.2:submissions.link", submission, what="link submission"
         )
         return submission
 
@@ -186,7 +186,7 @@ class Producer:
         if origin is not None:
             submission["origin"] = origin
         self.schemas.validate(
-            "urn:ccf:schema:0.1.2-rc1:submissions.blob", submission, what="blob submission"
+            "urn:ccf:schema:0.1.2:submissions.blob", submission, what="blob submission"
         )
         return submission, data
 
@@ -280,7 +280,7 @@ class Producer:
                     )
                 )
                 self.schemas.validate(
-                    "urn:ccf:schema:0.1.2-rc1:sync.producer-batch",
+                    "urn:ccf:schema:0.1.2:sync.producer-batch",
                     batch,
                     what="producer batch",
                 )

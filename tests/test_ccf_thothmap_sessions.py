@@ -63,7 +63,7 @@ def test_session_maps_with_origin_and_times(rig, ctx, source_id):
     record = mapped.records[0]
     assert record["type"] == "core.session"
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.core.session", record["payload"], what="core.session"
+        "urn:ccf:schema:0.1.2:payload.core.session", record["payload"], what="core.session"
     )
 
     result = admit_mapped(rig, mapped)
@@ -99,7 +99,7 @@ def test_run_maps_to_stateful_process_run(rig, ctx, source_id):
     record = mapped.records[0]
     assert record["type"] == "process.run"
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.process.run", record["payload"], what="process.run"
+        "urn:ccf:schema:0.1.2:payload.process.run", record["payload"], what="process.run"
     )
     assert record["lineage"]["transition"] == "succeed"
     assert record["lineage"]["previous_head_id"] is None

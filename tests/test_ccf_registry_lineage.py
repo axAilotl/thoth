@@ -31,8 +31,10 @@ def test_registry_lookups_fail_closed(registries):
 
 def test_registry_entry_digest_matches_example(registries, ccf_examples_dir, load_ccf_json):
     """The pinned entry digest must equal the vendored example's structural binding."""
+    ids = load_ccf_json(ccf_examples_dir / "ids.json")
+    source_uuid = ids["source"].rsplit(":", 1)[1]
     structural = load_ccf_json(
-        ccf_examples_dir / "record-3e98b052-de3c-4c51-b6a0-e5eee3935196.structural.json"
+        ccf_examples_dir / f"record-{source_uuid}.structural.json"
     )
     entry = registries.type_entry("core.source")
     assert (

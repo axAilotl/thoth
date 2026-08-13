@@ -1,0 +1,72 @@
+{
+  "format": "ccf.record-semantic/0.1.2",
+  "salt": "UVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVE",
+  "content": {
+    "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+    "recorded_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+    "recorded_at": "2026-08-11T21:40:00.000Z",
+    "privacy": {
+      "data_subjects": [],
+      "data_classes": [
+        "identity_data"
+      ],
+      "consent_refs": [],
+      "legal_basis_refs": [],
+      "subject_coverage": "unknown"
+    },
+    "policy_ref": {
+      "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "head_id_at_write": null,
+      "policy_object_hash": null,
+      "evaluator_profile": "ccf-deny-overrides-v1",
+      "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+    },
+    "authority": {
+      "basis": "explicit_authorization",
+      "asserted_by": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+      "accepted_by": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21"
+    },
+    "payload": {
+      "profile": "ccf.policy/0.1.2",
+      "evaluator_profile": "ccf-deny-overrides-v1",
+      "combining_algorithm": "deny_overrides_v1",
+      "default_effect": "deny",
+      "rules": [
+        {
+          "rule_id": "owner-local",
+          "effect": "allow",
+          "operations": [
+            "read",
+            "search",
+            "derive"
+          ],
+          "purposes": [
+            "personal_knowledge",
+            "agent_context"
+          ],
+          "recipients": [
+            "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+            "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09"
+          ],
+          "destinations": [
+            "local",
+            "same_archive"
+          ],
+          "data_classes": [],
+          "conditions": [],
+          "obligations": [],
+          "valid_from": "2026-08-11T21:40:00.000Z",
+          "expires_at": null
+        }
+      ],
+      "provenance_requirement": "lineage_only",
+      "retention": {
+        "minimum_until": null,
+        "maximum_until": null,
+        "on_expiry": "review"
+      },
+      "extensions": {}
+    },
+    "extensions": {}
+  }
+}

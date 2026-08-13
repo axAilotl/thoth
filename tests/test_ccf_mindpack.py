@@ -15,8 +15,9 @@ import pytest
 
 from ccf.archive import Archive
 from ccf.db import CcfPostgresSettings, open_ccf_connection
-from ccf.sync.packio import IncompletePackError, PackError
+from ccf.sync.packio import PackError
 from ccf.sync.restore import RestoreError, restore_mindpack, verify_mindpack
+from ccf.sync.verify import PackVerificationError
 
 from ccf_helpers import make_rig
 
@@ -110,7 +111,10 @@ def test_export_restore_roundtrip(rig, settings_factory, tmp_path, ccf_package_r
     pack_dir = tmp_path / "archive.mindpack"
     manifest = rig.archive.sync().export_mindpack(pack_dir)
     assert manifest["head_commit_hash"] == head_before["commit_hash"]
-    assert manifest["extensions"]["completeness"]["complete"] is True
+    assert manifest["custody"] == {
+        "completeness": "complete",
+        "restore_capable": True,
+    }
 
     settings_b = settings_factory()
     report = restore_mindpack(
@@ -211,8 +215,12 @@ def test_vendored_example_mindpack_verifies(ccf_package_root):
         ccf_package_root / "examples" / "mindpack", package_root=ccf_package_root
     )
     manifest = pack.manifest
-    assert manifest["format"] == "ccf.mindpack/0.1.2-rc1"
+    assert manifest["format"] == "ccf.mindpack/0.1.2"
     assert manifest["mode"] == "restore"
+    assert manifest["custody"] == {
+        "completeness": "complete",
+        "restore_capable": True,
+    }
     assert int(manifest["counts"]["records"]) == 15
     assert int(manifest["counts"]["commits"]) == 3
     assert pack.chain["commits_verified"] == 3
@@ -224,8 +232,8 @@ def test_vendored_example_mindpack_verifies(ccf_package_root):
     assert len(pack.blob_data) == 1
 
 
-def _remove_object_from_pack(pack_dir, object_id):
-    """Withhold an object without declaring it (non-compliant pack)."""
+def _remove_object_from_pack(pack_dir, object_id, *, declare_partial=False):
+    """Remove an object, optionally making the manifest truthfully partial."""
     kind = object_id.split(":")[2]
     uuid_part = object_id.rsplit(":", 1)[1]
     stream = pack_dir / "objects" / f"{kind}s.ndjson"
@@ -249,6 +257,23 @@ def _remove_object_from_pack(pack_dir, object_id):
             entry = {**entry, "digest": new_digest, "byte_length": str(new_length)}
         kept.append(entry)
     manifest["streams"] = kept
+    if declare_partial:
+        count_key = f"{kind}s"
+        manifest["counts"][count_key] = str(
+            int(manifest["counts"][count_key]) - 1
+        )
+        manifest["compartment_availability"] = [
+            entry
+            for entry in manifest["compartment_availability"]
+            if entry["object_id"] != object_id
+        ]
+        manifest["external_dependencies"].append(
+            {"object_id": object_id, "reason": "resolves outside the pack"}
+        )
+        manifest["custody"] = {
+            "completeness": "partial",
+            "restore_capable": False,
+        }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     for compartment_file in (pack_dir / "compartments" / f"{kind}s").glob(
         f"{uuid_part}.*.json"
@@ -265,17 +290,18 @@ def test_incomplete_pack_fails_closed_then_partial_merge(
     ids = _populate(rig_b)
     pack_dir = tmp_path / "b.mindpack"
     rig_b.archive.sync().export_mindpack(pack_dir)
-    _remove_object_from_pack(pack_dir, ids["source"])
+    _remove_object_from_pack(pack_dir, ids["source"], declare_partial=True)
 
     sync = rig.archive.sync()
-    with pytest.raises(IncompletePackError) as excinfo:
+    with pytest.raises(PackVerificationError) as excinfo:
         sync.import_mindpack(pack_dir)
-    assert ids["source"] in str(excinfo.value)
+    assert excinfo.value.reason == "manifest_completeness_mismatch"
 
     report = sync.import_mindpack(pack_dir, allow_partial=True)
     assert report["status"] == "merged"
     assert report["partial"] is True
-    assert ids["source"] in report["completeness"]["dangling"]
+    assert ids["source"] in report["completeness"]["external"]
+    assert report["completeness"]["dangling"] == []
     assert ids["source"] in report["not_included"]
     assert ids["source"] not in report["admitted"]
     # Referencing objects still merged; the destination chain verifies.
@@ -395,14 +421,14 @@ def test_foreign_merge_records_erased_compartments(
     merged = rig_b.archive.get_object(ids["session"])
     assert merged is not None
     semantic = merged["compartments"]["semantic"]
-    # 0.1.2-rc1: the exact source availability state is preserved.
+    # 0.1.2: the exact source availability state is preserved.
     assert semantic["state"] == "erased"
     assert semantic["envelope"] is None  # no fabricated content
     rig_b.archive.verify_chain()
 
 
 # ---------------------------------------------------------------------------
-# Security review regression tests (ccf-0.1.2-rc1)
+# Security review regression tests (ccf-0.1.2)
 # ---------------------------------------------------------------------------
 
 

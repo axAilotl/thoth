@@ -1,0 +1,156 @@
+{
+  "ids": {
+    "record": "urn:ccf:record:00000000-0000-4000-8000-000000000021",
+    "blob": "urn:ccf:blob:00000000-0000-4000-8000-000000000022",
+    "receipt": "urn:ccf:record:00000000-0000-4000-8000-000000000023",
+    "decision": "urn:ccf:record:00000000-0000-4000-8000-000000000024"
+  },
+  "content_fixture": {
+    "content_class": "record-semantic",
+    "canonical_plaintext": {
+      "language": "en",
+      "text": "erased fixture content"
+    },
+    "expected_content_digest": "sha256:c21f7d1e94aa67bb9ddb50d894b74bf78fbcac607a5f0eec89058e50bfc70b17"
+  },
+  "preimages": [
+    {
+      "format": "ccf.suppression-preimage/1",
+      "kind": "origin",
+      "source_id": "urn:ccf:record:00000000-0000-4000-8000-000000000031",
+      "native_id": "segment-1842",
+      "revision": "1",
+      "object_kind": "record"
+    },
+    {
+      "format": "ccf.suppression-preimage/1",
+      "kind": "content",
+      "content_class": "record-semantic",
+      "content_digest": "sha256:c21f7d1e94aa67bb9ddb50d894b74bf78fbcac607a5f0eec89058e50bfc70b17"
+    }
+  ],
+  "rejected_preimages": [
+    {
+      "name": "unknown-kind",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "other"
+      }
+    },
+    {
+      "name": "unknown-field",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "origin",
+        "source_id": "urn:ccf:record:00000000-0000-4000-8000-000000000031",
+        "native_id": "segment-1842",
+        "revision": "1",
+        "object_kind": "record",
+        "unexpected": true
+      }
+    },
+    {
+      "name": "missing-origin-field",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "origin",
+        "source_id": "urn:ccf:record:00000000-0000-4000-8000-000000000031",
+        "native_id": "segment-1842",
+        "revision": "1"
+      }
+    },
+    {
+      "name": "malformed-source-urn",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "origin",
+        "source_id": "urn:ccf:record:------------------------------------",
+        "native_id": "segment-1842",
+        "revision": "1",
+        "object_kind": "record"
+      }
+    },
+    {
+      "name": "invalid-content-class",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "content",
+        "content_class": "unknown",
+        "content_digest": "sha256:c21f7d1e94aa67bb9ddb50d894b74bf78fbcac607a5f0eec89058e50bfc70b17"
+      }
+    },
+    {
+      "name": "invalid-content-digest",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "content",
+        "content_class": "record-semantic",
+        "content_digest": "sha256:not-a-digest"
+      }
+    }
+  ],
+  "key_hex": "cacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacaca",
+  "entries": [
+    "hmac-sha256:1bf314eaa70ae7d33f129e05c115e7bec1b7d874e0c1470547dcd81449076045",
+    "hmac-sha256:9a6ee0a2024e8d8acfa1687f09c091c03a94a256bc00026375a08bcbaed8d795"
+  ],
+  "scope_object_ids": [
+    "urn:ccf:record:00000000-0000-4000-8000-000000000021"
+  ],
+  "expected_scope_commitment": "sha256:61d3e9baf5d0b18b665a604aa163821196c281090de5e046186c8d89ebf59791",
+  "record_structural_payload": {
+    "profile": "ccf-hmac-sha256-suppression-v1",
+    "suppression_blob_id": "urn:ccf:blob:00000000-0000-4000-8000-000000000022",
+    "entry_count": "2",
+    "entries_merkle_root": "sha256:df3b865eb50deb33a0dd435e2aaf52c29b99a49667ea2d416b8890d7a962b5d4",
+    "key_profile_id": "fixture-key-profile-v1",
+    "scope_commitment": "sha256:61d3e9baf5d0b18b665a604aa163821196c281090de5e046186c8d89ebf59791",
+    "erasure_receipt_id": "urn:ccf:record:00000000-0000-4000-8000-000000000023"
+  },
+  "blob_structural_content": {
+    "type": "blob.suppression_set",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:c4d58e1b16431cd4fda2265507a1343caf6c10436ab39265f4774c8ad83c33ad",
+    "registry_entry_digest": "sha256:88f068584511890c571a544e56732f566e9b0708bdf9b3c6d9407881cdf47246",
+    "retention_profile": "structural_retention_required",
+    "media_type": "application/vnd.ccf.suppression-set+json",
+    "byte_length": "214",
+    "content_commitment": "sha256:854ddace97145c23f29c729fa5e712eb35c3d3c44b9ceca8dfe9753b4ccba2f2",
+    "content_profile": "ccf-blob-content-v2",
+    "availability_class": "controlled",
+    "erasure_domain_id": null,
+    "structural_payload": {
+      "sensitivity": "governed_sensitive_metadata"
+    },
+    "extensions": {}
+  },
+  "blob_semantic_content": {
+    "content_salt": "ycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJyck",
+    "filename": "suppression-set.json",
+    "content_encryption_profile": "none",
+    "content_key_ref": null,
+    "extensions": {}
+  },
+  "receipt_structural_payload": {
+    "decision_id": "urn:ccf:record:00000000-0000-4000-8000-000000000024",
+    "profile": "storage_verified",
+    "verified_at": "2026-08-12T12:00:00.000Z",
+    "target_count": "1",
+    "destroyed_key_count": "0",
+    "status": "verified",
+    "membership_link_type": "ccf.covers",
+    "suppression_commitment": {
+      "profile": "ccf-hmac-sha256-suppression-v1",
+      "suppression_set_record_id": "urn:ccf:record:00000000-0000-4000-8000-000000000021",
+      "suppression_blob_id": "urn:ccf:blob:00000000-0000-4000-8000-000000000022",
+      "entry_count": "2",
+      "entries_merkle_root": "sha256:df3b865eb50deb33a0dd435e2aaf52c29b99a49667ea2d416b8890d7a962b5d4",
+      "key_profile_id": "fixture-key-profile-v1",
+      "scope_commitment": "sha256:61d3e9baf5d0b18b665a604aa163821196c281090de5e046186c8d89ebf59791"
+    }
+  },
+  "encoded_blob_base64": "eyJlbnRyaWVzIjpbImhtYWMtc2hhMjU2OjFiZjMxNGVhYTcwYWU3ZDMzZjEyOWUwNWMxMTVlN2JlYzFiN2Q4NzRlMGMxNDcwNTQ3ZGNkODE0NDkwNzYwNDUiLCJobWFjLXNoYTI1Njo5YTZlZTBhMjAyNGU4ZDhhY2ZhMTY4N2YwOWMwOTFjMDNhOTRhMjU2YmMwMDAyNjM3NWEwOGJjYmFlZDhkNzk1Il0sInByb2ZpbGUiOiJjY2YtaG1hYy1zaGEyNTYtc3VwcHJlc3Npb24tdjEifQ==",
+  "expected_content_commitment": "sha256:854ddace97145c23f29c729fa5e712eb35c3d3c44b9ceca8dfe9753b4ccba2f2",
+  "expected_entries_merkle_root": "sha256:df3b865eb50deb33a0dd435e2aaf52c29b99a49667ea2d416b8890d7a962b5d4"
+}

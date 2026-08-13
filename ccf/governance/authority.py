@@ -5,7 +5,7 @@ type must carry. Admission interprets the claimed authority block
 (``{basis, asserted_by, accepted_by}``) against that class and fails
 closed: a missing claim or an unsatisfied class rejects the Record.
 
-Since 0.1.2-rc1 the class mapping is pinned by
+Since 0.1.2 the class mapping is pinned by
 ``registries/admission-authority-classes.registry.json`` — this module is
 driven by that registry (evaluation mode, claim requirement, acceptable
 bases, person-acceptance rule) rather than a parallel hardcoded table,

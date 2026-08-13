@@ -1,0 +1,90 @@
+{
+  "format": "ccf.manifest-tamper-vectors/0.1.2",
+  "rule": "Every unsigned-manifest mismatch rejects before destination mutation",
+  "cases": [
+    {
+      "id": "forged-low-count",
+      "fixture": "complete-example",
+      "mutation": "count-low",
+      "expected": "reject"
+    },
+    {
+      "id": "forged-high-count",
+      "fixture": "complete-example",
+      "mutation": "count-high",
+      "expected": "reject"
+    },
+    {
+      "id": "removed-stream-entry",
+      "fixture": "complete-example",
+      "mutation": "remove-stream",
+      "expected": "reject"
+    },
+    {
+      "id": "extra-unlisted-stream",
+      "fixture": "complete-example",
+      "mutation": "add-container-member",
+      "expected": "reject"
+    },
+    {
+      "id": "available-changed-to-erased",
+      "fixture": "complete-example",
+      "mutation": "available-to-erased",
+      "expected": "reject"
+    },
+    {
+      "id": "erased-changed-to-available",
+      "fixture": "erased-example",
+      "mutation": "erased-to-available",
+      "expected": "reject"
+    },
+    {
+      "id": "missing-dependency",
+      "fixture": "external-dependency-example",
+      "mutation": "remove-dependency",
+      "expected": "reject"
+    },
+    {
+      "id": "fabricated-dependency",
+      "fixture": "complete-example",
+      "mutation": "add-dependency",
+      "expected": "reject"
+    },
+    {
+      "id": "changed-genesis",
+      "fixture": "complete-example",
+      "mutation": "change-genesis",
+      "expected": "reject"
+    },
+    {
+      "id": "changed-head",
+      "fixture": "complete-example",
+      "mutation": "change-head",
+      "expected": "reject"
+    },
+    {
+      "id": "complete-changed-to-partial",
+      "fixture": "complete-example",
+      "mutation": "complete-to-partial",
+      "expected": "reject"
+    },
+    {
+      "id": "restore-changed-to-foreign-merge",
+      "fixture": "complete-example",
+      "mutation": "restore-to-foreign-merge",
+      "expected": "reject"
+    },
+    {
+      "id": "duplicate-availability-row",
+      "fixture": "complete-example",
+      "mutation": "duplicate-availability",
+      "expected": "reject"
+    },
+    {
+      "id": "contradictory-availability-row",
+      "fixture": "complete-example",
+      "mutation": "contradict-availability",
+      "expected": "reject"
+    }
+  ]
+}

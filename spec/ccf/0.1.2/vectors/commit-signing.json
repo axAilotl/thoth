@@ -1,0 +1,251 @@
+{
+  "genesis": {
+    "header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "record",
+      "id": "urn:ccf:record:c59fe210-08b0-4ae7-9896-024d9ebbe47b",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "structural_commitment": "sha256:c0552c06313db9912d2eb329896da02f90ff900bb2235d6010dc9567fb3c29b6",
+      "semantic_commitment": null,
+      "object_hash": "sha256:2addde5dd716fe1bd222b19b983119d180f25a77968435fd46e33197a509ace2"
+    },
+    "structural": {
+      "format": "ccf.record-structural/0.1.2",
+      "salt": "KCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCg",
+      "content": {
+        "type": "integrity.commit",
+        "type_version": 1,
+        "type_visibility": "clear",
+        "schema_digest": "sha256:69e54a37c07e383b71002da67cabfbec0008d50572f534494b20d307786d52e2",
+        "registry_entry_digest": "sha256:f48a174a2a16cc50e2b832ca0691afcfbbb2b3b70a64437ca4efe1c358d21cd1",
+        "retention_profile": "epoch_lifetime_required",
+        "structural_payload": {
+          "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
+          "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
+          "sequence": "0",
+          "parent_commit_hash": null,
+          "batch_merkle_root": "sha256:9c4f113d0a7fc010d11b5c49da91aa81a1f9d7b60932f899b846046f6b645cfa",
+          "member_count": "0",
+          "hash_profile": "ccf-jcs-sha256-v2",
+          "signature_profile": "ed25519-jcs-v1",
+          "signer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+          "signer_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7",
+          "active_profiles": [
+            "ccf-core-0.1.2",
+            "ccf-local-sync-0.1.2",
+            "ccf-continuity-pack-0.1.2"
+          ],
+          "committed_at": "2026-08-11T21:40:00.000Z",
+          "signature": "-bG1Da51nsyoaQ73J5XILtQ3J16OpWKPTQ-ElxI3dtQamrthxzWpYuOL6sg5a8cYMc_JpukEv2SxOXMXR8WiCA"
+        },
+        "extensions": {}
+      }
+    },
+    "signing_header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "record",
+      "id": "urn:ccf:record:c59fe210-08b0-4ae7-9896-024d9ebbe47b",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "semantic_commitment": null
+    },
+    "structural_content_without_signature": {
+      "type": "integrity.commit",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "schema_digest": "sha256:69e54a37c07e383b71002da67cabfbec0008d50572f534494b20d307786d52e2",
+      "registry_entry_digest": "sha256:f48a174a2a16cc50e2b832ca0691afcfbbb2b3b70a64437ca4efe1c358d21cd1",
+      "retention_profile": "epoch_lifetime_required",
+      "structural_payload": {
+        "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
+        "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
+        "sequence": "0",
+        "parent_commit_hash": null,
+        "batch_merkle_root": "sha256:9c4f113d0a7fc010d11b5c49da91aa81a1f9d7b60932f899b846046f6b645cfa",
+        "member_count": "0",
+        "hash_profile": "ccf-jcs-sha256-v2",
+        "signature_profile": "ed25519-jcs-v1",
+        "signer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+        "signer_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+        "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7",
+        "active_profiles": [
+          "ccf-core-0.1.2",
+          "ccf-local-sync-0.1.2",
+          "ccf-continuity-pack-0.1.2"
+        ],
+        "committed_at": "2026-08-11T21:40:00.000Z"
+      },
+      "extensions": {}
+    },
+    "expected_signing_digest": "sha256:ab5ae8ea2143258f0563e2af90530be9fb25e4e0c6af2bd6589ee664221c8dc5",
+    "signature": "-bG1Da51nsyoaQ73J5XILtQ3J16OpWKPTQ-ElxI3dtQamrthxzWpYuOL6sg5a8cYMc_JpukEv2SxOXMXR8WiCA",
+    "expected_signature_valid": true,
+    "expected_commit_hash": "sha256:2addde5dd716fe1bd222b19b983119d180f25a77968435fd46e33197a509ace2"
+  },
+  "commit1": {
+    "header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "record",
+      "id": "urn:ccf:record:11d6493a-061f-46fa-85a6-d32f44cdcd5e",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "structural_commitment": "sha256:0ba6dc485659122297c98790a9a69f9ee5fa177306c21f50bbafe6fb779e5045",
+      "semantic_commitment": null,
+      "object_hash": "sha256:05e445180c9c08070ad07452eec3b4a662586c368af7ad585734274e808143b2"
+    },
+    "structural": {
+      "format": "ccf.record-structural/0.1.2",
+      "salt": "KSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSk",
+      "content": {
+        "type": "integrity.commit",
+        "type_version": 1,
+        "type_visibility": "clear",
+        "schema_digest": "sha256:69e54a37c07e383b71002da67cabfbec0008d50572f534494b20d307786d52e2",
+        "registry_entry_digest": "sha256:f48a174a2a16cc50e2b832ca0691afcfbbb2b3b70a64437ca4efe1c358d21cd1",
+        "retention_profile": "epoch_lifetime_required",
+        "structural_payload": {
+          "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
+          "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
+          "sequence": "1",
+          "parent_commit_hash": "sha256:2addde5dd716fe1bd222b19b983119d180f25a77968435fd46e33197a509ace2",
+          "batch_merkle_root": "sha256:06e2e1c7c872b616bb9d2c40358caae069e0e705ebc93b12b007320cf05fa2cc",
+          "member_count": "4",
+          "hash_profile": "ccf-jcs-sha256-v2",
+          "signature_profile": "ed25519-jcs-v1",
+          "signer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+          "signer_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7",
+          "active_profiles": [
+            "ccf-core-0.1.2",
+            "ccf-local-sync-0.1.2",
+            "ccf-continuity-pack-0.1.2"
+          ],
+          "committed_at": "2026-08-11T21:40:01.000Z",
+          "signature": "Bgae7gtIQ2AjVAs-Vgdel89cOPAPU00SPo3K-qqcGu-gpK2yLi4kH1Mn4wQgxVh67oBNVRn9AvAOhq58SEbVDQ"
+        },
+        "extensions": {}
+      }
+    },
+    "signing_header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "record",
+      "id": "urn:ccf:record:11d6493a-061f-46fa-85a6-d32f44cdcd5e",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "semantic_commitment": null
+    },
+    "structural_content_without_signature": {
+      "type": "integrity.commit",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "schema_digest": "sha256:69e54a37c07e383b71002da67cabfbec0008d50572f534494b20d307786d52e2",
+      "registry_entry_digest": "sha256:f48a174a2a16cc50e2b832ca0691afcfbbb2b3b70a64437ca4efe1c358d21cd1",
+      "retention_profile": "epoch_lifetime_required",
+      "structural_payload": {
+        "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
+        "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
+        "sequence": "1",
+        "parent_commit_hash": "sha256:2addde5dd716fe1bd222b19b983119d180f25a77968435fd46e33197a509ace2",
+        "batch_merkle_root": "sha256:06e2e1c7c872b616bb9d2c40358caae069e0e705ebc93b12b007320cf05fa2cc",
+        "member_count": "4",
+        "hash_profile": "ccf-jcs-sha256-v2",
+        "signature_profile": "ed25519-jcs-v1",
+        "signer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+        "signer_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+        "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7",
+        "active_profiles": [
+          "ccf-core-0.1.2",
+          "ccf-local-sync-0.1.2",
+          "ccf-continuity-pack-0.1.2"
+        ],
+        "committed_at": "2026-08-11T21:40:01.000Z"
+      },
+      "extensions": {}
+    },
+    "expected_signing_digest": "sha256:ebee83c0aec7a0406f8ed245aedd0254ada0a71f3b852c5c0a7e4cb5746a2e84",
+    "signature": "Bgae7gtIQ2AjVAs-Vgdel89cOPAPU00SPo3K-qqcGu-gpK2yLi4kH1Mn4wQgxVh67oBNVRn9AvAOhq58SEbVDQ",
+    "expected_signature_valid": true,
+    "expected_commit_hash": "sha256:05e445180c9c08070ad07452eec3b4a662586c368af7ad585734274e808143b2"
+  },
+  "commit2": {
+    "header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "record",
+      "id": "urn:ccf:record:2afb37bd-f796-40d5-bfdd-49375344f059",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "structural_commitment": "sha256:820f55b25c9ba3a8b1d7d5715aa09aac5d326969d506cff7568863cc3a92c8f9",
+      "semantic_commitment": null,
+      "object_hash": "sha256:c4441746a975de8e6036449c6d7ce9b7c1a028de13ec1b904489f25c0a8f728c"
+    },
+    "structural": {
+      "format": "ccf.record-structural/0.1.2",
+      "salt": "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio",
+      "content": {
+        "type": "integrity.commit",
+        "type_version": 1,
+        "type_visibility": "clear",
+        "schema_digest": "sha256:69e54a37c07e383b71002da67cabfbec0008d50572f534494b20d307786d52e2",
+        "registry_entry_digest": "sha256:f48a174a2a16cc50e2b832ca0691afcfbbb2b3b70a64437ca4efe1c358d21cd1",
+        "retention_profile": "epoch_lifetime_required",
+        "structural_payload": {
+          "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
+          "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
+          "sequence": "2",
+          "parent_commit_hash": "sha256:05e445180c9c08070ad07452eec3b4a662586c368af7ad585734274e808143b2",
+          "batch_merkle_root": "sha256:c130590d2bd0aad4369dd604a9ee50e037173e24d1ecbbcf1e7da86a4913c13e",
+          "member_count": "16",
+          "hash_profile": "ccf-jcs-sha256-v2",
+          "signature_profile": "ed25519-jcs-v1",
+          "signer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+          "signer_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7",
+          "active_profiles": [
+            "ccf-core-0.1.2",
+            "ccf-local-sync-0.1.2",
+            "ccf-continuity-pack-0.1.2"
+          ],
+          "committed_at": "2026-08-11T21:42:21.000Z",
+          "signature": "qfjvSuOxnW58NUhn06AD9BFkU_soK7QbAGW2ah0U5UJeTvWEx1XHgcfvMznwFG5Zmhip-QQKoGC6WgjucIn3BQ"
+        },
+        "extensions": {}
+      }
+    },
+    "signing_header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "record",
+      "id": "urn:ccf:record:2afb37bd-f796-40d5-bfdd-49375344f059",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "semantic_commitment": null
+    },
+    "structural_content_without_signature": {
+      "type": "integrity.commit",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "schema_digest": "sha256:69e54a37c07e383b71002da67cabfbec0008d50572f534494b20d307786d52e2",
+      "registry_entry_digest": "sha256:f48a174a2a16cc50e2b832ca0691afcfbbb2b3b70a64437ca4efe1c358d21cd1",
+      "retention_profile": "epoch_lifetime_required",
+      "structural_payload": {
+        "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
+        "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
+        "sequence": "2",
+        "parent_commit_hash": "sha256:05e445180c9c08070ad07452eec3b4a662586c368af7ad585734274e808143b2",
+        "batch_merkle_root": "sha256:c130590d2bd0aad4369dd604a9ee50e037173e24d1ecbbcf1e7da86a4913c13e",
+        "member_count": "16",
+        "hash_profile": "ccf-jcs-sha256-v2",
+        "signature_profile": "ed25519-jcs-v1",
+        "signer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+        "signer_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+        "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7",
+        "active_profiles": [
+          "ccf-core-0.1.2",
+          "ccf-local-sync-0.1.2",
+          "ccf-continuity-pack-0.1.2"
+        ],
+        "committed_at": "2026-08-11T21:42:21.000Z"
+      },
+      "extensions": {}
+    },
+    "expected_signing_digest": "sha256:616f3d1933b04c993bc82d670cab71384023a84d1918a99d744cf20ee70b0e5a",
+    "signature": "qfjvSuOxnW58NUhn06AD9BFkU_soK7QbAGW2ah0U5UJeTvWEx1XHgcfvMznwFG5Zmhip-QQKoGC6WgjucIn3BQ",
+    "expected_signature_valid": true,
+    "expected_commit_hash": "sha256:c4441746a975de8e6036449c6d7ce9b7c1a028de13ec1b904489f25c0a8f728c"
+  }
+}

@@ -88,15 +88,15 @@ class PinnedRegistries:
             return document
 
         return cls(
-            types=_load_verified("ccf.types/0.1.2-rc1"),
-            links=_load_verified("ccf.links/0.1.2-rc1"),
-            blobs=_load_verified("ccf.blobs/0.1.2-rc1"),
-            state_machines=_load_verified("ccf.state-machines/0.1.2-rc1"),
-            policy_evaluators=_load_verified("ccf.policy-evaluators/0.1.2-rc1"),
-            data_classes=_load_verified("ccf.data-classes/0.1.2-rc1"),
-            authority_bases=_load_verified("ccf.authority-bases/0.1.2-rc1"),
-            authority_classes=_load_verified("ccf.admission-authority-classes/0.1.2-rc1"),
-            suppression_profiles=_load_verified("ccf.suppression-profiles/0.1.2-rc1"),
+            types=_load_verified("ccf.types/0.1.2"),
+            links=_load_verified("ccf.links/0.1.2"),
+            blobs=_load_verified("ccf.blobs/0.1.2"),
+            state_machines=_load_verified("ccf.state-machines/0.1.2"),
+            policy_evaluators=_load_verified("ccf.policy-evaluators/0.1.2"),
+            data_classes=_load_verified("ccf.data-classes/0.1.2"),
+            authority_bases=_load_verified("ccf.authority-bases/0.1.2"),
+            authority_classes=_load_verified("ccf.admission-authority-classes/0.1.2"),
+            suppression_profiles=_load_verified("ccf.suppression-profiles/0.1.2"),
         )
 
     def type_entry(self, name: str, version: int = 1) -> dict:
@@ -154,7 +154,7 @@ class PinnedRegistries:
     def authority_class(self, name: str) -> dict:
         """Admission authority-class entry; fail closed if unknown.
 
-        The pinned ``ccf.admission-authority-classes`` registry (0.1.2-rc1)
+        The pinned ``ccf.admission-authority-classes`` registry (0.1.2)
         declares the normative ``failure_reason`` for each class; rejection
         reasons must emit it verbatim.
         """

@@ -1,0 +1,9 @@
+{
+  "spec": "ccf/0.1.2",
+  "object_kind": "record",
+  "id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+  "hash_profile": "ccf-jcs-sha256-v2",
+  "structural_commitment": "sha256:3f2f308ebd3df812a43d58422d7c2749d559a38060bd391ae9a42ebb93f6ecef",
+  "semantic_commitment": "sha256:2ceecc8336c8c04b5ee459d85c3424839fefd96ca475dcc3e93b8b4fabc7af88",
+  "object_hash": "sha256:74b9093df187b9d10c742f3bae34bbde6046c5cef42f4d7e25213a26c9b717aa"
+}

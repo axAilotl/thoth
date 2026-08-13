@@ -165,6 +165,7 @@ class SyncService:
             # A foreign merge of a partial pack tolerates member objects
             # absent from the pack; same-identity imports stay strict.
             allow_missing_member_objects=foreign,
+            operation="merge" if foreign else "import",
         )
         manifest = pack.manifest
         archive_id = self._archive.archive_id

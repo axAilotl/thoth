@@ -1,4 +1,4 @@
-"""CCF 0.1.2-rc1 portable object envelopes (spec sections 3 and 5).
+"""CCF 0.1.2 portable object envelopes (spec sections 3 and 5).
 
 Models the portable layers of a stored object (spec section 1.2):
 
@@ -49,8 +49,8 @@ class AvailabilityState(enum.Enum):
 
 
 def compartment_format(object_kind: str, compartment: str) -> str:
-    """Canonical compartment format label, e.g. ``ccf.record-structural/0.1.2-rc1``."""
-    return f"ccf.{object_kind}-{compartment}/0.1.2-rc1"
+    """Canonical compartment format label, e.g. ``ccf.record-structural/0.1.2``."""
+    return f"ccf.{object_kind}-{compartment}/0.1.2"
 
 
 def new_salt() -> str:

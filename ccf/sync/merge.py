@@ -83,13 +83,13 @@ def merge_mindpack(
     # must be recorded as unavailable, never dropped — the destination
     # header keeps the compartment commitment, and chain verification
     # fails closed when the row is simply missing. The exact availability
-    # state is preserved per compartment (0.1.2-rc1): erased stays erased,
+    # state is preserved per compartment (0.1.2): erased stays erased,
     # withheld stays withheld.
     unavailable_ids = set(manifest.get("withheld", [])) | set(
         manifest.get("erased", [])
     )
     erased_ids = set(manifest.get("erased", []))
-    # Per-compartment declarations (0.1.2-rc1 manifest) take precedence
+    # Per-compartment declarations (0.1.2 manifest) take precedence
     # over the object-level lists.
     declared_states: dict[tuple[str, str], str] = {}
     for entry in manifest.get("compartment_availability", []):

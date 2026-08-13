@@ -1,4 +1,4 @@
-"""Canonical suppression sets (spec 12.7, 0.1.2-rc1).
+"""Canonical suppression sets (spec 12.7, 0.1.2).
 
 Suppression commitments are canonical, journal-covered erasure lineage: a
 ``lineage.suppression_set`` Record commits to the pinned profile
@@ -21,9 +21,8 @@ with entries in ascending Unicode code-point order; the Merkle tree uses
 the registry-pinned leaf/node/empty domains and splits at the largest
 power of two smaller than the node count.
 
-The ``scope_commitment`` derivation is implementation-defined (the spec
-pins its presence, not its construction): here it is
-``ccf:suppression-scope:v1`` over the sorted erased object IDs.
+The ``scope_commitment`` derivation is registry-pinned as
+``ccf:suppression-scope:v1`` over the JCS array of sorted erased object IDs.
 """
 
 from __future__ import annotations
@@ -101,7 +100,7 @@ def suppression_blob_bytes(tokens: list[str]) -> bytes:
 
 
 def scope_commitment(plans: list[dict]) -> str:
-    """Commitment over the erased object IDs (implementation-defined)."""
+    """Registry-pinned commitment over the sorted erased object IDs."""
     return canonical_digest(
         "ccf:suppression-scope:v1", sorted(plan["object_id"] for plan in plans)
     )

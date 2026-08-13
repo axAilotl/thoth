@@ -115,7 +115,7 @@ class CcfTestRig:
                         "expires_at": None,
                     },
                     "payload": {
-                        "profile": "ccf.policy/0.1.2-rc1",
+                        "profile": "ccf.policy/0.1.2",
                         "evaluator_profile": "ccf-deny-overrides-v1",
                         "combining_algorithm": "deny_overrides_v1",
                         "default_effect": "deny",
@@ -228,7 +228,7 @@ class CcfTestRig:
 
 
 def make_rig(settings, tmp_path, ccf_package_root, clock=None) -> CcfTestRig:
-    # Every rig gets a suppression key unless one is configured: 0.1.2-rc1
+    # Every rig gets a suppression key unless one is configured: 0.1.2
     # requires canonical suppression lineage for erasure (spec 12.7).
     if settings.suppression_key_path is None:
         from dataclasses import replace

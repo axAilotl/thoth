@@ -34,8 +34,8 @@ from ccf.sync.packio import (
 from ccf.sync.restore import append_pack_commits, insert_pack_objects
 from ccf.sync.verify import verify_commit_chain, verify_pack_object
 
-DELTA_PACK_FORMAT = "ccf.delta-pack/0.1.2-rc1"
-SCHEMA_DELTA_MANIFEST = "urn:ccf:schema:0.1.2-rc1:sync.delta-pack-manifest"
+DELTA_PACK_FORMAT = "ccf.delta-pack/0.1.2"
+SCHEMA_DELTA_MANIFEST = "urn:ccf:schema:0.1.2:sync.delta-pack-manifest"
 
 
 class DeltaPackError(PackError):
@@ -44,7 +44,7 @@ class DeltaPackError(PackError):
 
 def _header_dict(row) -> dict:
     return {
-        "spec": "ccf/0.1.2-rc1",
+        "spec": "ccf/0.1.2",
         "object_kind": row[1],
         "id": row[0],
         "hash_profile": "ccf-jcs-sha256-v2",

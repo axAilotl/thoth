@@ -1,4 +1,4 @@
-"""CCF 0.1.2-rc1 governance baseline (spec section 9, checklist phase 6).
+"""CCF 0.1.2 governance baseline (spec section 9, checklist phase 6).
 
 Implements the pinned ``ccf-deny-overrides-v1`` evaluator over a
 deterministic policy closure, decision contexts and results matching the

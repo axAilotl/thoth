@@ -24,6 +24,30 @@ from ccf_helpers import authority, make_rig
 from test_ccf_mindpack import _populate, _remove_object_from_pack
 
 
+def test_manifest_tamper_vector_coverage(ccf_vectors_dir):
+    """Pin every published final manifest mutation to this rejection suite."""
+    path = ccf_vectors_dir / "mindpack-manifest-tamper.json"
+    vector = json.loads(path.read_text(encoding="utf-8"))
+    assert vector["format"] == "ccf.manifest-tamper-vectors/0.1.2"
+    assert {case["id"] for case in vector["cases"]} == {
+        "forged-low-count",
+        "forged-high-count",
+        "removed-stream-entry",
+        "extra-unlisted-stream",
+        "available-changed-to-erased",
+        "erased-changed-to-available",
+        "missing-dependency",
+        "fabricated-dependency",
+        "changed-genesis",
+        "changed-head",
+        "complete-changed-to-partial",
+        "restore-changed-to-foreign-merge",
+        "duplicate-availability-row",
+        "contradictory-availability-row",
+    }
+    assert {case["expected"] for case in vector["cases"]} == {"reject"}
+
+
 @pytest.fixture()
 def settings_factory(ccf_postgres_dsn):
     """Factory for extra store schemas in one test (restores, merges)."""
@@ -307,21 +331,7 @@ def _partial_pack_with_external_dep(rig, tmp_path, ccf_package_root):
     ids = _populate(rig)
     pack_dir = tmp_path / "partial"
     rig.archive.sync().export_mindpack(pack_dir)
-    _remove_object_from_pack(pack_dir, ids["source"])
-
-    def edit(m):
-        m["external_dependencies"].append(
-            {"object_id": ids["source"], "reason": "resolves outside the pack"}
-        )
-        # Keep the embedded completeness report consistent with the
-        # declaration, as an honest exporter would have written it.
-        m["extensions"]["completeness"]["external"] = [ids["source"]]
-        m["extensions"]["completeness"]["included"] = [
-            i for i in m["extensions"]["completeness"]["included"]
-            if i != ids["source"]
-        ]
-
-    _tamper(pack_dir, edit)
+    _remove_object_from_pack(pack_dir, ids["source"], declare_partial=True)
     return pack_dir, ids
 
 
@@ -337,6 +347,8 @@ def test_real_external_dependency_accepted(rig, tmp_path, ccf_package_root):
     )
     assert ids["source"] in pack.completeness.external
     assert pack.completeness.complete
+    assert pack.custody_complete is False
+    assert pack.restore_capable is False
 
 
 def test_real_external_dependency_removed(rig, tmp_path, ccf_package_root):
@@ -353,6 +365,25 @@ def test_real_external_dependency_removed(rig, tmp_path, ccf_package_root):
     assert ids["source"] in str(excinfo.value)
 
 
+def test_real_external_dependency_removed_even_for_partial_import(
+    rig, tmp_path, ccf_package_root
+):
+    """Explicit partial custody does not excuse a missing dependency row."""
+    pack_dir, ids = _partial_pack_with_external_dep(
+        rig, tmp_path, ccf_package_root
+    )
+    _tamper(pack_dir, lambda m: m["external_dependencies"].clear())
+    with pytest.raises(PackVerificationError) as excinfo:
+        verify_mindpack(
+            pack_dir,
+            package_root=ccf_package_root,
+            allow_partial=True,
+            allow_missing_member_objects=True,
+        )
+    assert excinfo.value.reason == "manifest_external_dependency_mismatch"
+    assert ids["source"] in str(excinfo.value)
+
+
 # ---------------------------------------------------------------------------
 # 7. Completeness flips.
 # ---------------------------------------------------------------------------
@@ -365,46 +396,42 @@ def test_completeness_underclaim_fails_without_partial_request(
     pack_dir, manifest, _ = pack
 
     def edit(m):
-        m["extensions"]["completeness"]["complete"] = False
-        m["extensions"]["completeness"]["dangling"] = [
-            "urn:ccf:record:00000000-0000-4000-8000-000000000000"
-        ]
+        m["custody"] = {"completeness": "partial", "restore_capable": False}
 
     _tamper(pack_dir, edit)
     _restore_fails(pack_dir, settings_factory, ccf_package_root, ccf_postgres_dsn,
                    manifest, reason="manifest_completeness_mismatch")
 
 
-def test_completeness_underclaim_accepted_with_explicit_partial(
-    pack, settings_factory, ccf_package_root
+def test_completeness_underclaim_fails_even_with_explicit_partial(
+    pack, ccf_package_root
 ):
-    """Explicit partial-custody request: derived truth (complete) governs."""
+    """Caller permission never excuses an unsigned custody mismatch."""
     pack_dir, manifest, _ = pack
 
     def edit(m):
-        m["extensions"]["completeness"]["complete"] = False
-        m["extensions"]["completeness"]["dangling"] = [
-            "urn:ccf:record:00000000-0000-4000-8000-000000000000"
-        ]
+        m["custody"] = {"completeness": "partial", "restore_capable": False}
 
     _tamper(pack_dir, edit)
-    report = restore_mindpack(
-        settings_factory(),
-        package_root=ccf_package_root,
-        pack_path=pack_dir,
-        trusted_genesis_hash=manifest["genesis_commit_hash"],
-        allow_partial=True,
-    )
-    assert report["status"] == "restored"
-    assert report["partial"] is False  # derived truth, not the claim
+    with pytest.raises(PackVerificationError) as excinfo:
+        verify_mindpack(
+            pack_dir,
+            package_root=ccf_package_root,
+            allow_partial=True,
+            operation="restore",
+        )
+    assert excinfo.value.reason == "manifest_completeness_mismatch"
 
 
 def test_completeness_overclaim_fails_restore(rig, tmp_path, ccf_package_root):
     """Claimed complete + verifiably partial fails a restore request."""
     pack_dir, _ = _partial_pack_with_external_dep(rig, tmp_path, ccf_package_root)
-    # Drop the declaration: the pack is now undeclared-partial, and its
-    # manifest still claims complete=true.
-    _tamper(pack_dir, lambda m: m["external_dependencies"].clear())
+    _tamper(
+        pack_dir,
+        lambda m: m.update(
+            custody={"completeness": "complete", "restore_capable": True}
+        ),
+    )
     with pytest.raises(PackVerificationError) as excinfo:
         verify_mindpack(
             pack_dir,
@@ -509,6 +536,35 @@ def test_stream_digest_mismatch(pack, settings_factory, ccf_package_root,
     _restore_fails(pack_dir, settings_factory, ccf_package_root,
                    ccf_postgres_dsn, manifest,
                    reason="manifest_stream_digest_mismatch")
+
+
+def test_removed_stream_entry_fails(pack, settings_factory, ccf_package_root,
+                                    ccf_postgres_dsn):
+    """A real container member omitted from the unsigned index is rejected."""
+    pack_dir, manifest, _ = pack
+    _tamper(pack_dir, lambda m: m["streams"].pop())
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_stream_digest_mismatch",
+    )
+
+
+def test_restore_capability_flip_fails(pack, settings_factory, ccf_package_root,
+                                       ccf_postgres_dsn):
+    pack_dir, manifest, _ = pack
+    _tamper(pack_dir, lambda m: m["custody"].update(restore_capable=False))
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_completeness_mismatch",
+    )
 
 
 def test_unlisted_pack_content_fails(pack, settings_factory, ccf_package_root,

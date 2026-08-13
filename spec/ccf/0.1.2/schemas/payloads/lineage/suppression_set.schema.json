@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.lineage.suppression_set",
+  "title": "lineage.suppression_set payload",
+  "type": "object",
+  "properties": {
+    "sensitivity": { "const": "governed_sensitive_metadata" },
+    "purpose": { "const": "erased_content_reintroduction_prevention" },
+    "extensions": { "type": "object" }
+  },
+  "required": ["sensitivity", "purpose", "extensions"],
+  "additionalProperties": false
+}

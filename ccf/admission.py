@@ -65,17 +65,17 @@ from ccf.objects import now_timestamp
 from ccf.registry import PinnedRegistries
 from ccf.schemas import CcfSchemaError, SchemaSet
 
-SCHEMA_PRODUCER_BATCH = "urn:ccf:schema:0.1.2-rc1:sync.producer-batch"
-SCHEMA_RECORD_SUBMISSION = "urn:ccf:schema:0.1.2-rc1:submissions.record"
-SCHEMA_LINK_SUBMISSION = "urn:ccf:schema:0.1.2-rc1:submissions.link"
-SCHEMA_BLOB_SUBMISSION = "urn:ccf:schema:0.1.2-rc1:submissions.blob"
-SCHEMA_LINK_SEMANTIC_CONTENT = "urn:ccf:schema:0.1.2-rc1:objects.link-semantic-content"
-SCHEMA_RECORD_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:objects.record-structural-content"
-SCHEMA_RECORD_SEMANTIC = "urn:ccf:schema:0.1.2-rc1:objects.record-semantic-content"
-SCHEMA_LINK_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:objects.link-structural-content"
-SCHEMA_LINK_SEMANTIC = "urn:ccf:schema:0.1.2-rc1:objects.link-semantic-content"
-SCHEMA_BLOB_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:objects.blob-structural-content"
-SCHEMA_BLOB_SEMANTIC = "urn:ccf:schema:0.1.2-rc1:objects.blob-semantic-content"
+SCHEMA_PRODUCER_BATCH = "urn:ccf:schema:0.1.2:sync.producer-batch"
+SCHEMA_RECORD_SUBMISSION = "urn:ccf:schema:0.1.2:submissions.record"
+SCHEMA_LINK_SUBMISSION = "urn:ccf:schema:0.1.2:submissions.link"
+SCHEMA_BLOB_SUBMISSION = "urn:ccf:schema:0.1.2:submissions.blob"
+SCHEMA_LINK_SEMANTIC_CONTENT = "urn:ccf:schema:0.1.2:objects.link-semantic-content"
+SCHEMA_RECORD_STRUCTURAL = "urn:ccf:schema:0.1.2:objects.record-structural-content"
+SCHEMA_RECORD_SEMANTIC = "urn:ccf:schema:0.1.2:objects.record-semantic-content"
+SCHEMA_LINK_STRUCTURAL = "urn:ccf:schema:0.1.2:objects.link-structural-content"
+SCHEMA_LINK_SEMANTIC = "urn:ccf:schema:0.1.2:objects.link-semantic-content"
+SCHEMA_BLOB_STRUCTURAL = "urn:ccf:schema:0.1.2:objects.blob-structural-content"
+SCHEMA_BLOB_SEMANTIC = "urn:ccf:schema:0.1.2:objects.blob-semantic-content"
 
 DEFAULT_EVALUATOR_PROFILE = "ccf-deny-overrides-v1"
 
@@ -125,7 +125,7 @@ def _batch_result(
         "commit_sequence": commit_sequence,
         "commit_hash": commit_hash,
         "admissions": admissions or [],
-        # Top-level machine field per operational.batch-result (0.1.2-rc1
+        # Top-level machine field per operational.batch-result (0.1.2
         # requires it); extensions.reason keeps the same prose for
         # existing consumers.
         "reason": reason,
@@ -799,20 +799,20 @@ def admit_producer_batch(
         if suppression_state is not None:
             if obj_kind == "blob":
                 data = (blob_bytes or {}).get(sub["id"])
-                content_commitment = (
-                    suppression.content_commitment_for_bytes(data)
+                content_digest = (
+                    suppression.content_digest_for_bytes(data)
                     if data is not None
                     else None
                 )
             else:
-                content_commitment = suppression.content_commitment_for_payload(
+                content_digest = suppression.content_digest_for_payload(
                     sub["payload"]
                 )
             suppressed = suppression.admission_outcome(
                 suppression_state,
                 key=suppression_key,
                 origin=origin,
-                content_commitment=content_commitment,
+                content_digest=content_digest,
                 object_kind=obj_kind,
                 object_id=object_id,
                 producer_id=batch["producer_id"],
@@ -1044,7 +1044,7 @@ def _resolve_submission(
 
 def _make_envelope(kind: str, compartment: str, content: dict, salt_fn) -> dict:
     return {
-        "format": f"ccf.{kind}-{compartment}/0.1.2-rc1",
+        "format": f"ccf.{kind}-{compartment}/0.1.2",
         "salt": salt_fn(),
         "content": content,
     }

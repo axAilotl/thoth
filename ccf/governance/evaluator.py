@@ -20,7 +20,7 @@ the object set (pending dominates deny, deny dominates allow):
   covering active legal-basis record suffices — never both at once.
 
 The evaluator version is pinned by the semantic catalog through the
-``ccf.policy-evaluators/0.1.2-rc1`` registry; construction fails closed when
+``ccf.policy-evaluators/0.1.2`` registry; construction fails closed when
 the profile is not pinned.
 """
 

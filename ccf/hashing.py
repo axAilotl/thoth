@@ -1,6 +1,6 @@
-"""CCF 0.1.2-rc1 hash profile ``ccf-jcs-sha256-v2`` (spec section 4).
+"""CCF 0.1.2 hash profile ``ccf-jcs-sha256-v2`` (spec section 4).
 
-Semantic port of ``spec/ccf/0.1.2-rc1/tools/ccf-jcs.mjs``. Every hash is
+Semantic port of ``spec/ccf/0.1.2/tools/ccf-jcs.mjs``. Every hash is
 
     SHA256(<domain-separator> || 0x00 || <parts...>)
 
@@ -250,7 +250,7 @@ def registry_entry_digest(entry: dict) -> str:
 
     Structural compartments bind an object to the exact type/Link registry
     entry the archive resolved, via ``ccf:registry-entry:v1`` (see
-    ``spec/ccf/0.1.2-rc1/tools/build-example.mjs``).
+    ``spec/ccf/0.1.2/tools/build-example.mjs``).
     """
     return canonical_digest("ccf:registry-entry:v1", entry)
 

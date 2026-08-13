@@ -1,0 +1,58 @@
+{
+  "format": "ccf.link-semantic/0.1.2",
+  "salt": "ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ",
+  "content": {
+    "recorded_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+    "recorded_at": "2026-08-11T21:42:20.200Z",
+    "claimed": {
+      "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+      "perspective_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+      "privacy": {
+        "data_subjects": [],
+        "data_classes": [],
+        "consent_refs": [],
+        "legal_basis_refs": [],
+        "subject_coverage": "unknown"
+      },
+      "authority": {
+        "basis": "runtime_import",
+        "asserted_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+        "accepted_by": null
+      },
+      "policy_hint": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "extensions": {}
+    },
+    "privacy": {
+      "data_subjects": [],
+      "data_classes": [],
+      "consent_refs": [],
+      "legal_basis_refs": [],
+      "subject_coverage": "unknown"
+    },
+    "policy_ref": {
+      "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "head_id_at_write": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "policy_object_hash": "sha256:e57851ddec5a839632de3ebd13c350ae8db724496473078180d94f5f52fcf225",
+      "evaluator_profile": "ccf-deny-overrides-v1",
+      "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+    },
+    "authority": {
+      "basis": "runtime_import",
+      "asserted_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+      "accepted_by": null
+    },
+    "producer_evidence": {
+      "batch_id": "urn:ccf:batch:98d352bf-7abb-4fdf-824c-3c93c4e55901",
+      "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
+      "producer_sequence": "1",
+      "submission_hash": "sha256:3b2885c3d0360f68acbb92eedbed674374b1b302631b1d9d0517cbaae10f3a9d"
+    },
+    "selector": {
+      "kind": "media_time",
+      "start_ms": 0,
+      "end_ms": 30000
+    },
+    "payload": {},
+    "extensions": {}
+  }
+}

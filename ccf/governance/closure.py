@@ -5,7 +5,7 @@ Deterministically collects every input the baseline evaluator may use:
 - the direct object policy (the Record's resolved ``policy_ref`` lineage);
 - active ``ccf.governed_by`` Links;
 - active derivation ancestors over Link types the registry marks
-  ``policy_propagates`` (none in the 0.1.2-rc1 registry, so the traversal is
+  ``policy_propagates`` (none in the 0.1.2 registry, so the traversal is
   registry-driven and currently vacuous rather than hard-coded);
 - current resolved data-subject identities (active ``ccf.same_as`` merges,
   vetoed pairwise by active ``ccf.distinct_from``);

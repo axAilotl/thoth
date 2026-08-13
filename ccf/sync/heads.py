@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from ccf.sync.packio import PackError
 
-SCHEMA_SYNC_HEAD = "urn:ccf:schema:0.1.2-rc1:sync.head"
+SCHEMA_SYNC_HEAD = "urn:ccf:schema:0.1.2:sync.head"
 
 
 class NegotiationError(PackError):

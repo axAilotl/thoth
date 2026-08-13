@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.governance.subject_access_request",
+  "title": "governance.subject_access_request payload",
+  "type": "object",
+  "properties": {
+    "subject_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "decision": {
+      "enum": [
+        "requested",
+        "verified",
+        "fulfilled",
+        "denied"
+      ]
+    },
+    "scope": {
+      "type": "object"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "effective_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "subject_id",
+    "decision",
+    "scope",
+    "reason",
+    "effective_at",
+    "evidence_refs",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

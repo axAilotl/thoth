@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:structural.empty",
+  "title": "Empty Structural Payload",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

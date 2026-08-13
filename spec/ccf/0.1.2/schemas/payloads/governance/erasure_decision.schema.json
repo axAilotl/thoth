@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.governance.erasure_decision",
+  "title": "governance.erasure_decision payload",
+  "type": "object",
+  "properties": {
+    "request_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "decision": {
+      "enum": [
+        "approve",
+        "deny",
+        "restrict",
+        "defer",
+        "partial"
+      ]
+    },
+    "approved_scope": {
+      "type": "object"
+    },
+    "reasoning": {
+      "type": "string"
+    },
+    "competing_obligations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "approved_operations": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "block",
+          "destroy_body_key",
+          "destroy_blob_key",
+          "delete_ciphertext",
+          "invalidate_selector",
+          "suppress_origin",
+          "recompute_descendants"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "decided_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "request_id",
+    "decision",
+    "approved_scope",
+    "reasoning",
+    "competing_obligations",
+    "approved_operations",
+    "decided_at",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

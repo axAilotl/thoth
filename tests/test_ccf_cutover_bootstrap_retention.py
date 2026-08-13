@@ -130,7 +130,7 @@ def test_gate5b_bootstrap_compartments_survive_projection_destruction(
     )
     assert (
         after["policy"]["semantic"]["content"]["payload"]["profile"]
-        == "ccf.policy/0.1.2-rc1"
+        == "ccf.policy/0.1.2"
     )
     credential_structural = after["credential"]["structural"]["content"]
     assert credential_structural["type"] == "core.device_credential"

@@ -2,7 +2,7 @@
 
 The CCF operational envelope lives in its own Postgres schema (default
 ``ccf``) and follows the vendored reference envelope
-(``spec/ccf/0.1.2-rc1/sql/postgres-reference.sql``): object headers, compartment
+(``spec/ccf/0.1.2/sql/postgres-reference.sql``): object headers, compartment
 and Blob content storage, admissions, commit journal + members, the
 origin/idempotency index, lineage heads, and the signed producer-batch spool
 with receipts.
@@ -209,7 +209,7 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
                 id                      text PRIMARY KEY,
                 archive_id              text NOT NULL REFERENCES archive(archive_id),
                 object_kind             text NOT NULL CHECK (object_kind IN ('record','link','blob')),
-                spec                    text NOT NULL CHECK (spec = 'ccf/0.1.2-rc1'),
+                spec                    text NOT NULL CHECK (spec = 'ccf/0.1.2'),
                 hash_profile            text NOT NULL CHECK (hash_profile = 'ccf-jcs-sha256-v2'),
                 structural_commitment   text NOT NULL,
                 semantic_commitment     text,
@@ -476,7 +476,7 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
             # preventing silent reintroduction. Commitments are keyed
             # digests only — never plaintext origin tuples or content —
             # because plain unsalted fingerprints are insufficient for
-            # low-entropy content. Since 0.1.2-rc1 this table is a
+            # low-entropy content. Since 0.1.2 this table is a
             # rebuildable PROJECTION: every row resolves to a canonical,
             # journal-covered ``lineage.suppression_set`` Record and its
             # governed token Blob; deleting rows never removes canonical
@@ -542,12 +542,12 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
             """,
         ),
     ),
-    # 0.1.2-rc1: batch disposition vocabulary, and the suppression lookup
+    # 0.1.2: batch disposition vocabulary, and the suppression lookup
     # table becomes a rebuildable projection of canonical
     # ``lineage.suppression_set`` lineage (spec 6.2, 12.7).
     PostgresMigration(
         version=6,
-        name="0006_ccf_012_rc1",
+        name="0006_ccf_012",
         statements=(
             # Batch dispositions committed/partial/rejected ->
             # accepted/partially_accepted/content_rejected (+quarantined).
@@ -568,12 +568,12 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
             """
             ALTER TABLE object_header
                 ADD CONSTRAINT object_header_spec_check
-                CHECK (spec = 'ccf/0.1.2-rc1')
+                CHECK (spec = 'ccf/0.1.2')
             """,
-            # Legacy pre-rc1 suppression rows used the old token domains
+            # Pre-0.1.2 suppression rows used the old token domains
             # and cannot be re-keyed under ccf-hmac-sha256-suppression-v1;
             # they are discarded — canonical suppression sets rebuild the
-            # projection (a pre-rc1 archive has none, so its erasures
+            # projection (a pre-0.1.2 archive has none, so its erasures
             # predate canonical suppression by definition).
             "DELETE FROM suppression_entry",
             """

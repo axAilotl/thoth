@@ -7,19 +7,17 @@ silently reintroduce them is caught at admission. Commitments are keyed —
 never plain unsalted fingerprints — because erased content may be
 low-entropy (spec 12.7).
 
-0.1.2-rc1 makes suppression canonical: the tokens committed here live in a
+0.1.2 makes suppression canonical: the tokens committed here live in a
 governed Blob referenced by a canonical ``lineage.suppression_set`` Record
 (:mod:`ccf.erasure.suppression_set`); the ``suppression_entry`` table is a
 rebuildable projection of that canonical state. This module owns the
 pinned token derivation:
 
-- the preimage is a JCS object validated by the closed catalog schema
-  ``urn:ccf:schema:0.1.2-rc1:security.suppression-preimage``, either an
-  origin tuple (``kind``, ``source_id``, ``native_id``, ``revision``,
-  ``object_kind``) or a content commitment (``kind``,
-  ``content_commitment``);
-- the token is ``HMAC-SHA-256(key, UTF8('ccf:suppression-token:v1\\0') ||
-  UTF8(JCS(preimage)))`` encoded as ``hmac-sha256:<lowercase hex>``.
+- origin tokens use ``ccf:suppression-token:v1`` over the closed JCS origin
+  preimage;
+- content tokens use ``ccf:suppression-content:v1`` over a stable content
+  class and the raw unsalted SHA-256 of canonical plaintext. The unsalted
+  digest is transient; canonical state retains only the HMAC token.
 
 Response shaping (spec 6.5, 12.8): an authorized source owner (a producer
 listed in the entry's ``authorized_producers``) receives a lifecycle
@@ -46,20 +44,28 @@ from pathlib import Path
 from ccf.db import CcfPostgresSettings
 from ccf.erasure.errors import SuppressionKeyError
 from ccf.hashing import (
-    canonical_digest,
     decode_b64url,
-    domain_digest,
+    digest_string,
     encode_b64url,
+    parse_digest,
 )
 from ccf.jcs import canonical_bytes
 
 #: The pinned suppression profile (registries/suppression-profiles).
 SUPPRESSION_PROFILE = "ccf-hmac-sha256-suppression-v1"
 PREIMAGE_FORMAT = "ccf.suppression-preimage/1"
-SCHEMA_PREIMAGE = "urn:ccf:schema:0.1.2-rc1:security.suppression-preimage"
+SCHEMA_PREIMAGE = "urn:ccf:schema:0.1.2:security.suppression-preimage"
 
-_TOKEN_DOMAIN = b"ccf:suppression-token:v1\0"
+_ORIGIN_TOKEN_DOMAIN = b"ccf:suppression-token:v1\0"
+_CONTENT_TOKEN_DOMAIN = b"ccf:suppression-content:v1\0"
 _TOKEN_PREFIX = "hmac-sha256:"
+
+CONTENT_CLASS_RECORD = "record-semantic"
+CONTENT_CLASS_LINK = "link-semantic"
+CONTENT_CLASS_BLOB = "blob-content"
+CONTENT_CLASSES = frozenset(
+    {CONTENT_CLASS_RECORD, CONTENT_CLASS_LINK, CONTENT_CLASS_BLOB}
+)
 
 
 def generate_suppression_key(path: str | Path) -> Path:
@@ -126,58 +132,77 @@ def origin_preimage(
     }
 
 
-def content_preimage(*, content_commitment: str) -> dict:
+def content_preimage(*, content_class: str, content_digest: str) -> dict:
     """The content suppression preimage (closed schema shape)."""
     return {
         "format": PREIMAGE_FORMAT,
         "kind": "content",
-        "content_commitment": content_commitment,
+        "content_class": content_class,
+        "content_digest": content_digest,
     }
 
 
-def suppression_token(key: bytes, preimage: dict) -> str:
-    """Keyed token for one preimage, per the pinned profile."""
-    mac = hmac.new(key, _TOKEN_DOMAIN + canonical_bytes(preimage), hashlib.sha256)
-    return _TOKEN_PREFIX + mac.hexdigest()
+def _check_key(key: bytes) -> None:
+    if not isinstance(key, bytes) or len(key) < 32:
+        raise SuppressionKeyError("suppression key must contain at least 32 bytes")
 
 
 def token_for_origin(
     key: bytes, *, source_id: str, native_id: str, revision: str, object_kind: str
 ) -> str:
     """Token for an erased source item (exact origin tuple + object kind)."""
-    return suppression_token(
-        key,
-        origin_preimage(
-            source_id=source_id,
-            native_id=native_id,
-            revision=revision,
-            object_kind=object_kind,
-        ),
+    _check_key(key)
+    preimage = origin_preimage(
+        source_id=source_id,
+        native_id=native_id,
+        revision=revision,
+        object_kind=object_kind,
     )
+    mac = hmac.new(
+        key, _ORIGIN_TOKEN_DOMAIN + canonical_bytes(preimage), hashlib.sha256
+    )
+    return _TOKEN_PREFIX + mac.hexdigest()
 
 
-#: Domain for the content commitment inside a content preimage. The
-#: commitment must be reproducible from equivalent content — the same
-#: payload (Records/Links) or the same bytes (Blobs) — so that erased
-#: content reappearing under a fresh origin tuple, revision, or object ID
-#: is still caught (spec 12.7). A submission hash would not serve: it is
-#: unique per submission envelope, so any recapture would slip past.
-_CONTENT_DOMAIN = "ccf:suppression-content:v1"
+def content_digest_for_payload(payload: dict) -> str:
+    """Stable unsalted digest of a Record/Link canonical plaintext payload."""
+    return digest_string(canonical_bytes(payload))
 
 
-def content_commitment_for_payload(payload: dict) -> str:
-    """Content commitment for a Record/Link semantic payload."""
-    return canonical_digest(_CONTENT_DOMAIN, payload)
+def content_digest_for_bytes(data: bytes) -> str:
+    """Stable unsalted digest of canonical plaintext Blob bytes."""
+    return digest_string(data)
 
 
-def content_commitment_for_bytes(data: bytes) -> str:
-    """Content commitment for raw Blob bytes."""
-    return domain_digest(_CONTENT_DOMAIN, data)
+def content_class_for_kind(object_kind: str) -> str:
+    """Pinned stable content class for one portable object kind."""
+    try:
+        return {
+            "record": CONTENT_CLASS_RECORD,
+            "link": CONTENT_CLASS_LINK,
+            "blob": CONTENT_CLASS_BLOB,
+        }[object_kind]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown suppression content object kind: {object_kind!r}"
+        ) from exc
 
 
-def token_for_content(key: bytes, content_commitment: str) -> str:
-    """Token for erased content (via its content commitment)."""
-    return suppression_token(key, content_preimage(content_commitment=content_commitment))
+def token_for_content(
+    key: bytes, *, content_class: str, content_digest: str
+) -> str:
+    """Token for stable plaintext content under the content-specific domain."""
+    _check_key(key)
+    if content_class not in CONTENT_CLASSES:
+        raise ValueError(f"unknown suppression content class: {content_class!r}")
+    raw_digest = parse_digest(content_digest)
+    message = (
+        _CONTENT_TOKEN_DOMAIN
+        + content_class.encode("utf-8")
+        + b"\0"
+        + raw_digest
+    )
+    return _TOKEN_PREFIX + hmac.new(key, message, hashlib.sha256).hexdigest()
 
 
 def tokens_for_plan(key: bytes, plan: dict) -> list[tuple[str, str]]:
@@ -197,8 +222,17 @@ def tokens_for_plan(key: bytes, plan: dict) -> list[tuple[str, str]]:
                 ),
             )
         )
-    if plan.get("content_commitment"):
-        tokens.append(("content", token_for_content(key, plan["content_commitment"])))
+    if plan.get("content_digest"):
+        tokens.append(
+            (
+                "content",
+                token_for_content(
+                    key,
+                    content_class=plan["content_class"],
+                    content_digest=plan["content_digest"],
+                ),
+            )
+        )
     return tokens
 
 
@@ -323,7 +357,7 @@ def admission_outcome(
     *,
     key: bytes,
     origin: dict | None,
-    content_commitment: str | None,
+    content_digest: str | None,
     object_kind: str,
     object_id: str,
     producer_id: str,
@@ -336,9 +370,15 @@ def admission_outcome(
     else.
     """
     candidates: list[str] = []
-    if content_commitment is not None:
+    if content_digest is not None:
         # Exact content first, then the origin tuple (spec 6.5 retry).
-        candidates.append(token_for_content(key, content_commitment))
+        candidates.append(
+            token_for_content(
+                key,
+                content_class=content_class_for_kind(object_kind),
+                content_digest=content_digest,
+            )
+        )
     if origin is not None:
         candidates.append(
             token_for_origin(

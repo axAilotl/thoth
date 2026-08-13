@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.experience.artifact",
+  "title": "experience.artifact payload",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "media_type": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "external_uri": {
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "uri"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifact_role": {
+      "type": "string"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "name",
+    "media_type",
+    "description",
+    "artifact_role",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

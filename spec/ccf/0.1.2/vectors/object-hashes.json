@@ -1,0 +1,298 @@
+{
+  "record": {
+    "header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "record",
+      "id": "urn:ccf:record:63607ea0-9d26-4625-ab23-65ce7415b571",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "structural_commitment": "sha256:cfc4fedf388d75310c2912b0efedcfda42a1828a0c4e834c263292f92c3ba3de",
+      "semantic_commitment": "sha256:e9c98a20f1f90d2a25bf7457c51ce2a06a5632e5b3c93e91d41615901e27911b",
+      "object_hash": "sha256:8bab105b1677637a8c5bb9846f9b57bb1561274b33dfc7ecb59b04f8dd80b799"
+    },
+    "structural": {
+      "format": "ccf.record-structural/0.1.2",
+      "salt": "Dg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4",
+      "content": {
+        "type": "experience.utterance",
+        "type_version": 1,
+        "type_visibility": "clear",
+        "schema_digest": "sha256:8ad65b218975e7ea06236523cdb2622bbadcf871586a44db91185c9ef626180a",
+        "registry_entry_digest": "sha256:209d4fad07a0b6d21db7d5dc465cd91cfd5d9a80dc55b1c4c13e0bf09405c90b",
+        "retention_profile": "payload_erasable",
+        "structural_payload": {},
+        "extensions": {}
+      }
+    },
+    "semantic": {
+      "format": "ccf.record-semantic/0.1.2",
+      "salt": "Xl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4",
+      "content": {
+        "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+        "perspective_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+        "recorded_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+        "recorded_at": "2026-08-11T21:42:19.100Z",
+        "occurred_at": {
+          "start": "2026-08-11T21:41:48.000Z",
+          "end": "2026-08-11T21:42:18.000Z",
+          "precision": "millisecond",
+          "clock_uncertainty_ms": 12
+        },
+        "origin": {
+          "source_id": "urn:ccf:record:4e9f8cc9-563a-4d61-8221-9f55e9db39bd",
+          "native_id": "boot-8891/segment-1842/utterance-1",
+          "revision": "1",
+          "submission_hash": "sha256:7208e022b337289bd657310acc70cb81a748df7231c1b4b863dead5d07eab6ec"
+        },
+        "claimed": {
+          "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+          "perspective_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+          "privacy": {
+            "data_subjects": [
+              {
+                "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+                "role": "speaker",
+                "identity_state_at_write": "verified"
+              }
+            ],
+            "data_classes": [
+              "speech_content"
+            ],
+            "consent_refs": [],
+            "legal_basis_refs": [],
+            "subject_coverage": "complete"
+          },
+          "authority": {
+            "basis": "quoted_statement",
+            "asserted_by": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+            "accepted_by": null
+          },
+          "policy_hint": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+          "extensions": {}
+        },
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "speech_content"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "policy_ref": {
+          "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+          "head_id_at_write": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
+          "policy_object_hash": "sha256:e57851ddec5a839632de3ebd13c350ae8db724496473078180d94f5f52fcf225",
+          "evaluator_profile": "ccf-deny-overrides-v1",
+          "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+        },
+        "authority": {
+          "basis": "quoted_statement",
+          "asserted_by": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+          "accepted_by": null
+        },
+        "producer_evidence": {
+          "batch_id": "urn:ccf:batch:98d352bf-7abb-4fdf-824c-3c93c4e55901",
+          "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
+          "producer_sequence": "1",
+          "submission_hash": "sha256:7208e022b337289bd657310acc70cb81a748df7231c1b4b863dead5d07eab6ec"
+        },
+        "payload": {
+          "text": "I want the schema open because adoption is still a win.",
+          "language": "en",
+          "speaker_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+          "sequence": "1",
+          "transcription": {
+            "engine": "example-stt",
+            "engine_version": "1",
+            "mean_confidence": 0.96,
+            "language_detected": "en"
+          },
+          "extensions": {}
+        },
+        "extensions": {},
+        "epistemic": {
+          "confidence": 0.98,
+          "method": "source-grounded-transcript",
+          "calibration_profile": "example-v1"
+        }
+      }
+    },
+    "expected_structural_commitment": "sha256:cfc4fedf388d75310c2912b0efedcfda42a1828a0c4e834c263292f92c3ba3de",
+    "expected_semantic_commitment": "sha256:e9c98a20f1f90d2a25bf7457c51ce2a06a5632e5b3c93e91d41615901e27911b",
+    "expected_object_hash": "sha256:8bab105b1677637a8c5bb9846f9b57bb1561274b33dfc7ecb59b04f8dd80b799"
+  },
+  "link": {
+    "header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "link",
+      "id": "urn:ccf:link:098c30cb-13fa-42b1-96f4-923ce82dd9d3",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "structural_commitment": "sha256:be50cd008e099f6f1df69e0644e93108c390b94cf4e98d1bfcdb039ebda08d79",
+      "semantic_commitment": "sha256:474fee424af85c3268d0d14cea77289161b4941129830dc9861157e360e97bf1",
+      "object_hash": "sha256:ae1020011f2e642751a6bb7cb63410ab247e9559616e8598f99bdbf73af6c717"
+    },
+    "structural": {
+      "format": "ccf.link-structural/0.1.2",
+      "salt": "FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQ",
+      "content": {
+        "type": "ccf.derived_from",
+        "type_version": 1,
+        "type_visibility": "clear",
+        "schema_digest": "sha256:e5b835be712f0ae9ba32410dc0a6f14cd67c803b50de1653c4786f2184031120",
+        "registry_entry_digest": "sha256:6d0733d189d07778bf9f339d5a02392d47cabebb6e2d1edc8d59796b8e6865bc",
+        "retention_profile": "structural_retention_required",
+        "structural_payload": {},
+        "extensions": {},
+        "from_id": "urn:ccf:record:63607ea0-9d26-4625-ab23-65ce7415b571",
+        "to_id": "urn:ccf:record:4d8feff5-3956-4190-9679-203f34a09de1"
+      }
+    },
+    "semantic": {
+      "format": "ccf.link-semantic/0.1.2",
+      "salt": "ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ",
+      "content": {
+        "recorded_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+        "recorded_at": "2026-08-11T21:42:20.200Z",
+        "claimed": {
+          "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+          "perspective_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+          "privacy": {
+            "data_subjects": [],
+            "data_classes": [],
+            "consent_refs": [],
+            "legal_basis_refs": [],
+            "subject_coverage": "unknown"
+          },
+          "authority": {
+            "basis": "runtime_import",
+            "asserted_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+            "accepted_by": null
+          },
+          "policy_hint": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+          "extensions": {}
+        },
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "policy_ref": {
+          "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+          "head_id_at_write": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
+          "policy_object_hash": "sha256:e57851ddec5a839632de3ebd13c350ae8db724496473078180d94f5f52fcf225",
+          "evaluator_profile": "ccf-deny-overrides-v1",
+          "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+          "accepted_by": null
+        },
+        "producer_evidence": {
+          "batch_id": "urn:ccf:batch:98d352bf-7abb-4fdf-824c-3c93c4e55901",
+          "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
+          "producer_sequence": "1",
+          "submission_hash": "sha256:3b2885c3d0360f68acbb92eedbed674374b1b302631b1d9d0517cbaae10f3a9d"
+        },
+        "selector": {
+          "kind": "media_time",
+          "start_ms": 0,
+          "end_ms": 30000
+        },
+        "payload": {},
+        "extensions": {}
+      }
+    },
+    "expected_structural_commitment": "sha256:be50cd008e099f6f1df69e0644e93108c390b94cf4e98d1bfcdb039ebda08d79",
+    "expected_semantic_commitment": "sha256:474fee424af85c3268d0d14cea77289161b4941129830dc9861157e360e97bf1",
+    "expected_object_hash": "sha256:ae1020011f2e642751a6bb7cb63410ab247e9559616e8598f99bdbf73af6c717"
+  },
+  "blob": {
+    "header": {
+      "spec": "ccf/0.1.2",
+      "object_kind": "blob",
+      "id": "urn:ccf:blob:4393e9d0-c150-448d-9b27-05872973abab",
+      "hash_profile": "ccf-jcs-sha256-v2",
+      "structural_commitment": "sha256:c342304f7d25a07e7bdd873ce2005d5419a319300b2fde2efcf2e3c3fd0f789b",
+      "semantic_commitment": "sha256:c5dccc68de46aee679dcb8ac870b02c006651af8a95bc2d2bab3c55ce60dbf2d",
+      "object_hash": "sha256:17fb346424ee47b052f01be6654731afd4396f626fa97218bd26fd7adc7e8c34"
+    },
+    "structural": {
+      "format": "ccf.blob-structural/0.1.2",
+      "salt": "GRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRk",
+      "content": {
+        "type": "blob.manifest",
+        "type_version": 1,
+        "type_visibility": "clear",
+        "schema_digest": "sha256:c4d58e1b16431cd4fda2265507a1343caf6c10436ab39265f4774c8ad83c33ad",
+        "registry_entry_digest": "sha256:7690184e5c7c4fa26a7389f5950a47d40cbc3d15e916466ea5ebf1376a6a4d1c",
+        "retention_profile": "payload_erasable",
+        "media_type": "audio/wav",
+        "byte_length": "3244",
+        "content_commitment": "sha256:a569ae3b982d098052fc4e0a8a20ea969b3990c601280b63ac305ab2e6a86468",
+        "content_profile": "ccf-blob-content-v2",
+        "availability_class": "controlled",
+        "erasure_domain_id": "urn:ccf:lineage:f68a13fb-5e71-4022-9e14-831c490e86ca",
+        "structural_payload": {},
+        "extensions": {}
+      }
+    },
+    "semantic": {
+      "format": "ccf.blob-semantic/0.1.2",
+      "salt": "aWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWk",
+      "content": {
+        "content_salt": "yMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMg",
+        "filename": "segment-1842.wav",
+        "origin": {
+          "source_id": "urn:ccf:record:4e9f8cc9-563a-4d61-8221-9f55e9db39bd",
+          "native_id": "boot-8891/segment-1842",
+          "revision": "1",
+          "submission_hash": "sha256:bb19a1f3c3322f367671de8eddf5d5ac4a4fcbe1cc8f9a9737952439170d0290"
+        },
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "voice_recording"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "policy_ref": {
+          "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+          "head_id_at_write": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
+          "policy_object_hash": "sha256:e57851ddec5a839632de3ebd13c350ae8db724496473078180d94f5f52fcf225",
+          "evaluator_profile": "ccf-deny-overrides-v1",
+          "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+        },
+        "producer_evidence": {
+          "batch_id": "urn:ccf:batch:98d352bf-7abb-4fdf-824c-3c93c4e55901",
+          "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
+          "producer_sequence": "1",
+          "submission_hash": "sha256:bb19a1f3c3322f367671de8eddf5d5ac4a4fcbe1cc8f9a9737952439170d0290"
+        },
+        "content_encryption_profile": "none",
+        "content_key_ref": null,
+        "extensions": {}
+      }
+    },
+    "expected_structural_commitment": "sha256:c342304f7d25a07e7bdd873ce2005d5419a319300b2fde2efcf2e3c3fd0f789b",
+    "expected_semantic_commitment": "sha256:c5dccc68de46aee679dcb8ac870b02c006651af8a95bc2d2bab3c55ce60dbf2d",
+    "expected_object_hash": "sha256:17fb346424ee47b052f01be6654731afd4396f626fa97218bd26fd7adc7e8c34",
+    "expected_content_commitment": "sha256:a569ae3b982d098052fc4e0a8a20ea969b3990c601280b63ac305ab2e6a86468"
+  }
+}

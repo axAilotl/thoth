@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.lineage.erasure_receipt",
+  "title": "lineage.erasure_receipt payload",
+  "type": "object",
+  "properties": {
+    "operation_id": {
+      "type": "string"
+    },
+    "decision_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "status": {
+      "enum": [
+        "blocked",
+        "destroying",
+        "verified",
+        "partial_failure",
+        "failed"
+      ]
+    },
+    "keys_destroyed": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "ciphertexts_deleted": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "selectors_invalidated": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "completed_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "verification": {
+      "type": "object"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "operation_id",
+    "decision_id",
+    "status",
+    "keys_destroyed",
+    "ciphertexts_deleted",
+    "selectors_invalidated",
+    "completed_at",
+    "verification",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

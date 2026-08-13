@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.governance.legal_basis",
+  "title": "governance.legal_basis payload",
+  "type": "object",
+  "properties": {
+    "subject_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "controller_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "basis_code": {
+      "type": "string"
+    },
+    "purposes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "data_classes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "jurisdiction": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "valid_from": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "expires_at": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "subject_id",
+    "controller_id",
+    "basis_code",
+    "purposes",
+    "operations",
+    "data_classes",
+    "jurisdiction",
+    "valid_from",
+    "evidence_refs",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

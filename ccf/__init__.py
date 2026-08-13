@@ -1,6 +1,6 @@
-"""CCF 0.1.2-rc1 for Thoth.
+"""CCF 0.1.2 for Thoth.
 
-Implements the vendored spec package at ``spec/ccf/0.1.2-rc1/``:
+Implements the vendored spec package at ``spec/ccf/0.1.2/``:
 
 - canonical primitives (phase 1): identifiers, RFC 8785 (JCS)
   canonicalization, the ``ccf-jcs-sha256-v2`` hash profile, portable object
@@ -27,7 +27,7 @@ Implements the vendored spec package at ``spec/ccf/0.1.2-rc1/``:
   proofs, fork preservation, compressed delta packs with verified-chunk
   resume over file or HTTP, and the durable producer-side Blob spool.
 
-0.1.2-rc1 deltas: the pinned admission authority classes with their
+0.1.2 deltas: the pinned admission authority classes with their
 normative ``failure_reason`` strings, producer-chain dispositions
 (``accepted`` / ``partially_accepted`` / ``content_rejected`` /
 ``quarantined``, with ``predecessor_missing`` as the retryable pending
@@ -36,9 +36,9 @@ canonical, journal-covered suppression lineage
 (``lineage.suppression_set``) with the suppression lookup table as a
 rebuildable projection (spec section 12.7).
 
-Conformance label: CCF 0.1.2-rc1 Core implemented, including canonical
+Conformance label: CCF 0.1.2 Core implemented, including canonical
 erasure suppression (spec 12.7) — the section 13.8 regressions map to
-named tests in ``tests/test_ccf_012_rc1.py``. Known gaps: archive-derived
+named tests in ``tests/test_ccf_012.py``. Known gaps: archive-derived
 encryption and per-object DEKs are unimplemented (profiles
 ``ccf-archive-encryption-derived-v1`` / ``ccf-object-erasure-v1`` stay
 opt-in and unused); erasure assurance is honestly ``logical`` only.
@@ -47,8 +47,8 @@ The vendored package is authoritative; published executable vectors take
 precedence over prose on any contradiction (spec section 0.4).
 """
 
-CCF_SPEC = "ccf/0.1.2-rc1"
-CCF_VERSION = "0.1.2-rc1"
+CCF_SPEC = "ccf/0.1.2"
+CCF_VERSION = "0.1.2"
 CCF_HASH_PROFILE = "ccf-jcs-sha256-v2"
 CCF_SIGNATURE_PROFILE = "ed25519-jcs-v1"
 

@@ -64,10 +64,10 @@ class VerifiedMindpack:
         # Format check first, so a pack from another CCF version fails
         # closed with a clear unsupported-version error rather than a bare
         # schema violation (no silent cross-version acceptance).
-        if self.manifest.get("format") != "ccf.mindpack/0.1.2-rc1":
+        if self.manifest.get("format") != "ccf.mindpack/0.1.2":
             raise RestoreError(
                 f"unsupported mindpack format {self.manifest.get('format')!r}: "
-                "this archive implements ccf.mindpack/0.1.2-rc1"
+                "this archive implements ccf.mindpack/0.1.2"
             )
         schemas.validate(SCHEMA_MINDPACK_MANIFEST, self.manifest, what="mindpack manifest")
 
@@ -112,6 +112,8 @@ class VerifiedMindpack:
             self.members,
             known_ids=known_ids,
         )
+        self.custody_complete = self.inventory.custody_complete
+        self.restore_capable = self.inventory.restore_capable
         manifest = self.manifest
         self.completeness: CompletenessReport = classify_references(
             self.objects,
@@ -130,14 +132,13 @@ class VerifiedMindpack:
             self.inventory,
             chain=self.chain,
             pack_names=reader.names(),
-            completeness=self.completeness,
             allow_partial=allow_partial,
             operation=operation,
         )
 
     @property
     def partial(self) -> bool:
-        return not self.completeness.complete
+        return not self.custody_complete
 
 
 def verify_mindpack(

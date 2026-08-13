@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:operational.compartment-storage",
+  "title": "CCF Compartment Storage State",
+  "type": "object",
+  "properties": {
+    "object_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+    },
+    "compartment": {
+      "enum": [
+        "structural",
+        "semantic",
+        "blob_content"
+      ]
+    },
+    "state": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/compartmentState"
+    },
+    "storage_ref": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "encryption_profile": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/profileName"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ciphertext_digest": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "key_ref": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/keyUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "erasure_receipt_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "object_id",
+    "compartment",
+    "state",
+    "storage_ref",
+    "encryption_profile",
+    "ciphertext_digest",
+    "key_ref",
+    "erasure_receipt_id"
+  ],
+  "additionalProperties": false
+}

@@ -47,10 +47,10 @@ from ccf.ids import generate_id
 from ccf.lineage import load_lineage_heads
 from ccf.projections import EMBEDDING, WIKI
 
-SCHEMA_REQUEST_PAYLOAD = "urn:ccf:schema:0.1.2-rc1:payload.governance.erasure_request"
-SCHEMA_DECISION_PAYLOAD = "urn:ccf:schema:0.1.2-rc1:payload.governance.erasure_decision"
-SCHEMA_DISPOSITION_PAYLOAD = "urn:ccf:schema:0.1.2-rc1:payload.lineage.link_disposition"
-SCHEMA_DISPOSITION_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:structural.lineage.link_disposition"
+SCHEMA_REQUEST_PAYLOAD = "urn:ccf:schema:0.1.2:payload.governance.erasure_request"
+SCHEMA_DECISION_PAYLOAD = "urn:ccf:schema:0.1.2:payload.governance.erasure_decision"
+SCHEMA_DISPOSITION_PAYLOAD = "urn:ccf:schema:0.1.2:payload.lineage.link_disposition"
+SCHEMA_DISPOSITION_STRUCTURAL = "urn:ccf:schema:0.1.2:structural.lineage.link_disposition"
 
 _REQUEST_TYPE = "governance.erasure_request"
 _DECISION_TYPE = "governance.erasure_decision"
@@ -256,7 +256,7 @@ class ErasureService:
             and targets
             and self._suppression_key is None
         ):
-            # 0.1.2-rc1 (spec 12.7): suppression commitments are canonical,
+            # 0.1.2 (spec 12.7): suppression commitments are canonical,
             # journal-covered erasure lineage, and the receipt schema
             # requires the suppression commitment — erasure without a
             # suppression key cannot complete, so fail before anything is
@@ -479,7 +479,7 @@ class ErasureService:
             )
 
         if row["plans"]:
-            # Canonical suppression (spec 12.7, 0.1.2-rc1): the keyed
+            # Canonical suppression (spec 12.7, 0.1.2): the keyed
             # tokens are committed as a governed Blob plus a canonical
             # ``lineage.suppression_set`` Record — journal-covered in this
             # same commit — and the lookup rows become a rebuildable

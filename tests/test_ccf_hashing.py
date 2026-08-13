@@ -211,8 +211,8 @@ def test_producer_batch_signature_reproduced_with_test_key(
     ccf_test_only_keys_dir, batch_vector
 ):
     batch = batch_vector["batch"]
-    # The rc1 package pins the same TEST-ONLY key material as 0.1.1 (the
-    # private pem is vendored in the rc1 vectors tree under a gitignore
+    # The 0.1.2 package pins the same TEST-ONLY key material as 0.1.1 (the
+    # private PEM is vendored in the final vectors tree under a gitignore
     # exception and pinned in SHA256SUMS).
     private_key = load_private_key(
         ccf_test_only_keys_dir / "TEST-ONLY-device-ed25519-private.pem"

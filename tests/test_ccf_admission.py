@@ -23,8 +23,8 @@ from ccf.schemas import SchemaSet
 
 from ccf_helpers import authority, make_clock, make_rig, privacy
 
-SCHEMA_BATCH_RESULT = "urn:ccf:schema:0.1.2-rc1:operational.batch-result"
-SCHEMA_ADMISSION = "urn:ccf:schema:0.1.2-rc1:operational.admission"
+SCHEMA_BATCH_RESULT = "urn:ccf:schema:0.1.2:operational.batch-result"
+SCHEMA_ADMISSION = "urn:ccf:schema:0.1.2:operational.admission"
 
 
 @pytest.fixture()
@@ -785,9 +785,9 @@ def test_thoth_capture_example_end_to_end(
         package_root=ccf_package_root,
         archive_key_path=archive_key,
         active_profiles=[
-            "ccf-core-0.1.2-rc1",
-            "ccf-local-sync-0.1.2-rc1",
-            "ccf-continuity-pack-0.1.2-rc1",
+            "ccf-core-0.1.2",
+            "ccf-local-sync-0.1.2",
+            "ccf-continuity-pack-0.1.2",
         ],
         clock=clock,
     )
@@ -815,7 +815,7 @@ def test_thoth_capture_example_end_to_end(
                     "expires_at": None,
                 },
                 "payload": {
-                    "profile": "ccf.policy/0.1.2-rc1",
+                    "profile": "ccf.policy/0.1.2",
                     "evaluator_profile": "ccf-deny-overrides-v1",
                     "combining_algorithm": "deny_overrides_v1",
                     "default_effect": "deny",
@@ -870,7 +870,7 @@ def test_thoth_capture_example_end_to_end(
                 "payload": {
                     "kind": "backend",
                     "name": "Thoth CCF adapter",
-                    "version": "0.1.2-rc1-example",
+                    "version": "0.1.2-example",
                     "instance_id": "thoth-local",
                     "capabilities": ["capture", "transcribe", "extract", "sync"],
                     "operator_id": ids["person"],

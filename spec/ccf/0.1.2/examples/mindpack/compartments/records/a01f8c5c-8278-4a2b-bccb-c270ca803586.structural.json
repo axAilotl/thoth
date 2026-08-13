@@ -1,0 +1,14 @@
+{
+  "format": "ccf.record-structural/0.1.2",
+  "salt": "EBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA",
+  "content": {
+    "type": "governance.review_decision",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:b055b6dbe11f25a8c1f5dfec5c3daaf451e1addc518a40fbcd5a752178b7c6c2",
+    "registry_entry_digest": "sha256:d4844182a9cbbfc879e5bc911837b65b843f12123c9586a140a832a838879389",
+    "retention_profile": "payload_erasable",
+    "structural_payload": {},
+    "extensions": {}
+  }
+}

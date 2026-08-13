@@ -40,7 +40,7 @@ def test_source_maps_to_core_source(rig, ctx):
     # The source is the origin root: no origin tuple of its own.
     assert "origin" not in record
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.core.source", record["payload"], what="core.source"
+        "urn:ccf:schema:0.1.2:payload.core.source", record["payload"], what="core.source"
     )
     assert record["payload"]["native_identity"] == "device:maxc-test"
     assert record["payload"]["trust_class"] == "authenticated"

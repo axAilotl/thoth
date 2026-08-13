@@ -59,7 +59,7 @@ def test_entity_maps_with_native_canonical_id(rig, ctx, source_id):
     mapped = entity_submission(rig.producer, ctx, ENTITY, source_ccf_id=source_id)
     record = mapped.records[0]
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.semantic.entity",
+        "urn:ccf:schema:0.1.2:payload.semantic.entity",
         record["payload"],
         what="semantic.entity",
     )
@@ -88,7 +88,7 @@ def test_candidate_maps_to_machine_inferred_assertion(rig, ctx, source_id):
     )
     record = mapped.records[0]
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.semantic.assertion",
+        "urn:ccf:schema:0.1.2:payload.semantic.assertion",
         record["payload"],
         what="semantic.assertion",
     )

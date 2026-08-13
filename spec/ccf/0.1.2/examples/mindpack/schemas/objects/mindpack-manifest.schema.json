@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:objects.mindpack-manifest",
+  "title": "CCF Mindpack Manifest 0.1.2",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "ccf.mindpack/0.1.2"
+    },
+    "mode": {
+      "enum": [
+        "restore",
+        "replica",
+        "foreign_merge",
+        "delta"
+      ]
+    },
+    "custody": {
+      "type": "object",
+      "properties": {
+        "completeness": {
+          "enum": ["complete", "partial"]
+        },
+        "restore_capable": {
+          "type": "boolean"
+        }
+      },
+      "required": ["completeness", "restore_capable"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "completeness": { "const": "partial" } },
+            "required": ["completeness"]
+          },
+          "then": {
+            "properties": { "restore_capable": { "const": false } }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "pack_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/packUrn"
+    },
+    "archive_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/archiveUrn"
+    },
+    "epoch_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/lineageUrn"
+    },
+    "created_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "genesis_commit_hash": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    },
+    "head_commit_hash": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    },
+    "head_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "semantic_catalog_root": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    },
+    "hash_profile": {
+      "const": "ccf-jcs-sha256-v2"
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/profileName"
+      },
+      "uniqueItems": true
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "records": {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+        },
+        "links": {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+        },
+        "blobs": {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+        },
+        "commits": {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+        }
+      },
+      "required": [
+        "records",
+        "links",
+        "blobs",
+        "commits"
+      ],
+      "additionalProperties": false
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "digest": {
+            "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+          },
+          "byte_length": {
+            "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "digest",
+          "byte_length",
+          "required"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external_dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "locator": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_id",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "withheld": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "erased": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "foreign_custody_proofs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "compartment_availability": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "object_kind": { "enum": ["record", "link", "blob"] },
+          "object_id": {
+            "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+          },
+          "compartment": { "enum": ["structural", "semantic", "blob_content"] },
+          "availability": {
+            "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/availabilityState"
+          },
+          "commitment": {
+            "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+          },
+          "retention_profile": {
+            "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/retentionProfile"
+          },
+          "source_custody_proof": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              { "type": "null" }
+            ]
+          },
+          "unavailability_lineage_id": {
+            "oneOf": [
+              { "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "object_kind",
+          "object_id",
+          "compartment",
+          "availability",
+          "commitment",
+          "retention_profile",
+          "source_custody_proof",
+          "unavailability_lineage_id"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": { "availability": { "enum": ["withheld", "erased"] } },
+              "required": ["availability"]
+            },
+            "then": {
+              "properties": {
+                "source_custody_proof": { "type": "string", "minLength": 1 },
+                "unavailability_lineage_id": {
+                  "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "availability": { "const": "external" } },
+              "required": ["availability"]
+            },
+            "then": {
+              "properties": {
+                "source_custody_proof": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "format",
+    "mode",
+    "custody",
+    "pack_id",
+    "archive_id",
+    "epoch_id",
+    "created_at",
+    "genesis_commit_hash",
+    "head_commit_hash",
+    "head_sequence",
+    "semantic_catalog_root",
+    "hash_profile",
+    "profiles",
+    "counts",
+    "streams",
+    "external_dependencies",
+    "withheld",
+    "erased",
+    "foreign_custody_proofs",
+    "compartment_availability",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

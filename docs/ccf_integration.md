@@ -1,12 +1,12 @@
 # CCF integration (dual-write) — developer guide
 
-Status: implemented on branch `ccf-0.1.2-rc1`; **legacy stores remain authoritative**.
+Status: implemented on branch `ccf-0.1.2`; **legacy stores remain authoritative**.
 CCF (Continuity Core Format) is the canonical record/link/blob store thoth is
-migrating to. The normative spec is vendored at `spec/ccf/0.1.2-rc1/`; implementation
+migrating to. The normative spec is vendored at `spec/ccf/0.1.2/`; implementation
 state per checklist section is annotated in
-`spec/ccf/0.1.2-rc1/THOTH-IMPLEMENTATION-CHECKLIST.md`.
+`spec/ccf/0.1.2/THOTH-IMPLEMENTATION-CHECKLIST.md`.
 
-This document covers the thoth-side wiring. It reflects `ccf-0.1.2-rc1` @ `eb5ded4`.
+This document covers the thoth-side wiring. It reflects `ccf-0.1.2` @ `eb5ded4`.
 
 ## How it works today
 

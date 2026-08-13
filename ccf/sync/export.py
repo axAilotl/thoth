@@ -23,8 +23,8 @@ from ccf.objects import compartment_format, now_timestamp
 from ccf.sync.completeness import classify_references
 from ccf.sync.packio import PackObject, PackWriter
 
-MINDPACK_FORMAT = "ccf.mindpack/0.1.2-rc1"
-SCHEMA_MINDPACK_MANIFEST = "urn:ccf:schema:0.1.2-rc1:objects.mindpack-manifest"
+MINDPACK_FORMAT = "ccf.mindpack/0.1.2"
+SCHEMA_MINDPACK_MANIFEST = "urn:ccf:schema:0.1.2:objects.mindpack-manifest"
 
 
 class ExportError(RuntimeError):
@@ -33,7 +33,7 @@ class ExportError(RuntimeError):
 
 def _header_dict(row) -> dict:
     return {
-        "spec": "ccf/0.1.2-rc1",
+        "spec": "ccf/0.1.2",
         "object_kind": row[1],
         "id": row[0],
         "hash_profile": "ccf-jcs-sha256-v2",
@@ -265,7 +265,7 @@ def export_mindpack(
     writer.write_json(
         "archive.json",
         {
-            "format": "ccf.archive-row/0.1.2-rc1",
+            "format": "ccf.archive-row/0.1.2",
             "archive_id": archive_id,
             "epoch_id": archive["epoch_id"],
             "genesis_commit_hash": archive["genesis_commit_hash"],
@@ -388,6 +388,12 @@ def export_mindpack(
     manifest = {
         "format": MINDPACK_FORMAT,
         "mode": mode,
+        "custody": {
+            "completeness": (
+                "complete" if not report.external and not report.dangling else "partial"
+            ),
+            "restore_capable": not report.external and not report.dangling,
+        },
         "pack_id": generate_id("pack"),
         "archive_id": archive_id,
         "epoch_id": archive["epoch_id"],
@@ -410,7 +416,7 @@ def export_mindpack(
         "erased": sorted(erased),
         "foreign_custody_proofs": custody_proofs,
         "compartment_availability": compartment_availability,
-        "extensions": {"completeness": report.to_dict()},
+        "extensions": {},
     }
     schemas.validate(SCHEMA_MINDPACK_MANIFEST, manifest, what="mindpack manifest")
     writer.write_json("manifest.json", manifest)
@@ -418,7 +424,7 @@ def export_mindpack(
 
 
 def _compartment_availability(conn, archive_id: str, objects: list[PackObject]) -> list[dict]:
-    """Per-compartment availability declarations (0.1.2-rc1 manifest field).
+    """Per-compartment availability declarations (0.1.2 manifest field).
 
     Every compartment of every packed object is declared with its
     availability state, commitment, and retention profile. Unavailable

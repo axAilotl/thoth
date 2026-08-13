@@ -160,7 +160,7 @@ def _policy(rig, lineage_id, rules, *, previous=None, transition="create"):
             "expires_at": None,
         },
         payload={
-            "profile": "ccf.policy/0.1.2-rc1",
+            "profile": "ccf.policy/0.1.2",
             "evaluator_profile": "ccf-deny-overrides-v1",
             "combining_algorithm": "deny_overrides_v1",
             "default_effect": "deny",

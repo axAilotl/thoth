@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:governance.authorization-decision",
+  "title": "CCF Authorization Decision",
+  "type": "object",
+  "properties": {
+    "decision": {
+      "enum": [
+        "allow",
+        "deny",
+        "pending"
+      ]
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "obligations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "policy_closure_hash": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    },
+    "decision_context_hash": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    },
+    "evaluated_at_head": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "generation_vector": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+      }
+    },
+    "evaluator_profile": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/profileName"
+    },
+    "evaluator_version": {
+      "type": "string"
+    },
+    "valid_until": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "decision",
+    "reason_codes",
+    "obligations",
+    "policy_closure_hash",
+    "decision_context_hash",
+    "evaluated_at_head",
+    "generation_vector",
+    "evaluator_profile",
+    "evaluator_version",
+    "valid_until"
+  ],
+  "additionalProperties": false
+}

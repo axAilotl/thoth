@@ -23,10 +23,10 @@ from ccf.schemas import SchemaSet
 RECEIPT_TYPE = "lineage.erasure_receipt"
 MEMBERSHIP_LINK_TYPE = "ccf.covers"
 
-SCHEMA_RECEIPT_PAYLOAD = "urn:ccf:schema:0.1.2-rc1:payload.lineage.erasure_receipt"
-SCHEMA_RECEIPT_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:structural.lineage.erasure_receipt"
-SCHEMA_LINK_STRUCTURAL = "urn:ccf:schema:0.1.2-rc1:objects.link-structural-content"
-SCHEMA_LINK_SEMANTIC = "urn:ccf:schema:0.1.2-rc1:objects.link-semantic-content"
+SCHEMA_RECEIPT_PAYLOAD = "urn:ccf:schema:0.1.2:payload.lineage.erasure_receipt"
+SCHEMA_RECEIPT_STRUCTURAL = "urn:ccf:schema:0.1.2:structural.lineage.erasure_receipt"
+SCHEMA_LINK_STRUCTURAL = "urn:ccf:schema:0.1.2:objects.link-structural-content"
+SCHEMA_LINK_SEMANTIC = "urn:ccf:schema:0.1.2:objects.link-semantic-content"
 
 
 def build_receipt_record_spec(
@@ -51,7 +51,7 @@ def build_receipt_record_spec(
     ``suppression_commitment`` commits the receipt to the canonical
     ``lineage.suppression_set`` lineage (profile, set Record and Blob IDs,
     entry count, Merkle root, key/profile id, scope commitment) — required
-    by the 0.1.2-rc1 receipt schema (spec 12.7).
+    by the 0.1.2 receipt schema (spec 12.7).
     """
     selectors = sum(
         1

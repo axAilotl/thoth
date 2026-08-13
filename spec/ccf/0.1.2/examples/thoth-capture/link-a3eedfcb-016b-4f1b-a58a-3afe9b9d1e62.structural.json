@@ -1,0 +1,16 @@
+{
+  "format": "ccf.link-structural/0.1.2",
+  "salt": "FhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhY",
+  "content": {
+    "type": "ccf.evidence_for",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:e5b835be712f0ae9ba32410dc0a6f14cd67c803b50de1653c4786f2184031120",
+    "registry_entry_digest": "sha256:56161fa4686ff95eb271b96e8ba710262ded55e83fb17fb796565bc6053345f3",
+    "retention_profile": "structural_retention_required",
+    "structural_payload": {},
+    "extensions": {},
+    "from_id": "urn:ccf:record:63607ea0-9d26-4625-ab23-65ce7415b571",
+    "to_id": "urn:ccf:record:396faaaf-52c3-494d-b456-bbb1b8889cbf"
+  }
+}

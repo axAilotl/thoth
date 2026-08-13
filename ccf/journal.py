@@ -129,7 +129,7 @@ def build_commit_record(
     structural_payload["signature"] = encode_b64url(sign_digest(signer, digest))
 
     envelope = {
-        "format": "ccf.record-structural/0.1.2-rc1",
+        "format": "ccf.record-structural/0.1.2",
         "salt": salt_fn(),
         "content": structural_content,
     }

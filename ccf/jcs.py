@@ -1,7 +1,7 @@
 """RFC 8785 (JCS) canonical JSON serialization per CCF spec section 4.1.
 
 This is a semantic port of the reference implementation
-``spec/ccf/0.1.2-rc1/tools/ccf-jcs.mjs``. The hard part is numbers: JSON has a
+``spec/ccf/0.1.2/tools/ccf-jcs.mjs``. The hard part is numbers: JSON has a
 single number type and ECMAScript serializes it with
 ``Number::toString`` (shortest round-trip decimal, ES-specific exponent
 rules). Python's ``repr`` of a float yields the same shortest round-trip

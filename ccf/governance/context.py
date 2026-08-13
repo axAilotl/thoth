@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from ccf.hashing import canonical_digest
 from ccf.objects import validate_timestamp
 
-DECISION_CONTEXT_SCHEMA = "urn:ccf:schema:0.1.2-rc1:governance.decision-context"
+DECISION_CONTEXT_SCHEMA = "urn:ccf:schema:0.1.2:governance.decision-context"
 
 #: Destination marking local reads inside the archive control domain.
 LOCAL_DESTINATION = "local"

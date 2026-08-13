@@ -345,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", default=None)
     parser.add_argument(
         "--package-root",
-        default=str(REPO_ROOT / "spec" / "ccf" / "0.1.2-rc1"),
+        default=str(REPO_ROOT / "spec" / "ccf" / "0.1.2"),
     )
     parser.add_argument("--report", default=None)
     args = parser.parse_args(argv)

@@ -251,7 +251,7 @@ class CcfDualWriteService:
                         "expires_at": None,
                     },
                     "payload": {
-                        "profile": "ccf.policy/0.1.2-rc1",
+                        "profile": "ccf.policy/0.1.2",
                         "evaluator_profile": "ccf-deny-overrides-v1",
                         "combining_algorithm": "deny_overrides_v1",
                         "default_effect": "deny",
@@ -306,7 +306,7 @@ class CcfDualWriteService:
                     "payload": {
                         "kind": "backend",
                         "name": "thoth-dualwrite",
-                        "version": "0.1.2-rc1",
+                        "version": "0.1.2",
                         "instance_id": "thoth-dualwrite",
                         "capabilities": ["capture", "sync"],
                         "operator_id": person_id,

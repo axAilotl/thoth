@@ -60,7 +60,7 @@ def _rule(rule_id, effect, *, operations=None, purposes=None, obligations=None,
 
 def _policy_payload(rules, *, default_effect="deny"):
     return {
-        "profile": "ccf.policy/0.1.2-rc1",
+        "profile": "ccf.policy/0.1.2",
         "evaluator_profile": "ccf-deny-overrides-v1",
         "combining_algorithm": "deny_overrides_v1",
         "default_effect": default_effect,
@@ -798,7 +798,7 @@ def test_pending_on_unresolved_policy_lineage_then_resolves(rig, engine, ccf_pac
     assert int(document["retry_after_ms"]) >= 1
     assert document["request_id"]
     SchemaSet.load(ccf_package_root).validate(
-        "urn:ccf:schema:0.1.2-rc1:operational.policy-pending",
+        "urn:ccf:schema:0.1.2:operational.policy-pending",
         document,
         what="pending document",
     )
@@ -1079,7 +1079,7 @@ def test_unknown_authority_basis_fails_closed(ccf_package_root):
             registries=registries,
         )
         # Rejection reasons are the pinned registry's normative
-        # failure_reason strings, verbatim (0.1.2-rc1).
+        # failure_reason strings, verbatim (0.1.2).
         assert reason == registries.authority_class(required)["failure_reason"]
     # Unknown required_authority classes fail closed too.
     reason = check_required_authority(

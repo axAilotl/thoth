@@ -86,7 +86,7 @@ def test_media_maps_to_blob_artifact_and_links(rig, ctx, source_id, session_id):
     link_types = {link["type"] for link in mapped.links}
     assert link_types == {"ccf.has_blob", "ccf.captured_in"}
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.experience.artifact",
+        "urn:ccf:schema:0.1.2:payload.experience.artifact",
         artifact["payload"],
         what="experience.artifact",
     )

@@ -1,0 +1,10 @@
+{
+  "registry": "ccf.signature-profiles/0.1.2",
+  "entries": [
+    {
+      "name": "ed25519-jcs-v1",
+      "status": "active",
+      "description": "Ed25519 over the exact CCF JCS signing digest for commits, producer batches, and witnesses."
+    }
+  ]
+}

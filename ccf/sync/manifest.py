@@ -13,10 +13,9 @@ The journal membership stream and the verified object streams define the
 iteration set; manifest counts are compared, never iterated to, so a
 maliciously reduced count cannot truncate verification.
 
-With ``allow_partial`` the caller explicitly requests a partial-custody
-import: claims about material the pack does not carry (absent member
-objects) are advisory and the derived inventory governs, but every claim
-about present material must still match exactly.
+With ``allow_partial`` the caller explicitly permits a truthfully declared
+partial-custody import. It does not relax comparisons: every unsigned claim
+must still match the inventory derived from verified contents exactly.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ccf.hashing import parse_digest
-from ccf.sync.completeness import CompletenessReport, object_references
+from ccf.sync.completeness import object_references
 from ccf.sync.packio import (
     MANIFEST_AVAILABILITY_MISMATCH,
     MANIFEST_COMPLETENESS_MISMATCH,
@@ -40,9 +39,8 @@ from ccf.sync.verify import PackVerificationError
 _RECEIPT_TYPE = "lineage.erasure_receipt"
 _COVERS_LINK_TYPE = "ccf.covers"
 
-#: Manifest extensions this implementation understands; anything else is
-#: an unknown extension claim the verifier cannot honor (fail closed).
-_KNOWN_EXTENSIONS = frozenset({"completeness"})
+#: No final-0.1.2 manifest extensions are defined. Unknown claims fail closed.
+_KNOWN_EXTENSIONS: frozenset[str] = frozenset()
 
 #: Manifest modes consistent with each caller-requested operation. The
 #: mode is non-authoritative exporter intent; it must be consistent with
@@ -64,7 +62,18 @@ class DerivedInventory:
     erased: set[str]
     availability: dict[tuple[str, str], dict] = field(default_factory=dict)
     unresolved_references: set[str] = field(default_factory=set)
+    missing_member_ids: set[str] = field(default_factory=set)
     object_hashes: set[str] = field(default_factory=set)
+
+    @property
+    def custody_complete(self) -> bool:
+        """Whether the pack carries its full journal membership and references."""
+        return not self.missing_member_ids and not self.unresolved_references
+
+    @property
+    def restore_capable(self) -> bool:
+        """A fully verified complete pack can reproduce canonical custody."""
+        return self.custody_complete
 
 
 def expected_compartments(obj) -> list[str]:
@@ -216,6 +225,7 @@ def derive_pack_inventory(
         erased=erased,
         availability=availability,
         unresolved_references=unresolved,
+        missing_member_ids={member["object_id"] for member in members} - set(objects),
         object_hashes={obj.header["object_hash"] for obj in objects.values()},
     )
 
@@ -237,7 +247,6 @@ def compare_manifest(
     *,
     chain: dict,
     pack_names: set[str],
-    completeness: CompletenessReport,
     allow_partial: bool,
     operation: str,
 ) -> None:
@@ -247,40 +256,27 @@ def compare_manifest(
     mutation; any disagreement raises :class:`PackVerificationError`
     with a stable ``MANIFEST_*`` reason.
     """
-    _compare_counts(manifest, inventory, allow_partial=allow_partial)
+    check_manifest_mode(manifest, operation=operation)
+    _compare_counts(manifest, inventory)
     _compare_streams(manifest, pack_names)
     _compare_head(manifest, chain)
-    _compare_availability(manifest, inventory, allow_partial=allow_partial)
+    _compare_availability(manifest, inventory)
     _compare_external_dependencies(manifest, inventory)
     _compare_custody_proofs(manifest, inventory)
-    _compare_extensions(
-        manifest,
-        completeness,
-        allow_partial=allow_partial,
-        operation=operation,
-    )
+    _compare_custody(manifest, inventory, allow_partial=allow_partial, operation=operation)
+    _compare_extensions(manifest)
 
 
-def _compare_counts(
-    manifest: dict, inventory: DerivedInventory, *, allow_partial: bool
-) -> None:
+def _compare_counts(manifest: dict, inventory: DerivedInventory) -> None:
     claimed = manifest["counts"]
     derived = inventory.counts
     for key in ("records", "links", "blobs", "commits"):
         claim, actual = int(claimed[key]), derived[key]
-        # The commit stream is always fully packed and chain-verified, so
-        # its count is exact. Object counts may honestly exceed the pack
-        # contents under an explicit partial-custody import; a claim of
-        # fewer objects than the pack verifiably carries is a
-        # contradiction of present material and always fails.
-        if claim == actual:
-            continue
-        if allow_partial and key != "commits" and claim > actual:
-            continue
-        raise PackVerificationError(
-            f"manifest counts.{key} {claim} != derived {actual}",
-            reason=MANIFEST_COUNT_MISMATCH,
-        )
+        if claim != actual:
+            raise PackVerificationError(
+                f"manifest counts.{key} {claim} != derived {actual}",
+                reason=MANIFEST_COUNT_MISMATCH,
+            )
 
 
 def _compare_streams(manifest: dict, pack_names: set[str]) -> None:
@@ -313,10 +309,7 @@ def _compare_head(manifest: dict, chain: dict) -> None:
         )
 
 
-def _compare_availability(
-    manifest: dict, inventory: DerivedInventory, *, allow_partial: bool
-) -> None:
-    present_ids = {entry["object_id"] for entry in inventory.availability.values()}
+def _compare_availability(manifest: dict, inventory: DerivedInventory) -> None:
     for field_name, derived_set in (
         ("withheld", inventory.withheld),
         ("erased", inventory.erased),
@@ -327,17 +320,10 @@ def _compare_availability(
                 f"manifest {field_name} list contains duplicates",
                 reason=MANIFEST_AVAILABILITY_MISMATCH,
             )
-        unbacked = claimed_set - present_ids
-        if unbacked and not allow_partial:
-            raise PackVerificationError(
-                f"manifest declares {field_name} objects the pack does not "
-                f"carry: {sorted(unbacked)}",
-                reason=MANIFEST_AVAILABILITY_MISMATCH,
-            )
-        if claimed_set - unbacked != derived_set:
+        if claimed_set != derived_set:
             raise PackVerificationError(
                 f"manifest {field_name} list disagrees with derived pack "
-                f"contents (claimed {sorted(claimed_set - unbacked)}, "
+                f"contents (claimed {sorted(claimed_set)}, "
                 f"derived {sorted(derived_set)})",
                 reason=MANIFEST_AVAILABILITY_MISMATCH,
             )
@@ -362,8 +348,6 @@ def _compare_availability(
     for key in claimed_entries:
         if key in inventory.availability:
             continue
-        if allow_partial and key[0] not in present_ids:
-            continue  # claim about material the pack does not carry
         raise PackVerificationError(
             f"manifest availability entry {key} has no counterpart in the "
             "verified pack contents",
@@ -427,6 +411,13 @@ def _compare_external_dependencies(
             f"reference in the verified pack contents: {sorted(phantom)}",
             reason=MANIFEST_EXTERNAL_DEPENDENCY_MISMATCH,
         )
+    missing = inventory.unresolved_references - set(claimed)
+    if missing:
+        raise PackVerificationError(
+            "manifest omits external dependencies derived from unresolved "
+            f"references in the verified pack contents: {sorted(missing)}",
+            reason=MANIFEST_EXTERNAL_DEPENDENCY_MISMATCH,
+        )
 
 
 def _compare_custody_proofs(manifest: dict, inventory: DerivedInventory) -> None:
@@ -457,62 +448,40 @@ def _compare_custody_proofs(manifest: dict, inventory: DerivedInventory) -> None
             )
 
 
-def _compare_extensions(
+def _compare_custody(
     manifest: dict,
-    completeness: CompletenessReport,
+    inventory: DerivedInventory,
     *,
     allow_partial: bool,
     operation: str,
 ) -> None:
+    """Compare first-class custody claims with verified pack capability."""
+    derived = {
+        "completeness": "complete" if inventory.custody_complete else "partial",
+        "restore_capable": inventory.restore_capable,
+    }
+    if manifest["custody"] != derived:
+        raise PackVerificationError(
+            f"manifest custody {manifest['custody']} != derived {derived}",
+            reason=MANIFEST_COMPLETENESS_MISMATCH,
+        )
+    if not inventory.custody_complete and not allow_partial:
+        raise PackVerificationError(
+            "verified pack has partial custody but the caller did not permit it",
+            reason=MANIFEST_COMPLETENESS_MISMATCH,
+        )
+    if operation == "restore" and not inventory.restore_capable:
+        raise PackVerificationError(
+            "verified pack is not restore capable",
+            reason=MANIFEST_COMPLETENESS_MISMATCH,
+        )
+
+
+def _compare_extensions(manifest: dict) -> None:
     extensions = manifest["extensions"]
     unknown = set(extensions) - _KNOWN_EXTENSIONS
     if unknown:
         raise PackVerificationError(
             f"manifest declares unknown extensions: {sorted(unknown)}",
             reason=MANIFEST_UNKNOWN_EXTENSION_MISMATCH,
-        )
-    claimed = extensions.get("completeness")
-    if claimed is None:
-        return
-    if not isinstance(claimed, dict) or "complete" not in claimed:
-        raise PackVerificationError(
-            "manifest completeness claim is malformed",
-            reason=MANIFEST_COMPLETENESS_MISMATCH,
-        )
-    claimed_complete = bool(claimed["complete"])
-    derived_complete = completeness.complete
-    if claimed_complete and not derived_complete:
-        # Overclaim: the manifest promises material the verified contents
-        # do not carry. An explicit partial-custody import may proceed on
-        # the derived truth; a requested restore never silently downgrades.
-        if not (allow_partial and operation != "restore"):
-            raise PackVerificationError(
-                "manifest claims a complete pack but the verified contents "
-                f"are partial (dangling: {completeness.dangling})",
-                reason=MANIFEST_COMPLETENESS_MISMATCH,
-            )
-        return
-    if not claimed_complete and derived_complete:
-        # Underclaim (partial_custody claim over complete contents):
-        # accept only under an explicit partial-custody request.
-        if not allow_partial:
-            raise PackVerificationError(
-                "manifest claims a partial pack but the verified contents "
-                "are complete",
-                reason=MANIFEST_COMPLETENESS_MISMATCH,
-            )
-        return
-    if claimed_complete and derived_complete:
-        if sorted(claimed.get("external", [])) != completeness.external:
-            raise PackVerificationError(
-                "manifest completeness external list disagrees with the "
-                "derived classification",
-                reason=MANIFEST_COMPLETENESS_MISMATCH,
-            )
-        return
-    if sorted(claimed.get("dangling", [])) != completeness.dangling:
-        raise PackVerificationError(
-            "manifest completeness dangling list disagrees with the "
-            "derived classification",
-            reason=MANIFEST_COMPLETENESS_MISMATCH,
         )

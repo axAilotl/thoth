@@ -1,0 +1,173 @@
+{
+  "empty_expected": "sha256:9c4f113d0a7fc010d11b5c49da91aa81a1f9d7b60932f899b846046f6b645cfa",
+  "commit1": {
+    "members": [
+      {
+        "commit_sequence": "1",
+        "commit_position": 0,
+        "admitted_at": "2026-08-11T21:40:01.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
+        "object_hash": "sha256:e57851ddec5a839632de3ebd13c350ae8db724496473078180d94f5f52fcf225"
+      },
+      {
+        "commit_sequence": "1",
+        "commit_position": 1,
+        "admitted_at": "2026-08-11T21:40:01.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+        "object_hash": "sha256:74b9093df187b9d10c742f3bae34bbde6046c5cef42f4d7e25213a26c9b717aa"
+      },
+      {
+        "commit_sequence": "1",
+        "commit_position": 2,
+        "admitted_at": "2026-08-11T21:40:01.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+        "object_hash": "sha256:9e00cefbab5cefcea109e27788d83f4e14881e3b161475aba1653bd2dd377827"
+      },
+      {
+        "commit_sequence": "1",
+        "commit_position": 3,
+        "admitted_at": "2026-08-11T21:40:01.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:405c475b-1c4c-4e05-b978-28246bb3a5fa",
+        "object_hash": "sha256:7f08f57e56c0a776ea1b10abe2260d7500b0c382c831a08f633cf0166b4e6f1d"
+      }
+    ],
+    "expected_root": "sha256:06e2e1c7c872b616bb9d2c40358caae069e0e705ebc93b12b007320cf05fa2cc"
+  },
+  "commit2": {
+    "members": [
+      {
+        "commit_sequence": "2",
+        "commit_position": 0,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:4e9f8cc9-563a-4d61-8221-9f55e9db39bd",
+        "object_hash": "sha256:9f8c329d7dd6324846bb4d77660b3aa330506b0d36a9ad018e8f0024114368fa"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 1,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:b7972dfb-99c3-4376-897f-3c9f2848138b",
+        "object_hash": "sha256:9311e1da1c235805a39e7479d186bea0f3d761fb7461c78aac20f01f92c534d0"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 2,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:4d8feff5-3956-4190-9679-203f34a09de1",
+        "object_hash": "sha256:85782c5b756131f2c459161f15b8fca84e0018b3fc49bbdc01257a4a5b3472c4"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 3,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203",
+        "object_hash": "sha256:deb7d5ae95eb5c74207c72f4e1a5c3375ee65279fa622948214ba37b6d8c1b33"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 4,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:63607ea0-9d26-4625-ab23-65ce7415b571",
+        "object_hash": "sha256:8bab105b1677637a8c5bb9846f9b57bb1561274b33dfc7ecb59b04f8dd80b799"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 5,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:396faaaf-52c3-494d-b456-bbb1b8889cbf",
+        "object_hash": "sha256:01b535e065f767b7a792b67beafdb69e2ea44dc12722e5b98dbe6ca11ffb46fb"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 6,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:a01f8c5c-8278-4a2b-bccb-c270ca803586",
+        "object_hash": "sha256:80277c4983782cf043618e4c666d075d3bd1c0474df589a4610f73d19128a908"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 7,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:2e96f116-6c1a-4216-8ac5-63d0b5da108f",
+        "object_hash": "sha256:637d341c397e4158ffdfb7a113a94c2f4734ae1c62acb11f0b4d81a1ce16e0d1"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 8,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "link",
+        "object_id": "urn:ccf:link:a3a6c051-271d-47cf-bee5-35fc66d903c2",
+        "object_hash": "sha256:c5fae520d39f4bebd35237e6ff818a8c39354b1a54351eb071308311104ffeb2"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 9,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "link",
+        "object_id": "urn:ccf:link:1ae193bd-79bd-4535-bbd3-a670dba025ff",
+        "object_hash": "sha256:ae0aa78e0f39a2811820b126061a95cfd77ebddf21c6f50be03ccf06e02c0626"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 10,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "link",
+        "object_id": "urn:ccf:link:098c30cb-13fa-42b1-96f4-923ce82dd9d3",
+        "object_hash": "sha256:ae1020011f2e642751a6bb7cb63410ab247e9559616e8598f99bdbf73af6c717"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 11,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "link",
+        "object_id": "urn:ccf:link:d8302220-fcda-466a-ae4f-58b116746b4e",
+        "object_hash": "sha256:d7875a4ddd359d669c2264fa262bfc78cdd7365dc2a2b6965d8f6efdebdaf7ca"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 12,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "link",
+        "object_id": "urn:ccf:link:a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62",
+        "object_hash": "sha256:a76a153ee924a1adab33310c29a50b6525949a2f4905541fa3d3a9708bf0ef93"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 13,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "link",
+        "object_id": "urn:ccf:link:76a63205-f0d1-4502-b29e-c44e0d1c6645",
+        "object_hash": "sha256:40a0b7a02079e6a98f61c407c678a1e5d4b76d67949ad07a33c7f8c3ca284841"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 14,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "link",
+        "object_id": "urn:ccf:link:e807d6c8-6589-4ac2-bed4-032207901261",
+        "object_hash": "sha256:4acd08bf6082484d6f291049c8e765f23bc1b461d4d965c84da91c9d4aadf606"
+      },
+      {
+        "commit_sequence": "2",
+        "commit_position": 15,
+        "admitted_at": "2026-08-11T21:42:21.000Z",
+        "object_kind": "blob",
+        "object_id": "urn:ccf:blob:4393e9d0-c150-448d-9b27-05872973abab",
+        "object_hash": "sha256:17fb346424ee47b052f01be6654731afd4396f626fa97218bd26fd7adc7e8c34"
+      }
+    ],
+    "expected_root": "sha256:c130590d2bd0aad4369dd604a9ee50e037173e24d1ecbbcf1e7da86a4913c13e"
+  }
+}

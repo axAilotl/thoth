@@ -83,7 +83,7 @@ def test_finding_maps_sealed_with_exact_evidence(rig, ctx, evidence):
     assert finding["type_visibility"] == "sealed"
     assert finding["lineage"]["transition"] == "create"
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.security.finding",
+        "urn:ccf:schema:0.1.2:payload.security.finding",
         finding["payload"],
         what="security.finding",
     )

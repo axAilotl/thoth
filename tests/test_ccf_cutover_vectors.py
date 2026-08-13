@@ -21,8 +21,9 @@ PUBLISHED_VECTOR_FILES = {
     "producer-batch.json",
     "submission-hashes.json",
     "admission-authority-classes.json",
-    "conformance-0.1.2-rc1.json",
+    "conformance-0.1.2.json",
     "foreign-unavailability.json",
+    "mindpack-manifest-tamper.json",
     "suppression-canonical.json",
     "archive-ed25519-public.pem",
     "device-ed25519-public.pem",
@@ -79,16 +80,21 @@ VECTOR_REPRODUCTION_CASES = {
         "test_ccf_hashing.py": {"test_submission_hashes"},
     },
     "admission-authority-classes.json": {
-        "test_ccf_012_rc1.py": {"test_authority_class_vector_matrix"},
+        "test_ccf_012.py": {"test_authority_class_vector_matrix"},
     },
-    "conformance-0.1.2-rc1.json": {
-        "test_ccf_012_rc1.py": {"test_conformance_case_coverage"},
+    "conformance-0.1.2.json": {
+        "test_ccf_012.py": {"test_conformance_case_coverage"},
     },
     "foreign-unavailability.json": {
-        "test_ccf_012_rc1.py": {"test_foreign_unavailability_vector"},
+        "test_ccf_012.py": {"test_foreign_unavailability_vector"},
+    },
+    "mindpack-manifest-tamper.json": {
+        "test_ccf_manifest_verification.py": {
+            "test_manifest_tamper_vector_coverage"
+        },
     },
     "suppression-canonical.json": {
-        "test_ccf_012_rc1.py": {
+        "test_ccf_012.py": {
             "test_suppression_canonical_vector",
             "test_suppression_preimage_rejections",
         },

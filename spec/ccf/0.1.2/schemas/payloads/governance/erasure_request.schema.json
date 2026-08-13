@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.governance.erasure_request",
+  "title": "governance.erasure_request payload",
+  "type": "object",
+  "properties": {
+    "requester_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "subject_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "requested_scope": {
+      "type": "object"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "requested_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "authentication_evidence_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "requester_id",
+    "subject_id",
+    "requested_scope",
+    "reason",
+    "requested_at",
+    "authentication_evidence_refs",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

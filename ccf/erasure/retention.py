@@ -1,7 +1,7 @@
 """Retention-profile enforcement at erasure time (spec 1.3, 3.10, 5.3).
 
 Type and Link registries declare one of four retention profiles
-(``ccf.retention-profiles/0.1.2-rc1``):
+(``ccf.retention-profiles/0.1.2``):
 
 - ``erasable`` — both compartments (and Blob content) may be removed; the
   header and commitments remain;
@@ -104,14 +104,14 @@ def load_target(conn, archive_id: str, object_id: str) -> dict:
         """,
         (archive_id, object_id),
     ).fetchone()
-    # Content commitment for the suppression preimage (spec 12.7): the
+    # Stable content digest for the suppression preimage (spec 12.7): the
     # still-plaintext semantic payload (Records/Links) or raw bytes
     # (Blobs), so equivalent content is caught even under a fresh origin
     # tuple. None when the content is already unavailable.
-    content_commitment = None
+    content_digest = None
     if header[0] == "blob":
         if blob_bytes is not None:
-            content_commitment = suppression.content_commitment_for_bytes(blob_bytes)
+            content_digest = suppression.content_digest_for_bytes(blob_bytes)
     elif compartments.get("semantic") == "plaintext":
         semantic = conn.execute(
             """
@@ -122,7 +122,7 @@ def load_target(conn, archive_id: str, object_id: str) -> dict:
             (object_id,),
         ).fetchone()
         if semantic is not None and semantic[0] is not None:
-            content_commitment = suppression.content_commitment_for_payload(semantic[0])
+            content_digest = suppression.content_digest_for_payload(semantic[0])
     return {
         "object_id": object_id,
         "object_kind": header[0],
@@ -132,7 +132,8 @@ def load_target(conn, archive_id: str, object_id: str) -> dict:
         "structural_state": structural[0] if structural else None,
         "compartments": compartments,
         "blob_state": blob_state,
-        "content_commitment": content_commitment,
+        "content_class": suppression.content_class_for_kind(header[0]),
+        "content_digest": content_digest,
         "origin": (
             {"source_id": origin[0], "native_id": origin[1], "revision": origin[2]}
             if origin
@@ -217,7 +218,8 @@ def plan_targets(
                 "erase_content": "content" in parts,
                 "origin": target["origin"],
                 "submission_hash": target["submission_hash"],
-                "content_commitment": target["content_commitment"],
+                "content_class": target["content_class"],
+                "content_digest": target["content_digest"],
             }
         )
     return plans

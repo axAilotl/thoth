@@ -1,0 +1,45 @@
+{
+  "format": "ccf.blob-semantic/0.1.2",
+  "salt": "aWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWk",
+  "content": {
+    "content_salt": "yMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMg",
+    "filename": "segment-1842.wav",
+    "origin": {
+      "source_id": "urn:ccf:record:4e9f8cc9-563a-4d61-8221-9f55e9db39bd",
+      "native_id": "boot-8891/segment-1842",
+      "revision": "1",
+      "submission_hash": "sha256:bb19a1f3c3322f367671de8eddf5d5ac4a4fcbe1cc8f9a9737952439170d0290"
+    },
+    "privacy": {
+      "data_subjects": [
+        {
+          "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+          "role": "speaker",
+          "identity_state_at_write": "verified"
+        }
+      ],
+      "data_classes": [
+        "voice_recording"
+      ],
+      "consent_refs": [],
+      "legal_basis_refs": [],
+      "subject_coverage": "complete"
+    },
+    "policy_ref": {
+      "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "head_id_at_write": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "policy_object_hash": "sha256:e57851ddec5a839632de3ebd13c350ae8db724496473078180d94f5f52fcf225",
+      "evaluator_profile": "ccf-deny-overrides-v1",
+      "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+    },
+    "producer_evidence": {
+      "batch_id": "urn:ccf:batch:98d352bf-7abb-4fdf-824c-3c93c4e55901",
+      "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
+      "producer_sequence": "1",
+      "submission_hash": "sha256:bb19a1f3c3322f367671de8eddf5d5ac4a4fcbe1cc8f9a9737952439170d0290"
+    },
+    "content_encryption_profile": "none",
+    "content_key_ref": null,
+    "extensions": {}
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.integrity.head_witness",
+  "title": "Head Witness Payload",
+  "type": "object",
+  "properties": {
+    "archive_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/archiveUrn"
+    },
+    "epoch_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/lineageUrn"
+    },
+    "head_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "head_commit_hash": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    },
+    "witness_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "observed_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "signature_profile": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/profileName"
+    },
+    "signature": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/base64url"
+    },
+    "external_receipt": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "archive_id",
+    "epoch_id",
+    "head_sequence",
+    "head_commit_hash",
+    "witness_id",
+    "observed_at",
+    "signature_profile",
+    "signature",
+    "external_receipt",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

@@ -1,4 +1,4 @@
-"""CCF 0.1.2-rc1 checklist stage 9: Obsidian torture run (real vault corpus).
+"""CCF 0.1.2 checklist stage 9: Obsidian torture run (real vault corpus).
 
 Runs the 12 stage-9 scenarios against the real Obsidian vault segment via
 ``scripts.ccf_stage9`` — the same scenario functions the standalone runner

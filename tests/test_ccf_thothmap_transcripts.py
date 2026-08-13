@@ -120,7 +120,7 @@ def test_whole_transcript_single_utterance(rig, ctx, capture):
     assert len(mapped.records) == 1
     utterance = mapped.records[0]
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.experience.utterance",
+        "urn:ccf:schema:0.1.2:payload.experience.utterance",
         utterance["payload"],
         what="experience.utterance",
     )

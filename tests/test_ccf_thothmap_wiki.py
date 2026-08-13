@@ -69,7 +69,7 @@ def test_wiki_page_maps_to_projection_artifact_with_evidence(rig, ctx, inputs):
     )
     record = mapped.records[0]
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.experience.artifact",
+        "urn:ccf:schema:0.1.2:payload.experience.artifact",
         record["payload"],
         what="experience.artifact",
     )

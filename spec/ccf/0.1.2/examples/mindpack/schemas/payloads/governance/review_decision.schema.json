@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.governance.review_decision",
+  "title": "governance.review_decision payload",
+  "type": "object",
+  "properties": {
+    "target_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "decision": {
+      "enum": [
+        "accept",
+        "reject",
+        "quarantine",
+        "release",
+        "supersede",
+        "defer"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "reviewer_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "target_ids",
+    "decision",
+    "reason",
+    "reviewer_id",
+    "evidence_refs",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

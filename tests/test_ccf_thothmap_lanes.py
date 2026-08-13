@@ -91,7 +91,7 @@ def test_media_carries_lane_role_extensions_and_provenance(rig, ctx, source_id):
     )
     artifact = mapped.records[0]
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.2-rc1:payload.experience.artifact",
+        "urn:ccf:schema:0.1.2:payload.experience.artifact",
         artifact["payload"],
         what="experience.artifact",
     )
