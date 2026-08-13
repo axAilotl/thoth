@@ -21,6 +21,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Mapping
+
+from core.connector_registry import (
+    ConnectorCcfBlock,
+    ConnectorRegistry,
+    load_connector_registry,
+)
 
 from ccf.archive import Archive
 from ccf.catalog import SemanticCatalog
@@ -67,11 +74,13 @@ class CcfDualWriteService:
         archive: Archive,
         producer: Producer,
         ctx: MapContext,
+        connector_registry: ConnectorRegistry | None = None,
     ) -> None:
         self.settings = settings
         self.archive = archive
         self.producer = producer
         self.ctx = ctx
+        self.connector_registry = connector_registry
         self._ids = bootstrap_ids(archive.archive_id)
 
     # ------------------------------------------------------------------
@@ -79,7 +88,13 @@ class CcfDualWriteService:
     # ------------------------------------------------------------------
 
     @classmethod
-    def create_or_open(cls, settings: DualWriteSettings, *, clock=None) -> "CcfDualWriteService":
+    def create_or_open(
+        cls,
+        settings: DualWriteSettings,
+        *,
+        clock=None,
+        connector_registry: ConnectorRegistry | None = None,
+    ) -> "CcfDualWriteService":
         """Open the dual-write archive, running first-enable bootstrap.
 
         Bootstrap generates the Ed25519 key pairs at the configured paths
@@ -87,6 +102,11 @@ class CcfDualWriteService:
         when the store is empty, and admits the founding Records. All key
         material stays at the operator-configured paths; nothing is
         written anywhere else.
+
+        ``connector_registry`` supplies the connector manifests whose
+        optional ``ccf`` blocks lane the mirrored artifacts; when omitted
+        the registry is loaded per mirror call (builtins plus
+        ``THOTH_CONNECTOR_PATH`` plugin dirs).
         """
         if not settings.enabled or settings.store is None:
             raise DualWriteError("dual-write service requires enabled settings")
@@ -170,7 +190,13 @@ class CcfDualWriteService:
             person_id=ids["person_id"],
             policy_hint=ids["policy_lineage_id"],
         )
-        return cls(settings=settings, archive=archive, producer=producer, ctx=ctx)
+        return cls(
+            settings=settings,
+            archive=archive,
+            producer=producer,
+            ctx=ctx,
+            connector_registry=connector_registry,
+        )
 
     @staticmethod
     def _admit_founding_records(
@@ -348,6 +374,7 @@ class CcfDualWriteService:
         thoth_source_id = _required(source.get("source_id"), "source.source_id")
         source_ccf_id = source_record_id(self.archive.archive_id, thoth_source_id)
         origins = self._origin_index(source_ccf_id)
+        ccf_block = self._ccf_block_for_source(source)
 
         parts = MappedSubmissions()
         objects: dict[str, object] = {"source_id": source_ccf_id}
@@ -366,7 +393,15 @@ class CcfDualWriteService:
         session_ccf_id = self._mirror_session(parts, origins, source, session, objects)
 
         artifact_ccf_id, blob_ccf_id = self._mirror_media(
-            parts, origins, source_ccf_id, session_ccf_id, raw_ref, data, objects
+            parts,
+            origins,
+            source_ccf_id,
+            session_ccf_id,
+            raw_ref,
+            data,
+            objects,
+            source=source,
+            ccf_block=ccf_block,
         )
 
         self._mirror_findings(
@@ -469,6 +504,9 @@ class CcfDualWriteService:
         raw_ref: dict,
         data: bytes,
         objects: dict,
+        *,
+        source: Mapping,
+        ccf_block: ConnectorCcfBlock | None,
     ) -> tuple[str, str]:
         raw_ref_id = _required(raw_ref.get("raw_ref_id"), "raw_ref.raw_ref_id")
         sha256 = _required(raw_ref.get("sha256"), "raw_ref.sha256")
@@ -492,6 +530,14 @@ class CcfDualWriteService:
                 source_ccf_id=source_ccf_id,
                 session_ccf_id=session_ccf_id,
                 revision=sha256,
+                artifact_role=(
+                    ccf_block.artifact_role if ccf_block is not None else "raw_capture"
+                ),
+                lane=ccf_block.lane if ccf_block is not None else None,
+                source_snapshot=dict(source) if ccf_block is not None else None,
+                manifest_extensions=(
+                    dict(ccf_block.extensions) if ccf_block is not None else None
+                ),
             )
             artifact_ccf_id = mapped.records[0]["id"]
             blob_ccf_id = mapped.blobs[0]["id"]
@@ -549,6 +595,29 @@ class CcfDualWriteService:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _ccf_block_for_source(self, source: Mapping) -> ConnectorCcfBlock | None:
+        """Resolve the manifest ``ccf`` block of the capture's connector.
+
+        Keyed on the capture source's ``collector`` name. Called once per
+        mirror (never per object); when the service was built without a
+        registry the default registry (builtins plus
+        ``THOTH_CONNECTOR_PATH`` plugin dirs) is loaded here. A capture
+        whose connector has no manifest, or whose manifest declares no
+        ``ccf`` block, returns None — the mirror keeps the legacy generic
+        artifact mapping.
+        """
+        collector = source.get("collector")
+        if not isinstance(collector, str) or not collector.strip():
+            return None
+        registry = self.connector_registry
+        if registry is None:
+            registry = load_connector_registry()
+        try:
+            manifest = registry.get(collector.strip())
+        except KeyError:
+            return None
+        return manifest.ccf
 
     def _origin_index(self, source_ccf_id: str) -> dict[tuple[str, str, str], str]:
         """{(native_id, revision, object_kind): object_id} for one source."""

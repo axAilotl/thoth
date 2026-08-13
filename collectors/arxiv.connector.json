@@ -39,5 +39,9 @@
   "entrypoint": "collectors.arxiv_collector:ArXivCollector",
   "cli_command": "arxiv",
   "config_namespace": "sources.arxiv",
-  "default_enabled": true
+  "default_enabled": true,
+  "ccf": {
+    "lane": "paper",
+    "artifact_role": "raw_capture"
+  }
 }

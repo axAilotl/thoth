@@ -38,5 +38,9 @@
   "entrypoint": "collectors.web_clipper_collector:WebClipperCollector",
   "cli_command": "web-clipper",
   "config_namespace": "sources.web_clipper",
-  "default_enabled": true
+  "default_enabled": true,
+  "ccf": {
+    "lane": "web_clipper",
+    "artifact_role": "raw_capture"
+  }
 }

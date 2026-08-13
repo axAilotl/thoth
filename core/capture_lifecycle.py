@@ -20,6 +20,7 @@ from .capture_event_store import (
 )
 from .ccf_dualwrite import dual_write_requested
 from .config import Config, config
+from .connector_registry import load_connector_registry
 from .ingestion_runtime import (
     IngestionDispatchResult,
     KnowledgeArtifactRuntime,
@@ -787,7 +788,8 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
         from ccf.dualwrite import CcfDualWriteService, resolve_dual_write_settings
 
         self._ccf_dual_write = CcfDualWriteService.create_or_open(
-            resolve_dual_write_settings(self.config)
+            resolve_dual_write_settings(self.config),
+            connector_registry=load_connector_registry(self.config),
         )
         return self._ccf_dual_write
 

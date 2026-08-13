@@ -14,6 +14,15 @@ captured file under ``knowledge_vault/``) to:
   has been mapped.
 
 The caller reads the file bytes; converters never touch the filesystem.
+
+Lane-awareness: when the capture's connector manifest declares a ``ccf``
+block (``core.connector_registry.ConnectorCcfBlock``), the caller threads
+``lane``/``artifact_role``/``manifest_extensions`` plus the capture
+``source_snapshot`` through, and the artifact's payload extensions gain
+``thoth_lane``, connector-native provenance (``thoth_source_name``,
+``thoth_collector``, ``thoth_native_source_id`` when present), and the
+manifest's namespaced extension entries. Without a block the mapping is
+byte-identical to the legacy generic behavior.
 """
 
 from __future__ import annotations
@@ -47,6 +56,9 @@ def media_submissions(
     session_ccf_id: str | None = None,
     revision: str | int | None = "1",
     artifact_role: str = "raw_capture",
+    lane: str | None = None,
+    source_snapshot: dict | None = None,
+    manifest_extensions: dict | None = None,
     description: str | None = None,
     subjects: list[dict] | None = None,
     source_subjects: list[dict] | None = None,
@@ -59,8 +71,19 @@ def media_submissions(
     ``sha256``, ``size_bytes``, ``mime_type``, ``created_at``. The blob's
     origin native ID is the ``raw_ref_id``; the artifact shares the same
     native ID (distinct object kinds never collide in the origin index).
+
+    ``lane`` is the connector manifest's declared CCF lane; when given it
+    lands in the artifact payload extensions as ``thoth_lane``.
+    ``source_snapshot`` (the capture source dict) contributes
+    connector-native provenance extensions (``thoth_source_name``,
+    ``thoth_collector``, ``thoth_native_source_id`` when present), and
+    ``manifest_extensions`` merges the manifest's namespaced (``thoth.*``
+    style) extension entries verbatim. All three default to the legacy
+    generic mapping.
     """
     require_urn(source_ccf_id, "record", field="source_ccf_id")
+    if lane is not None and not (isinstance(lane, str) and lane.strip()):
+        raise ThothMapError(f"artifact lane must be a non-empty string, got {lane!r}")
     if session_ccf_id is not None:
         require_urn(session_ccf_id, "record", field="session_ccf_id")
     raw_ref_id = require_str(snapshot, "raw_ref_id", what="raw artifact ref")
@@ -108,6 +131,20 @@ def media_submissions(
         subject_coverage=coverage,
         data_classes=classes,
     )
+    extensions: dict = {
+        "thoth_raw_ref_id": raw_ref_id,
+        "thoth_path": path,
+        "thoth_sha256": actual_sha,
+    }
+    if lane is not None:
+        extensions["thoth_lane"] = lane.strip()
+    if source_snapshot is not None:
+        for key in ("source_name", "collector", "native_source_id"):
+            value = optional_str(source_snapshot, key)
+            if value is not None:
+                extensions[f"thoth_{key}"] = value
+    if manifest_extensions:
+        extensions.update(manifest_extensions)
     artifact = producer.new_record(
         type="experience.artifact",
         claims=artifact_claims,
@@ -119,11 +156,7 @@ def media_submissions(
             "description": description or f"Raw capture {raw_ref_id}",
             "external_uri": None,
             "artifact_role": artifact_role,
-            "extensions": {
-                "thoth_raw_ref_id": raw_ref_id,
-                "thoth_path": path,
-                "thoth_sha256": actual_sha,
-            },
+            "extensions": extensions,
         },
     )
 

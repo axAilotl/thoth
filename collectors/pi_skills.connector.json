@@ -54,5 +54,9 @@
   "entrypoint": "collectors.pi_skill_connector:PiSkillConnector",
   "cli_command": "connectors run pi_skills",
   "config_namespace": "sources.pi_skills",
-  "default_enabled": true
+  "default_enabled": true,
+  "ccf": {
+    "lane": "mixed",
+    "artifact_role": "raw_capture"
+  }
 }

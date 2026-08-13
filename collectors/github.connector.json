@@ -40,5 +40,9 @@
   "entrypoint": "collectors.social_collector:SocialCollector.discover_github_stars",
   "cli_command": "social",
   "config_namespace": "sources.github",
-  "default_enabled": true
+  "default_enabled": true,
+  "ccf": {
+    "lane": "repository",
+    "artifact_role": "raw_capture"
+  }
 }

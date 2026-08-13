@@ -41,5 +41,9 @@
   "entrypoint": "collectors.imported_markdown_connector:ImportedMarkdownConnector",
   "cli_command": "connectors run imported_markdown",
   "config_namespace": "sources.imported_markdown",
-  "default_enabled": true
+  "default_enabled": true,
+  "ccf": {
+    "lane": "markdown",
+    "artifact_role": "raw_capture"
+  }
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
@@ -41,6 +42,112 @@ FORBIDDEN_DIRECT_WIKI_OUTPUTS = {
     "wiki_path",
 }
 
+#: CCF lane vocabulary a manifest ``ccf`` block may declare. The lane is
+#: carried onto mirrored artifacts by the dual-write thothmap, so the set
+#: is closed: an unknown lane fails manifest loading instead of silently
+#: inventing archive vocabulary. ``mixed`` covers wildcard connectors
+#: whose artifact types span several lanes.
+CCF_LANES = frozenset(
+    {
+        "markdown",
+        "mixed",
+        "paper",
+        "repository",
+        "transcript",
+        "tweet",
+        "video",
+        "web_clipper",
+    }
+)
+
+_CCF_ROLE_TOKEN = re.compile(r"[a-z][a-z0-9_]*")
+#: Extension keys must be namespaced dotted keys (``thoth.lane``), per the
+#: ``thoth.<...>`` precedent in ``ccf.thothmap.semantic``.
+_CCF_EXTENSION_KEY = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+")
+_CCF_BLOCK_FIELDS = {"lane", "artifact_role", "extensions"}
+
+
+@dataclass(frozen=True)
+class ConnectorCcfBlock:
+    """Optional CCF lane declaration of a connector manifest.
+
+    Consumed by the dual-write mirror (``ccf.dualwrite`` /
+    ``ccf.thothmap``): mirrored artifacts carry the lane and the block's
+    namespaced extensions instead of one generic role. ``None`` on the
+    manifest means legacy generic behavior.
+    """
+
+    lane: str
+    artifact_role: str
+    extensions: Mapping[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "lane": self.lane,
+            "artifact_role": self.artifact_role,
+            "extensions": dict(self.extensions),
+        }
+
+
+def _parse_ccf_block(value: Any, *, origin: str) -> "ConnectorCcfBlock | None":
+    """Validate the optional manifest ``ccf`` block (fail closed)."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ConnectorManifestError(
+            f"{origin}: connector manifest 'ccf' block must be an object"
+        )
+    unknown_fields = sorted(set(value) - _CCF_BLOCK_FIELDS)
+    if unknown_fields:
+        raise ConnectorManifestError(
+            f"{origin}: connector manifest 'ccf' block has unknown fields "
+            f"{unknown_fields}"
+        )
+
+    lane = value.get("lane")
+    if not isinstance(lane, str) or not lane.strip():
+        raise ConnectorManifestError(
+            f"{origin}: connector manifest 'ccf' block requires a non-empty lane"
+        )
+    lane = lane.strip()
+    if lane not in CCF_LANES:
+        raise ConnectorManifestError(
+            f"{origin}: unknown ccf lane {lane!r}; known lanes: {sorted(CCF_LANES)}"
+        )
+
+    role = value.get("artifact_role")
+    if not isinstance(role, str) or not _CCF_ROLE_TOKEN.fullmatch(role.strip()):
+        raise ConnectorManifestError(
+            f"{origin}: connector manifest 'ccf' block requires a well-formed "
+            "artifact_role token"
+        )
+
+    raw_extensions = value.get("extensions", {})
+    if not isinstance(raw_extensions, Mapping):
+        raise ConnectorManifestError(
+            f"{origin}: connector manifest 'ccf' extensions must be an object"
+        )
+    extensions: dict[str, Any] = {}
+    for key, extension_value in raw_extensions.items():
+        if not isinstance(key, str) or not _CCF_EXTENSION_KEY.fullmatch(key):
+            raise ConnectorManifestError(
+                f"{origin}: ccf extension key {key!r} must be a namespaced "
+                "dotted key (e.g. 'thoth.lane')"
+            )
+        if extension_value is not None and not isinstance(
+            extension_value, (str, int, float, bool)
+        ):
+            raise ConnectorManifestError(
+                f"{origin}: ccf extension {key!r} must be a scalar value"
+            )
+        extensions[key] = extension_value
+
+    return ConnectorCcfBlock(
+        lane=lane,
+        artifact_role=role.strip(),
+        extensions=extensions,
+    )
+
 
 @dataclass(frozen=True)
 class ConnectorManifest:
@@ -67,6 +174,7 @@ class ConnectorManifest:
     default_enabled: bool = True
     description: str = ""
     origin: str = "builtin"
+    ccf: ConnectorCcfBlock | None = None
 
     @property
     def source_names(self) -> tuple[str, ...]:
@@ -105,6 +213,7 @@ class ConnectorManifest:
             "config_namespace": self.config_namespace,
             "enabled": self.is_enabled(config),
             "origin": self.origin,
+            "ccf": self.ccf.to_dict() if self.ccf is not None else None,
         }
         if config is not None:
             payload["policy"] = connector_policy_status(self, config)
@@ -161,6 +270,7 @@ class ConnectorManifest:
         config_namespace = _optional_string(value.get("config_namespace"))
         description = _optional_string(value.get("description")) or ""
         default_enabled = bool(value.get("default_enabled", True))
+        ccf = _parse_ccf_block(value.get("ccf"), origin=origin)
 
         queue_capability = value.get("queue_capability")
         if not isinstance(queue_capability, bool):
@@ -190,6 +300,7 @@ class ConnectorManifest:
             default_enabled=default_enabled,
             description=description,
             origin=origin,
+            ccf=ccf,
         )
 
 

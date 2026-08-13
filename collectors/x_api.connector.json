@@ -44,5 +44,9 @@
   "entrypoint": "core.x_api_bookmark_sync:run_x_api_bookmark_backfill",
   "cli_command": "x-api-sync",
   "config_namespace": "sources.x_api",
-  "default_enabled": false
+  "default_enabled": false,
+  "ccf": {
+    "lane": "tweet",
+    "artifact_role": "raw_capture"
+  }
 }

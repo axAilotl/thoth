@@ -57,5 +57,9 @@
   "entrypoint": "collectors.personal_transcript_connector:PersonalTranscriptConnector",
   "cli_command": "connectors run omi",
   "config_namespace": "sources.omi",
-  "default_enabled": true
+  "default_enabled": true,
+  "ccf": {
+    "lane": "transcript",
+    "artifact_role": "raw_capture"
+  }
 }

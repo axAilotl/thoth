@@ -294,3 +294,139 @@ def test_config_example_exposes_all_builtin_connector_names():
 
     assert "research_graph" in config_data
     assert "research_graph" in schema_data["properties"]
+
+
+# ---------------------------------------------------------------------------
+# Optional manifest ccf block (lane declaration for the dual-write mirror)
+# ---------------------------------------------------------------------------
+
+
+def test_builtin_manifests_declare_ccf_lanes(tmp_path: Path):
+    registry = load_connector_registry(project_root=tmp_path)
+
+    lanes = {manifest.name: manifest.ccf.lane for manifest in registry.list()}
+    assert lanes == {
+        "arxiv": "paper",
+        "github": "repository",
+        "huggingface": "repository",
+        "imported_markdown": "markdown",
+        "omi": "transcript",
+        "pi_skills": "mixed",
+        "skill_outputs": "mixed",
+        "web_clipper": "web_clipper",
+        "x_api": "tweet",
+        "youtube": "video",
+    }
+    for manifest in registry.list():
+        assert manifest.ccf.artifact_role == "raw_capture"
+        assert manifest.ccf.extensions == {}
+
+    as_dict = registry.get("arxiv").to_dict()["ccf"]
+    assert as_dict == {
+        "lane": "paper",
+        "artifact_role": "raw_capture",
+        "extensions": {},
+    }
+
+
+def _write_ccf_plugin(tmp_path: Path, ccf_block) -> Config:
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir(exist_ok=True)
+    payload = {
+        "name": "lane_plugin",
+        "source_name": "lane_plugin",
+        "artifact_types": ["paper"],
+        "inputs": ["local_files:lane_plugin"],
+        "outputs": ["artifact_queue:paper"],
+        "auth": [],
+        "queue_capability": True,
+        "queue_behavior": "queues_artifacts",
+        "safety_mode": "local_ingest_queue",
+        "allowed_side_effects": ["local_file_read", "artifact_queue_write"],
+        "entrypoint": "collectors.personal.lane_plugin:LanePlugin",
+    }
+    if ccf_block is not ...:
+        payload["ccf"] = ccf_block
+    (plugin_dir / "lane_plugin.connector.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+    config = Config()
+    config.data = {"connectors": {"plugin_dirs": [str(plugin_dir)]}}
+    return config
+
+
+def test_plugin_manifest_without_ccf_block_loads_with_none(tmp_path: Path):
+    config = _write_ccf_plugin(tmp_path, ...)
+
+    registry = load_connector_registry(config, project_root=tmp_path)
+
+    assert registry.get("lane_plugin").ccf is None
+    assert registry.get("lane_plugin").to_dict()["ccf"] is None
+
+
+def test_plugin_manifest_ccf_block_round_trips(tmp_path: Path):
+    config = _write_ccf_plugin(
+        tmp_path,
+        {
+            "lane": "transcript",
+            "artifact_role": "raw_capture",
+            "extensions": {"thoth.lane": "transcript", "acme.channel": "calls"},
+        },
+    )
+
+    registry = load_connector_registry(config, project_root=tmp_path)
+    block = registry.get("lane_plugin").ccf
+
+    assert block.lane == "transcript"
+    assert block.artifact_role == "raw_capture"
+    assert block.extensions == {"thoth.lane": "transcript", "acme.channel": "calls"}
+    assert block.to_dict()["extensions"]["acme.channel"] == "calls"
+
+
+@pytest.mark.parametrize(
+    ("ccf_block", "match"),
+    [
+        ("paper", "must be an object"),
+        ({"artifact_role": "raw_capture"}, "requires a non-empty lane"),
+        (
+            {"lane": "  ", "artifact_role": "raw_capture"},
+            "requires a non-empty lane",
+        ),
+        (
+            {"lane": "hologram", "artifact_role": "raw_capture"},
+            "unknown ccf lane 'hologram'",
+        ),
+        ({"lane": "paper"}, "artifact_role"),
+        ({"lane": "paper", "artifact_role": ""}, "artifact_role"),
+        ({"lane": "paper", "artifact_role": "Raw Capture!"}, "artifact_role"),
+        ({"lane": "paper", "artifact_role": "raw_capture", "role": "x"}, "unknown fields"),
+        (
+            {"lane": "paper", "artifact_role": "raw_capture", "extensions": []},
+            "extensions must be an object",
+        ),
+        (
+            {
+                "lane": "paper",
+                "artifact_role": "raw_capture",
+                "extensions": {"lane": "paper"},
+            },
+            "namespaced",
+        ),
+        (
+            {
+                "lane": "paper",
+                "artifact_role": "raw_capture",
+                "extensions": {"thoth.meta": {"nested": True}},
+            },
+            "scalar",
+        ),
+    ],
+)
+def test_plugin_manifest_ccf_block_fails_closed(tmp_path: Path, ccf_block, match):
+    config = _write_ccf_plugin(tmp_path, ccf_block)
+
+    with pytest.raises(ConnectorManifestError, match=match) as excinfo:
+        load_connector_registry(config, project_root=tmp_path)
+
+    # The error names the manifest origin so operators can find the file.
+    assert "lane_plugin.connector.json" in str(excinfo.value)

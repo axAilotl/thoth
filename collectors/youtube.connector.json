@@ -51,5 +51,9 @@
   "entrypoint": "collectors.youtube_connector:YouTubeConnector",
   "cli_command": "connectors run youtube",
   "config_namespace": "sources.youtube",
-  "default_enabled": true
+  "default_enabled": true,
+  "ccf": {
+    "lane": "video",
+    "artifact_role": "raw_capture"
+  }
 }

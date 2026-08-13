@@ -46,5 +46,9 @@
   "entrypoint": "collectors.skill_output_connector:SkillOutputConnector",
   "cli_command": "connectors run skill_outputs",
   "config_namespace": "sources.skill_outputs",
-  "default_enabled": true
+  "default_enabled": true,
+  "ccf": {
+    "lane": "mixed",
+    "artifact_role": "raw_capture"
+  }
 }
