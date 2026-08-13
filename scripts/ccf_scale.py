@@ -307,23 +307,23 @@ def run_scale_scenarios(ctx: Stage9Context) -> list[dict]:
         try:
             detail = fn(ctx)
         except Exception as exc:
-            results.append(
-                {
-                    "scenario": name,
-                    "status": "FAIL",
-                    "seconds": round(time.monotonic() - started, 2),
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-            )
-            continue
-        results.append(
-            {
+            result = {
+                "scenario": name,
+                "status": "FAIL",
+                "seconds": round(time.monotonic() - started, 2),
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        else:
+            result = {
                 "scenario": name,
                 "status": "PASS",
                 "seconds": round(time.monotonic() - started, 2),
                 "detail": detail,
             }
-        )
+        results.append(result)
+        # Stream each phase as it completes: at this scale a crash must
+        # never take the already-collected evidence down with it.
+        print(f"{result['status']}  {name}  ({result['seconds']}s)", flush=True)
     return results
 
 
@@ -366,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
     container, dsn = start_ephemeral_postgres()
     started = time.monotonic()
     ctx = None
+    results: list[dict] = []
     try:
         ctx = build_context(
             dsn=dsn,
@@ -376,8 +377,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         ctx.details["generated"] = generated
         results = run_scale_scenarios(ctx)
-        ctx.settings_factory.cleanup()
     finally:
+        if ctx is not None:
+            try:
+                ctx.settings_factory.cleanup()
+            except Exception as exc:
+                # The container is removed next anyway; a dead server at
+                # this point invalidates nothing the phases proved.
+                print(f"WARN  schema cleanup failed: {exc}", flush=True)
         subprocess.run(["docker", "rm", "-f", container], capture_output=True)
     if ctx is None:
         print("FAIL  context build failed before any scenario ran")

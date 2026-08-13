@@ -486,19 +486,29 @@ class ObsidianImporter:
             chunk = notes[offset : offset + self.notes_per_batch]
             combined = MappedSubmissions()
             chunk_relpaths = {vfile.relpath for vfile in chunk}
+            chunk_sources = {
+                vfile.relpath: self._segment_of_fn(vfile) for vfile in chunk
+            }
+            # One origin-index probe for the whole chunk (record + blob per
+            # note) — not two connections per file (thoth-abq scale).
+            existing = self._archive.find_origin_objects(
+                [
+                    (sources[1], vfile.relpath, vfile.sha256, kind)
+                    for vfile in chunk
+                    for sources in [chunk_sources[vfile.relpath]]
+                    for kind in ("record", "blob")
+                ]
+            )
             for vfile in chunk:
-                segment, source_id = self._segment_of_fn(vfile)
-                existing_artifact = self._archive.find_origin_object(
-                    source_id, vfile.relpath, vfile.sha256, "record"
-                )
+                segment, source_id = chunk_sources[vfile.relpath]
+                origin_key = (source_id, vfile.relpath, vfile.sha256)
+                existing_artifact = existing.get((*origin_key, "record"))
                 if existing_artifact is not None:
                     # Cross-pass re-import (thoth-doz): this exact revision
                     # was admitted by an earlier import. Reuse it; never
                     # resubmit under fresh object IDs (the fresh recorded_at
                     # would read as a dishonest origin_revision_conflict).
-                    existing_blob = self._archive.find_origin_object(
-                        source_id, vfile.relpath, vfile.sha256, "blob"
-                    )
+                    existing_blob = existing.get((*origin_key, "blob"))
                     if existing_blob is None:
                         raise ObsidianImportError(
                             f"archive holds the artifact but not the blob for "
@@ -764,19 +774,23 @@ class ObsidianImporter:
     def _blob_for_attachment(self, binary: VaultFile) -> str:
         blob_id = self.report.attachment_blobs.get(binary.relpath)
         if blob_id is None:
-            blob_id = self._attachment_submissions(binary)
+            # Note-edge path: probe before building (thoth-doz reuse).
+            _segment, source_id = self._segment_of_fn(binary)
+            blob_id = self._archive.find_origin_object(
+                source_id, binary.relpath, binary.sha256, "blob"
+            )
+            if blob_id is None:
+                blob_id = self._attachment_submissions(binary)
+            else:
+                self.report.attachment_blobs[binary.relpath] = blob_id
         return blob_id
 
     def _attachment_submissions(self, binary: VaultFile) -> str:
-        """Binary file -> attachment artifact + Blob (embedded or external)."""
+        """Binary file -> attachment artifact + Blob (embedded or external).
+
+        Callers probe the origin index first; this builds new submissions.
+        """
         segment, source_id = self._segment_of_fn(binary)
-        existing_blob = self._archive.find_origin_object(
-            source_id, binary.relpath, binary.sha256, "blob"
-        )
-        if existing_blob is not None:
-            # Admitted by an earlier import pass (thoth-doz): reuse it.
-            self.report.attachment_blobs[binary.relpath] = existing_blob
-            return existing_blob
         data = binary.abspath.read_bytes()
         embedded = binary.size_bytes <= self.embed_cap_bytes
         mapped = thothmap_artifacts.media_submissions(
@@ -817,8 +831,25 @@ class ObsidianImporter:
     def _import_binaries(self, binaries: list[VaultFile]) -> None:
         """Every unreferenced vault binary still gets a Blob manifest."""
         self._flush_attachments()
+        # One bulk probe for everything the note edges did not claim, so a
+        # cross-pass re-import reuses prior blobs without per-file
+        # connections (thoth-doz, thoth-abq).
+        pending = []
+        probes = []
         for binary in binaries:
             if binary.relpath in self.report.attachment_blobs:
+                continue
+            _segment, source_id = self._segment_of_fn(binary)
+            probes.append((source_id, binary.relpath, binary.sha256, "blob"))
+            pending.append(binary)
+        existing = self._archive.find_origin_objects(probes)
+        for binary in pending:
+            if binary.relpath in self.report.attachment_blobs:
+                continue
+            _segment, source_id = self._segment_of_fn(binary)
+            blob_id = existing.get((source_id, binary.relpath, binary.sha256, "blob"))
+            if blob_id is not None:
+                self.report.attachment_blobs[binary.relpath] = blob_id
                 continue
             self._attachment_submissions(binary)
             if len(self._pending_attachments.blobs) >= ATTACHMENTS_PER_BATCH:

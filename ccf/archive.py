@@ -553,16 +553,43 @@ class Archive:
         them under fresh object IDs.
         """
         parse_id(source_id)
+        result = self.find_origin_objects([(source_id, native_id, revision, object_kind)])
+        return result.get((source_id, native_id, revision, object_kind))
+
+    def find_origin_objects(
+        self, probes: list[tuple[str, str, str, str]]
+    ) -> dict[tuple[str, str, str, str], str]:
+        """Bulk form of :meth:`find_origin_object` over one connection.
+
+        Importers probe whole batches at once: one query per chunk instead
+        of two connections per file, which matters at corpus scale.
+        """
+        if not probes:
+            return {}
+        sources = [probe[0] for probe in probes]
+        natives = [probe[1] for probe in probes]
+        revisions = [probe[2] for probe in probes]
+        kinds = [probe[3] for probe in probes]
         with open_ccf_connection(self._settings) as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 """
-                SELECT object_id FROM origin_index
-                WHERE archive_id = %s AND source_id = %s AND native_id = %s
-                  AND revision = %s AND object_kind = %s
+                SELECT t.source_id, t.native_id, t.revision, t.object_kind,
+                       o.object_id
+                FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[])
+                     AS t(source_id, native_id, revision, object_kind)
+                JOIN origin_index o
+                  ON o.archive_id = %s
+                 AND o.source_id = t.source_id
+                 AND o.native_id = t.native_id
+                 AND o.revision = t.revision
+                 AND o.object_kind = t.object_kind
                 """,
-                (self.archive_id, source_id, native_id, revision, object_kind),
-            ).fetchone()
-        return row[0] if row is not None else None
+                (sources, natives, revisions, kinds, self.archive_id),
+            ).fetchall()
+        return {
+            (source_id, native_id, revision, kind): object_id
+            for source_id, native_id, revision, kind, object_id in rows
+        }
 
     def get_object(self, object_id: str) -> dict | None:
         """Portable view of one admitted object (header + compartments)."""
