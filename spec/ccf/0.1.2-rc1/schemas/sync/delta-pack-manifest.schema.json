@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:sync.delta-pack-manifest",
+  "title": "CCF Delta Pack Manifest",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "ccf.delta-pack/0.1.2-rc1"
+    },
+    "pack_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/packUrn"
+    },
+    "archive_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/archiveUrn"
+    },
+    "from_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/uint64"
+    },
+    "through_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/uint64"
+    },
+    "created_at": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/timestamp"
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "pack_digest": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "format",
+    "pack_id",
+    "archive_id",
+    "from_sequence",
+    "through_sequence",
+    "created_at",
+    "streams",
+    "pack_digest",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

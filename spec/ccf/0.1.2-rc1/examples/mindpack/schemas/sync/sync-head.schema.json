@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:sync.head",
+  "title": "CCF Sync Head",
+  "type": "object",
+  "properties": {
+    "archive_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/archiveUrn"
+    },
+    "epoch_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/lineageUrn"
+    },
+    "head_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/uint64"
+    },
+    "head_commit_hash": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    },
+    "semantic_catalog_root": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    },
+    "producer_heads": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+      }
+    }
+  },
+  "required": [
+    "archive_id",
+    "epoch_id",
+    "head_sequence",
+    "head_commit_hash",
+    "semantic_catalog_root",
+    "producer_heads"
+  ],
+  "additionalProperties": false
+}

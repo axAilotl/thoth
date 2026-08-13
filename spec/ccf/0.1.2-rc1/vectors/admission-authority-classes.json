@@ -1,0 +1,519 @@
+{
+  "evaluator_profile": "ccf-admission-authority-v1",
+  "cases": [
+    {
+      "name": "type_state_machine:positive",
+      "authority_class": "type_state_machine",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": null
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "type_state_machine:negative",
+      "authority_class": "type_state_machine",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": false,
+        "claim": null
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "archive:positive",
+      "authority_class": "archive",
+      "fixture": {
+        "admitted_by_archive": true,
+        "lineage_state_machine_passed": true,
+        "claim": null
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "archive:negative",
+      "authority_class": "archive",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": null
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "active_signer:positive",
+      "authority_class": "active_signer",
+      "fixture": {
+        "admitted_by_archive": true,
+        "lineage_state_machine_passed": true,
+        "claim": null
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "active_signer:negative",
+      "authority_class": "active_signer",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": null
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "source_or_runtime:positive",
+      "authority_class": "source_or_runtime",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "direct_observation",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "source_or_runtime:negative",
+      "authority_class": "source_or_runtime",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": null
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "runtime_authenticated:positive",
+      "authority_class": "runtime_authenticated",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "runtime_authenticated:negative",
+      "authority_class": "runtime_authenticated",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "first_person_statement",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "authenticated_witness:positive",
+      "authority_class": "authenticated_witness",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "direct_observation",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "authenticated_witness:negative",
+      "authority_class": "authenticated_witness",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "authorized_governance_actor:positive",
+      "authority_class": "authorized_governance_actor",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "authorized_governance_actor:negative",
+      "authority_class": "authorized_governance_actor",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "grantor_or_authorized_actor:positive",
+      "authority_class": "grantor_or_authorized_actor",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "grantor_or_authorized_actor:negative",
+      "authority_class": "grantor_or_authorized_actor",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "authorized_scheduler:positive",
+      "authority_class": "authorized_scheduler",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "authorized_scheduler:negative",
+      "authority_class": "authorized_scheduler",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "authorized_erasure_worker:positive",
+      "authority_class": "authorized_erasure_worker",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "authorized_erasure_worker:negative",
+      "authority_class": "authorized_erasure_worker",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "authorized_security_actor:positive",
+      "authority_class": "authorized_security_actor",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "authorized_security_actor:negative",
+      "authority_class": "authorized_security_actor",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "authorized_successor:positive",
+      "authority_class": "authorized_successor",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "authorized_successor:negative",
+      "authority_class": "authorized_successor",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "archive_owner_or_catalog_admin:positive",
+      "authority_class": "archive_owner_or_catalog_admin",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "archive_owner_or_catalog_admin:negative",
+      "authority_class": "archive_owner_or_catalog_admin",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "archive_owner_or_key_custodian:positive",
+      "authority_class": "archive_owner_or_key_custodian",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "archive_owner_or_key_custodian:negative",
+      "authority_class": "archive_owner_or_key_custodian",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "subject_or_authorized_representative:positive",
+      "authority_class": "subject_or_authorized_representative",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "first_person_statement",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "subject_or_authorized_representative:negative",
+      "authority_class": "subject_or_authorized_representative",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "person_accepted_or_reviewed:positive",
+      "authority_class": "person_accepted_or_reviewed",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "person_accepted",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "person_accepted_or_reviewed:negative",
+      "authority_class": "person_accepted_or_reviewed",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "person_or_authorized_agent:positive",
+      "authority_class": "person_or_authorized_agent",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "first_person_statement",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "person_or_authorized_agent:negative",
+      "authority_class": "person_or_authorized_agent",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "person_or_operator:positive",
+      "authority_class": "person_or_operator",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "direct_observation",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "person_or_operator:negative",
+      "authority_class": "person_or_operator",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": null
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "archive_root_or_authorized_issuer:positive",
+      "authority_class": "archive_root_or_authorized_issuer",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "explicit_authorization",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    },
+    {
+      "name": "archive_root_or_authorized_issuer:negative",
+      "authority_class": "archive_root_or_authorized_issuer",
+      "fixture": {
+        "admitted_by_archive": false,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "reject"
+    },
+    {
+      "name": "archive_root_or_authorized_issuer:archive-positive",
+      "authority_class": "archive_root_or_authorized_issuer",
+      "fixture": {
+        "admitted_by_archive": true,
+        "lineage_state_machine_passed": true,
+        "claim": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:00000000-0000-4000-8000-000000000001",
+          "accepted_by": null
+        }
+      },
+      "expected": "accept"
+    }
+  ]
+}

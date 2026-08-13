@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:objects.link-structural-content",
+  "title": "CCF Link Structural Content",
+  "type": "object",
+  "properties": {
+    "type": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/typeName"
+    },
+    "type_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "type_visibility": {
+      "enum": [
+        "clear",
+        "sealed"
+      ]
+    },
+    "schema_digest": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    },
+    "registry_entry_digest": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    },
+    "retention_profile": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/retentionProfile"
+    },
+    "from_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/objectUrn"
+    },
+    "to_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/objectUrn"
+    },
+    "structural_payload": {
+      "type": "object"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "type",
+    "type_version",
+    "type_visibility",
+    "schema_digest",
+    "registry_entry_digest",
+    "retention_profile",
+    "structural_payload",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

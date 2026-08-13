@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:common.compartment-envelope",
+  "title": "CCF compartment envelope",
+  "type": "object",
+  "properties": {
+    "format": {
+      "type": "string"
+    },
+    "salt": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/salt256"
+    },
+    "content": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "format",
+    "salt",
+    "content"
+  ],
+  "additionalProperties": false
+}

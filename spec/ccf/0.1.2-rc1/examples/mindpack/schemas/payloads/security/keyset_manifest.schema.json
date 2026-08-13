@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:payload.security.keyset_manifest",
+  "title": "Archive Keyset Manifest Payload",
+  "allOf": [
+    {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:security.keyset-manifest"
+    }
+  ]
+}

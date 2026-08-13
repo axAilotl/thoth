@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:payload.core.runtime",
+  "title": "core.runtime payload",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "instance_id": {
+      "type": "string"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "operator_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/recordUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "kind",
+    "name",
+    "version",
+    "instance_id",
+    "capabilities",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

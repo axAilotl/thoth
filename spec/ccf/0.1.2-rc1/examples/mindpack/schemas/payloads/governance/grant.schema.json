@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:payload.governance.grant",
+  "title": "governance.grant payload",
+  "type": "object",
+  "properties": {
+    "grantor_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/recordUrn"
+    },
+    "grantee_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/recordUrn"
+    },
+    "decision": {
+      "enum": [
+        "given",
+        "revoked",
+        "denied"
+      ]
+    },
+    "capability": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "object"
+    },
+    "valid_from": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/timestamp"
+    },
+    "expires_at": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "grantor_id",
+    "grantee_id",
+    "decision",
+    "capability",
+    "scope",
+    "valid_from",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

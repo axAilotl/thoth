@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:structural.integrity.successor_activation",
+  "title": "Successor Activation Structural Payload",
+  "type": "object",
+  "properties": {
+    "authorization_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/recordUrn"
+    },
+    "certificate": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/base64url"
+    },
+    "activation_evidence": {
+      "type": "object"
+    },
+    "successor_proof": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/base64url"
+    },
+    "parent_commit_hash": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    }
+  },
+  "required": [
+    "authorization_id",
+    "certificate",
+    "activation_evidence",
+    "successor_proof",
+    "parent_commit_hash"
+  ],
+  "additionalProperties": false
+}

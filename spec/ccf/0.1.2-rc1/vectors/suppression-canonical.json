@@ -1,0 +1,133 @@
+{
+  "ids": {
+    "record": "urn:ccf:record:00000000-0000-4000-8000-000000000021",
+    "blob": "urn:ccf:blob:00000000-0000-4000-8000-000000000022",
+    "receipt": "urn:ccf:record:00000000-0000-4000-8000-000000000023",
+    "decision": "urn:ccf:record:00000000-0000-4000-8000-000000000024"
+  },
+  "preimages": [
+    {
+      "format": "ccf.suppression-preimage/1",
+      "kind": "origin",
+      "source_id": "urn:ccf:record:00000000-0000-4000-8000-000000000031",
+      "native_id": "segment-1842",
+      "revision": "1",
+      "object_kind": "record"
+    },
+    {
+      "format": "ccf.suppression-preimage/1",
+      "kind": "content",
+      "content_commitment": "sha256:0000000000000000000000000000000000000000000000000000000000000032"
+    }
+  ],
+  "rejected_preimages": [
+    {
+      "name": "unknown-kind",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "other"
+      }
+    },
+    {
+      "name": "unknown-field",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "origin",
+        "source_id": "urn:ccf:record:00000000-0000-4000-8000-000000000031",
+        "native_id": "segment-1842",
+        "revision": "1",
+        "object_kind": "record",
+        "unexpected": true
+      }
+    },
+    {
+      "name": "missing-origin-field",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "origin",
+        "source_id": "urn:ccf:record:00000000-0000-4000-8000-000000000031",
+        "native_id": "segment-1842",
+        "revision": "1"
+      }
+    },
+    {
+      "name": "malformed-source-urn",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "origin",
+        "source_id": "urn:ccf:record:------------------------------------",
+        "native_id": "segment-1842",
+        "revision": "1",
+        "object_kind": "record"
+      }
+    },
+    {
+      "name": "invalid-content-digest",
+      "value": {
+        "format": "ccf.suppression-preimage/1",
+        "kind": "content",
+        "content_commitment": "sha256:not-a-digest"
+      }
+    }
+  ],
+  "key_hex": "cacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacaca",
+  "entries": [
+    "hmac-sha256:1bf314eaa70ae7d33f129e05c115e7bec1b7d874e0c1470547dcd81449076045",
+    "hmac-sha256:e2e4df0bf1dbd84eaaa4fa599eb5f5425f13a70d2c364090ff49e5e26581a6d6"
+  ],
+  "record_structural_payload": {
+    "profile": "ccf-hmac-sha256-suppression-v1",
+    "suppression_blob_id": "urn:ccf:blob:00000000-0000-4000-8000-000000000022",
+    "entry_count": "2",
+    "entries_merkle_root": "sha256:33dddf655f0c76662cd47459a4ff21241fcb614af08456709c08c022a07cb47a",
+    "key_profile_id": "fixture-key-profile-v1",
+    "scope_commitment": "sha256:fdfcd65e936477cb634ba5bbf2ad1c8dff7e1f4470d8d488f50fa727e0b2d9d4",
+    "erasure_receipt_id": "urn:ccf:record:00000000-0000-4000-8000-000000000023"
+  },
+  "blob_structural_content": {
+    "type": "blob.suppression_set",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:6578402ce43e9cc72ee08e5dec891a628b3ff3341ad5f6814421f5cfccac12b7",
+    "registry_entry_digest": "sha256:b93f084589069a277125caa0017267870fd1ec1caafb3b6f9a9a05d7543020fd",
+    "retention_profile": "structural_retention_required",
+    "media_type": "application/vnd.ccf.suppression-set+json",
+    "byte_length": "214",
+    "content_commitment": "sha256:dc7376583d8a8171d0e646ff13e54f541afbbe498e1d25d4055d25337ce24fdd",
+    "content_profile": "ccf-blob-content-v2",
+    "availability_class": "controlled",
+    "erasure_domain_id": null,
+    "structural_payload": {
+      "sensitivity": "governed_sensitive_metadata"
+    },
+    "extensions": {}
+  },
+  "blob_semantic_content": {
+    "content_salt": "ycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJyck",
+    "filename": "suppression-set.json",
+    "content_encryption_profile": "none",
+    "content_key_ref": null,
+    "extensions": {}
+  },
+  "receipt_structural_payload": {
+    "decision_id": "urn:ccf:record:00000000-0000-4000-8000-000000000024",
+    "profile": "storage_verified",
+    "verified_at": "2026-08-12T12:00:00.000Z",
+    "target_count": "1",
+    "destroyed_key_count": "0",
+    "status": "verified",
+    "membership_link_type": "ccf.covers",
+    "suppression_commitment": {
+      "profile": "ccf-hmac-sha256-suppression-v1",
+      "suppression_set_record_id": "urn:ccf:record:00000000-0000-4000-8000-000000000021",
+      "suppression_blob_id": "urn:ccf:blob:00000000-0000-4000-8000-000000000022",
+      "entry_count": "2",
+      "entries_merkle_root": "sha256:33dddf655f0c76662cd47459a4ff21241fcb614af08456709c08c022a07cb47a",
+      "key_profile_id": "fixture-key-profile-v1",
+      "scope_commitment": "sha256:fdfcd65e936477cb634ba5bbf2ad1c8dff7e1f4470d8d488f50fa727e0b2d9d4"
+    }
+  },
+  "encoded_blob_base64": "eyJlbnRyaWVzIjpbImhtYWMtc2hhMjU2OjFiZjMxNGVhYTcwYWU3ZDMzZjEyOWUwNWMxMTVlN2JlYzFiN2Q4NzRlMGMxNDcwNTQ3ZGNkODE0NDkwNzYwNDUiLCJobWFjLXNoYTI1NjplMmU0ZGYwYmYxZGJkODRlYWFhNGZhNTk5ZWI1ZjU0MjVmMTNhNzBkMmMzNjQwOTBmZjQ5ZTVlMjY1ODFhNmQ2Il0sInByb2ZpbGUiOiJjY2YtaG1hYy1zaGEyNTYtc3VwcHJlc3Npb24tdjEifQ==",
+  "expected_content_commitment": "sha256:dc7376583d8a8171d0e646ff13e54f541afbbe498e1d25d4055d25337ce24fdd",
+  "expected_entries_merkle_root": "sha256:33dddf655f0c76662cd47459a4ff21241fcb614af08456709c08c022a07cb47a"
+}

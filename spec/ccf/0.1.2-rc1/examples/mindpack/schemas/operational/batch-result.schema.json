@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:operational.batch-result",
+  "title": "CCF Producer Batch Result",
+  "type": "object",
+  "properties": {
+    "batch_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/batchUrn"
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "accepted",
+        "partially_accepted",
+        "content_rejected",
+        "quarantined",
+        "conflict"
+      ]
+    },
+    "reason": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "null" }
+      ]
+    },
+    "archive_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/archiveUrn"
+    },
+    "commit_sequence": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/uint64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "commit_hash": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "admissions": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2-rc1:operational.admission"
+      }
+    },
+    "next_sync_cursor": {
+      "type": "string"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "batch_id",
+    "status",
+    "archive_id",
+    "commit_sequence",
+    "commit_hash",
+    "admissions",
+    "reason",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

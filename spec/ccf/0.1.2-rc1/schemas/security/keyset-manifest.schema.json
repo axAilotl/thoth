@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:security.keyset-manifest",
+  "title": "CCF Archive Encryption Keyset Manifest",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "ccf.keyset/0.1.2-rc1"
+    },
+    "keyset_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/keyUrn"
+    },
+    "archive_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/archiveUrn"
+    },
+    "epoch": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/uint64"
+    },
+    "profile": {
+      "enum": [
+        "ccf-archive-encryption-derived-v1",
+        "ccf-object-erasure-v1"
+      ]
+    },
+    "created_at": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/timestamp"
+    },
+    "recipients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "user_recovery",
+              "device",
+              "service_runtime",
+              "enterprise_kms",
+              "external_kms"
+            ]
+          },
+          "key_id": {
+            "type": "string"
+          },
+          "credential_id": {
+            "oneOf": [
+              {
+                "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/credentialUrn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "wrap_profile": {
+            "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/profileName"
+          },
+          "wrapped_epoch_key": {
+            "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/base64url"
+          }
+        },
+        "required": [
+          "kind",
+          "key_id",
+          "credential_id",
+          "wrap_profile",
+          "wrapped_epoch_key"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "format",
+    "keyset_id",
+    "archive_id",
+    "epoch",
+    "profile",
+    "created_at",
+    "recipients",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:payload.continuity.episode",
+  "title": "continuity.episode payload",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "meaning": {
+      "type": "string"
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/recordUrn"
+      },
+      "uniqueItems": true
+    },
+    "themes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "title",
+    "summary",
+    "meaning",
+    "participants",
+    "themes",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

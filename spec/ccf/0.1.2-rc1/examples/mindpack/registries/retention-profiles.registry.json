@@ -1,0 +1,21 @@
+{
+  "registry": "ccf.retention-profiles/0.1.2-rc1",
+  "entries": [
+    {
+      "name": "erasable",
+      "description": "Both structural and semantic compartments may be erased; the portable header and commitments may remain."
+    },
+    {
+      "name": "payload_erasable",
+      "description": "Structural compartment remains; semantic compartment and content may be erased."
+    },
+    {
+      "name": "structural_retention_required",
+      "description": "Type-specific structural fields required for lineage or replay remain; semantic material may be erased."
+    },
+    {
+      "name": "epoch_lifetime_required",
+      "description": "Required structural material remains for the lifetime of the archive epoch; type-specific semantic fields may also be required."
+    }
+  ]
+}

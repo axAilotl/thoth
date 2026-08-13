@@ -1,0 +1,615 @@
+{
+  "registry": "ccf.state-machines/0.1.2-rc1",
+  "entries": [
+    {
+      "id": "ccf.state.catalog-v1",
+      "description": "Semantic catalog transition lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "activate"
+      ],
+      "transitions": [
+        {
+          "from": "activate",
+          "to": [
+            "supersede"
+          ]
+        },
+        {
+          "from": "supersede",
+          "to": [
+            "supersede"
+          ]
+        }
+      ],
+      "terminal_states": []
+    },
+    {
+      "id": "ccf.state.consent-v1",
+      "description": "Consent or denial lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "give",
+        "deny"
+      ],
+      "transitions": [
+        {
+          "from": "give",
+          "to": [
+            "withdraw",
+            "supersede"
+          ]
+        },
+        {
+          "from": "deny",
+          "to": [
+            "supersede"
+          ]
+        },
+        {
+          "from": "supersede",
+          "to": [
+            "withdraw",
+            "supersede"
+          ]
+        },
+        {
+          "from": "withdraw",
+          "to": [
+            "supersede"
+          ]
+        }
+      ],
+      "terminal_states": []
+    },
+    {
+      "id": "ccf.state.credential-v1",
+      "description": "Device credential issue, rotate, and revoke lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "issue"
+      ],
+      "transitions": [
+        {
+          "from": "issue",
+          "to": [
+            "rotate",
+            "revoke"
+          ]
+        },
+        {
+          "from": "rotate",
+          "to": [
+            "rotate",
+            "revoke"
+          ]
+        },
+        {
+          "from": "revoke",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "revoke"
+      ]
+    },
+    {
+      "id": "ccf.state.erasure-v1",
+      "description": "Erasure request/decision/receipt lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "approve",
+        "deny",
+        "restrict",
+        "defer",
+        "partial"
+      ],
+      "transitions": [
+        {
+          "from": "approve",
+          "to": [
+            "block",
+            "fail"
+          ]
+        },
+        {
+          "from": "partial",
+          "to": [
+            "block",
+            "fail"
+          ]
+        },
+        {
+          "from": "restrict",
+          "to": [
+            "approve",
+            "deny",
+            "defer"
+          ]
+        },
+        {
+          "from": "defer",
+          "to": [
+            "approve",
+            "deny",
+            "restrict"
+          ]
+        },
+        {
+          "from": "block",
+          "to": [
+            "destroy",
+            "fail"
+          ]
+        },
+        {
+          "from": "destroy",
+          "to": [
+            "verify",
+            "partial_failure",
+            "fail"
+          ]
+        },
+        {
+          "from": "verify",
+          "to": [
+            "verified",
+            "partial_failure",
+            "fail"
+          ]
+        },
+        {
+          "from": "partial_failure",
+          "to": [
+            "destroy",
+            "verify",
+            "fail"
+          ]
+        },
+        {
+          "from": "verified",
+          "to": []
+        },
+        {
+          "from": "deny",
+          "to": []
+        },
+        {
+          "from": "fail",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "verified",
+        "deny",
+        "fail"
+      ]
+    },
+    {
+      "id": "ccf.state.grant-v1",
+      "description": "Delegated authority grant lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "give",
+        "deny"
+      ],
+      "transitions": [
+        {
+          "from": "give",
+          "to": [
+            "revoke",
+            "supersede"
+          ]
+        },
+        {
+          "from": "deny",
+          "to": [
+            "supersede"
+          ]
+        },
+        {
+          "from": "supersede",
+          "to": [
+            "revoke",
+            "supersede"
+          ]
+        },
+        {
+          "from": "revoke",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "revoke"
+      ]
+    },
+    {
+      "id": "ccf.state.keyset-v1",
+      "description": "Archive encryption keyset activation and revocation lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "activate"
+      ],
+      "transitions": [
+        {
+          "from": "activate",
+          "to": [
+            "rotate",
+            "revoke"
+          ]
+        },
+        {
+          "from": "rotate",
+          "to": [
+            "rotate",
+            "revoke"
+          ]
+        },
+        {
+          "from": "revoke",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "revoke"
+      ]
+    },
+    {
+      "id": "ccf.state.link-disposition-v1",
+      "description": "Current-state transitions for an immutable Link.",
+      "head_check": "required",
+      "initial_transitions": [
+        "retract",
+        "supersede",
+        "invalidate_selector",
+        "tombstone"
+      ],
+      "transitions": [
+        {
+          "from": "retract",
+          "to": [
+            "restore",
+            "supersede",
+            "tombstone"
+          ]
+        },
+        {
+          "from": "restore",
+          "to": [
+            "retract",
+            "supersede",
+            "invalidate_selector",
+            "tombstone"
+          ]
+        },
+        {
+          "from": "invalidate_selector",
+          "to": [
+            "supersede",
+            "tombstone"
+          ]
+        },
+        {
+          "from": "supersede",
+          "to": [
+            "tombstone"
+          ]
+        },
+        {
+          "from": "tombstone",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "tombstone"
+      ]
+    },
+    {
+      "id": "ccf.state.policy-v1",
+      "description": "Policy lineage lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "create"
+      ],
+      "transitions": [
+        {
+          "from": "create",
+          "to": [
+            "supersede",
+            "revoke"
+          ]
+        },
+        {
+          "from": "supersede",
+          "to": [
+            "supersede",
+            "revoke"
+          ]
+        },
+        {
+          "from": "revoke",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "revoke"
+      ]
+    },
+    {
+      "id": "ccf.state.process-run-v1",
+      "description": "Processing or agent run lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "queue",
+        "start",
+        "succeed",
+        "fail",
+        "cancel",
+        "interrupt"
+      ],
+      "transitions": [
+        {
+          "from": "queue",
+          "to": [
+            "start",
+            "cancel"
+          ]
+        },
+        {
+          "from": "start",
+          "to": [
+            "succeed",
+            "fail",
+            "cancel",
+            "interrupt"
+          ]
+        },
+        {
+          "from": "interrupt",
+          "to": [
+            "start",
+            "cancel",
+            "fail"
+          ]
+        },
+        {
+          "from": "succeed",
+          "to": []
+        },
+        {
+          "from": "fail",
+          "to": []
+        },
+        {
+          "from": "cancel",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "succeed",
+        "fail",
+        "cancel"
+      ]
+    },
+    {
+      "id": "ccf.state.restriction-v1",
+      "description": "Restriction, objection, hold, and release lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "impose",
+        "raise"
+      ],
+      "transitions": [
+        {
+          "from": "impose",
+          "to": [
+            "release",
+            "supersede"
+          ]
+        },
+        {
+          "from": "raise",
+          "to": [
+            "accept",
+            "override",
+            "withdraw"
+          ]
+        },
+        {
+          "from": "accept",
+          "to": [
+            "release"
+          ]
+        },
+        {
+          "from": "override",
+          "to": [
+            "supersede"
+          ]
+        },
+        {
+          "from": "supersede",
+          "to": [
+            "release",
+            "supersede"
+          ]
+        },
+        {
+          "from": "withdraw",
+          "to": []
+        },
+        {
+          "from": "release",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "withdraw",
+        "release"
+      ]
+    },
+    {
+      "id": "ccf.state.reviewable-v1",
+      "description": "Generic reviewed current-state lineage.",
+      "head_check": "required",
+      "initial_transitions": [
+        "create"
+      ],
+      "transitions": [
+        {
+          "from": "create",
+          "to": [
+            "supersede",
+            "retract",
+            "release",
+            "tombstone"
+          ]
+        },
+        {
+          "from": "supersede",
+          "to": [
+            "supersede",
+            "retract",
+            "tombstone"
+          ]
+        },
+        {
+          "from": "retract",
+          "to": [
+            "restore",
+            "tombstone"
+          ]
+        },
+        {
+          "from": "restore",
+          "to": [
+            "supersede",
+            "retract",
+            "tombstone"
+          ]
+        },
+        {
+          "from": "release",
+          "to": [
+            "supersede",
+            "retract",
+            "tombstone"
+          ]
+        },
+        {
+          "from": "tombstone",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "tombstone"
+      ]
+    },
+    {
+      "id": "ccf.state.signer-rotation-v1",
+      "description": "Scheduled signer rotation lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "schedule"
+      ],
+      "transitions": [
+        {
+          "from": "schedule",
+          "to": [
+            "activate",
+            "supersede",
+            "revoke"
+          ]
+        },
+        {
+          "from": "activate",
+          "to": []
+        },
+        {
+          "from": "supersede",
+          "to": []
+        },
+        {
+          "from": "revoke",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "activate",
+        "supersede",
+        "revoke"
+      ]
+    },
+    {
+      "id": "ccf.state.subject-request-v1",
+      "description": "Subject access or portability request lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "requested"
+      ],
+      "transitions": [
+        {
+          "from": "requested",
+          "to": [
+            "verified",
+            "denied"
+          ]
+        },
+        {
+          "from": "verified",
+          "to": [
+            "fulfilled",
+            "denied"
+          ]
+        },
+        {
+          "from": "fulfilled",
+          "to": []
+        },
+        {
+          "from": "denied",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "fulfilled",
+        "denied"
+      ]
+    },
+    {
+      "id": "ccf.state.successor-v1",
+      "description": "Successor authorization lifecycle.",
+      "head_check": "required",
+      "initial_transitions": [
+        "authorize"
+      ],
+      "transitions": [
+        {
+          "from": "authorize",
+          "to": [
+            "activate",
+            "supersede",
+            "revoke"
+          ]
+        },
+        {
+          "from": "activate",
+          "to": []
+        },
+        {
+          "from": "supersede",
+          "to": []
+        },
+        {
+          "from": "revoke",
+          "to": []
+        }
+      ],
+      "terminal_states": [
+        "activate",
+        "supersede",
+        "revoke"
+      ]
+    }
+  ]
+}

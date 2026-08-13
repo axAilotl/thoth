@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:registries.profile-registry",
+  "title": "CCF Profile Registry",
+  "type": "object",
+  "properties": {
+    "registry": {
+      "const": "ccf.profiles/0.1.2-rc1"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/profileName"
+          },
+          "status": {
+            "enum": [
+              "required",
+              "recommended",
+              "optional",
+              "experimental"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/profileName"
+            },
+            "uniqueItems": true
+          },
+          "security_claims": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "description",
+          "depends_on",
+          "security_claims",
+          "exclusions"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "registry",
+    "entries"
+  ],
+  "additionalProperties": false
+}

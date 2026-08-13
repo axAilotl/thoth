@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:payload.governance.policy",
+  "title": "governance.policy payload",
+  "type": "object",
+  "properties": {
+    "profile": {
+      "const": "ccf.policy/0.1.2-rc1"
+    },
+    "evaluator_profile": {
+      "type": "string"
+    },
+    "combining_algorithm": {
+      "const": "deny_overrides_v1"
+    },
+    "default_effect": {
+      "enum": [
+        "allow",
+        "deny"
+      ]
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "rule_id": {
+            "type": "string"
+          },
+          "effect": {
+            "enum": [
+              "allow",
+              "deny",
+              "oblige"
+            ]
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "purposes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "data_classes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attribute": {
+                  "type": "string"
+                },
+                "operator": {
+                  "enum": [
+                    "equals",
+                    "not_equals",
+                    "in",
+                    "not_in",
+                    "contains",
+                    "before",
+                    "after",
+                    "exists"
+                  ]
+                },
+                "value": {}
+              },
+              "required": [
+                "attribute",
+                "operator"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "obligations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "valid_from": {
+            "oneOf": [
+              {
+                "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rule_id",
+          "effect",
+          "operations",
+          "purposes",
+          "recipients",
+          "destinations",
+          "data_classes",
+          "conditions",
+          "obligations"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "provenance_requirement": {
+      "enum": [
+        "none",
+        "lineage_only",
+        "inspectable_source"
+      ]
+    },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "minimum_until": {
+          "oneOf": [
+            {
+              "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maximum_until": {
+          "oneOf": [
+            {
+              "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "on_expiry": {
+          "enum": [
+            "restrict",
+            "erase",
+            "review"
+          ]
+        }
+      },
+      "required": [
+        "on_expiry"
+      ],
+      "additionalProperties": false
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "profile",
+    "evaluator_profile",
+    "combining_algorithm",
+    "default_effect",
+    "rules",
+    "provenance_requirement",
+    "retention",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

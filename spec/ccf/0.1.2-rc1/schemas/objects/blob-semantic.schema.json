@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:objects.blob-semantic",
+  "title": "CCF Blob Semantic Compartment",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "ccf.blob-semantic/0.1.2-rc1"
+    },
+    "salt": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/salt256"
+    },
+    "content": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:objects.blob-semantic-content"
+    }
+  },
+  "required": [
+    "format",
+    "salt",
+    "content"
+  ],
+  "additionalProperties": false
+}

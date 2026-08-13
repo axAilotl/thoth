@@ -1,0 +1,65 @@
+{
+  "format": "ccf.conformance/0.1.2-rc1",
+  "cases": [
+    {
+      "id": "origin-cross-kind",
+      "requirement": "Record and Blob sharing one origin tuple succeed because object_kind differs",
+      "expected": "accept_both"
+    },
+    {
+      "id": "origin-same-kind",
+      "requirement": "Same-kind origin collision conflicts unless native IDs differ",
+      "expected": "conflict_then_suffix_accepts"
+    },
+    {
+      "id": "foreign-unavailability",
+      "requirement": "Erased and withheld compartments survive foreign merge",
+      "expected": "preserve_exact_state"
+    },
+    {
+      "id": "bootstrap-rebuild",
+      "requirement": "Bootstrap objects retain semantic compartments through reload and projection destruction",
+      "expected": "canonical_compartments_unchanged"
+    },
+    {
+      "id": "content-rejection-liveness",
+      "requirement": "A cryptographically valid content-rejected batch anchors successors",
+      "expected": "successor_eligible"
+    },
+    {
+      "id": "predecessor-pending",
+      "requirement": "An early batch remains pending and succeeds after its exact predecessor appears",
+      "expected": "queued_then_accepted"
+    },
+    {
+      "id": "suppression-row-rebuild",
+      "requirement": "Deleting a suppression projection row is detected and reconstructed from canonical state",
+      "expected": "detected_and_restored"
+    },
+    {
+      "id": "suppression-reintroduction",
+      "requirement": "Erased content remains blocked after total projection destruction",
+      "expected": "blocked_after_rebuild"
+    },
+    {
+      "id": "admission-membership",
+      "requirement": "Deleting or mutating admission state causes chain verification to fail",
+      "expected": "fail_closed"
+    },
+    {
+      "id": "pgvector-multischema",
+      "requirement": "PostgreSQL detects pgvector without public or search_path assumptions",
+      "expected": "extension_namespace_qualified"
+    },
+    {
+      "id": "git-three-commit",
+      "requirement": "Three commits cover evolution, rename, delete, binary content, and retry",
+      "expected": "stable_replay"
+    },
+    {
+      "id": "authority-classes",
+      "requirement": "Every authority class has positive and negative admission vectors",
+      "expected": "complete_matrix"
+    }
+  ]
+}

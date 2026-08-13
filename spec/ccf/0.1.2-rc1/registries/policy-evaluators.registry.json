@@ -1,0 +1,11 @@
+{
+  "registry": "ccf.policy-evaluators/0.1.2-rc1",
+  "entries": [
+    {
+      "name": "ccf-deny-overrides-v1",
+      "version": "1",
+      "combining_algorithm": "deny_overrides_v1",
+      "description": "Deterministic default-deny baseline. Applicable denies override allows; mandatory obligations accumulate; unknown required context yields deny or pending; legal bases may be explicit alternatives."
+    }
+  ]
+}

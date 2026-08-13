@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:payload.work.decision",
+  "title": "work.decision payload",
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string"
+    },
+    "decision": {
+      "type": "string"
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "proposed",
+        "accepted",
+        "rejected",
+        "superseded"
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "question",
+    "decision",
+    "alternatives",
+    "rationale",
+    "status",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

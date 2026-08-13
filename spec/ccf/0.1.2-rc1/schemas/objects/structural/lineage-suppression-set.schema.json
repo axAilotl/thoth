@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:structural.lineage.suppression_set",
+  "title": "Suppression Set Structural Payload",
+  "type": "object",
+  "properties": {
+    "profile": { "const": "ccf-hmac-sha256-suppression-v1" },
+    "suppression_blob_id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/blobUrn"
+    },
+    "entry_count": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/uint64"
+    },
+    "entries_merkle_root": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    },
+    "key_profile_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "scope_commitment": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    },
+    "erasure_receipt_id": {
+      "oneOf": [
+        { "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/recordUrn" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "required": [
+    "profile",
+    "suppression_blob_id",
+    "entry_count",
+    "entries_merkle_root",
+    "key_profile_id",
+    "scope_commitment",
+    "erasure_receipt_id"
+  ],
+  "additionalProperties": false
+}

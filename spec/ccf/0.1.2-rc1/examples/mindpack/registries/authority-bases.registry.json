@@ -1,0 +1,41 @@
+{
+  "registry": "ccf.authority-bases/0.1.2-rc1",
+  "entries": [
+    {
+      "name": "direct_observation",
+      "description": "Directly observed by a trusted capture process."
+    },
+    {
+      "name": "quoted_statement",
+      "description": "Evidence that the attributed speaker produced the quoted content."
+    },
+    {
+      "name": "first_person_statement",
+      "description": "First-person assertion by the represented Person."
+    },
+    {
+      "name": "third_party_statement",
+      "description": "Assertion made by another Person or source."
+    },
+    {
+      "name": "machine_inference",
+      "description": "Probabilistic machine-produced interpretation; not accepted by default."
+    },
+    {
+      "name": "deterministic_derivation",
+      "description": "Deterministic transformation of declared sources."
+    },
+    {
+      "name": "person_accepted",
+      "description": "A Person explicitly accepted the semantic claim or decision."
+    },
+    {
+      "name": "explicit_authorization",
+      "description": "A Person or authorized actor granted a scoped capability."
+    },
+    {
+      "name": "runtime_import",
+      "description": "Imported as a record of source-system state, without upgrading semantic authority."
+    }
+  ]
+}

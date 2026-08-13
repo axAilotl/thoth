@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:objects.blob-header",
+  "title": "CCF Blob Header",
+  "type": "object",
+  "properties": {
+    "spec": {
+      "const": "ccf/0.1.2-rc1"
+    },
+    "object_kind": {
+      "const": "blob"
+    },
+    "id": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/blobUrn"
+    },
+    "hash_profile": {
+      "const": "ccf-jcs-sha256-v2"
+    },
+    "structural_commitment": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    },
+    "semantic_commitment": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "object_hash": {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/digest"
+    }
+  },
+  "required": [
+    "spec",
+    "object_kind",
+    "id",
+    "hash_profile",
+    "structural_commitment",
+    "semantic_commitment",
+    "object_hash"
+  ],
+  "additionalProperties": false
+}

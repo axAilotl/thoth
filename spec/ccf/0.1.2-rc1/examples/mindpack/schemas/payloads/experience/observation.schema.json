@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:payload.experience.observation",
+  "title": "experience.observation payload",
+  "type": "object",
+  "properties": {
+    "modality": {
+      "type": "string"
+    },
+    "value": {},
+    "units": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "attributes": {
+      "type": "object"
+    },
+    "sequence": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2-rc1:common.defs#/$defs/uint64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "modality",
+    "value",
+    "attributes",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

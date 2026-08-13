@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:payload.core.person",
+  "title": "core.person payload",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "enum": [
+        "human",
+        "digital",
+        "organization",
+        "collective",
+        "unknown"
+      ]
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "identity_anchors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scheme": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scheme",
+          "value",
+          "verified"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "kind",
+    "display_name",
+    "aliases",
+    "identity_anchors",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,18 @@
+{
+  "registry": "ccf.suppression-profiles/0.1.2-rc1",
+  "entries": [
+    {
+      "name": "ccf-hmac-sha256-suppression-v1",
+      "token_derivation": "HMAC-SHA-256(key, UTF8('ccf:suppression-token:v1\\0') || UTF8(JCS(preimage)))",
+      "preimage_schema_id": "urn:ccf:schema:0.1.2-rc1:security.suppression-preimage",
+      "token_encoding": "hmac-sha256:<64 lowercase hex characters>",
+      "entry_order": "ascending Unicode code-point order of complete token strings",
+      "duplicates": "reject",
+      "leaf_hash": "SHA-256(UTF8('ccf:suppression-leaf:v1\\0') || UTF8(token))",
+      "node_hash": "SHA-256(UTF8('ccf:suppression-node:v1\\0') || left || right)",
+      "empty_root": "SHA-256(UTF8('ccf:suppression-empty:v1\\0'))",
+      "tree_shape": "recursive split at largest power of two smaller than the node count",
+      "minimum_key_bytes": 32
+    }
+  ]
+}

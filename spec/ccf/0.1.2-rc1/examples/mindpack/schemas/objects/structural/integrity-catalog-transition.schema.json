@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2-rc1:structural.integrity.catalog_transition",
+  "title": "Catalog Transition Structural Payload",
+  "allOf": [
+    {
+      "$ref": "urn:ccf:schema:0.1.2-rc1:payload.integrity.catalog_transition"
+    }
+  ]
+}

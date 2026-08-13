@@ -1,0 +1,124 @@
+{
+  "registry": "ccf.profiles/0.1.2-rc1",
+  "entries": [
+    {
+      "name": "ccf-core-0.1.2-rc1",
+      "status": "required",
+      "description": "Portable Record/Link/Blob objects, split compartments, canonical hashing, admission journal, lineages, baseline governance, mindpack restore/merge, and projection rules.",
+      "depends_on": [],
+      "security_claims": [
+        "prefix integrity when commit verification succeeds",
+        "portable object identity",
+        "append-only admitted lineage"
+      ],
+      "exclusions": [
+        "does not require content encryption",
+        "does not claim selective cryptographic erasure",
+        "does not claim rollback freshness without a witness"
+      ]
+    },
+    {
+      "name": "ccf-local-sync-0.1.2-rc1",
+      "status": "recommended",
+      "description": "Offline signed producer-batch chains, resumable delta packs, device credentials, provisional local state, and batched synchronization.",
+      "depends_on": [
+        "ccf-core-0.1.2-rc1"
+      ],
+      "security_claims": [
+        "authenticated offline provenance when credentials and signatures verify"
+      ],
+      "exclusions": [
+        "offline revocation cannot affect a disconnected device until it learns new state"
+      ]
+    },
+    {
+      "name": "ccf-archive-encryption-derived-v1",
+      "status": "optional",
+      "description": "One random archive epoch secret wrapped to authorized recipients; per-object compartment keys derived locally with HKDF.",
+      "depends_on": [
+        "ccf-core-0.1.2-rc1"
+      ],
+      "security_claims": [
+        "provider-blind storage when no service recipient key slot exists",
+        "epoch-wide cryptographic erasure when every recoverable epoch secret is destroyed"
+      ],
+      "exclusions": [
+        "does not provide selective per-object cryptographic erasure"
+      ]
+    },
+    {
+      "name": "ccf-object-erasure-v1",
+      "status": "optional",
+      "description": "Random per-object data-encryption keys and wrapped-key inventory for selective cryptographic erasure.",
+      "depends_on": [
+        "ccf-core-0.1.2-rc1"
+      ],
+      "security_claims": [
+        "selective cryptographic erasure when all wrapped-key and backup copies are destroyed"
+      ],
+      "exclusions": [
+        "requires stronger key-custody and recovery operations"
+      ]
+    },
+    {
+      "name": "ccf-witnessed-integrity-v1",
+      "status": "optional",
+      "description": "Independent head checkpoints or witness signatures for rollback detection beyond valid-prefix integrity.",
+      "depends_on": [
+        "ccf-core-0.1.2-rc1"
+      ],
+      "security_claims": [
+        "rollback detection relative to trusted witness checkpoints"
+      ],
+      "exclusions": [
+        "does not create distributed consensus"
+      ]
+    },
+    {
+      "name": "ccf-succession-v1",
+      "status": "optional",
+      "description": "Live signer rotation and preauthorized successor activation.",
+      "depends_on": [
+        "ccf-core-0.1.2-rc1"
+      ],
+      "security_claims": [
+        "verifiable signer continuity across authorized rotation or succession"
+      ],
+      "exclusions": [
+        "activation evidence remains deployment policy"
+      ]
+    },
+    {
+      "name": "ccf-continuity-pack-0.1.2-rc1",
+      "status": "optional",
+      "description": "Episodes, preferences, values, goals, commitments, boundaries, and relationships.",
+      "depends_on": [
+        "ccf-core-0.1.2-rc1"
+      ],
+      "security_claims": [],
+      "exclusions": []
+    },
+    {
+      "name": "ccf-work-pack-0.1.2-rc1",
+      "status": "optional",
+      "description": "Projects, tasks, decisions, and constraints.",
+      "depends_on": [
+        "ccf-core-0.1.2-rc1"
+      ],
+      "security_claims": [],
+      "exclusions": []
+    },
+    {
+      "name": "ccf-agent-pack-0.1.2-rc1",
+      "status": "optional",
+      "description": "Framework-neutral agent runs, findings, handoffs, proposals, and receipts.",
+      "depends_on": [
+        "ccf-core-0.1.2-rc1"
+      ],
+      "security_claims": [],
+      "exclusions": [
+        "does not prescribe orchestration topology"
+      ]
+    }
+  ]
+}
