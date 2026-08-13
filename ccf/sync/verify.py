@@ -43,9 +43,11 @@ def verify_pack_object(
 ) -> None:
     """Recompute one object's commitments and object hash.
 
-    Objects declared withheld/erased (``unavailable_ids``) may lack
-    envelopes; their header commitments are authenticated by commit
-    membership instead. Content is never fabricated for them.
+    Unavailable objects (``unavailable_ids``, derived from the pack
+    contents — never from manifest declarations) may lack envelopes;
+    their header commitments are authenticated by commit membership
+    instead, but every envelope they do carry is still recomputed
+    against the header. Content is never fabricated for them.
     """
     unavailable_ids = unavailable_ids or set()
     object_id = obj.object_id
@@ -60,7 +62,26 @@ def verify_pack_object(
 
     envelopes = {"structural": obj.structural, "semantic": obj.semantic}
     if object_id in unavailable_ids:
-        return  # commitments stand on commit membership; nothing to recompute
+        # A partially available object still proves every compartment it
+        # carries: each present envelope must match its header commitment
+        # (the header itself is authenticated by commit membership).
+        # Content is never fabricated for the absent ones.
+        if envelopes["structural"] is not None:
+            _verify_envelope_commitment(header, envelopes["structural"], "structural")
+        if envelopes["semantic"] is not None:
+            _require(
+                header.semantic_commitment is not None,
+                f"semantic envelope without header commitment for {object_id}",
+            )
+            _verify_envelope_commitment(header, envelopes["semantic"], "semantic")
+        if (
+            obj.object_kind == "blob"
+            and blob_data is not None
+            and envelopes["structural"] is not None
+            and envelopes["semantic"] is not None
+        ):
+            _verify_blob_bytes(obj, blob_data, envelopes)
+        return
     _require(
         envelopes["structural"] is not None,
         f"structural compartment missing for available object {object_id}",
@@ -74,20 +95,47 @@ def verify_pack_object(
         raise PackVerificationError(f"object verification failed: {exc}") from exc
 
     if obj.object_kind == "blob" and blob_data is not None:
-        semantic = envelopes["semantic"] or {}
-        content = semantic.get("content") or {}
-        salt = content.get("content_salt")
-        structural = envelopes["structural"]["content"]
-        _require(bool(salt), f"blob {object_id} semantic content_salt missing")
-        _require(
-            str(len(blob_data)) == structural.get("byte_length"),
-            f"blob {object_id} byte length mismatch",
-        )
-        _require(
-            blob_content_commitment(salt, blob_data)
-            == structural.get("content_commitment"),
-            f"blob {object_id} content commitment mismatch",
-        )
+        _verify_blob_bytes(obj, blob_data, envelopes)
+
+
+def _verify_envelope_commitment(
+    header: PortableHeader, envelope: dict, compartment: str
+) -> None:
+    """Recompute one present envelope's commitment against the header."""
+    try:
+        commitment = _envelope(envelope).commitment(header.object_kind, compartment)
+    except Exception as exc:
+        raise PackVerificationError(
+            f"{compartment} envelope invalid for {header.id}: {exc}"
+        ) from exc
+    expected = (
+        header.structural_commitment
+        if compartment == "structural"
+        else header.semantic_commitment
+    )
+    _require(
+        commitment == expected,
+        f"{compartment} commitment mismatch for {header.id}",
+    )
+
+
+def _verify_blob_bytes(obj: PackObject, blob_data: bytes, envelopes: dict) -> None:
+    """Verify included Blob bytes against the salted content commitment."""
+    object_id = obj.object_id
+    semantic = envelopes["semantic"] or {}
+    content = semantic.get("content") or {}
+    salt = content.get("content_salt")
+    structural = envelopes["structural"]["content"]
+    _require(bool(salt), f"blob {object_id} semantic content_salt missing")
+    _require(
+        str(len(blob_data)) == structural.get("byte_length"),
+        f"blob {object_id} byte length mismatch",
+    )
+    _require(
+        blob_content_commitment(salt, blob_data)
+        == structural.get("content_commitment"),
+        f"blob {object_id} content commitment mismatch",
+    )
 
 
 def _envelope(raw: dict):

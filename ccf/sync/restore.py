@@ -23,7 +23,13 @@ from ccf.objects import now_timestamp
 from ccf.schemas import SchemaSet
 from ccf.sync.completeness import CompletenessReport, classify_references
 from ccf.sync.export import SCHEMA_MINDPACK_MANIFEST
+from ccf.sync.manifest import (
+    compare_manifest,
+    derive_pack_inventory,
+    unavailable_object_ids,
+)
 from ccf.sync.packio import (
+    MANIFEST_MODE_MISMATCH,
     IncompletePackError,
     PackError,
     PackReader,
@@ -50,7 +56,8 @@ class VerifiedMindpack:
 
     def __init__(self, reader: PackReader, schemas: SchemaSet, *, allow_partial: bool = False,
                  known_ids: set[str] | None = None,
-                 allow_missing_member_objects: bool = False) -> None:
+                 allow_missing_member_objects: bool = False,
+                 operation: str = "import") -> None:
         if not reader.has("manifest.json"):
             raise RestoreError("pack has no manifest.json")
         self.manifest = reader.read_json("manifest.json")
@@ -71,7 +78,10 @@ class VerifiedMindpack:
         contents = load_pack_objects(reader)
         self.objects = contents.objects
         self.blob_data = contents.blob_data
-        unavailable = set(self.manifest["withheld"]) | set(self.manifest["erased"])
+        # Availability is derived from the pack contents (which objects
+        # actually lack compartments), never from the manifest's own
+        # withheld/erased declarations.
+        unavailable = unavailable_object_ids(self.objects, self.blob_data)
         for object_id, obj in self.objects.items():
             verify_pack_object(
                 obj, blob_data=self.blob_data.get(object_id), unavailable_ids=unavailable
@@ -91,19 +101,23 @@ class VerifiedMindpack:
             self.objects,
             allow_missing_member_objects=allow_missing_member_objects,
         )
-        manifest = self.manifest
-        if self.chain["genesis_commit_hash"] != manifest["genesis_commit_hash"]:
-            raise RestoreError("manifest genesis hash does not match verified chain")
-        if self.chain["head_commit_hash"] != manifest["head_commit_hash"] or (
-            self.chain["head_sequence"] != manifest["head_sequence"]
-        ):
-            raise RestoreError("manifest head does not match verified chain")
 
+        # The manifest is an unsigned transport index: reconstruct the
+        # actual inventory from the verified material and fail closed on
+        # any disagreement, before any canonical state is touched.
+        self.inventory = derive_pack_inventory(
+            self.objects,
+            self.blob_data,
+            self.commits,
+            self.members,
+            known_ids=known_ids,
+        )
+        manifest = self.manifest
         self.completeness: CompletenessReport = classify_references(
             self.objects,
             external_ids={d["object_id"] for d in manifest["external_dependencies"]},
-            withheld_ids=set(manifest["withheld"]),
-            erased_ids=set(manifest["erased"]),
+            withheld_ids=self.inventory.withheld,
+            erased_ids=self.inventory.erased,
             known_ids=known_ids,
         )
         if not self.completeness.complete and not allow_partial:
@@ -111,6 +125,15 @@ class VerifiedMindpack:
                 "pack has undeclared dangling references: "
                 f"{self.completeness.dangling}"
             )
+        compare_manifest(
+            manifest,
+            self.inventory,
+            chain=self.chain,
+            pack_names=reader.names(),
+            completeness=self.completeness,
+            allow_partial=allow_partial,
+            operation=operation,
+        )
 
     @property
     def partial(self) -> bool:
@@ -124,6 +147,7 @@ def verify_mindpack(
     allow_partial: bool = False,
     known_ids: set[str] | None = None,
     allow_missing_member_objects: bool = False,
+    operation: str = "import",
 ) -> VerifiedMindpack:
     """Open and fully verify a mindpack (directory or ZIP container)."""
     schemas = SchemaSet.load(package_root)
@@ -134,6 +158,7 @@ def verify_mindpack(
             allow_partial=allow_partial,
             known_ids=known_ids,
             allow_missing_member_objects=allow_missing_member_objects,
+            operation=operation,
         )
 
 
@@ -474,11 +499,15 @@ def restore_mindpack(
             "(or bootstrap_new_archive=True to pin a brand-new archive)"
         )
     pack = verify_mindpack(
-        pack_path, package_root=package_root, allow_partial=allow_partial
+        pack_path, package_root=package_root, allow_partial=allow_partial,
+        operation="restore",
     )
     manifest = pack.manifest
     if manifest["mode"] not in ("restore", "replica"):
-        raise RestoreError(f"pack mode {manifest['mode']!r} is not restorable")
+        raise RestoreError(
+            f"pack mode {manifest['mode']!r} is not restorable",
+            reason=MANIFEST_MODE_MISMATCH,
+        )
     if trusted_genesis_hash is not None and (
         trusted_genesis_hash != pack.chain["genesis_commit_hash"]
     ):
@@ -535,7 +564,8 @@ def restore_mindpack(
                 ),
             )
             inserted, _ = insert_pack_objects(
-                conn, archive_id, pack, updated_at=received_at
+                conn, archive_id, pack, updated_at=received_at,
+                unavailable_ids=pack.inventory.unavailable_ids,
             )
             genesis = pack.commits[0]
             genesis_payload = pack.objects[genesis["record_id"]].structural[

@@ -23,6 +23,7 @@ from ccf.sync.chunks import SIDECAR_SUFFIX, load_sidecar, verify_file
 from ccf.sync.delta import apply_delta_pack, build_delta_pack
 from ccf.sync.export import export_mindpack
 from ccf.sync.heads import build_sync_head, negotiate
+from ccf.sync.manifest import check_manifest_mode
 from ccf.sync.merge import merge_mindpack
 from ccf.sync.packio import PackError
 from ccf.sync.restore import (
@@ -167,6 +168,9 @@ class SyncService:
         )
         manifest = pack.manifest
         archive_id = self._archive.archive_id
+        # The manifest mode is non-authoritative exporter intent; it must
+        # be consistent with the operation the caller requested.
+        check_manifest_mode(manifest, operation="merge" if foreign else "import")
         if manifest["archive_id"] != archive_id:
             return self._merge(pack)
 

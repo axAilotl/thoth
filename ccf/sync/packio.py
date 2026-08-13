@@ -31,7 +31,30 @@ MAX_TOTAL_BYTES = 4 << 30  # 4 GiB cumulative per reader
 
 
 class PackError(RuntimeError):
-    """Raised when a pack is malformed, tampered with, or incomplete."""
+    """Raised when a pack is malformed, tampered with, or incomplete.
+
+    ``reason`` carries a stable machine-readable identifier (see the
+    ``MANIFEST_*`` constants below) when the failure is a disagreement
+    between a manifest claim and the verified pack contents; the human
+    diagnostic text may vary.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+#: Stable machine-readable identifiers for disagreements between a pack
+#: manifest (an unsigned, non-authoritative transport index) and the
+#: inventory independently derived from digest-verified pack contents.
+MANIFEST_COUNT_MISMATCH = "manifest_count_mismatch"
+MANIFEST_STREAM_DIGEST_MISMATCH = "manifest_stream_digest_mismatch"
+MANIFEST_AVAILABILITY_MISMATCH = "manifest_availability_mismatch"
+MANIFEST_EXTERNAL_DEPENDENCY_MISMATCH = "manifest_external_dependency_mismatch"
+MANIFEST_COMPLETENESS_MISMATCH = "manifest_completeness_mismatch"
+MANIFEST_MODE_MISMATCH = "manifest_mode_mismatch"
+MANIFEST_HEAD_MISMATCH = "manifest_head_mismatch"
+MANIFEST_UNKNOWN_EXTENSION_MISMATCH = "manifest_unknown_extension_mismatch"
 
 
 class IncompletePackError(PackError):
@@ -262,22 +285,30 @@ def verify_stream_digests(reader: PackReader, streams: list[StreamEntry]) -> lis
     for entry in streams:
         if not reader.has(entry.path):
             if entry.required:
-                raise PackError(f"required pack stream missing: {entry.path}")
+                raise PackError(
+                    f"required pack stream missing: {entry.path}",
+                    reason=MANIFEST_STREAM_DIGEST_MISMATCH,
+                )
             notes.append(f"optional stream absent: {entry.path}")
             continue
         if entry.byte_length < 0 or entry.byte_length > reader.max_entry_bytes:
             raise PackError(
                 f"stream {entry.path} manifest byte_length {entry.byte_length} "
-                f"is outside the per-entry cap ({reader.max_entry_bytes})"
+                f"is outside the per-entry cap ({reader.max_entry_bytes})",
+                reason=MANIFEST_STREAM_DIGEST_MISMATCH,
             )
         data = reader.read(entry.path, max_bytes=entry.byte_length)
         if len(data) != entry.byte_length:
             raise PackError(
                 f"stream {entry.path} byte length {len(data)} != "
-                f"manifest {entry.byte_length}"
+                f"manifest {entry.byte_length}",
+                reason=MANIFEST_STREAM_DIGEST_MISMATCH,
             )
         if digest_string(data) != entry.digest:
-            raise PackError(f"stream {entry.path} digest mismatch (tampered)")
+            raise PackError(
+                f"stream {entry.path} digest mismatch (tampered)",
+                reason=MANIFEST_STREAM_DIGEST_MISMATCH,
+            )
         parse_digest(entry.digest)
     return notes
 

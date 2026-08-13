@@ -8,6 +8,8 @@
 - :mod:`ccf.sync.chunks` / :mod:`ccf.sync.transport` — verified chunk
   digests and byte-range resume over file/USB or HTTP;
 - :mod:`ccf.sync.completeness` — reference completeness (2.5);
+- :mod:`ccf.sync.manifest` — manifest cross-checks against the inventory
+  derived from verified pack contents (11.5);
 - :mod:`ccf.sync.service` — ``Archive.sync()`` facade (merge/fork dispatch).
 """
 
