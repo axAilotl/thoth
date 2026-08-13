@@ -40,13 +40,13 @@ def test_source_maps_to_core_source(rig, ctx):
     # The source is the origin root: no origin tuple of its own.
     assert "origin" not in record
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.1:payload.core.source", record["payload"], what="core.source"
+        "urn:ccf:schema:0.1.2-rc1:payload.core.source", record["payload"], what="core.source"
     )
     assert record["payload"]["native_identity"] == "device:maxc-test"
     assert record["payload"]["trust_class"] == "authenticated"
 
     result = admit_mapped(rig, mapped)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     assert outcome_for(result, record["id"])["status"] == "admitted"
     admitted = compartment(rig, record["id"], "semantic")
     assert admitted["payload"]["connector"] == "thoth.capture"
@@ -58,7 +58,7 @@ def test_source_reimport_is_idempotent(rig, ctx):
     assert outcome_for(first, mapped.records[0]["id"])["status"] == "admitted"
     # Replay of the same submissions in a new batch resolves to existing.
     second = admit_mapped(rig, mapped)
-    assert second["status"] == "committed"
+    assert second["status"] == "accepted"
     assert outcome_for(second, mapped.records[0]["id"])["status"] == "existing"
 
 

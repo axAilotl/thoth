@@ -225,7 +225,7 @@ def test_suppression_entries_without_key_fail_closed(
         },
     )
     result = keyed.archive.admit_batch(keyed.producer.create_batch(records=[record]))
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
     svc = keyed.archive.erasure()
     request = svc.submit_request(

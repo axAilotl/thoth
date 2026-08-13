@@ -47,7 +47,7 @@ def _concept(rig, label="tamper-target"):
 def _admit(rig, record):
     batch = rig.producer.create_batch(records=[record])
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     return batch, result
 
 
@@ -207,7 +207,7 @@ def test_tampered_spooled_batch_rejected_on_admission(rig):
         (Jsonb(forged), batch["batch_id"]),
     )
     result = rig.archive.admit_batch(forged)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "batch_hash does not match" in result["extensions"]["reason"]
 
     # The producer chains past the forged spool row: its next honest batch
@@ -215,7 +215,7 @@ def test_tampered_spooled_batch_rejected_on_admission(rig):
     result = rig.archive.admit_batch(
         rig.producer.create_batch(records=[_concept(rig, "after-forgery")])
     )
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ def _origin_utterance(rig):
         },
     )
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[source]))
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     utterance = rig.producer.new_record(
         type="experience.utterance",
         claims=rig.claims(),
@@ -252,7 +252,7 @@ def _origin_utterance(rig):
         },
     )
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[utterance]))
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     return source["id"], utterance
 
 
@@ -319,14 +319,18 @@ def test_tampered_suppression_metadata_cannot_resurrect(erasure_rig):
 
 
 def test_erased_origin_tuple_stays_blocked_after_commitment_tamper(erasure_rig):
-    """Even with the commitment row rewritten, the exact erased tuple
-    cannot be re-admitted: the origin index lifecycle guards it."""
+    """A rewritten suppression commitment is detected at admission
+    (fail closed), and after a canonical rebuild the erased tuple stays
+    blocked (spec 12.7)."""
+    from ccf.erasure.errors import SuppressionProjectionError
+    from ccf.erasure.suppression_set import rebuild_projection
+
     source_id, utterance = _origin_utterance(erasure_rig)
     _erase(erasure_rig, utterance["id"])
     _tamper(
         erasure_rig,
         "UPDATE suppression_entry SET commitment = 'hmac-sha256:' || repeat('0', 64) "
-        "WHERE kind = 'origin'",
+        "WHERE commitment = (SELECT MIN(commitment) FROM suppression_entry)",
     )
     replay = erasure_rig.producer.new_record(
         type="experience.utterance",
@@ -337,13 +341,22 @@ def test_erased_origin_tuple_stays_blocked_after_commitment_tamper(erasure_rig):
             "sequence": None, "transcription": None, "extensions": {},
         },
     )
-    result = erasure_rig.archive.admit_batch(
-        erasure_rig.producer.create_batch(records=[replay])
-    )
+    batch = erasure_rig.producer.create_batch(records=[replay])
+    # The tampered row no longer matches canonical state: admission
+    # refuses to run on a drifted projection at all.
+    with pytest.raises(SuppressionProjectionError):
+        erasure_rig.archive.admit_batch(batch)
+
+    from ccf.db import open_ccf_connection
+
+    with open_ccf_connection(erasure_rig.settings) as conn:
+        with conn.transaction():
+            rebuild_projection(conn, erasure_rig.archive.archive_id, now=erasure_rig.clock())
+    result = erasure_rig.archive.admit_batch(batch)
     for admission in result["admissions"]:
         assert admission["status"] in ("rejected", "origin_revision_conflict", "existing")
         assert admission["payload_available"] is False
-    assert result["status"] != "committed" or all(
+    assert result["status"] != "accepted" or all(
         a["status"] != "admitted" for a in result["admissions"]
     )
 
@@ -391,14 +404,14 @@ def test_forged_batch_wrong_key_rejected_and_not_anchored(rig, tmp_path):
     batch = rig.producer.create_batch(records=[_concept(rig)])
     forged = _resign(rig, batch, evil, credential_id=evil.credential_id)
     result = rig.archive.admit_batch(forged)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "unknown credential" in result["extensions"]["reason"]
 
     # No anchor was planted: the honest producer's next batch commits.
     result = rig.archive.admit_batch(
         rig.producer.create_batch(records=[_concept(rig, "post-attack")])
     )
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
 
 def test_replayed_committed_batch_is_idempotent_not_double_admitted(rig):
@@ -407,7 +420,7 @@ def test_replayed_committed_batch_is_idempotent_not_double_admitted(rig):
     head_after_first = rig.archive.head()
 
     replay = rig.archive.admit_batch(batch)
-    assert replay["status"] == "committed"
+    assert replay["status"] == "accepted"
     assert replay["commit_sequence"] == first["commit_sequence"]
     assert rig.archive.head() == head_after_first
     assert rig.archive.verify_chain()["commits_verified"] >= 2
@@ -421,12 +434,12 @@ def test_broken_previous_hash_chain_rejected(rig):
         previous_batch_hash="sha256:" + "0" * 64,
     )
     result = rig.archive.admit_batch(forged)
-    assert result["status"] == "rejected"
+    assert result["status"] == "quarantined"
     assert "producer chain conflict" in result["extensions"]["reason"]
 
     # The honest chain is untouched: batch2 itself still admits.
     result = rig.archive.admit_batch(batch2)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
 
 
 def test_content_rejected_batch_does_not_brick_producer(rig):
@@ -444,7 +457,7 @@ def test_content_rejected_batch_does_not_brick_producer(rig):
     rejected = rig.archive.admit_batch(
         rig.producer.create_batch(links=[ghost_link])
     )
-    assert rejected["status"] == "rejected", rejected
+    assert rejected["status"] == "content_rejected", rejected
     assert "unknown ID" in rejected["extensions"]["reason"]
 
     # Before the fix, the archive anchored the chain on the last
@@ -453,5 +466,5 @@ def test_content_rejected_batch_does_not_brick_producer(rig):
     result = rig.archive.admit_batch(
         rig.producer.create_batch(records=[_concept(rig, "recovery")])
     )
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     assert rig.archive.verify_chain()["commits_verified"] >= 2

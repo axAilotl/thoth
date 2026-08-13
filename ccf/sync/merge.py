@@ -82,11 +82,22 @@ def merge_mindpack(
     # Objects the source declared withheld or erased: an absent compartment
     # must be recorded as unavailable, never dropped — the destination
     # header keeps the compartment commitment, and chain verification
-    # fails closed when the row is simply missing.
+    # fails closed when the row is simply missing. The exact availability
+    # state is preserved per compartment (0.1.2-rc1): erased stays erased,
+    # withheld stays withheld.
     unavailable_ids = set(manifest.get("withheld", [])) | set(
         manifest.get("erased", [])
     )
-    unavailable_compartments: list[tuple[str, str]] = []
+    erased_ids = set(manifest.get("erased", []))
+    # Per-compartment declarations (0.1.2-rc1 manifest) take precedence
+    # over the object-level lists.
+    declared_states: dict[tuple[str, str], str] = {}
+    for entry in manifest.get("compartment_availability", []):
+        if entry["availability"] in ("withheld", "erased"):
+            declared_states[(entry["object_id"], entry["compartment"])] = entry[
+                "availability"
+            ]
+    unavailable_compartments: list[tuple[str, str, str]] = []
 
     resolved: list[ResolvedObject] = []
     skipped_existing: list[str] = []
@@ -131,7 +142,11 @@ def merge_mindpack(
                     f"object {object_id} has no structural compartment; "
                     "withheld source material cannot be re-admitted"
                 )
-            unavailable_compartments.append((object_id, compartment))
+            state = declared_states.get(
+                (object_id, compartment),
+                "erased" if object_id in erased_ids else "withheld",
+            )
+            unavailable_compartments.append((object_id, compartment, state))
         lineage_update = None
         lineage_block = obj.structural["content"].get("lineage")
         if lineage_block is not None:
@@ -172,16 +187,35 @@ def merge_mindpack(
             salt_fn=salt_fn,
         )
     # Record the unavailable state of declared-withheld/erased compartments
-    # (headers exist once commit_objects ran; same transaction).
-    for object_id, compartment in unavailable_compartments:
+    # (headers exist once commit_objects ran; same transaction), preserving
+    # the exact source state.
+    for object_id, compartment, state in unavailable_compartments:
         conn.execute(
             """
             INSERT INTO compartment (
                 object_id, compartment, state, updated_at
-            ) VALUES (%s, %s, 'withheld', %s)
+            ) VALUES (%s, %s, %s, %s)
             """,
-            (object_id, compartment, received_at),
+            (object_id, compartment, state, received_at),
         )
+    # Blob content is a third compartment outside the compartment table:
+    # commit_objects wrote it 'withheld' when the pack carries no bytes;
+    # mirror the source's erased state exactly (salt destroyed at erasure).
+    for obj in resolved:
+        if obj.object_kind != "blob" or obj.blob_data is not None:
+            continue
+        content_state = declared_states.get((obj.object_id, "blob_content"))
+        if content_state is None and obj.object_id in erased_ids:
+            content_state = "erased"
+        if content_state == "erased":
+            conn.execute(
+                """
+                UPDATE blob_content
+                SET state = 'erased', content_salt = NULL, updated_at = %s
+                WHERE blob_id = %s AND state = 'withheld'
+                """,
+                (received_at, obj.object_id),
+            )
 
     # Custody proof: the source chain, preserved as foreign evidence.
     commits_with_members = []

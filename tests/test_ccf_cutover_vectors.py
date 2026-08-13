@@ -20,10 +20,12 @@ PUBLISHED_VECTOR_FILES = {
     "ordering.json",
     "producer-batch.json",
     "submission-hashes.json",
+    "admission-authority-classes.json",
+    "conformance-0.1.2-rc1.json",
+    "foreign-unavailability.json",
+    "suppression-canonical.json",
     "archive-ed25519-public.pem",
     "device-ed25519-public.pem",
-    "TEST-ONLY-archive-ed25519-private.pem",
-    "TEST-ONLY-device-ed25519-private.pem",
 }
 
 # Explicit vector-to-independent-test contract. The gate parses the named
@@ -74,17 +76,26 @@ VECTOR_REPRODUCTION_CASES = {
     "submission-hashes.json": {
         "test_ccf_hashing.py": {"test_submission_hashes"},
     },
+    "admission-authority-classes.json": {
+        "test_ccf_012_rc1.py": {"test_authority_class_vector_matrix"},
+    },
+    "conformance-0.1.2-rc1.json": {
+        "test_ccf_012_rc1.py": {"test_conformance_case_coverage"},
+    },
+    "foreign-unavailability.json": {
+        "test_ccf_012_rc1.py": {"test_foreign_unavailability_vector"},
+    },
+    "suppression-canonical.json": {
+        "test_ccf_012_rc1.py": {
+            "test_suppression_canonical_vector",
+            "test_suppression_preimage_rejections",
+        },
+    },
     "archive-ed25519-public.pem": {
         "test_ccf_hashing.py": {"test_commit_signature_verifies"},
     },
     "device-ed25519-public.pem": {
         "test_ccf_hashing.py": {"test_producer_batch_signature_verifies"},
-    },
-    "TEST-ONLY-archive-ed25519-private.pem": {
-        "test_ccf_hashing.py": {"test_commit_signature_reproduced_with_test_key"},
-    },
-    "TEST-ONLY-device-ed25519-private.pem": {
-        "test_ccf_hashing.py": {"test_producer_batch_signature_reproduced_with_test_key"},
     },
 }
 

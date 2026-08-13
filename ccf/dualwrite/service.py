@@ -222,7 +222,7 @@ class CcfDualWriteService:
                         "expires_at": None,
                     },
                     "payload": {
-                        "profile": "ccf.policy/0.1.1",
+                        "profile": "ccf.policy/0.1.2-rc1",
                         "evaluator_profile": "ccf-deny-overrides-v1",
                         "combining_algorithm": "deny_overrides_v1",
                         "default_effect": "deny",
@@ -277,7 +277,7 @@ class CcfDualWriteService:
                     "payload": {
                         "kind": "backend",
                         "name": "thoth-dualwrite",
-                        "version": "0.1.1",
+                        "version": "0.1.2-rc1",
                         "instance_id": "thoth-dualwrite",
                         "capabilities": ["capture", "sync"],
                         "operator_id": person_id,
@@ -398,13 +398,13 @@ class CcfDualWriteService:
             for admission in result.get("admissions", [])
             if admission.get("status") not in _OK_ADMISSION_STATUSES
         ]
-        if result.get("status") != "committed" or bad:
+        if result.get("status") != "accepted" or bad:
             raise DualWriteError(
                 f"dual-write admission failed for source {thoth_source_id}: "
                 f"batch status {result.get('status')!r}, rejections: {bad[:3]}"
             )
         return {
-            "status": "committed",
+            "status": "accepted",
             "archive_id": self.archive.archive_id,
             "batch_id": batch["batch_id"],
             "commit_sequence": result.get("commit_sequence"),

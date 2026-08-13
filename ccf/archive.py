@@ -36,9 +36,9 @@ from ccf.registry import PinnedRegistries
 from ccf.schemas import SchemaSet
 
 DEFAULT_ACTIVE_PROFILES = [
-    "ccf-core-0.1.1",
-    "ccf-local-sync-0.1.1",
-    "ccf-continuity-pack-0.1.1",
+    "ccf-core-0.1.2-rc1",
+    "ccf-local-sync-0.1.2-rc1",
+    "ccf-continuity-pack-0.1.2-rc1",
 ]
 
 
@@ -421,12 +421,12 @@ class Archive:
             if policy_ref is not None:
                 semantic_content["policy_ref"] = policy_ref
             self.schemas.validate(
-                "urn:ccf:schema:0.1.1:objects.record-semantic-content",
+                "urn:ccf:schema:0.1.2-rc1:objects.record-semantic-content",
                 semantic_content,
                 what="bootstrap semantic content",
             )
         self.schemas.validate(
-            "urn:ccf:schema:0.1.1:objects.record-structural-content",
+            "urn:ccf:schema:0.1.2-rc1:objects.record-structural-content",
             structural_content,
             what="bootstrap structural content",
         )
@@ -557,7 +557,7 @@ class Archive:
                 "id": object_id,
                 "object_kind": header_row[0],
                 "header": {
-                    "spec": "ccf/0.1.1",
+                    "spec": "ccf/0.1.2-rc1",
                     "object_kind": header_row[0],
                     "id": object_id,
                     "hash_profile": "ccf-jcs-sha256-v2",
@@ -615,7 +615,7 @@ def _insert_commit_record(conn, archive_id: str, commit, committed_at: str) -> N
             id, archive_id, object_kind, spec, hash_profile,
             structural_commitment, semantic_commitment, object_hash,
             submission_hash
-        ) VALUES (%s, %s, 'record', 'ccf/0.1.1', 'ccf-jcs-sha256-v2',
+        ) VALUES (%s, %s, 'record', 'ccf/0.1.2-rc1', 'ccf-jcs-sha256-v2',
                   %s, NULL, %s, NULL)
         """,
         (

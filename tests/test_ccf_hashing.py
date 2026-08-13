@@ -207,9 +207,15 @@ def test_producer_batch_signature_verifies(ccf_vectors_dir, batch_vector):
     assert batch_vector["expected_signature_valid"] is True
 
 
-def test_producer_batch_signature_reproduced_with_test_key(ccf_vectors_dir, batch_vector):
+def test_producer_batch_signature_reproduced_with_test_key(
+    ccf_test_only_keys_dir, batch_vector
+):
     batch = batch_vector["batch"]
-    private_key = load_private_key(ccf_vectors_dir / "TEST-ONLY-device-ed25519-private.pem")
+    # The rc1 package pins the same TEST-ONLY key material as 0.1.1 (the
+    # private pem is gitignored, so it is loaded from the 0.1.1 tree).
+    private_key = load_private_key(
+        ccf_test_only_keys_dir / "TEST-ONLY-device-ed25519-private.pem"
+    )
     digest = producer_batch_signing_digest(producer_batch_hash(batch))
     signature = sign_digest(private_key, digest)
     # Ed25519 is deterministic: signing reproduces the vector signature.
@@ -255,11 +261,11 @@ def test_commit_signature_verifies(ccf_vectors_dir, commit_vectors, commit_name)
 
 @pytest.mark.parametrize("commit_name", ["genesis", "commit1", "commit2"])
 def test_commit_signature_reproduced_with_test_key(
-    ccf_vectors_dir, commit_vectors, commit_name
+    ccf_test_only_keys_dir, commit_vectors, commit_name
 ):
     vector = commit_vectors[commit_name]
     private_key = load_private_key(
-        ccf_vectors_dir / "TEST-ONLY-archive-ed25519-private.pem"
+        ccf_test_only_keys_dir / "TEST-ONLY-archive-ed25519-private.pem"
     )
     digest = commit_signing_digest(
         vector["signing_header"], vector["structural_content_without_signature"]

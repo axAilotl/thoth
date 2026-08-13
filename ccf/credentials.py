@@ -60,7 +60,7 @@ def device_credential_structural_payload(
 ) -> dict:
     """Structural payload of a ``core.device_credential`` Record.
 
-    Mirrors ``spec/ccf/0.1.1/examples/thoth-capture`` record material: the
+    Mirrors ``spec/ccf/0.1.2-rc1/examples/thoth-capture`` record material: the
     archive resolves batch signature verification keys from this payload.
     """
     return {

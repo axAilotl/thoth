@@ -34,8 +34,8 @@ from ccf.sync.packio import (
 from ccf.sync.restore import append_pack_commits, insert_pack_objects
 from ccf.sync.verify import verify_commit_chain, verify_pack_object
 
-DELTA_PACK_FORMAT = "ccf.delta-pack/0.1.1"
-SCHEMA_DELTA_MANIFEST = "urn:ccf:schema:0.1.1:sync.delta-pack-manifest"
+DELTA_PACK_FORMAT = "ccf.delta-pack/0.1.2-rc1"
+SCHEMA_DELTA_MANIFEST = "urn:ccf:schema:0.1.2-rc1:sync.delta-pack-manifest"
 
 
 class DeltaPackError(PackError):
@@ -44,7 +44,7 @@ class DeltaPackError(PackError):
 
 def _header_dict(row) -> dict:
     return {
-        "spec": "ccf/0.1.1",
+        "spec": "ccf/0.1.2-rc1",
         "object_kind": row[1],
         "id": row[0],
         "hash_profile": "ccf-jcs-sha256-v2",
@@ -273,9 +273,14 @@ def apply_delta_pack(
         if not reader.has("manifest.json"):
             raise DeltaPackError("delta pack has no manifest.json")
         manifest = reader.read_json("manifest.json")
+        # Format check first: a foreign-version pack fails closed with a
+        # clear unsupported-version error, not a bare schema violation.
+        if manifest.get("format") != DELTA_PACK_FORMAT:
+            raise DeltaPackError(
+                f"unsupported delta pack format {manifest.get('format')!r}: "
+                f"this archive implements {DELTA_PACK_FORMAT}"
+            )
         schemas.validate(SCHEMA_DELTA_MANIFEST, manifest, what="delta pack manifest")
-        if manifest["format"] != DELTA_PACK_FORMAT:
-            raise DeltaPackError(f"not a delta pack: {manifest['format']!r}")
         if manifest["archive_id"] != archive_id:
             raise DeltaPackError(
                 f"delta pack archive {manifest['archive_id']} != local {archive_id}"

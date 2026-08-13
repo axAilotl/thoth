@@ -121,7 +121,7 @@ def test_blob_spool_survives_restart(rig, ccf_package_root):
 
     # sync_pending attaches spooled bytes automatically.
     results = producer2.sync_pending(rig.archive)
-    assert [r["status"] for r in results] == ["committed"]
+    assert [r["status"] for r in results] == ["accepted"]
     with open_ccf_connection(rig.settings) as conn:
         row = conn.execute(
             "SELECT state, plaintext_bytes FROM blob_content WHERE blob_id = %s",
@@ -309,7 +309,7 @@ def test_fork_preserves_both_heads(rig, settings_factory, tmp_path, ccf_package_
         },
     )
     result_b = archive_b.admit_batch(producer_b.create_batch(records=[record_b]))
-    assert result_b["status"] == "committed"
+    assert result_b["status"] == "accepted"
 
     head_a = rig.archive.head()
     head_b = archive_b.head()

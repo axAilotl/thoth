@@ -15,7 +15,7 @@ import re
 import uuid
 from dataclasses import dataclass
 
-#: Portable ID kinds defined by CCF 0.1.1 (spec section 2.1).
+#: Portable ID kinds defined by CCF 0.1.2-rc1 (spec section 2.1).
 ID_KINDS: frozenset[str] = frozenset(
     {
         "record",

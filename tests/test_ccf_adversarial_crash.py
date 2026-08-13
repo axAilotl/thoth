@@ -65,13 +65,13 @@ def test_crash_after_spool_before_admit_recovers_via_pending(rig):
     # Recovery: replay the pending batch through sync_pending.
     results = rig.producer.sync_pending(rig.archive)
     assert len(results) == 1
-    assert results[0]["status"] == "committed", results[0]
+    assert results[0]["status"] == "accepted", results[0]
     assert rig.archive.head() != head_before
 
     # A second replay returns the stored outcome — nothing double-admits.
     assert rig.producer.pending_batches() == []
     replay = rig.archive.admit_batch(batch)
-    assert replay["status"] == "committed"
+    assert replay["status"] == "accepted"
     assert replay["commit_sequence"] == results[0]["commit_sequence"]
     assert rig.archive.verify_chain()["commits_verified"] >= 2
 
@@ -99,7 +99,7 @@ def test_crash_mid_commit_before_journal_signature(rig, monkeypatch):
 
     # The spooled batch survives and admits cleanly on retry.
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     assert _object_count(rig) == objects_before + 2  # record + commit Record
     assert rig.archive.verify_chain()["commits_verified"] >= 2
 
@@ -158,7 +158,7 @@ def test_crash_after_journal_write_before_head_advance(rig, monkeypatch):
     assert journal_rows == 0  # no orphaned journal entries
 
     result = rig.archive.admit_batch(batch)
-    assert result["status"] == "committed", result
+    assert result["status"] == "accepted", result
     assert rig.archive.verify_chain()["commits_verified"] >= 2
 
 

@@ -1,4 +1,4 @@
-"""CCF 0.1.1 stage 9 torture-run support (checklist section 9).
+"""CCF 0.1.2-rc1 stage 9 torture-run support (checklist section 9).
 
 Importable scenario implementations plus the shared run context. The
 standalone entrypoint is ``python scripts/ccf_stage9.py`` (see
@@ -1133,7 +1133,7 @@ def main(argv: list[str] | None = None) -> int:
     import tempfile
 
     parser = argparse.ArgumentParser(
-        description="CCF 0.1.1 checklist stage 9: Obsidian torture run"
+        description="CCF 0.1.2-rc1 checklist stage 9: Obsidian torture run"
     )
     parser.add_argument(
         "--vault",
@@ -1153,7 +1153,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--package-root",
-        default=str(REPO_ROOT / "spec" / "ccf" / "0.1.1"),
+        default=str(REPO_ROOT / "spec" / "ccf" / "0.1.2-rc1"),
         help="vendored CCF package root",
     )
     parser.add_argument("--report", default=None, help="write JSON report here")
@@ -1182,7 +1182,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     passed = sum(1 for r in results if r["status"] == "PASS")
-    print("CCF 0.1.1 stage 9 — Obsidian torture run")
+    print("CCF 0.1.2-rc1 stage 9 — Obsidian torture run")
     print(f"vault: {args.vault}")
     print(f"workspace: {workspace}")
     print("-" * 72)

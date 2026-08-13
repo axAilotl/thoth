@@ -120,7 +120,7 @@ def test_whole_transcript_single_utterance(rig, ctx, capture):
     assert len(mapped.records) == 1
     utterance = mapped.records[0]
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.1:payload.experience.utterance",
+        "urn:ccf:schema:0.1.2-rc1:payload.experience.utterance",
         utterance["payload"],
         what="experience.utterance",
     )
@@ -131,7 +131,7 @@ def test_whole_transcript_single_utterance(rig, ctx, capture):
     assert link_types.count("ccf.has_transcript") == 1
 
     result = admit_mapped(rig, mapped)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     semantic = compartment(rig, utterance["id"], "semantic")
     assert semantic["origin"]["native_id"] == "omi_transcript_boot-8891"
     # Conservative subject propagation from the source media (spec 3.9).
@@ -172,7 +172,7 @@ def test_segmented_transcript_utterances(rig, ctx, capture):
     assert all(l["to_id"] == capture["artifact_id"] for l in derived)
 
     result = admit_mapped(rig, mapped)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     semantic = compartment(rig, mapped.records[0]["id"], "semantic")
     assert semantic["payload"]["transcription"]["mean_confidence"] == 0.96
     # Unknown speaker: machine-inference authority asserted by the runtime.

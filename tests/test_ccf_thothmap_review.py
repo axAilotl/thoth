@@ -76,7 +76,7 @@ def test_confirm_maps_to_decision_and_accepted_successor(rig, ctx, candidate):
     decision, successor = mapped.records
     assert decision["type"] == "governance.review_decision"
     rig.producer.schemas.validate(
-        "urn:ccf:schema:0.1.1:payload.governance.review_decision",
+        "urn:ccf:schema:0.1.2-rc1:payload.governance.review_decision",
         decision["payload"],
         what="governance.review_decision",
     )
@@ -89,7 +89,7 @@ def test_confirm_maps_to_decision_and_accepted_successor(rig, ctx, candidate):
     assert ("ccf.supersedes", successor["id"], candidate["candidate_id"]) in link_types
 
     result = admit_mapped(rig, mapped)
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     # The accepted successor upgrades authority; the original claims stay.
     semantic = compartment(rig, successor["id"], "semantic")
     assert semantic["authority"]["basis"] == "person_accepted"

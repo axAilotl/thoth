@@ -52,9 +52,15 @@ class VerifiedMindpack:
         if not reader.has("manifest.json"):
             raise RestoreError("pack has no manifest.json")
         self.manifest = reader.read_json("manifest.json")
+        # Format check first, so a pack from another CCF version fails
+        # closed with a clear unsupported-version error rather than a bare
+        # schema violation (no silent cross-version acceptance).
+        if self.manifest.get("format") != "ccf.mindpack/0.1.2-rc1":
+            raise RestoreError(
+                f"unsupported mindpack format {self.manifest.get('format')!r}: "
+                "this archive implements ccf.mindpack/0.1.2-rc1"
+            )
         schemas.validate(SCHEMA_MINDPACK_MANIFEST, self.manifest, what="mindpack manifest")
-        if self.manifest["format"] != "ccf.mindpack/0.1.1":
-            raise RestoreError(f"not a mindpack: {self.manifest['format']!r}")
 
         streams = [StreamEntry.from_dict(s) for s in self.manifest["streams"]]
         self.stream_notes = verify_stream_digests(reader, streams)
@@ -581,7 +587,7 @@ def _restore_producer_state(
                 batch_id, producer_id, producer_sequence, previous_batch_hash,
                 credential_id, created_at, semantic_catalog_root, batch_hash,
                 signature, batch_json, status, spooled_at, committed_sequence
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'committed', %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'accepted', %s, %s)
             """,
             (
                 batch["batch_id"],

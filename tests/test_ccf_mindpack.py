@@ -94,7 +94,7 @@ def _populate(rig):
         blob_data={blob_sub["id"]: blob_bytes},
     )
     result = rig.archive.admit_batch(batch, blob_bytes={blob_sub["id"]: blob_bytes})
-    assert result["status"] == "committed"
+    assert result["status"] == "accepted"
     return {
         "source": source["id"],
         "session": session["id"],
@@ -205,7 +205,7 @@ def test_vendored_example_mindpack_verifies(ccf_package_root):
         ccf_package_root / "examples" / "mindpack", package_root=ccf_package_root
     )
     manifest = pack.manifest
-    assert manifest["format"] == "ccf.mindpack/0.1.1"
+    assert manifest["format"] == "ccf.mindpack/0.1.2-rc1"
     assert manifest["mode"] == "restore"
     assert int(manifest["counts"]["records"]) == 15
     assert int(manifest["counts"]["commits"]) == 3
@@ -389,6 +389,7 @@ def test_foreign_merge_records_erased_compartments(
     merged = rig_b.archive.get_object(ids["session"])
     assert merged is not None
     semantic = merged["compartments"]["semantic"]
-    assert semantic["state"] == "withheld"
+    # 0.1.2-rc1: the exact source availability state is preserved.
+    assert semantic["state"] == "erased"
     assert semantic["envelope"] is None  # no fabricated content
     rig_b.archive.verify_chain()

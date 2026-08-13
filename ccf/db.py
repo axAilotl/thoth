@@ -2,7 +2,7 @@
 
 The CCF operational envelope lives in its own Postgres schema (default
 ``ccf``) and follows the vendored reference envelope
-(``spec/ccf/0.1.1/sql/postgres-reference.sql``): object headers, compartment
+(``spec/ccf/0.1.2-rc1/sql/postgres-reference.sql``): object headers, compartment
 and Blob content storage, admissions, commit journal + members, the
 origin/idempotency index, lineage heads, and the signed producer-batch spool
 with receipts.
@@ -209,7 +209,7 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
                 id                      text PRIMARY KEY,
                 archive_id              text NOT NULL REFERENCES archive(archive_id),
                 object_kind             text NOT NULL CHECK (object_kind IN ('record','link','blob')),
-                spec                    text NOT NULL CHECK (spec = 'ccf/0.1.1'),
+                spec                    text NOT NULL CHECK (spec = 'ccf/0.1.2-rc1'),
                 hash_profile            text NOT NULL CHECK (hash_profile = 'ccf-jcs-sha256-v2'),
                 structural_commitment   text NOT NULL,
                 semantic_commitment     text,
@@ -299,7 +299,8 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
                 signature               bytea NOT NULL,
                 batch_json              jsonb NOT NULL,
                 status                  text NOT NULL CHECK (status IN
-                    ('queued','verifying','committed','partial','rejected','conflict')),
+                    ('queued','verifying','accepted','partially_accepted',
+                     'content_rejected','quarantined','conflict')),
                 spooled_at              text NOT NULL,
                 committed_sequence      numeric(20,0),
                 result_json             jsonb,
@@ -475,17 +476,26 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
             # preventing silent reintroduction. Commitments are keyed
             # digests only — never plaintext origin tuples or content —
             # because plain unsalted fingerprints are insufficient for
-            # low-entropy content.
+            # low-entropy content. Since 0.1.2-rc1 this table is a
+            # rebuildable PROJECTION: every row resolves to a canonical,
+            # journal-covered ``lineage.suppression_set`` Record and its
+            # governed token Blob; deleting rows never removes canonical
+            # suppression authority (rebuild from
+            # ``ccf.erasure.suppression_set.rebuild_projection``).
             """
             CREATE TABLE IF NOT EXISTS suppression_entry (
                 archive_id              text NOT NULL REFERENCES archive(archive_id),
+                suppression_set_record_id text NOT NULL,
                 commitment              text NOT NULL,
-                kind                    text NOT NULL CHECK (kind IN ('origin','content')),
-                operation_id            text NOT NULL
+                kind                    text CHECK (kind IN ('origin','content')),
+                operation_id            text
                     REFERENCES erasure_operation(operation_id),
+                suppression_blob_id     text,
+                key_profile_id          text,
+                erasure_receipt_id      text,
                 authorized_producers    jsonb NOT NULL,
                 created_at              text NOT NULL,
-                PRIMARY KEY (archive_id, commitment)
+                PRIMARY KEY (archive_id, suppression_set_record_id, commitment)
             )
             """,
         ),
@@ -529,6 +539,84 @@ CCF_MIGRATIONS: tuple[PostgresMigration, ...] = (
                 received_at             text NOT NULL,
                 PRIMARY KEY (archive_id, source_archive_id, head_commit_hash)
             )
+            """,
+        ),
+    ),
+    # 0.1.2-rc1: batch disposition vocabulary, and the suppression lookup
+    # table becomes a rebuildable projection of canonical
+    # ``lineage.suppression_set`` lineage (spec 6.2, 12.7).
+    PostgresMigration(
+        version=6,
+        name="0006_ccf_012_rc1",
+        statements=(
+            # Batch dispositions committed/partial/rejected ->
+            # accepted/partially_accepted/content_rejected (+quarantined).
+            """
+            ALTER TABLE producer_batch
+                DROP CONSTRAINT IF EXISTS producer_batch_status_check
+            """,
+            """
+            ALTER TABLE producer_batch
+                ADD CONSTRAINT producer_batch_status_check CHECK (status IN
+                    ('queued','verifying','accepted','partially_accepted',
+                     'content_rejected','quarantined','conflict'))
+            """,
+            """
+            ALTER TABLE object_header
+                DROP CONSTRAINT IF EXISTS object_header_spec_check
+            """,
+            """
+            ALTER TABLE object_header
+                ADD CONSTRAINT object_header_spec_check
+                CHECK (spec = 'ccf/0.1.2-rc1')
+            """,
+            # Legacy pre-rc1 suppression rows used the old token domains
+            # and cannot be re-keyed under ccf-hmac-sha256-suppression-v1;
+            # they are discarded — canonical suppression sets rebuild the
+            # projection (a pre-rc1 archive has none, so its erasures
+            # predate canonical suppression by definition).
+            "DELETE FROM suppression_entry",
+            """
+            ALTER TABLE suppression_entry
+                DROP CONSTRAINT IF EXISTS suppression_entry_pkey
+            """,
+            """
+            ALTER TABLE suppression_entry
+                ALTER COLUMN operation_id DROP NOT NULL
+            """,
+            """
+            ALTER TABLE suppression_entry
+                ALTER COLUMN kind DROP NOT NULL
+            """,
+            """
+            ALTER TABLE suppression_entry
+                ADD COLUMN IF NOT EXISTS suppression_set_record_id text
+            """,
+            """
+            ALTER TABLE suppression_entry
+                ADD COLUMN IF NOT EXISTS suppression_blob_id text
+            """,
+            """
+            ALTER TABLE suppression_entry
+                ADD COLUMN IF NOT EXISTS key_profile_id text
+            """,
+            """
+            ALTER TABLE suppression_entry
+                ADD COLUMN IF NOT EXISTS erasure_receipt_id text
+            """,
+            """
+            ALTER TABLE suppression_entry
+                ALTER COLUMN suppression_set_record_id SET NOT NULL
+            """,
+            """
+            ALTER TABLE suppression_entry
+                ADD PRIMARY KEY (archive_id, suppression_set_record_id, commitment)
+            """,
+            # The durable operation row carries the canonical
+            # suppression-set descriptor the receipt commits back to.
+            """
+            ALTER TABLE erasure_operation
+                ADD COLUMN IF NOT EXISTS suppression_set jsonb
             """,
         ),
     ),

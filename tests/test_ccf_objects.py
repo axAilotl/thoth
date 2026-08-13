@@ -30,15 +30,15 @@ from ccf.objects import (
 )
 
 SCHEMA_IDS = {
-    ("record", "header"): "urn:ccf:schema:0.1.1:objects.record-header",
-    ("link", "header"): "urn:ccf:schema:0.1.1:objects.link-header",
-    ("blob", "header"): "urn:ccf:schema:0.1.1:objects.blob-header",
-    ("record", "structural"): "urn:ccf:schema:0.1.1:objects.record-structural",
-    ("record", "semantic"): "urn:ccf:schema:0.1.1:objects.record-semantic",
-    ("link", "structural"): "urn:ccf:schema:0.1.1:objects.link-structural",
-    ("link", "semantic"): "urn:ccf:schema:0.1.1:objects.link-semantic",
-    ("blob", "structural"): "urn:ccf:schema:0.1.1:objects.blob-structural",
-    ("blob", "semantic"): "urn:ccf:schema:0.1.1:objects.blob-semantic",
+    ("record", "header"): "urn:ccf:schema:0.1.2-rc1:objects.record-header",
+    ("link", "header"): "urn:ccf:schema:0.1.2-rc1:objects.link-header",
+    ("blob", "header"): "urn:ccf:schema:0.1.2-rc1:objects.blob-header",
+    ("record", "structural"): "urn:ccf:schema:0.1.2-rc1:objects.record-structural",
+    ("record", "semantic"): "urn:ccf:schema:0.1.2-rc1:objects.record-semantic",
+    ("link", "structural"): "urn:ccf:schema:0.1.2-rc1:objects.link-structural",
+    ("link", "semantic"): "urn:ccf:schema:0.1.2-rc1:objects.link-semantic",
+    ("blob", "structural"): "urn:ccf:schema:0.1.2-rc1:objects.blob-structural",
+    ("blob", "semantic"): "urn:ccf:schema:0.1.2-rc1:objects.blob-semantic",
 }
 
 
@@ -233,12 +233,12 @@ def test_commit_members_validate(ccf_vectors_dir, load_ccf_json, validate):
     merkle = load_ccf_json(ccf_vectors_dir / "merkle.json")
     for name in ("commit1", "commit2"):
         for member in merkle[name]["members"]:
-            validate(member, "urn:ccf:schema:0.1.1:objects.commit-member")
+            validate(member, "urn:ccf:schema:0.1.2-rc1:objects.commit-member")
 
 
 def test_producer_batch_validates(ccf_vectors_dir, load_ccf_json, validate):
     batch = load_ccf_json(ccf_vectors_dir / "producer-batch.json")["batch"]
-    validate(batch, "urn:ccf:schema:0.1.1:sync.producer-batch")
+    validate(batch, "urn:ccf:schema:0.1.2-rc1:sync.producer-batch")
 
 
 def test_schema_validation_fails_closed_on_tamper(object_vectors, validate):
