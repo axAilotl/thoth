@@ -1,0 +1,58 @@
+{
+  "name": "pi_skills",
+  "source_name": "pi_skills",
+  "source_aliases": [
+    "pi_skill"
+  ],
+  "display_name": "Pi Skills",
+  "description": "Run configured local Pi skills and ingest their JSON/JSONL artifact envelopes.",
+  "artifact_types": [
+    "paper",
+    "repository",
+    "transcript",
+    "tweet",
+    "video",
+    "web_clipper"
+  ],
+  "inputs": [
+    "operator_prompt",
+    "local_files:allowed_input_roots"
+  ],
+  "outputs": [
+    "skill_output_envelopes",
+    "artifact_queue:*"
+  ],
+  "capabilities": [
+    "skills",
+    "pi",
+    "envelopes",
+    "queue",
+    "raw_preservation"
+  ],
+  "config_keys": [
+    "sources.pi_skills.enabled",
+    "sources.pi_skills.skills",
+    "sources.pi_skills.output_dir",
+    "sources.pi_skills.default_provider",
+    "sources.pi_skills.default_model",
+    "sources.pi_skills.fallback"
+  ],
+  "auth": [
+    "llm.providers.pi",
+    "llm.providers.pi_openrouter"
+  ],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "no_tools_json",
+  "allowed_side_effects": [
+    "llm_api_call",
+    "subprocess_exec",
+    "local_file_read",
+    "local_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.pi_skill_connector:PiSkillConnector",
+  "cli_command": "connectors run pi_skills",
+  "config_namespace": "sources.pi_skills",
+  "default_enabled": true
+}

@@ -1,0 +1,48 @@
+{
+  "name": "x_api",
+  "source_name": "x_api_backfill",
+  "source_aliases": [
+    "browser_extension",
+    "x_api"
+  ],
+  "display_name": "X API Bookmarks",
+  "description": "Backfill X/Twitter bookmarks into the bookmark queue.",
+  "artifact_types": [
+    "tweet"
+  ],
+  "inputs": [
+    "remote_api:x_bookmarks"
+  ],
+  "outputs": [
+    "artifact_queue:tweet"
+  ],
+  "capabilities": [
+    "bookmarks",
+    "oauth",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.x_api.client_id",
+    "sources.x_api.redirect_uri",
+    "sources.x_api.scopes",
+    "automation.x_api_sync"
+  ],
+  "auth": [
+    "sources.x_api.client_id",
+    "sources.x_api.redirect_uri",
+    "x_api_token_bundle"
+  ],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "network_ingest_queue",
+  "allowed_side_effects": [
+    "network_read",
+    "auth_token_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "core.x_api_bookmark_sync:run_x_api_bookmark_backfill",
+  "cli_command": "x-api-sync",
+  "config_namespace": "sources.x_api",
+  "default_enabled": false
+}

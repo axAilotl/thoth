@@ -5,6 +5,7 @@ import pytest
 
 from core.agent_surface import AgentSurfaceService
 from core.config import Config
+from core.connector_runners import _RUN_ADAPTERS
 from core.mcp_server import ThothMCPServer
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
@@ -80,10 +81,14 @@ def test_connector_run_history_records_failed_attempt_reason_and_retry(
     db = MetadataDB(str(layout.database_path))
     service = AgentSurfaceService(config, layout=layout, db=db)
 
-    def fail_connector(_options):
+    def fail_connector(_context, _entrypoint, _options):
         raise ValueError("temporary connector outage")
 
-    monkeypatch.setattr(service, "_run_arxiv_connector", fail_connector)
+    monkeypatch.setitem(
+        _RUN_ADAPTERS,
+        "collectors.arxiv_collector:ArXivCollector",
+        ("class", fail_connector),
+    )
 
     with pytest.raises(ValueError, match="temporary connector outage"):
         service.run_connector(
@@ -110,7 +115,7 @@ def test_connector_checkpoint_records_resume_token_from_result(
     db = MetadataDB(str(layout.database_path))
     service = AgentSurfaceService(config, layout=layout, db=db)
 
-    def run_connector(_options):
+    def run_connector(_context, _entrypoint, _options):
         return {
             "queued_count": 1,
             "queued": [{"artifact_id": "paper-1", "artifact_type": "paper"}],
@@ -120,7 +125,11 @@ def test_connector_checkpoint_records_resume_token_from_result(
             },
         }
 
-    monkeypatch.setattr(service, "_run_arxiv_connector", run_connector)
+    monkeypatch.setitem(
+        _RUN_ADAPTERS,
+        "collectors.arxiv_collector:ArXivCollector",
+        ("class", run_connector),
+    )
 
     payload = service.run_connector(
         "arxiv",
@@ -154,7 +163,7 @@ def test_connector_run_history_surfaces_metadata_links_and_redacts_secrets(
     export_path.write_text("{}", encoding="utf-8")
     secret = "omi-secret-token"
 
-    def run_connector(options):
+    def run_connector(_context, _entrypoint, options):
         assert options["api_key"] == secret
         return {
             "queued_count": 1,
@@ -171,7 +180,11 @@ def test_connector_run_history_surfaces_metadata_links_and_redacts_secrets(
             ],
         }
 
-    monkeypatch.setattr(service, "_run_omi_connector", run_connector)
+    monkeypatch.setitem(
+        _RUN_ADAPTERS,
+        "collectors.personal_transcript_connector:PersonalTranscriptConnector",
+        ("class", run_connector),
+    )
 
     payload = service.run_connector(
         "omi",

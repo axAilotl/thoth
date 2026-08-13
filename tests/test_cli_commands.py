@@ -161,18 +161,18 @@ def test_connectors_list_command_reads_registry_metadata():
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     names = [item["name"] for item in payload["connectors"]]
-    assert names[:9] == [
-        "x_api",
+    assert names == [
         "arxiv",
         "github",
         "huggingface",
-        "web_clipper",
-        "youtube",
+        "imported_markdown",
         "omi",
-        "skill_outputs",
         "pi_skills",
+        "skill_outputs",
+        "web_clipper",
+        "x_api",
+        "youtube",
     ]
-    assert "imported_markdown" in names
 
 
 def test_query_wiki_json_uses_agent_safe_response_model():

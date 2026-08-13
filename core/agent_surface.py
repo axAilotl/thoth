@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
@@ -35,6 +34,13 @@ from .capture_surface import (
 from .config import Config, config
 from .connector_capture import connector_run_context
 from .connector_registry import connector_policy_status, load_connector_registry
+from .connector_runners import (
+    ConnectorRunContext,
+    _optional_text,
+    _string_list,
+    connector_run_handler,
+    connector_run_planner,
+)
 from .ingestion_runtime import KnowledgeArtifactRuntime
 from .metadata_db import (
     IngestionQueueEntry,
@@ -55,20 +61,6 @@ from .prompt_security import (
 from .research_graph import ResearchGraphService
 from .hybrid_search import HybridSearchFilters, HybridSearchHit
 from .wiki_query import WikiQueryRunner
-
-
-_CONNECTOR_RUNNER_METHODS = {
-    "arxiv": "_run_arxiv_connector",
-    "github": "_run_github_connector",
-    "huggingface": "_run_huggingface_connector",
-    "web_clipper": "_run_web_clipper_connector",
-    "x_api": "_run_x_api_connector",
-    "youtube": "_run_youtube_connector",
-    "omi": "_run_omi_connector",
-    "skill_outputs": "_run_skill_outputs_connector",
-    "pi_skills": "_run_pi_skills_connector",
-    "imported_markdown": "_run_imported_markdown_connector",
-}
 
 
 class AgentSurfaceError(RuntimeError):
@@ -561,9 +553,16 @@ class AgentSurfaceService:
                 "checkpoint": _serialize_connector_checkpoint(checkpoint),
             },
         }
+        run_context = ConnectorRunContext(
+            config=self.config,
+            layout=self.layout,
+            db=self.db,
+            actor=actor,
+        )
         if not execute:
-            if manifest.name == "pi_skills":
-                plan["run_plan"] = self._plan_pi_skills_connector(execution_options)
+            planner = connector_run_planner(manifest, run_context)
+            if planner is not None:
+                plan["run_plan"] = planner(execution_options)
             return plan
         if not manifest.is_enabled(self.config):
             raise AgentSurfaceError(f"Connector is disabled: {connector_name}")
@@ -579,11 +578,7 @@ class AgentSurfaceService:
                 f"Connector pin drift detected for {connector_name}: {drift_fields}"
             )
 
-        handler = self._connector_handler_for_manifest(manifest)
-        if handler is None:
-            raise AgentSurfaceError(
-                f"Connector {connector_name!r} has no executable adapter registered"
-            )
+        handler = connector_run_handler(manifest, run_context)
 
         run = self.db.begin_connector_run(
             manifest.name,
@@ -662,13 +657,6 @@ class AgentSurfaceService:
                 "checkpoint": _serialize_connector_checkpoint(checkpoint),
             },
         }
-
-    def _connector_handler_for_manifest(self, manifest):
-        runner_key = manifest.runner or manifest.name
-        method_name = _CONNECTOR_RUNNER_METHODS.get(runner_key)
-        if method_name is None:
-            return None
-        return getattr(self, method_name, None)
 
     def _resolve_connector_actor(self, options: Mapping[str, Any]) -> str | None:
         for value in (
@@ -813,369 +801,6 @@ class AgentSurfaceService:
                 raise AgentSurfaceError(
                     f"Failed to record connector output {output['artifact_id']}"
                 )
-
-    def _run_arxiv_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        from collectors.arxiv_collector import ArXivCollector
-
-        collector = ArXivCollector(db=self.db)
-        source = str(options.get("source") or self.config.get("sources.arxiv.source", "api"))
-        if source not in {"api", "rss"}:
-            raise AgentSurfaceError("arxiv connector source must be 'api' or 'rss'")
-        limit = _positive_int(
-            options.get("limit"),
-            default=int(self.config.get("sources.arxiv.limit", 50) or 50),
-        )
-
-        if source == "rss":
-            categories = _string_list(options.get("categories")) or _string_list(
-                self.config.get("sources.arxiv.categories", [])
-            )
-            if not categories:
-                raise AgentSurfaceError("arxiv RSS execution requires categories")
-            feed_format = str(
-                options.get("feed_format")
-                or self.config.get("sources.arxiv.feed_format", "rss")
-            )
-            artifacts = collector.scan_rss_feeds(
-                categories,
-                max_results=limit,
-                feed_format=feed_format,
-            )
-            return {
-                "source": source,
-                "categories": categories,
-                "feed_format": feed_format,
-                "queued": _artifact_summaries(artifacts),
-                "queued_count": len(artifacts),
-            }
-
-        topics = _string_list(options.get("topics")) or _string_list(
-            self.config.get("sources.arxiv.topics", [])
-        )
-        if not topics:
-            raise AgentSurfaceError("arxiv API execution requires topics")
-        artifacts = collector.discover_papers(topics, max_results=limit)
-        return {
-            "source": source,
-            "topics": topics,
-            "queued": _artifact_summaries(artifacts),
-            "queued_count": len(artifacts),
-        }
-
-    def _run_github_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        token = (
-            self.config.get("sources.github.token")
-            or os.getenv("GITHUB_API")
-            or os.getenv("GITHUB_TOKEN")
-        )
-        username = _optional_text(options.get("github_user") or options.get("username"))
-        if not token and not username:
-            raise AgentSurfaceError(
-                "github connector requires a username for public stars, or sources.github.token, GITHUB_API, or GITHUB_TOKEN"
-            )
-
-        from collectors.social_collector import SocialCollector
-
-        collector = SocialCollector(db=self.db)
-        limit = _positive_int(
-            options.get("limit"),
-            default=int(self.config.get("sources.github.limit", 50) or 50),
-        )
-        artifacts = collector.discover_github_stars(
-            username=username,
-            limit=limit,
-            token=token,
-        )
-        return {
-            "username": username or "authenticated account",
-            "queued": _artifact_summaries(artifacts),
-            "queued_count": len(artifacts),
-        }
-
-    def _run_huggingface_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        username = _optional_text(
-            options.get("hf_user")
-            or options.get("username")
-            or self.config.get("sources.huggingface.username")
-            or os.getenv("HF_USER")
-        )
-        if not username:
-            raise AgentSurfaceError(
-                "huggingface connector requires sources.huggingface.username, HF_USER, or username option"
-            )
-
-        from collectors.social_collector import SocialCollector
-
-        collector = SocialCollector(db=self.db)
-        limit = _positive_int(
-            options.get("limit"),
-            default=int(self.config.get("sources.huggingface.limit", 50) or 50),
-        )
-        artifacts = collector.discover_hf_likes(username=username, limit=limit)
-        return {
-            "username": username,
-            "queued": _artifact_summaries(artifacts),
-            "queued_count": len(artifacts),
-        }
-
-    def _run_web_clipper_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        if self.config.get("sources.web_clipper.enabled", True) is False:
-            raise AgentSurfaceError("web_clipper connector is disabled")
-
-        from collectors.web_clipper_collector import WebClipperCollector
-
-        collector = WebClipperCollector(self.config, layout=self.layout, db=self.db)
-        records = collector.collect()
-        changed = [record for record in records if record.is_new_or_changed]
-        queued = [
-            record
-            for record in changed
-            if record.file_type == "note" and record.artifact is not None
-        ]
-        staged = [record for record in changed if record.file_type == "attachment"]
-        return {
-            "scanned_count": len(records),
-            "changed_count": len(changed),
-            "queued_count": len(queued),
-            "staged_count": len(staged),
-            "queued": [
-                {
-                    "artifact_id": record.artifact.id if record.artifact else None,
-                    "path": record.path,
-                    "source_id": record.source_id,
-                }
-                for record in queued
-            ],
-            "budget": collector.last_budget_usage,
-        }
-
-    def _run_x_api_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        from .x_api_bookmark_sync import run_x_api_bookmark_backfill
-
-        no_resume = _optional_bool(options.get("no_resume"))
-        return _run_async(
-            run_x_api_bookmark_backfill(
-                self.config,
-                layout=self.layout,
-                max_results=_optional_int(options.get("max_results")),
-                max_pages=_optional_int(options.get("max_pages")),
-                resume_from_checkpoint=False if no_resume else None,
-            )
-        )
-
-    def _run_youtube_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        from collectors.youtube_connector import YouTubeConnector
-
-        connector = YouTubeConnector(self.config, layout=self.layout, db=self.db)
-        configured = self.config.get("sources.youtube", {}) or {}
-        urls = _string_list(options.get("urls") or options.get("url")) or _string_list(
-            configured.get("urls")
-        )
-        playlist_urls = _string_list(
-            options.get("playlist_urls") or options.get("playlist_url")
-        ) or _string_list(configured.get("playlist_urls"))
-        export_paths = _string_list(
-            options.get("export_paths") or options.get("export_path")
-        ) or _string_list(configured.get("export_paths"))
-        if not urls and not playlist_urls and not export_paths:
-            raise AgentSurfaceError(
-                "youtube connector requires urls, playlist_urls, or export_paths"
-            )
-        archive_video = (
-            _optional_bool(options.get("archive_video"))
-            if "archive_video" in options
-            else None
-        )
-        no_resume = _optional_bool(options.get("no_resume"))
-        result = _run_async(
-            connector.collect(
-                urls=urls,
-                playlist_urls=playlist_urls,
-                export_paths=export_paths,
-                limit=_optional_int(options.get("limit")),
-                archive_video=archive_video,
-                resume=not bool(no_resume),
-            )
-        )
-        return result.to_dict()
-
-    def _run_omi_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        from collectors.personal_transcript_connector import PersonalTranscriptConnector
-
-        connector = PersonalTranscriptConnector(self.config, layout=self.layout, db=self.db)
-        configured = self.config.get("sources.omi", {}) or {}
-        export_paths = _string_list(
-            options.get("export_paths") or options.get("export_path")
-        ) or _string_list(configured.get("export_paths") or configured.get("export_path"))
-        export_dirs = _string_list(
-            options.get("export_dirs") or options.get("export_dir")
-        ) or _string_list(configured.get("export_dirs") or configured.get("export_dir"))
-        api_key_env = options.get("api_key_env") or configured.get("api_key_env")
-        api_key_available = bool(
-            options.get("api_key")
-            or configured.get("api_key")
-            or os.getenv(str(api_key_env or "OMI_API_KEY"))
-        )
-        if not export_paths and not export_dirs and not api_key_available:
-            raise AgentSurfaceError(
-                "omi connector requires export_paths, export_dirs, or an Omi API key"
-            )
-        result = _run_async(
-            connector.collect(
-                export_paths=export_paths,
-                export_dirs=export_dirs,
-                file_patterns=_string_list(
-                    options.get("file_patterns") or options.get("file_pattern")
-                )
-                or _string_list(configured.get("file_patterns")),
-                source_name=options.get("source_name") or configured.get("source_name"),
-                device_id=options.get("device_id") or configured.get("device_id"),
-                speaker=options.get("speaker") or configured.get("speaker"),
-                session_id=options.get("session_id") or configured.get("session_id"),
-                language=options.get("language") or configured.get("language"),
-                limit=_optional_int(options.get("limit")),
-                api_key=options.get("api_key"),
-                api_key_env=api_key_env,
-                api_base_url=options.get("api_base_url") or configured.get("base_url"),
-                api_limit=_optional_int(options.get("api_limit")),
-                api_page_size=_optional_int(options.get("api_page_size")),
-                include_transcript=_optional_bool(options.get("include_transcript")),
-                start_date=options.get("start_date") or configured.get("start_date"),
-                end_date=options.get("end_date") or configured.get("end_date"),
-                categories=options.get("categories") or configured.get("categories"),
-                folder_id=options.get("folder_id") or configured.get("folder_id"),
-                starred=_optional_bool(options.get("starred")),
-                timeout_seconds=options.get("timeout_seconds")
-                or configured.get("timeout_seconds"),
-            )
-        )
-        return result.to_dict()
-
-    def _run_skill_outputs_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        from collectors.skill_output_connector import SkillOutputConnector
-
-        connector = SkillOutputConnector(self.config, layout=self.layout, db=self.db)
-        configured = self.config.get("sources.skill_outputs", {}) or {}
-        output_paths = _string_list(
-            options.get("output_paths")
-            or options.get("output_path")
-            or options.get("export_paths")
-            or options.get("export_path")
-        ) or _string_list(configured.get("output_paths") or configured.get("output_path"))
-        output_dirs = _string_list(
-            options.get("output_dirs")
-            or options.get("output_dir")
-            or options.get("export_dirs")
-            or options.get("export_dir")
-        ) or _string_list(configured.get("output_dirs") or configured.get("output_dir"))
-        if not output_paths and not output_dirs:
-            raise AgentSurfaceError(
-                "skill_outputs connector requires output_paths or output_dirs"
-            )
-        result = _run_async(
-            connector.collect(
-                output_paths=output_paths,
-                output_dirs=output_dirs,
-                file_patterns=_string_list(
-                    options.get("file_patterns") or options.get("file_pattern")
-                )
-                or _string_list(configured.get("file_patterns")),
-                source_name=options.get("source_name") or configured.get("source_name"),
-                limit=_optional_int(options.get("limit")),
-            )
-        )
-        return result.to_dict()
-
-    def _run_imported_markdown_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        from collectors.imported_markdown_connector import ImportedMarkdownConnector
-
-        connector = ImportedMarkdownConnector(self.config, layout=self.layout, db=self.db)
-        configured = self.config.get("sources.imported_markdown", {}) or {}
-        import_paths = _string_list(
-            options.get("import_paths")
-            or options.get("import_path")
-            or options.get("input_paths")
-            or options.get("input_path")
-            or options.get("export_paths")
-            or options.get("export_path")
-        ) or _string_list(
-            configured.get("import_paths")
-            or configured.get("import_path")
-            or configured.get("paths")
-        )
-        import_dirs = _string_list(
-            options.get("import_dirs")
-            or options.get("import_dir")
-            or options.get("input_dirs")
-            or options.get("input_dir")
-            or options.get("export_dirs")
-            or options.get("export_dir")
-        ) or _string_list(
-            configured.get("import_dirs")
-            or configured.get("import_dir")
-            or configured.get("dirs")
-        )
-        if not import_paths and not import_dirs:
-            raise AgentSurfaceError(
-                "imported_markdown connector requires import_paths or import_dirs"
-            )
-        result = _run_async(
-            connector.collect(
-                import_paths=import_paths,
-                import_dirs=import_dirs,
-                file_patterns=_string_list(
-                    options.get("file_patterns") or options.get("file_pattern")
-                )
-                or _string_list(configured.get("file_patterns")),
-                source_name=options.get("source_name") or configured.get("source_name"),
-                limit=_optional_int(options.get("limit")),
-            )
-        )
-        return result.to_dict()
-
-    def _plan_pi_skills_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        from collectors.pi_skill_connector import PiSkillConnector
-
-        connector = PiSkillConnector(self.config, layout=self.layout, db=self.db)
-        return connector.plan(
-            skill_id=options.get("skill") or options.get("skill_id"),
-            prompt=options.get("prompt"),
-            input_paths=(
-                options.get("input_paths")
-                or options.get("input_path")
-                or options.get("export_paths")
-                or options.get("export_path")
-            ),
-            output_dir=_first_string(options.get("output_dir") or options.get("output_dirs")),
-            provider=options.get("provider"),
-            model=options.get("model"),
-            limit=_optional_int(options.get("limit")),
-        )
-
-    def _run_pi_skills_connector(self, options: Mapping[str, Any]) -> dict[str, Any]:
-        from collectors.pi_skill_connector import PiSkillConnector
-
-        connector = PiSkillConnector(self.config, layout=self.layout, db=self.db)
-        result = _run_async(
-            connector.collect(
-                skill_id=options.get("skill") or options.get("skill_id"),
-                prompt=options.get("prompt"),
-                input_paths=(
-                    options.get("input_paths")
-                    or options.get("input_path")
-                    or options.get("export_paths")
-                    or options.get("export_path")
-                ),
-                output_dir=_first_string(
-                    options.get("output_dir") or options.get("output_dirs")
-                ),
-                provider=options.get("provider"),
-                model=options.get("model"),
-                limit=_optional_int(options.get("limit")),
-                actor=self._resolve_connector_actor(options),
-            )
-        )
-        return result.to_dict()
 
 
 def _serialize_connector_run(
@@ -1662,76 +1287,3 @@ def _entry_requires_security_review(entry: IngestionQueueEntry) -> bool:
         return True
     metadata = _security_metadata_from_payload(entry.payload_json)
     return prompt_security_requires_review(metadata)
-
-
-def _run_async(coro: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    if hasattr(coro, "close"):
-        coro.close()
-    raise AgentSurfaceError("Connector execution is not available inside an active event loop")
-
-
-def _optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _string_list(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [item.strip() for item in value.split(",") if item.strip()]
-    if isinstance(value, (list, tuple, set)):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return [str(value).strip()] if str(value).strip() else []
-
-
-def _first_string(value: Any) -> str | None:
-    values = _string_list(value)
-    return values[0] if values else None
-
-
-def _optional_int(value: Any) -> int | None:
-    if value is None or value == "":
-        return None
-    return int(value)
-
-
-def _optional_bool(value: Any) -> bool | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in {"true", "1", "yes", "on"}:
-        return True
-    if text in {"false", "0", "no", "off"}:
-        return False
-    raise AgentSurfaceError("Boolean connector options must be true or false")
-
-
-def _positive_int(value: Any, *, default: int) -> int:
-    resolved = default if value is None or value == "" else int(value)
-    return max(1, resolved)
-
-
-def _artifact_summaries(artifacts: list[Any]) -> list[dict[str, Any]]:
-    summaries = []
-    for artifact in artifacts:
-        summaries.append(
-            {
-                "artifact_id": getattr(artifact, "id", None),
-                "title": (
-                    getattr(artifact, "title", None)
-                    or getattr(artifact, "repo_name", None)
-                    or getattr(artifact, "source_uri", None)
-                ),
-                "source_type": getattr(artifact, "source_type", None),
-            }
-        )
-    return summaries

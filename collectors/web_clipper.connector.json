@@ -1,0 +1,42 @@
+{
+  "name": "web_clipper",
+  "source_name": "web_clipper",
+  "display_name": "Web Clipper",
+  "description": "Index configured Web Clipper notes and staged attachments.",
+  "artifact_types": [
+    "web_clipper"
+  ],
+  "inputs": [
+    "local_files:web_clipper_notes",
+    "local_files:web_clipper_attachments"
+  ],
+  "outputs": [
+    "artifact_queue:web_clipper"
+  ],
+  "capabilities": [
+    "markdown",
+    "frontmatter",
+    "attachments",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.web_clipper.enabled",
+    "sources.web_clipper.note_dirs",
+    "sources.web_clipper.attachment_dirs",
+    "sources.web_clipper.note_extensions",
+    "sources.web_clipper.attachment_extensions"
+  ],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "local_ingest_queue",
+  "allowed_side_effects": [
+    "local_file_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.web_clipper_collector:WebClipperCollector",
+  "cli_command": "web-clipper",
+  "config_namespace": "sources.web_clipper",
+  "default_enabled": true
+}
