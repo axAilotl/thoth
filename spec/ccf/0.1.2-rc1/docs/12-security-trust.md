@@ -67,6 +67,24 @@ origin/content preimages, HMAC domain and lowercase-hex token encoding, sorted
 unique entry order, minimum key size, and suppression-specific leaf/node/empty
 Merkle domains so independent implementations reproduce identical roots.
 
+The `scope_commitment` construction is pinned to the reference implementation.
+The schema types it as an opaque digest and the rc1 registry does not pin its
+bytes; conforming implementations MUST construct it exactly as follows:
+
+- domain separator: the UTF-8 bytes of `ccf:suppression-scope:v1`, followed by
+  a single `0x00` byte;
+- preimage: the JCS (RFC 8785) canonical serialization of the JSON array of
+  erased object ID strings, sorted in ascending Unicode code-point order;
+- duplicates: object IDs are not deduplicated and duplicates are not rejected;
+  each erasure plan contributes exactly one array element;
+- empty scope: an empty plan list hashes the canonical empty array `[]`,
+  yielding a well-defined digest rather than an error;
+- digest encoding: SHA-256 over the domain separator, the `0x00` byte, and the
+  preimage, encoded as lowercase hexadecimal with the `sha256:` prefix.
+
+The suppression-profiles registry entry gains a field pinning this construction
+at final; registry bytes are frozen for rc1.
+
 ## 12.8 Side channels
 
 Unauthorized existence queries, retry responses, and erasure status must be response-shaped and rate-limited. Authorized source owners may receive richer lifecycle information. Core does not require identical network timing but requires deployments to document observable differences.

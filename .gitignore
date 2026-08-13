@@ -45,6 +45,8 @@ xmarks_backup/
 
 # CCF private signing keys must never be committed (public keys are fine)
 *-ed25519-private.pem
+# Exception: vendored CCF spec packages ship TEST-ONLY vector keys listed in SHA256SUMS
+!spec/ccf/**/vectors/TEST-ONLY-*-ed25519-private.pem
 
 # Local CCF spec zips and test vault data (vendored copy lives in spec/ccf/)
 .CCF/

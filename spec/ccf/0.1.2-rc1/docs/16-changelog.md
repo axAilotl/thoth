@@ -11,4 +11,4 @@ Record/Link/Blob algebra and canonical/projection boundary are unchanged.
 - Suppression authority is canonical and journal-covered; lookups are projections.
 - Verification proves signed membership and admission correspondence.
 - Catalog, genesis, mindpack, vectors, SQL, inventory, and checksums are regenerated.
-- Section 13.8 adds twelve implementation-derived conformance regressions.
+- `docs/13-conformance.md` §13.8 adds twelve implementation-derived conformance regressions.

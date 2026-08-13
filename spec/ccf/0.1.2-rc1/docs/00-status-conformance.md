@@ -17,6 +17,8 @@ The following architectural decisions are frozen for this version:
 
 The protocol is an implementation candidate until at least one independent implementation reproduces the published vectors and passes the mandatory suite.
 
+Status note (rc1 final-pass review): independent reproduction has been achieved by the thoth implementation — its suite reproduces every published vector (`scripts/verify_ccf_012rc1_vectors.py`, `tests/test_ccf_cutover_vectors.py`). The freeze decision for 0.1.2 final now rests with the spec author; the version remains 0.1.2-rc1 until then.
+
 ## 0.2 Mandatory and optional profiles
 
 `ccf-core-0.1.2-rc1` is mandatory. Other profiles compose without changing the three-object model:

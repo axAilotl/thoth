@@ -81,3 +81,8 @@ liveness; out-of-order predecessor retry; suppression detection, reconstruction,
 and reintroduction blocking; admission/member correspondence; multi-schema
 pgvector discovery; three-commit Git evolution/rename/delete/binary/retry; and
 positive plus negative vectors for every authority class.
+
+Manifest-tamper conformance vectors are required at final: forged counts,
+stream digests, availability declarations, and `mode` claims against the
+unsigned-manifest rules of `docs/11-import-export-evolution.md` §11.5. They are
+stated here as a requirement and are not part of the frozen rc1 vector set.

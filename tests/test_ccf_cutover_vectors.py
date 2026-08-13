@@ -26,6 +26,8 @@ PUBLISHED_VECTOR_FILES = {
     "suppression-canonical.json",
     "archive-ed25519-public.pem",
     "device-ed25519-public.pem",
+    "TEST-ONLY-archive-ed25519-private.pem",
+    "TEST-ONLY-device-ed25519-private.pem",
 }
 
 # Explicit vector-to-independent-test contract. The gate parses the named
@@ -96,6 +98,12 @@ VECTOR_REPRODUCTION_CASES = {
     },
     "device-ed25519-public.pem": {
         "test_ccf_hashing.py": {"test_producer_batch_signature_verifies"},
+    },
+    "TEST-ONLY-archive-ed25519-private.pem": {
+        "test_ccf_hashing.py": {"test_commit_signature_reproduced_with_test_key"},
+    },
+    "TEST-ONLY-device-ed25519-private.pem": {
+        "test_ccf_hashing.py": {"test_producer_batch_signature_reproduced_with_test_key"},
     },
 }
 

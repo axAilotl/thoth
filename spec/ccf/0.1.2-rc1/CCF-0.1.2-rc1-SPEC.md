@@ -28,6 +28,8 @@ The following architectural decisions are frozen for this version:
 
 The protocol is an implementation candidate until at least one independent implementation reproduces the published vectors and passes the mandatory suite.
 
+Status note (rc1 final-pass review): independent reproduction has been achieved by the thoth implementation — its suite reproduces every published vector (`scripts/verify_ccf_012rc1_vectors.py`, `tests/test_ccf_cutover_vectors.py`). The freeze decision for 0.1.2 final now rests with the spec author; the version remains 0.1.2-rc1 until then.
+
 ## 0.2 Mandatory and optional profiles
 
 `ccf-core-0.1.2-rc1` is mandatory. Other profiles compose without changing the three-object model:
@@ -1165,7 +1167,33 @@ The manifest reports:
 - genesis and head hashes;
 - foreign custody proofs.
 
+The manifest is unsigned and non-authoritative:
+
+- the verifier MUST independently reconstruct counts and availability from
+  verified streams and journal membership;
+- manifest values MUST NOT determine iteration bounds;
+- every mismatch fails BEFORE any destination mutation;
+- `mode` is only an exporter claim and cannot authorize restore or foreign
+  merge.
+
+Manifest-tamper conformance vectors are required at final (see §13.8).
+
 Unknown semantics must round-trip in canonical form. Byte-identical original JSON is not required unless preserved separately as a Blob.
+
+### 11.5.1 Complete versus partial-custody export
+
+```text
+complete export:
+    MUST fail if required material is withheld, erased without adequate
+    lineage, external, or otherwise unavailable
+partial-custody export:
+    MAY be supported as an explicit, separately authorized mode
+    MUST declare complete=false
+    MUST declare restore_capable=false
+    MUST preserve commitments, availability, and custody proofs
+```
+
+A fail-closed implementation that does not support partial-custody export remains conformant.
 
 ## 11.6 Evolution
 
@@ -1177,6 +1205,19 @@ Published 0.1.2-rc1 schemas and profile semantics do not change in place.
 - a hash-profile change starts a new archive epoch;
 - old object hashes and old epoch verification remain intact;
 - migrations append new objects and lineage rather than rewriting historical bytes.
+
+0.1.1 to 0.1.2 suppression migration:
+
+```text
+derive 0.1.2 suppression sets from canonical historical erasure lineage
+when all required preimages remain available
+otherwise:
+    report suppression migration incomplete
+    do not silently discard old suppression state
+    do not claim full 0.1.2 suppression conformance
+```
+
+Development archives may be recreated instead of migrated, but recreation is not a lossless migration.
 
 ## 11.7 Forks
 
@@ -1264,6 +1305,24 @@ profile domain plus canonical preimage, encoded as lowercase hexadecimal with
 the `hmac-sha256:` prefix. Tokens sort by complete string, duplicates reject,
 and the registry pins leaf, node, empty-root, and tree-split construction. The
 key is at least 32 bytes and is governed outside the public token Blob.
+
+The `scope_commitment` construction is pinned to the reference implementation.
+The schema types it as an opaque digest and the rc1 registry does not pin its
+bytes; conforming implementations MUST construct it exactly as follows:
+
+- domain separator: the UTF-8 bytes of `ccf:suppression-scope:v1`, followed by
+  a single `0x00` byte;
+- preimage: the JCS (RFC 8785) canonical serialization of the JSON array of
+  erased object ID strings, sorted in ascending Unicode code-point order;
+- duplicates: object IDs are not deduplicated and duplicates are not rejected;
+  each erasure plan contributes exactly one array element;
+- empty scope: an empty plan list hashes the canonical empty array `[]`,
+  yielding a well-defined digest rather than an error;
+- digest encoding: SHA-256 over the domain separator, the `0x00` byte, and the
+  preimage, encoded as lowercase hexadecimal with the `sha256:` prefix.
+
+The suppression-profiles registry entry gains a field pinning this construction
+at final; registry bytes are frozen for rc1.
 
 ## 12.8 Side channels
 
@@ -1361,6 +1420,20 @@ The 0.1.2 conformance package additionally requires these implementation-informe
 ## 13.7 Nightly destructive test
 
 Delete every projection and restore only from canonical objects and a validated checkpoint or genesis replay. No human decision, lineage transition, policy state, consent state, Link disposition, erasure receipt, or integrity proof may be lost.
+
+## 13.8 0.1.2 implementation-informed regressions
+
+The executable package covers cross-kind and same-kind origin behavior;
+unavailable foreign compartments; bootstrap rebuild; content-rejection chain
+liveness; out-of-order predecessor retry; suppression detection, reconstruction,
+and reintroduction blocking; admission/member correspondence; multi-schema
+pgvector discovery; three-commit Git evolution/rename/delete/binary/retry; and
+positive plus negative vectors for every authority class.
+
+Manifest-tamper conformance vectors are required at final: forged counts,
+stream digests, availability declarations, and `mode` claims against the
+unsigned-manifest rules of §11.5. They are stated here as a requirement and are
+not part of the frozen rc1 vector set.
 
 
 ---

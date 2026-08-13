@@ -28,7 +28,8 @@ canonical/projection boundary.
 
 ## Conformance additions
 
-The executable suite adds the twelve regressions listed in section 13.8,
+The executable suite adds the twelve regressions listed in
+`docs/13-conformance.md` §13.8,
 including cross-kind origin reuse, producer-chain liveness, unavailable foreign
 merge, canonical suppression rebuild, admission tamper detection, multi-schema
 pgvector discovery, a real three-commit Git fixture, and positive/negative

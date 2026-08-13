@@ -23,6 +23,12 @@ by the first full reference-implementation pressure test. Cut final 0.1.2 only
 after an independent clean reproduction of the catalog, genesis, vectors,
 mindpack, SQL, inventory, checksums, and conformance suite.
 
+Status note (rc1 final-pass review): independent reproduction has been
+achieved by the thoth implementation — its suite reproduces every published
+vector (`scripts/verify_ccf_012rc1_vectors.py`,
+`tests/test_ccf_cutover_vectors.py`). The freeze decision for 0.1.2 final now
+rests with the spec author; the version remains 0.1.2-rc1 until then.
+
 ## What changed from 0.1.1
 
 - Origin idempotency includes object kind and stable same-kind native suffixes.

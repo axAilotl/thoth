@@ -59,7 +59,34 @@ The manifest reports:
 - genesis and head hashes;
 - foreign custody proofs.
 
+The manifest is unsigned and non-authoritative:
+
+- the verifier MUST independently reconstruct counts and availability from
+  verified streams and journal membership;
+- manifest values MUST NOT determine iteration bounds;
+- every mismatch fails BEFORE any destination mutation;
+- `mode` is only an exporter claim and cannot authorize restore or foreign
+  merge.
+
+Manifest-tamper conformance vectors are required at final (see
+`docs/13-conformance.md` §13.8).
+
 Unknown semantics must round-trip in canonical form. Byte-identical original JSON is not required unless preserved separately as a Blob.
+
+### 11.5.1 Complete versus partial-custody export
+
+```text
+complete export:
+    MUST fail if required material is withheld, erased without adequate
+    lineage, external, or otherwise unavailable
+partial-custody export:
+    MAY be supported as an explicit, separately authorized mode
+    MUST declare complete=false
+    MUST declare restore_capable=false
+    MUST preserve commitments, availability, and custody proofs
+```
+
+A fail-closed implementation that does not support partial-custody export remains conformant.
 
 ## 11.6 Evolution
 
@@ -71,6 +98,19 @@ Published 0.1.2-rc1 schemas and profile semantics do not change in place.
 - a hash-profile change starts a new archive epoch;
 - old object hashes and old epoch verification remain intact;
 - migrations append new objects and lineage rather than rewriting historical bytes.
+
+0.1.1 to 0.1.2 suppression migration:
+
+```text
+derive 0.1.2 suppression sets from canonical historical erasure lineage
+when all required preimages remain available
+otherwise:
+    report suppression migration incomplete
+    do not silently discard old suppression state
+    do not claim full 0.1.2 suppression conformance
+```
+
+Development archives may be recreated instead of migrated, but recreation is not a lossless migration.
 
 ## 11.7 Forks
 

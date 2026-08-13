@@ -18,11 +18,12 @@ CCF_EXAMPLES = CCF_PACKAGE_ROOT / "examples" / "thoth-capture"
 
 #: The 0.1.2-rc1 package pins the same deterministic TEST-ONLY Ed25519 key
 #: material as 0.1.1 (identical public keys; the rc1 SHA256SUMS entries for
-#: the private pems match the 0.1.1 files byte-for-byte), but the repo's
-#: .gitignore excludes ``*-ed25519-private.pem``, so the vendored rc1 tree
-#: carries public keys only. Tests load the identical TEST-ONLY private key
-#: material from the 0.1.1 package — read-only; neither tree is modified.
-CCF_TEST_ONLY_KEYS = REPO_ROOT / "spec" / "ccf" / "0.1.1" / "vectors"
+#: the private pems match the 0.1.1 files byte-for-byte). The repo's
+#: .gitignore excludes ``*-ed25519-private.pem`` except for the vendored
+#: ``spec/ccf/**/vectors/TEST-ONLY-*`` copies, so the rc1 tree carries the
+#: TEST-ONLY private keys and tests load them directly from the package —
+#: read-only; the tree is never modified.
+CCF_TEST_ONLY_KEYS = REPO_ROOT / "spec" / "ccf" / "0.1.2-rc1" / "vectors"
 
 
 @pytest.fixture(scope="session")
