@@ -1,6 +1,6 @@
 """CCF 0.1.2-rc1 checklist stage 9: Obsidian torture run (real vault corpus).
 
-Runs the 11 stage-9 scenarios against the real Obsidian vault segment via
+Runs the 12 stage-9 scenarios against the real Obsidian vault segment via
 ``scripts.ccf_stage9`` — the same scenario functions the standalone runner
 (``python scripts/ccf_stage9.py --vault <path>``) executes, so the suite
 and the runner can never drift apart.
@@ -117,3 +117,9 @@ def test_11_restore_and_foreign_merge(stage9_ctx):
     from scripts.ccf_stage9 import scenario_11_restore_and_foreign_merge
 
     scenario_11_restore_and_foreign_merge(stage9_ctx)
+
+
+def test_12_cross_instance_reimport(stage9_ctx):
+    from scripts.ccf_stage9 import scenario_12_cross_instance_reimport
+
+    scenario_12_cross_instance_reimport(stage9_ctx)
