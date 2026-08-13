@@ -348,3 +348,84 @@ def outcome_for(result: dict, object_id: str) -> dict:
         if admission["object_id"] == object_id:
             return admission
     raise AssertionError(f"no admission outcome for {object_id}: {result['admissions']}")
+
+
+# ---------------------------------------------------------------------------
+# dual-write service helpers (phase 2 mirror families)
+# ---------------------------------------------------------------------------
+
+
+def make_dual_write_config(tmp_path, schema: str, *, dual_write: bool = True, **flags):
+    """Thoth config with a CCF dual-write block; family flags default off."""
+    from core.config import Config
+
+    cfg = Config()
+    cfg.data = {
+        "paths": {
+            "vault_dir": str(tmp_path / "knowledge_vault"),
+            "system_dir": str(tmp_path / ".thoth_system"),
+            "cache_dir": str(tmp_path / ".thoth_system" / "cache"),
+        },
+        "database": {
+            "enabled": True,
+            "path": str(tmp_path / ".thoth_system" / "meta.db"),
+            "ccf_archive": {
+                "enabled": True,
+                "dual_write": dual_write,
+                "backend": "postgres",
+                "dsn_env": "THOTH_CCF_POSTGRES_DSN",
+                "schema": schema,
+                "device_key_path": str(tmp_path / "ccf" / "device.pem"),
+                "archive_key_path": str(tmp_path / "ccf" / "archive.pem"),
+                "error_log_path": str(tmp_path / "errors.jsonl"),
+                **flags,
+            },
+        },
+    }
+    return cfg
+
+
+def make_dual_write_service(tmp_path, schema: str, **flags):
+    """Real dual-write service against the ephemeral Postgres fixture.
+
+    The caller must set ``THOTH_CCF_POSTGRES_DSN`` (monkeypatch.setenv).
+    """
+    from ccf.dualwrite import CcfDualWriteService, resolve_dual_write_settings
+
+    return CcfDualWriteService.create_or_open(
+        resolve_dual_write_settings(
+            make_dual_write_config(tmp_path, schema, **flags)
+        )
+    )
+
+
+def mirror_test_capture(service, tmp_path, *, session_id: str = "sess-1", name: str = "capture.json") -> dict:
+    """Mirror one minimal capture envelope through the service; return the receipt."""
+    import hashlib
+    import json
+
+    data = json.dumps({"capture": name}).encode()
+    raw = tmp_path / "vault" / "raw" / name
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_bytes(data)
+    return service.mirror_capture(
+        source={
+            "source_id": "src-test",
+            "source_name": "test",
+            "source_type": "test",
+            "collector": "test_connector",
+        },
+        session={
+            "session_id": session_id,
+            "session_type": "test",
+            "started_at": "2026-08-01T00:00:00Z",
+        },
+        raw_ref={
+            "raw_ref_id": f"raw-ref-{name}",
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "path": str(raw),
+            "size_bytes": len(data),
+            "mime_type": "application/json",
+        },
+        data=data,
+    )

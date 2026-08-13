@@ -49,6 +49,14 @@ from ccf.dualwrite.conventions import (  # noqa: E402
 )
 from ccf.dualwrite.ledger import read_errors  # noqa: E402
 
+# Phase-2 mirror families itemized (not reconciled against legacy) when found.
+_DERIVED_MIRROR_TYPES = {
+    "experience.utterance": "transcripts",
+    "semantic.entity": "entities",
+    "semantic.assertion": "assertions",
+    "governance.review_decision": "review_decisions",
+}
+
 
 class HarnessError(RuntimeError):
     """The harness itself cannot run (missing inputs, empty archive)."""
@@ -469,7 +477,13 @@ def reconcile(
     # content-bearing classes (artifacts, blobs, findings) stay hard
     # mismatches — per checklist 10a the reconciled classes are sources,
     # artifacts, blobs, transcripts, and findings.
+    # Phase-2 mirror families (utterances, entities, assertions, review
+    # decisions, wiki projections) are operator-gated per family flag, so
+    # the legacy inventory cannot say whether they were expected; they are
+    # itemized as ``derived`` (not mismatches) and covered by the
+    # mirror-integration tests instead.
     superseded: list[dict] = []
+    derived: list[dict] = []
     for source_id, native_id, revision, kind, object_id in snapshot.origins:
         if source_id not in dual_source_ccf_ids:
             continue  # other producers/sources are out of scope
@@ -483,6 +497,18 @@ def reconcile(
                     "ccf_id": object_id,
                     "origin": [native_id, revision, kind],
                     "reason": "run-scoped record no longer referenced by the legacy queue",
+                }
+            )
+            continue
+        if record_type in _DERIVED_MIRROR_TYPES or (
+            record_type == "experience.artifact" and native_id.startswith("wiki:")
+        ):
+            derived.append(
+                {
+                    "class": _DERIVED_MIRROR_TYPES.get(record_type, "wiki"),
+                    "ccf_id": object_id,
+                    "origin": [native_id, revision, kind],
+                    "reason": "phase-2 mirror family object (flag-gated, not legacy-reconciled)",
                 }
             )
             continue
@@ -506,11 +532,13 @@ def reconcile(
         "skipped_rows": inventory["skipped_rows"],
         "classes": classes,
         "superseded": superseded,
+        "derived": derived,
         "mismatches": mismatches,
         "summary": {
             "mismatch_count": len(mismatches),
             "dual_write_errors": len(ledger_entries),
             "superseded_run_records": len(superseded),
+            "derived_records": len(derived),
             "ok": not mismatches,
         },
     }

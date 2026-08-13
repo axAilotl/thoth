@@ -131,3 +131,62 @@ def test_candidate_reimport_idempotent(rig, ctx, source_id):
     admit_mapped(rig, mapped)
     replay = admit_mapped(rig, mapped)
     assert outcome_for(replay, mapped.records[0]["id"])["status"] == "existing"
+
+
+# ---------------------------------------------------------------------------
+# Mirror integration (ccf.dualwrite.families)
+# ---------------------------------------------------------------------------
+
+
+def test_mirror_semantic_family_admits_and_skips_rerun(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    """Entities and candidate assertions mirror idempotently."""
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    from ccf.dualwrite import families
+    from ccf_helpers import make_dual_write_service, mirror_test_capture
+
+    service = make_dual_write_service(
+        tmp_path, ccf_settings.schema, mirror_semantic=True
+    )
+    receipt = mirror_test_capture(service, tmp_path)
+    objects = receipt["objects"]
+
+    entity = {
+        "canonical_id": "person:exact_name:ada",
+        "entity_type": "person",
+        "display_name": "Ada",
+    }
+    out = families.mirror_entity(
+        service, source={"source_id": "src-test"}, entity=entity
+    )
+    assert out["status"] == "accepted"
+    assert out["entity_id"]
+    again = families.mirror_entity(
+        service, source={"source_id": "src-test"}, entity=entity
+    )
+    assert again["status"] == "existing"
+    assert again["entity_id"] == out["entity_id"]
+
+    candidate = {
+        "candidate_id": "cand-1",
+        "candidate_type": "fact",
+        "status": "proposed",
+        "subject": "Ada",
+        "predicate": "uses",
+        "object_value": "Thoth",
+    }
+    assertion_id = families.mirror_candidate_assertion(
+        service,
+        source_ccf_id=objects["source_id"],
+        candidate=candidate,
+        subject_ccf_id=out["entity_id"],
+        evidence_ccf_ids=[objects["artifact_id"]],
+    )
+    assert assertion_id
+    assert (
+        families.mirror_candidate_assertion(
+            service, source_ccf_id=objects["source_id"], candidate=candidate
+        )
+        == assertion_id
+    )

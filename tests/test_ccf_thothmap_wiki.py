@@ -97,3 +97,57 @@ def test_wiki_projection_refused_without_evidence(rig, ctx, inputs):
             source_ccf_id=inputs["source_id"],
             evidence_ccf_ids=[],
         )
+
+
+# ---------------------------------------------------------------------------
+# Mirror integration (ccf.dualwrite.families)
+# ---------------------------------------------------------------------------
+
+
+def test_mirror_wiki_projection_family_admits_and_skips_rerun(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    """Wiki projections mirror with mandatory evidence, idempotently."""
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    from ccf.dualwrite import families
+    from ccf.dualwrite.service import DualWriteError
+    from ccf_helpers import make_dual_write_service, mirror_test_capture
+
+    service = make_dual_write_service(
+        tmp_path, ccf_settings.schema, mirror_wiki=True
+    )
+    receipt = mirror_test_capture(service, tmp_path)
+    objects = receipt["objects"]
+    evidence = [(objects["source_id"], objects["artifact_id"])]
+
+    page = {
+        "slug": "semantic-memory-digest",
+        "title": "Semantic Memory Digest",
+        "summary": "digest",
+        "kind": "topic",
+        "input_hash": "hash-v1",
+        "source_paths": [],
+        "event_ids": [],
+        "semantic_candidate_ids": ["cand-1"],
+        "updated_at": "2026-08-12T00:00:00Z",
+    }
+    out = families.mirror_wiki_projection(service, page=page, evidence=evidence)
+    assert out["status"] == "accepted"
+    assert out["projection_id"]
+
+    again = families.mirror_wiki_projection(service, page=page, evidence=evidence)
+    assert again["status"] == "existing"
+    assert again["projection_id"] == out["projection_id"]
+
+    # A new input_hash is a new revision: the recompiled page re-mirrors.
+    updated = families.mirror_wiki_projection(
+        service, page={**page, "input_hash": "hash-v2"}, evidence=evidence
+    )
+    assert updated["status"] == "accepted"
+    assert updated["projection_id"] != out["projection_id"]
+
+    # The refusal is never weakened: no evidence, no projection.
+    import pytest
+
+    with pytest.raises(DualWriteError):
+        families.mirror_wiki_projection(service, page=page, evidence=[])

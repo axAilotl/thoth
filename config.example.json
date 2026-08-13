@@ -533,6 +533,10 @@
     "ccf_archive": {
       "enabled": false,
       "dual_write": false,
+      "mirror_transcripts": false,
+      "mirror_semantic": false,
+      "mirror_review": false,
+      "mirror_wiki": false,
       "backend": "postgres",
       "dsn_env": "THOTH_CCF_POSTGRES_DSN",
       "schema": "ccf",

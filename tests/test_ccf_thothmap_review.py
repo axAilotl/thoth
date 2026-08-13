@@ -154,3 +154,50 @@ def test_successor_requires_accept(rig, ctx, candidate):
             accepted_type="semantic.assertion",
             accepted_payload=candidate["candidate_payload"],
         )
+
+
+# ---------------------------------------------------------------------------
+# Mirror integration (ccf.dualwrite.families)
+# ---------------------------------------------------------------------------
+
+
+def test_mirror_review_decision_family_admits_and_skips_rerun(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    """Review decisions mirror with the operator as reviewer, idempotently."""
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    from ccf.dualwrite import families
+    from ccf_helpers import make_dual_write_service, mirror_test_capture
+
+    service = make_dual_write_service(
+        tmp_path, ccf_settings.schema, mirror_review=True
+    )
+    receipt = mirror_test_capture(service, tmp_path)
+    objects = receipt["objects"]
+
+    review = {
+        "action": "reject",
+        "actor": "operator",
+        "at": "2026-08-12T00:00:00Z",
+        "reason": "bad audio",
+    }
+    out = families.mirror_review_decision(
+        service,
+        source_ccf_id=objects["source_id"],
+        review=review,
+        target_ccf_ids=[objects["artifact_id"]],
+        evidence_ccf_ids=[objects["artifact_id"]],
+    )
+    assert out["status"] == "accepted"
+    assert out["decision_id"]
+
+    # Re-mirroring the same event maps to the same origin tuple and is
+    # skipped before signing — never duplicated or conflicted.
+    again = families.mirror_review_decision(
+        service,
+        source_ccf_id=objects["source_id"],
+        review=review,
+        target_ccf_ids=[objects["artifact_id"]],
+    )
+    assert again["status"] == "existing"
+    assert again["decision_id"] == out["decision_id"]
