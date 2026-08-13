@@ -181,7 +181,73 @@ def _fetch_envelope(conn, object_id: str, compartment: str) -> tuple[str | None,
     }
 
 
-def _verify_object(conn, object_id: str, expected_hash: str, context: str) -> None:
+def _preload_members(conn, archive_id: str) -> dict[int, list[tuple]]:
+    """All commit member rows for the archive, grouped by commit sequence.
+
+    One set-based scan replaces the per-commit member query plus the
+    per-member leaf-hash probe: on replica schemas built without indexes
+    (``CREATE TABLE AS SELECT`` copies) those per-row probes degrade to
+    full table scans, i.e. O(n^2) in archive size.
+    """
+    grouped: dict[int, list[tuple]] = {}
+    for row in conn.execute(
+        """
+        SELECT commit_sequence, commit_position, object_kind, object_id,
+               object_hash, admitted_at, leaf_hash
+        FROM commit_member
+        WHERE archive_id = %s
+        ORDER BY commit_sequence ASC, commit_position ASC
+        """,
+        (archive_id,),
+    ):
+        sequence, position, kind, object_id, member_hash, admitted_at, leaf = row
+        grouped.setdefault(int(sequence), []).append(
+            (int(position), kind, object_id, member_hash, admitted_at, leaf)
+        )
+    return grouped
+
+
+def _preload_objects(conn, object_ids: list[str]) -> tuple[dict, dict]:
+    """Bulk-load header rows and compartment envelopes for member objects.
+
+    Same lookups ``_verify_object`` performs, batched into two queries
+    instead of three per object. Duplicate keys keep the first row,
+    matching the previous ``fetchone`` behaviour.
+    """
+    headers: dict[str, tuple] = {}
+    envelopes: dict[tuple[str, str], tuple] = {}
+    if not object_ids:
+        return headers, envelopes
+    ids = sorted(set(object_ids))
+    for row in conn.execute(
+        """
+        SELECT id, object_kind, spec, hash_profile, structural_commitment,
+               semantic_commitment, object_hash
+        FROM object_header WHERE id = ANY(%s)
+        """,
+        (ids,),
+    ):
+        headers.setdefault(row[0], row[1:])
+    for row in conn.execute(
+        """
+        SELECT object_id, compartment, state, format, salt, plaintext_json
+        FROM compartment WHERE object_id = ANY(%s)
+        """,
+        (ids,),
+    ):
+        object_id, compartment, state, format_, salt, plaintext = row
+        envelope = None
+        if state == "plaintext":
+            envelope = {
+                "format": format_,
+                "salt": encode_b64url(bytes(salt)),
+                "content": plaintext,
+            }
+        envelopes.setdefault((object_id, compartment), (state, envelope))
+    return headers, envelopes
+
+
+def _verify_object(headers, envelopes, object_id: str, expected_hash: str, context: str) -> None:
     """Recompute an admitted object's commitments and object hash.
 
     An erased or withheld compartment is no longer inspectable: its
@@ -192,18 +258,11 @@ def _verify_object(conn, object_id: str, expected_hash: str, context: str) -> No
     """
     from ccf.hashing import compartment_commitment, parse_digest
 
-    row = conn.execute(
-        """
-        SELECT object_kind, spec, hash_profile, structural_commitment,
-               semantic_commitment, object_hash
-        FROM object_header WHERE id = %s
-        """,
-        (object_id,),
-    ).fetchone()
+    row = headers.get(object_id)
     _require(row is not None, f"{context}: object {object_id} missing")
     kind, spec, hash_profile, structural_c, semantic_c, stored_hash = row
     _require(stored_hash == expected_hash, f"{context}: object hash mismatch for {object_id}")
-    structural_state, structural = _fetch_envelope(conn, object_id, "structural")
+    structural_state, structural = envelopes.get((object_id, "structural"), (None, None))
     _require(
         structural_state is not None,
         f"{context}: structural compartment unavailable for {object_id}",
@@ -220,7 +279,7 @@ def _verify_object(conn, object_id: str, expected_hash: str, context: str) -> No
             f"{context}: structural compartment state {structural_state!r} "
             f"is not verifiable for {object_id}",
         )
-    semantic_state, semantic = _fetch_envelope(conn, object_id, "semantic")
+    semantic_state, semantic = envelopes.get((object_id, "semantic"), (None, None))
     if semantic_state == "plaintext":
         recomputed_semantic = compartment_commitment(kind, "semantic", semantic)
     elif semantic_state in ("withheld", "erased"):
@@ -285,6 +344,23 @@ def verify_chain(
     previous_hash: str | None = None
     members_verified = 0
 
+    # Set-based preloads: one scan of commit_member plus (when object
+    # verification is on) one scan each of object_header and compartment.
+    # The per-commit/per-member queries they replace are full table scans
+    # on index-less replica schemas, which made verification O(n^2).
+    members_by_sequence = _preload_members(conn, archive_id)
+    headers: dict = {}
+    envelopes: dict = {}
+    if verify_objects:
+        headers, envelopes = _preload_objects(
+            conn,
+            [
+                stored[2]
+                for stored_rows in members_by_sequence.values()
+                for stored in stored_rows
+            ],
+        )
+
     for index, row in enumerate(commits):
         (
             sequence,
@@ -346,38 +422,24 @@ def verify_chain(
         )
 
         # Members: rebuild canonical member dicts, recheck leaves and root.
-        member_rows = conn.execute(
-            """
-            SELECT commit_position, object_kind, object_id, object_hash, admitted_at
-            FROM commit_member
-            WHERE archive_id = %s AND commit_sequence = %s
-            ORDER BY commit_position ASC
-            """,
-            (archive_id, sequence),
-        ).fetchall()
+        stored_rows = members_by_sequence.get(index, [])
         members = [
             {
                 "commit_sequence": str(index),
-                "commit_position": int(position),
+                "commit_position": position,
                 "admitted_at": admitted_at,
                 "object_kind": kind,
                 "object_id": object_id,
                 "object_hash": member_hash,
             }
-            for position, kind, object_id, member_hash, admitted_at in member_rows
+            for position, kind, object_id, member_hash, admitted_at, _leaf in stored_rows
         ]
         _require(
             len(members) == int(member_count) == int(payload.get("member_count", -1)),
             f"{context}: member count mismatch",
         )
-        for member, stored_row in zip(members, member_rows):
-            stored_leaf = conn.execute(
-                """
-                SELECT leaf_hash FROM commit_member
-                WHERE archive_id = %s AND commit_sequence = %s AND commit_position = %s
-                """,
-                (archive_id, sequence, member["commit_position"]),
-            ).fetchone()[0]
+        for member, stored_row in zip(members, stored_rows):
+            stored_leaf = stored_row[5]
             recomputed_leaf = "sha256:" + commit_leaf(member).hex()
             _require(
                 recomputed_leaf == stored_leaf,
@@ -415,7 +477,9 @@ def verify_chain(
 
         if verify_objects:
             for member in members:
-                _verify_object(conn, member["object_id"], member["object_hash"], context)
+                _verify_object(
+                    headers, envelopes, member["object_id"], member["object_hash"], context
+                )
 
         members_verified += len(members)
         previous_hash = commit_hash
