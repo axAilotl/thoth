@@ -9,16 +9,16 @@ from fastapi.testclient import TestClient
 import thoth_api
 
 BUILTIN_CONNECTOR_NAMES = [
-    "x_api",
     "arxiv",
     "github",
     "huggingface",
-    "web_clipper",
-    "youtube",
-    "omi",
-    "skill_outputs",
-    "pi_skills",
     "imported_markdown",
+    "omi",
+    "pi_skills",
+    "skill_outputs",
+    "web_clipper",
+    "x_api",
+    "youtube",
 ]
 
 PLUGIN_MANIFEST = {
