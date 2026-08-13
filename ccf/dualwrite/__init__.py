@@ -11,7 +11,12 @@ Gating: ``database.ccf_archive.enabled`` + ``database.ccf_archive.dual_write``
 must both be true. When off, legacy paths never import this package (see
 ``core.ccf_dualwrite.dual_write_requested``). Contradictory config
 (``dual_write`` without ``enabled``) or missing key paths/DSN fail closed
-in :func:`ccf.dualwrite.config.resolve_dual_write_settings`.
+in :func:`ccf.dualwrite.config.resolve_dual_write_settings`. The phase-2
+converter families (``ccf.dualwrite.families``: transcripts, semantic
+entities/assertions, review decisions, wiki projections) are each gated
+behind their own ``mirror_*`` flag under ``database.ccf_archive`` for
+incremental rollout; each family mirrors as its own batch and fails open
+(ledgered) without blocking the others.
 
 Rollback: set ``database.ccf_archive.dual_write`` (and ``enabled``) to
 ``false`` — the mirror stops being constructed and legacy behavior is

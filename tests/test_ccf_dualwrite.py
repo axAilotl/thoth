@@ -40,7 +40,7 @@ def _write_note(path: Path, *, title: str, body: str) -> Path:
     return path
 
 
-def _dualwrite_config(tmp_path: Path, schema: str, *, dual_write=True, enabled=True) -> Config:
+def _dualwrite_config(tmp_path: Path, schema: str, *, dual_write=True, enabled=True, **flags) -> Config:
     cfg = Config()
     cfg.data = {
         "paths": {
@@ -60,6 +60,7 @@ def _dualwrite_config(tmp_path: Path, schema: str, *, dual_write=True, enabled=T
                 "device_key_path": str(tmp_path / "ccf" / "device.pem"),
                 "archive_key_path": str(tmp_path / "ccf" / "archive.pem"),
                 "error_log_path": str(tmp_path / "errors.jsonl"),
+                **flags,
             },
         },
     }
@@ -351,3 +352,414 @@ def test_harness_reports_dual_write_errors(mirrored_workspace):
     )
     assert not report["summary"]["ok"]
     assert any(m["kind"] == "dual_write_error" for m in report["mismatches"])
+
+
+# ---------------------------------------------------------------------------
+# Phase-2 converter families (transcripts / semantic / review / wiki)
+# ---------------------------------------------------------------------------
+
+
+def _lifecycle_service(cfg: Config, tmp_path: Path):
+    from core.capture_lifecycle import CaptureLifecycleService
+
+    layout = build_path_layout(cfg)
+    layout.ensure_directories()
+    db = MetadataDB(str(tmp_path / ".thoth_system" / "meta.db"))
+    service = CaptureLifecycleService(
+        cfg, layout=layout, db=db, capture_event_store=None
+    )
+    return service, db
+
+
+def _capture_transcript(service, *, artifact_id="omi-transcript-1", text="meeting notes"):
+    raw_file = service.layout.raw_root / "omi" / f"{artifact_id}.json"
+    raw_file.parent.mkdir(parents=True, exist_ok=True)
+    raw_file.write_text(
+        json.dumps({"session": artifact_id}) + "\n", encoding="utf-8"
+    )
+    return service.capture_to_queue(
+        artifact_type="transcript",
+        payload={
+            "id": artifact_id,
+            "transcript_id": artifact_id,
+            "source_type": "omi",
+            "title": "Omi Session",
+            "raw_transcript": text,
+            "language": "en",
+        },
+        source={
+            "source_name": "omi",
+            "source_type": "wearable",
+            "collector": "omi_connector",
+        },
+        session={
+            "session_type": "sync",
+            "native_session_id": f"{artifact_id}-sync",
+            "started_at": "2026-08-01T00:00:00Z",
+        },
+        raw_path=raw_file,
+    )
+
+
+def _record_types(ccf_settings) -> dict:
+    return CcfSnapshot(ccf_settings).record_types
+
+
+def _ids_of_type(ccf_settings, record_type: str) -> list[str]:
+    return sorted(
+        object_id
+        for object_id, rtype in _record_types(ccf_settings).items()
+        if rtype == record_type
+    )
+
+
+def _links(ccf_settings) -> list[tuple]:
+    return CcfSnapshot(ccf_settings).links
+
+
+def _ledger_entries(tmp_path: Path) -> list[dict]:
+    ledger = tmp_path / "errors.jsonl"
+    if not ledger.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in ledger.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _add_candidate_with_evidence(db, queue_artifact_id: str):
+    from core.semantic_memory import (
+        SemanticMemoryCandidate,
+        SemanticMemoryEvidence,
+        SemanticMemoryStore,
+    )
+
+    store = SemanticMemoryStore(db)
+    return store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-fact-1",
+            candidate_type="fact",
+            text="Thoth mirrors captures into CCF.",
+            subject="Thoth",
+            predicate="mirrors captures into",
+            object_value="CCF",
+            confidence=0.9,
+        ),
+        evidence=(
+            SemanticMemoryEvidence(
+                candidate_id="candidate-fact-1",
+                evidence_id="evidence-1",
+                artifact_id=queue_artifact_id,
+                artifact_type="transcript",
+                evidence_text="meeting notes",
+            ),
+        ),
+    )
+
+
+def test_family_flags_default_off(tmp_path, ccf_postgres_dsn, monkeypatch):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, "ccf_unused")
+    settings = resolve_dual_write_settings(cfg)
+    assert settings.enabled
+    assert not settings.mirror_transcripts
+    assert not settings.mirror_semantic
+    assert not settings.mirror_review
+    assert not settings.mirror_wiki
+
+
+def test_family_flags_parse(tmp_path, ccf_postgres_dsn, monkeypatch):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(
+        tmp_path,
+        "ccf_unused",
+        mirror_transcripts=True,
+        mirror_semantic=True,
+        mirror_review=True,
+        mirror_wiki=True,
+    )
+    settings = resolve_dual_write_settings(cfg)
+    assert settings.mirror_transcripts
+    assert settings.mirror_semantic
+    assert settings.mirror_review
+    assert settings.mirror_wiki
+
+
+def test_transcript_family_mirrors_utterances_with_links(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(
+        tmp_path, ccf_settings.schema, mirror_transcripts=True
+    )
+    service, _db = _lifecycle_service(cfg, tmp_path)
+    result = _capture_transcript(service)
+    assert result.queue_artifact_id == "omi-transcript-1"
+
+    utterances = _ids_of_type(ccf_settings, "experience.utterance")
+    assert len(utterances) == 1
+    utterance = utterances[0]
+    links = _links(ccf_settings)
+    assert any(t == "ccf.derived_from" and f == utterance for t, f, _ in links)
+    assert any(t == "ccf.generated_by" and f == utterance for t, f, _ in links)
+    assert any(t == "ccf.has_transcript" and to == utterance for t, _, to in links)
+    assert not _ledger_entries(tmp_path)
+
+    # The reconcile harness itemizes phase-2 family objects instead of
+    # flagging them as extras.
+    report = _reconcile_workspace(tmp_path, ccf_settings.schema, ccf_postgres_dsn)
+    assert report["summary"]["ok"], report["mismatches"]
+    assert report["summary"]["derived_records"] >= 1
+    assert any(d["class"] == "transcripts" for d in report["derived"])
+
+
+def test_transcript_family_skipped_when_flag_off(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, ccf_settings.schema)
+    service, _db = _lifecycle_service(cfg, tmp_path)
+    _capture_transcript(service)
+
+    assert _ids_of_type(ccf_settings, "experience.utterance") == []
+    assert not _ledger_entries(tmp_path)
+
+
+def test_semantic_family_mirrors_canonical_entity(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, ccf_settings.schema, mirror_semantic=True)
+    service, db = _lifecycle_service(cfg, tmp_path)
+    result = _capture_transcript(service)
+
+    canonical_id = result.canonical_record["normalized_metadata"]["canonical_id"]
+    assert db.get_canonical_entity(canonical_id) is not None
+    assert len(_ids_of_type(ccf_settings, "semantic.entity")) == 1
+    assert not _ledger_entries(tmp_path)
+
+
+def test_semantic_family_skipped_when_flag_off(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, ccf_settings.schema)
+    service, _db = _lifecycle_service(cfg, tmp_path)
+    _capture_transcript(service)
+
+    assert _ids_of_type(ccf_settings, "semantic.entity") == []
+    assert not _ledger_entries(tmp_path)
+
+
+def test_family_failure_ledgers_without_blocking_others(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(
+        tmp_path,
+        ccf_settings.schema,
+        mirror_transcripts=True,
+        mirror_semantic=True,
+    )
+
+    from ccf.dualwrite import families
+
+    def _explode(*args, **kwargs):
+        raise RuntimeError("planted transcript failure")
+
+    monkeypatch.setattr(
+        families.thothmap_transcripts, "utterance_submissions", _explode
+    )
+    service, _db = _lifecycle_service(cfg, tmp_path)
+    result = _capture_transcript(service)
+
+    # Legacy write and the other families are unaffected.
+    assert result.queue_artifact_id == "omi-transcript-1"
+    assert _ids_of_type(ccf_settings, "experience.artifact")
+    assert _ids_of_type(ccf_settings, "semantic.entity")
+    assert _ids_of_type(ccf_settings, "experience.utterance") == []
+
+    ledger = _ledger_entries(tmp_path)
+    assert len(ledger) == 1
+    assert ledger[0]["kind"] == "mirror_failure"
+    assert ledger[0]["context"]["family"] == "transcripts"
+    assert "planted transcript failure" in ledger[0]["error"]
+
+
+def test_review_family_mirrors_artifact_review_decision(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, ccf_settings.schema, mirror_review=True)
+    service, db = _lifecycle_service(cfg, tmp_path)
+    result = _capture_transcript(service)
+
+    from core.artifact_review_queue import ArtifactReviewQueueService
+
+    updated = ArtifactReviewQueueService(db, config=cfg).reject(
+        result.queue_artifact_id, actor="operator", reason="bad audio"
+    )
+    assert updated.status == "rejected"
+
+    decisions = _ids_of_type(ccf_settings, "governance.review_decision")
+    assert len(decisions) == 1
+    artifacts = _ids_of_type(ccf_settings, "experience.artifact")
+    assert len(artifacts) == 1
+    links = _links(ccf_settings)
+    assert any(
+        t == "ccf.covers" and f == decisions[0] and to == artifacts[0]
+        for t, f, to in links
+    )
+    assert not _ledger_entries(tmp_path)
+
+
+def test_review_family_skipped_when_flag_off(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, ccf_settings.schema)
+    service, db = _lifecycle_service(cfg, tmp_path)
+    result = _capture_transcript(service)
+
+    from core.artifact_review_queue import ArtifactReviewQueueService
+
+    ArtifactReviewQueueService(db, config=cfg).reject(
+        result.queue_artifact_id, actor="operator", reason="bad audio"
+    )
+    assert _ids_of_type(ccf_settings, "governance.review_decision") == []
+    assert not _ledger_entries(tmp_path)
+
+
+def test_review_family_mirrors_semantic_review(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, ccf_settings.schema, mirror_review=True)
+    service, db = _lifecycle_service(cfg, tmp_path)
+    result = _capture_transcript(service)
+    candidate = _add_candidate_with_evidence(db, result.queue_artifact_id)
+
+    from core.semantic_memory_review import SemanticMemoryReviewService
+
+    reviewed = SemanticMemoryReviewService(db=db, config=cfg).confirm_candidate(
+        candidate.candidate_id, actor="operator", reason="looks right"
+    )
+    assert reviewed["candidate"]["status"] == "confirmed"
+
+    assertions = _ids_of_type(ccf_settings, "semantic.assertion")
+    decisions = _ids_of_type(ccf_settings, "governance.review_decision")
+    artifacts = _ids_of_type(ccf_settings, "experience.artifact")
+    assert len(assertions) == 1
+    assert len(decisions) == 1
+    assert len(artifacts) == 1
+    links = _links(ccf_settings)
+    # Evidence artifact -> assertion, decision -> assertion.
+    assert any(
+        t == "ccf.evidence_for" and f == artifacts[0] and to == assertions[0]
+        for t, f, to in links
+    )
+    assert any(
+        t == "ccf.covers" and f == decisions[0] and to == assertions[0]
+        for t, f, to in links
+    )
+    assert not _ledger_entries(tmp_path)
+
+
+def test_review_family_semantic_review_skips_unmirrored_evidence(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch, caplog
+):
+    """Candidate evidence that was never mirrored: skip loudly, no ledger."""
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, ccf_settings.schema, mirror_review=True)
+    service, db = _lifecycle_service(cfg, tmp_path)
+    candidate = _add_candidate_with_evidence(db, "artifact-never-captured")
+
+    from core.semantic_memory_review import SemanticMemoryReviewService
+
+    with caplog.at_level(logging.WARNING, logger="core.semantic_memory_review"):
+        SemanticMemoryReviewService(db=db, config=cfg).confirm_candidate(
+            candidate.candidate_id, actor="operator", reason="ok"
+        )
+    assert any("no mirrored evidence artifact" in r.message for r in caplog.records)
+    assert _ids_of_type(ccf_settings, "semantic.assertion") == []
+    assert _ids_of_type(ccf_settings, "governance.review_decision") == []
+    assert not _ledger_entries(tmp_path)
+
+
+def test_wiki_family_mirrors_semantic_page_projection(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(
+        tmp_path, ccf_settings.schema, mirror_review=True, mirror_wiki=True
+    )
+    service, db = _lifecycle_service(cfg, tmp_path)
+    result = _capture_transcript(service)
+    candidate = _add_candidate_with_evidence(db, result.queue_artifact_id)
+
+    from core.semantic_memory_review import SemanticMemoryReviewService
+
+    SemanticMemoryReviewService(db=db, config=cfg).confirm_candidate(
+        candidate.candidate_id, actor="operator", reason="looks right"
+    )
+
+    from core.wiki_updater import CompiledWikiUpdater
+
+    results = CompiledWikiUpdater(
+        cfg, layout=service.layout, db=db
+    ).update_from_semantic_memory()
+    assert results
+
+    snapshot = CcfSnapshot(ccf_settings)
+    wiki_origins = [
+        (native_id, object_id)
+        for _src, native_id, _rev, kind, object_id in snapshot.origins
+        if kind == "record" and native_id.startswith("wiki:")
+    ]
+    assert wiki_origins, "expected a mirrored wiki projection"
+    assertions = _ids_of_type(ccf_settings, "semantic.assertion")
+    assert len(assertions) == 1
+    # Every projection carries derived_from evidence to the assertion.
+    for _native_id, projection_id in wiki_origins:
+        assert any(
+            t == "ccf.derived_from" and f == projection_id and to == assertions[0]
+            for t, f, to in snapshot.links
+        )
+    assert not _ledger_entries(tmp_path)
+
+
+def test_wiki_family_skips_pages_without_mirrored_evidence(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch, caplog
+):
+    """mirror_wiki without mirror_review: no assertion exists to cite."""
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    cfg = _dualwrite_config(tmp_path, ccf_settings.schema, mirror_wiki=True)
+    service, db = _lifecycle_service(cfg, tmp_path)
+    result = _capture_transcript(service)
+    candidate = _add_candidate_with_evidence(db, result.queue_artifact_id)
+
+    from core.semantic_memory_review import SemanticMemoryReviewService
+
+    SemanticMemoryReviewService(db=db, config=cfg).confirm_candidate(
+        candidate.candidate_id, actor="operator", reason="looks right"
+    )
+
+    from core.wiki_updater import CompiledWikiUpdater
+
+    with caplog.at_level(logging.WARNING, logger="core.wiki_updater"):
+        results = CompiledWikiUpdater(
+            cfg, layout=service.layout, db=db
+        ).update_from_semantic_memory()
+    assert results  # pages still compile; only the mirror skips
+    assert any(
+        "no mirrored candidate assertions" in r.message for r in caplog.records
+    )
+
+    snapshot = CcfSnapshot(ccf_settings)
+    assert not any(
+        native_id.startswith("wiki:")
+        for _src, native_id, _rev, kind, _oid in snapshot.origins
+        if kind == "record"
+    )
+    assert not _ledger_entries(tmp_path)

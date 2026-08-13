@@ -207,3 +207,49 @@ def test_transcript_requires_text(rig, ctx, capture):
             engine="deepgram",
             engine_version="nova-2",
         )
+
+
+# ---------------------------------------------------------------------------
+# Mirror integration (ccf.dualwrite.families)
+# ---------------------------------------------------------------------------
+
+
+def test_mirror_transcript_family_admits_and_skips_rerun(
+    tmp_path, ccf_postgres_dsn, ccf_settings, monkeypatch
+):
+    """utterances mirror through the dual-write service, idempotently."""
+    monkeypatch.setenv("THOTH_CCF_POSTGRES_DSN", ccf_postgres_dsn)
+    from ccf.dualwrite import families
+    from ccf_helpers import make_dual_write_service, mirror_test_capture
+
+    service = make_dual_write_service(
+        tmp_path, ccf_settings.schema, mirror_transcripts=True
+    )
+    receipt = mirror_test_capture(service, tmp_path)
+    objects = receipt["objects"]
+
+    out = families.mirror_transcript(
+        service,
+        source={"source_id": "src-test"},
+        transcript={
+            "transcript_id": "tr-1",
+            "raw_transcript": "hello there",
+            "language": "en",
+        },
+        media_artifact_ccf_id=objects["artifact_id"],
+        run_ccf_id=objects.get("run_id"),
+        session_ccf_id=objects.get("session_id"),
+        engine="test_connector",
+    )
+    assert out["status"] == "accepted"
+    assert len(out["utterance_ids"]) == 1
+
+    again = families.mirror_transcript(
+        service,
+        source={"source_id": "src-test"},
+        transcript={"transcript_id": "tr-1", "raw_transcript": "hello there"},
+        media_artifact_ccf_id=objects["artifact_id"],
+        run_ccf_id=objects.get("run_id"),
+        engine="test_connector",
+    )
+    assert again["status"] == "existing"

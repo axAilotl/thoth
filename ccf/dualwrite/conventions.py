@@ -36,6 +36,11 @@ DUALWRITE_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "thoth.ccf.dualwrite")
 MEDIA_REVISION = "content-sha256"  # marker: media origin revision IS the sha256
 SESSION_REVISION = "1"
 FINDING_REVISION = "1"
+TRANSCRIPT_REVISION = "1"
+ENTITY_REVISION = "1"
+ASSERTION_REVISION = "1"
+REVIEW_REVISION = "1"
+WIKI_REVISION = "1"  # fallback; the page input_hash is the revision when present
 
 
 def deterministic_id(kind: str, archive_id: str, *parts: str) -> str:

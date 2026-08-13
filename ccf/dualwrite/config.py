@@ -32,12 +32,22 @@ DEFAULT_ERROR_LOG_PATH = ".thoth_system/ccf_dualwrite_errors.jsonl"
 
 @dataclass(frozen=True)
 class DualWriteSettings:
-    """Resolved dual-write settings; ``enabled=False`` means untouched."""
+    """Resolved dual-write settings; ``enabled=False`` means untouched.
+
+    The ``mirror_*`` flags gate the phase-2 converter families
+    (``ccf.dualwrite.families``) individually so operators can roll the
+    mirror out family by family. Like ``dual_write`` itself they default
+    off; they are meaningless (and unresolved) unless ``dual_write`` is on.
+    """
 
     enabled: bool
     store: CcfPostgresSettings | None = None
     package_root: Path | None = None
     error_log_path: Path | None = None
+    mirror_transcripts: bool = False
+    mirror_semantic: bool = False
+    mirror_review: bool = False
+    mirror_wiki: bool = False
 
 
 def resolve_dual_write_settings(
@@ -95,4 +105,8 @@ def resolve_dual_write_settings(
         store=store,
         package_root=package_root,
         error_log_path=error_log_path,
+        mirror_transcripts=bool(store_cfg.get("mirror_transcripts", False)),
+        mirror_semantic=bool(store_cfg.get("mirror_semantic", False)),
+        mirror_review=bool(store_cfg.get("mirror_review", False)),
+        mirror_wiki=bool(store_cfg.get("mirror_wiki", False)),
     )

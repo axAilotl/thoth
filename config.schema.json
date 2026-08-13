@@ -227,6 +227,22 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "dual_write": { "type": "boolean" },
+            "mirror_transcripts": {
+              "type": "boolean",
+              "description": "Dual-write family flag: mirror transcript captures as experience.utterance records. Requires dual_write."
+            },
+            "mirror_semantic": {
+              "type": "boolean",
+              "description": "Dual-write family flag: mirror canonical entities resolved at capture time as semantic.entity records. Requires dual_write."
+            },
+            "mirror_review": {
+              "type": "boolean",
+              "description": "Dual-write family flag: mirror artifact/semantic-memory review decisions as governance.review_decision records (materializing candidate semantic.assertion targets). Requires dual_write."
+            },
+            "mirror_wiki": {
+              "type": "boolean",
+              "description": "Dual-write family flag: mirror compiled semantic wiki pages as experience.artifact wiki projections with mandatory evidence links. Requires dual_write."
+            },
             "backend": { "type": "string", "enum": ["postgres"] },
             "dsn_env": { "type": "string" },
             "schema": {

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any, Mapping
 
+from .ccf_dualwrite import mirrored_queue_artifact, open_dual_write_service
+from .config import config as _runtime_config
 from .metadata_db import MetadataDB
 from .semantic_memory import (
     SemanticMemoryCandidate,
@@ -13,6 +17,8 @@ from .semantic_memory import (
 )
 from .time_utils import utc_now_iso as _now_iso
 
+
+logger = logging.getLogger(__name__)
 
 JsonObject = dict[str, Any]
 SEMANTIC_MEMORY_REVIEW_METADATA_KEY = "semantic_memory_review"
@@ -49,10 +55,12 @@ class SemanticMemoryReviewService:
         *,
         store: SemanticMemoryStore | None = None,
         db: MetadataDB | None = None,
+        config=None,
     ):
         if store is not None and db is not None:
             raise SemanticMemoryReviewError("store and db are mutually exclusive")
         self.store = store or SemanticMemoryStore(db)
+        self.config = config if config is not None else _runtime_config
 
     def list_candidates(
         self,
@@ -207,6 +215,7 @@ class SemanticMemoryReviewService:
             write_provenance={SEMANTIC_MEMORY_REVIEW_METADATA_KEY: review_record},
             promoted_at=review_record["at"],
         )
+        self._mirror_review(candidate, review_record)
         return self.get_candidate(candidate.candidate_id)
 
     def _review_transition(
@@ -229,7 +238,7 @@ class SemanticMemoryReviewService:
             reviewed_at=reviewed_at,
             metadata=metadata,
         )
-        return self.store.transition_candidate(
+        candidate = self.store.transition_candidate(
             candidate_id,
             status,
             superseded_by_candidate_id=superseded_by_candidate_id,
@@ -237,6 +246,102 @@ class SemanticMemoryReviewService:
             write_provenance={SEMANTIC_MEMORY_REVIEW_METADATA_KEY: review_record},
             transitioned_at=review_record["at"],
         )
+        self._mirror_review(candidate, review_record)
+        return candidate
+
+    def _mirror_review(
+        self,
+        candidate: SemanticMemoryCandidate,
+        review_record: Mapping[str, Any],
+    ) -> None:
+        """Mirror the candidate assertion + review decision into CCF.
+
+        Fail-open and ledgered: the legacy transition is already durable
+        when this runs. The candidate assertion is materialized (idempotent)
+        so the decision has a target; evidence Links cite the mirrored media
+        artifacts behind the candidate's evidence rows. When no evidence
+        artifact was ever mirrored the review cannot cite a source or
+        evidence, so it is skipped with a warning rather than weakened.
+        """
+        service = open_dual_write_service(self.config)
+        if service is None or not service.settings.mirror_review:
+            return
+        try:
+            from ccf.dualwrite import families
+            from ccf.dualwrite.conventions import ENTITY_REVISION
+
+            evidence_ccf_ids: list[str] = []
+            source_ccf_id: str | None = None
+            for item in self.store.list_evidence(candidate_id=candidate.candidate_id):
+                if not item.artifact_id:
+                    continue
+                entry = self.store.db.get_ingestion_entry(item.artifact_id)
+                if entry is None:
+                    continue
+                try:
+                    payload = json.loads(entry.payload_json or "{}")
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, Mapping):
+                    continue
+                resolved = mirrored_queue_artifact(service, self.config, payload)
+                if resolved is None:
+                    continue
+                if source_ccf_id is None:
+                    source_ccf_id = resolved[0]
+                evidence_ccf_ids.append(resolved[1])
+            if source_ccf_id is None:
+                logger.warning(
+                    "skipping CCF review mirror for candidate %s: "
+                    "no mirrored evidence artifact",
+                    candidate.candidate_id,
+                )
+                return
+
+            subject_ccf_id = None
+            if candidate.entity_id:
+                found = families.find_mirrored_object(
+                    service,
+                    native_id=candidate.entity_id,
+                    revision=ENTITY_REVISION,
+                )
+                if found is not None:
+                    subject_ccf_id = found[1]
+
+            assertion_id = families.mirror_candidate_assertion(
+                service,
+                source_ccf_id=source_ccf_id,
+                candidate={
+                    "candidate_id": candidate.candidate_id,
+                    "candidate_type": candidate.candidate_type,
+                    "status": candidate.status,
+                    "subject": candidate.subject,
+                    "predicate": candidate.predicate,
+                    "object_value": candidate.object_value,
+                    "text": candidate.text,
+                    "confidence": candidate.confidence,
+                    "entity_id": candidate.entity_id,
+                },
+                subject_ccf_id=subject_ccf_id,
+                evidence_ccf_ids=evidence_ccf_ids,
+            )
+            families.mirror_review_decision(
+                service,
+                source_ccf_id=source_ccf_id,
+                review=dict(review_record),
+                target_ccf_ids=[assertion_id],
+                evidence_ccf_ids=evidence_ccf_ids,
+            )
+        except Exception as exc:
+            service.record_error(
+                {
+                    "family": "review",
+                    "flow": "semantic_memory_review",
+                    "candidate_id": candidate.candidate_id,
+                    "action": review_record.get("action"),
+                },
+                exc,
+            )
 
     def _require_candidate(self, candidate_id: str) -> None:
         candidate = self.store.get_candidate(candidate_id)

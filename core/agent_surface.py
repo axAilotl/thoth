@@ -179,7 +179,7 @@ class AgentSurfaceService:
         limit: int = 50,
     ) -> dict[str, Any]:
         """List artifacts that are in active or closed operator review states."""
-        entries = ArtifactReviewQueueService(self.db).list_entries(
+        entries = ArtifactReviewQueueService(self.db, config=self.config).list_entries(
             status=status,
             include_closed=include_closed,
             limit=limit,
@@ -421,7 +421,7 @@ class AgentSurfaceService:
     ) -> dict[str, Any]:
         """Retry a review-queue artifact by moving it back to pending."""
         try:
-            entry = ArtifactReviewQueueService(self.db).retry(
+            entry = ArtifactReviewQueueService(self.db, config=self.config).retry(
                 artifact_id,
                 actor=actor,
                 reason=reason,
@@ -441,7 +441,7 @@ class AgentSurfaceService:
     ) -> dict[str, Any]:
         """Reject a bad artifact and keep its provenance/error audit."""
         try:
-            entry = ArtifactReviewQueueService(self.db).reject(
+            entry = ArtifactReviewQueueService(self.db, config=self.config).reject(
                 artifact_id,
                 actor=actor,
                 reason=reason,
@@ -461,7 +461,7 @@ class AgentSurfaceService:
     ) -> dict[str, Any]:
         """Mark a bad artifact reviewed without retrying or accepting it."""
         try:
-            entry = ArtifactReviewQueueService(self.db).mark_reviewed(
+            entry = ArtifactReviewQueueService(self.db, config=self.config).mark_reviewed(
                 artifact_id,
                 actor=actor,
                 reason=reason,
