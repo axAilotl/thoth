@@ -29,7 +29,11 @@ fits:
 
 The importer keeps per-file object IDs in its report so unchanged files
 re-map to byte-identical submissions (idempotent retry) and dishonest
-re-submissions surface as ``origin_revision_conflict``.
+re-submissions surface as ``origin_revision_conflict``. Source Records
+derive deterministic URNs from the archive ID plus the vault's native
+identity, and unchanged notes/attachments are recognized through the
+origin index, so a fresh importer instance re-importing the same vault
+reuses the admitted objects instead of duplicating them (thoth-doz).
 """
 
 from __future__ import annotations
@@ -151,6 +155,7 @@ class NoteRecord:
     excerpt: str
     submissions: dict = field(default_factory=dict)  # original signed submissions
     batch_id: str = ""
+    existing: bool = False  # admitted by an earlier import pass, reused as-is
 
 
 @dataclass
@@ -188,6 +193,9 @@ class ImportReport:
             "run_tag": self.run_tag,
             "sources": len(self.sources),
             "notes_imported": len(self.notes),
+            "notes_existing": sum(
+                1 for record in self.notes.values() if record.existing
+            ),
             "attachment_blobs": len(self.attachment_blobs),
             "wikilink_edges": len(self.wikilink_edges),
             "attachment_links": len(self.attachment_links),
@@ -302,6 +310,11 @@ class ObsidianImporter:
         record = self.report.notes.get(relpath)
         if record is None:
             raise ObsidianImportError(f"note was not imported: {relpath}")
+        if reuse_ids and record.existing:
+            raise ObsidianImportError(
+                f"note predates this importer instance, no signed submissions "
+                f"to replay: {relpath}"
+            )
         path = self.vault_root / relpath
         if reuse_ids:
             if revision is not None or text_override is not None:
@@ -349,33 +362,46 @@ class ObsidianImporter:
         if existing is not None:
             return existing
         if "_vault" not in self.report.sources:
-            vault = thothmap_sources.source_submission(
-                self._producer,
-                self._ctx,
+            self.report.sources["_vault"] = self._admit_source_once(
                 {
                     "source_name": self.vault_root.name or "obsidian-vault",
                     "source_type": "obsidian_vault",
                     "collector": "ccf.obsidian",
                     "native_source_id": str(self.vault_root),
-                },
-                trust_class="trusted",
+                }
             )
-            self._pending_sources.extend(vault.records)
-            self.report.sources["_vault"] = vault.records[0]["id"]
-        mapped = thothmap_sources.source_submission(
-            self._producer,
-            self._ctx,
+        self.report.sources[segment] = self._admit_source_once(
             {
                 "source_name": segment,
                 "source_type": kind,
                 "collector": "ccf.obsidian",
                 "native_source_id": f"{self.vault_root}/{segment}",
-            },
+            }
+        )
+        return self.report.sources[segment]
+
+    def _admit_source_once(self, snapshot: dict) -> str:
+        """Construct one source Record unless the archive already has it.
+
+        The source URN derives deterministically from the archive ID and
+        the source's native identity, so a fresh importer instance pointed
+        at the same vault reuses the admitted Record instead of
+        duplicating the origin root (thoth-doz).
+        """
+        object_id = thothmap_sources.stable_source_object_id(
+            self._archive.archive_id, snapshot["native_source_id"]
+        )
+        if self._archive.get_object(object_id) is not None:
+            return object_id
+        mapped = thothmap_sources.source_submission(
+            self._producer,
+            self._ctx,
+            snapshot,
             trust_class="trusted",
+            object_id=object_id,
         )
         self._pending_sources.extend(mapped.records)
-        self.report.sources[segment] = mapped.records[0]["id"]
-        return mapped.records[0]["id"]
+        return object_id
 
     def _flush_sources(self) -> None:
         if self._pending_sources:
@@ -403,19 +429,14 @@ class ObsidianImporter:
         for vfile in layout.notes + layout.binaries:
             self._segment_of(vfile)
         for repo_relpath in layout.repos:
-            mapped = thothmap_sources.source_submission(
-                self._producer,
-                self._ctx,
+            self.report.sources[f"repo:{repo_relpath}"] = self._admit_source_once(
                 {
                     "source_name": Path(repo_relpath).name,
                     "source_type": "git_repository",
                     "collector": "ccf.obsidian",
                     "native_source_id": f"{self.vault_root}/{repo_relpath}",
-                },
-                trust_class="trusted",
+                }
             )
-            self._pending_sources.extend(mapped.records)
-            self.report.sources[f"repo:{repo_relpath}"] = mapped.records[0]["id"]
 
         vault_source = self.report.sources["_vault"]
         started = self._producer.clock()
@@ -467,6 +488,35 @@ class ObsidianImporter:
             chunk_relpaths = {vfile.relpath for vfile in chunk}
             for vfile in chunk:
                 segment, source_id = self._segment_of_fn(vfile)
+                existing_artifact = self._archive.find_origin_object(
+                    source_id, vfile.relpath, vfile.sha256, "record"
+                )
+                if existing_artifact is not None:
+                    # Cross-pass re-import (thoth-doz): this exact revision
+                    # was admitted by an earlier import. Reuse it; never
+                    # resubmit under fresh object IDs (the fresh recorded_at
+                    # would read as a dishonest origin_revision_conflict).
+                    existing_blob = self._archive.find_origin_object(
+                        source_id, vfile.relpath, vfile.sha256, "blob"
+                    )
+                    if existing_blob is None:
+                        raise ObsidianImportError(
+                            f"archive holds the artifact but not the blob for "
+                            f"{vfile.relpath} — origin index is inconsistent"
+                        )
+                    self.report.notes[vfile.relpath] = NoteRecord(
+                        relpath=vfile.relpath,
+                        segment=segment,
+                        artifact_id=existing_artifact,
+                        blob_id=existing_blob,
+                        has_blob_id="",
+                        captured_in_id="",
+                        revision=vfile.sha256,
+                        title="",
+                        excerpt="",
+                        existing=True,
+                    )
+                    continue
                 data = vfile.abspath.read_bytes()
                 try:
                     parsed = parse_note(data.decode("utf-8"), fallback_title=vfile.stem)
@@ -515,7 +565,7 @@ class ObsidianImporter:
             self._admit(combined, purpose="notes")
             for vfile in chunk:
                 record = self.report.notes.get(vfile.relpath)
-                if record is not None and not record.batch_id:
+                if record is not None and not record.existing and not record.batch_id:
                     record.batch_id = self.report.batches[-1]["batch_id"]
 
     def _note_submissions(
@@ -720,6 +770,13 @@ class ObsidianImporter:
     def _attachment_submissions(self, binary: VaultFile) -> str:
         """Binary file -> attachment artifact + Blob (embedded or external)."""
         segment, source_id = self._segment_of_fn(binary)
+        existing_blob = self._archive.find_origin_object(
+            source_id, binary.relpath, binary.sha256, "blob"
+        )
+        if existing_blob is not None:
+            # Admitted by an earlier import pass (thoth-doz): reuse it.
+            self.report.attachment_blobs[binary.relpath] = existing_blob
+            return existing_blob
         data = binary.abspath.read_bytes()
         embedded = binary.size_bytes <= self.embed_cap_bytes
         mapped = thothmap_artifacts.media_submissions(

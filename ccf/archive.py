@@ -539,6 +539,31 @@ class Archive:
                 "commit_hash": row[2],
             }
 
+    def find_origin_object(
+        self,
+        source_id: str,
+        native_id: str,
+        revision: str,
+        object_kind: str,
+    ) -> str | None:
+        """Object ID admitted under one origin tuple, or ``None``.
+
+        Producer-side idempotency probe (spec 6.5): importers use it to
+        skip already-admitted source-native items instead of resubmitting
+        them under fresh object IDs.
+        """
+        parse_id(source_id)
+        with open_ccf_connection(self._settings) as conn:
+            row = conn.execute(
+                """
+                SELECT object_id FROM origin_index
+                WHERE archive_id = %s AND source_id = %s AND native_id = %s
+                  AND revision = %s AND object_kind = %s
+                """,
+                (self.archive_id, source_id, native_id, revision, object_kind),
+            ).fetchone()
+        return row[0] if row is not None else None
+
     def get_object(self, object_id: str) -> dict | None:
         """Portable view of one admitted object (header + compartments)."""
         parse_id(object_id)

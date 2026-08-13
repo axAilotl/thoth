@@ -21,9 +21,10 @@ archive's origin index, not from reused IDs.
 
 from __future__ import annotations
 
-import json
 import uuid
 from typing import Mapping
+
+from ccf.ids import derive_id
 
 from core.prompt_security import (
     PROMPT_SECURITY_SCANNER,
@@ -40,17 +41,12 @@ FINDING_REVISION = "1"
 def deterministic_id(kind: str, archive_id: str, *parts: str) -> str:
     """Deterministic CCF URN of ``kind`` namespaced to one archive.
 
-    Derived from a UUIDv5 digest with the version/variant bits forced to
-    the UUIDv4/RFC-4122 layout CCF requires — deterministic content with a
-    spec-legal shape (``ccf.ids.parse_id`` rejects non-v4 URNs).
+    Thin wrapper over :func:`ccf.ids.derive_id` pinning the dual-write
+    namespace and the ``[archive_id, kind, *parts]`` material layout —
+    the derivation is load-bearing for reopened archives, so it must
+    never change.
     """
-    material = json.dumps(
-        [archive_id, kind, *parts], ensure_ascii=False, separators=(",", ":")
-    )
-    digest = bytearray(uuid.uuid5(DUALWRITE_ID_NAMESPACE, material).bytes)
-    digest[6] = (digest[6] & 0x0F) | 0x40  # version 4
-    digest[8] = (digest[8] & 0x3F) | 0x80  # RFC 4122 variant
-    return f"urn:ccf:{kind}:{uuid.UUID(bytes=bytes(digest))}"
+    return derive_id(DUALWRITE_ID_NAMESPACE, kind, [archive_id, kind, *parts])
 
 
 def source_record_id(archive_id: str, thoth_source_id: str) -> str:

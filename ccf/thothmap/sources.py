@@ -14,6 +14,9 @@ Snapshot keys (CaptureSource fields): ``source_id``, ``source_name``,
 
 from __future__ import annotations
 
+import uuid
+
+from ccf.ids import derive_id
 from ccf.producer import Producer
 
 from ccf.thothmap.context import (
@@ -27,6 +30,25 @@ from ccf.thothmap.context import (
 )
 
 _SOURCE_TRUST_CLASSES = {"trusted", "authenticated", "untrusted", "hostile", "unknown"}
+
+#: UUIDv5 namespace salt for importer origin-root source IDs. Distinct
+#: from the dual-write namespace: a dual-write mirror and an import pass
+#: never share an archive, and their IDs must never be interchangeable.
+IMPORT_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "thoth.ccf.import")
+
+
+def stable_source_object_id(archive_id: str, native_source_id: str) -> str:
+    """Deterministic ``core.source`` URN for one importer origin root.
+
+    Sources carry no origin tuple, so the origin index cannot dedupe
+    them; the importer derives the URN from the archive ID plus the
+    source's stable native identity (e.g. vault path + segment) instead.
+    Two importer instances pointed at the same source derive the same
+    URN; distinct sources and distinct archives cannot collide.
+    """
+    return derive_id(
+        IMPORT_ID_NAMESPACE, "record", [archive_id, "core.source", native_source_id]
+    )
 
 
 def source_submission(
