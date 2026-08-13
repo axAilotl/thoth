@@ -132,15 +132,12 @@ def test_key_path_pointing_at_directory_fails_closed(
             "SELECT 1 FROM pg_tables WHERE schemaname = %s AND tablename = 'archive'",
             ("ccf_dir_key",),
         ).fetchone()
-    assert exists is None or True  # schema may exist from migrations; see below
-    try:
+    if exists is not None:
         with open_ccf_connection(
             CcfPostgresSettings(enabled=True, dsn=ccf_postgres_dsn, schema="ccf_dir_key")
         ) as conn:
             row = conn.execute("SELECT COUNT(*) FROM archive").fetchone()
             assert row[0] == 0
-    except Exception:
-        pass  # schema never created at all is equally fail-closed
 
 
 # ---------------------------------------------------------------------------

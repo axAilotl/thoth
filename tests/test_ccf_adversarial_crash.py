@@ -12,7 +12,6 @@ docker.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 from pathlib import Path
@@ -21,6 +20,7 @@ import pytest
 
 from ccf.db import CcfPostgresSettings, open_ccf_connection
 from ccf_helpers import make_rig
+from ccf_cutover_test_support import collect_imported_markdown, dualwrite_config
 
 
 @pytest.fixture()
@@ -168,43 +168,12 @@ def test_crash_after_journal_write_before_head_advance(rig, monkeypatch):
 
 
 def _dualwrite_config(tmp_path: Path, schema: str):
-    from core.config import Config
-
-    cfg = Config()
-    cfg.data = {
-        "paths": {
-            "vault_dir": str(tmp_path / "knowledge_vault"),
-            "system_dir": str(tmp_path / ".thoth_system"),
-            "cache_dir": str(tmp_path / ".thoth_system" / "cache"),
-        },
-        "database": {
-            "enabled": True,
-            "path": str(tmp_path / ".thoth_system" / "meta.db"),
-            "ccf_archive": {
-                "enabled": True,
-                "dual_write": True,
-                "backend": "postgres",
-                "dsn_env": "THOTH_CCF_POSTGRES_DSN",
-                "schema": schema,
-                "device_key_path": str(tmp_path / "ccf" / "device.pem"),
-                "archive_key_path": str(tmp_path / "ccf" / "archive.pem"),
-                "error_log_path": str(tmp_path / "errors.jsonl"),
-            },
-        },
-    }
-    return cfg
+    return dualwrite_config(tmp_path, schema)
 
 
 def _collect(cfg, import_dir: Path, tmp_path: Path):
-    from collectors.imported_markdown_connector import ImportedMarkdownConnector
-    from core.metadata_db import MetadataDB
-    from core.path_layout import build_path_layout
-
-    layout = build_path_layout(cfg)
-    db = MetadataDB(str(tmp_path / ".thoth_system" / "meta.db"))
-    connector = ImportedMarkdownConnector(cfg, layout=layout, db=db)
-    return asyncio.run(
-        connector.collect(import_dirs=[import_dir], source_name="crash_corpus")
+    return collect_imported_markdown(
+        cfg, import_dir, tmp_path, source_name="crash_corpus"
     )
 
 

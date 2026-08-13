@@ -17,6 +17,7 @@ import threading
 
 import pytest
 
+from ccf.db import open_ccf_connection
 from ccf.ids import generate_id
 from ccf.schemas import SchemaSet
 
@@ -524,6 +525,34 @@ def test_producer_chain_gap_rejected(rig):
     result = rig.archive.admit_batch(forged)
     assert result["status"] == "rejected"
     assert "producer chain conflict" in result["extensions"]["reason"]
+
+
+def test_out_of_order_batch_waits_for_exact_predecessor_then_admits(rig):
+    batch1 = rig.producer.create_batch(records=[_concept(rig)])
+    batch2 = rig.producer.create_batch(records=[_concept(rig)])
+
+    # Simulate a disconnected producer: the archive has its credential but
+    # has not received either locally spooled batch yet.
+    with open_ccf_connection(rig.settings) as conn:
+        with conn.transaction():
+            conn.execute(
+                "DELETE FROM producer_batch WHERE producer_id = %s",
+                (batch1["producer_id"],),
+            )
+            conn.execute(
+                "DELETE FROM producer_head WHERE producer_id = %s",
+                (batch1["producer_id"],),
+            )
+
+    early = rig.archive.admit_batch(batch2)
+    assert early["status"] == "queued", early
+    assert early["extensions"]["reason"].startswith("predecessor_missing:")
+
+    first = rig.archive.admit_batch(batch1)
+    assert first["status"] == "committed", first
+    retried = rig.archive.admit_batch(batch2)
+    assert retried["status"] == "committed", retried
+    assert int(retried["commit_sequence"]) > int(first["commit_sequence"])
 
 
 def test_unknown_type_fails_closed(rig):

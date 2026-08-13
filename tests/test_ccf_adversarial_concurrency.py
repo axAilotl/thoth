@@ -221,14 +221,22 @@ def test_governance_mutation_never_serves_stale_allow(rig):
         transition="supersede",
     )
     stop = threading.Event()
+    tightened_committed = threading.Event()
+    observed_post_commit = threading.Condition()
     errors: list[BaseException] = []
     decisions: list[str] = []
+    post_commit_decisions: list[str] = []
 
     def _reader():
         while not stop.is_set():
             try:
+                began_after_commit = tightened_committed.is_set()
                 result = engine.authorize(**kwargs)
                 decisions.append(result.decision["decision"])
+                if began_after_commit:
+                    with observed_post_commit:
+                        post_commit_decisions.append(result.decision["decision"])
+                        observed_post_commit.notify_all()
             except BaseException as exc:  # noqa: BLE001 - collected, asserted
                 errors.append(exc)
 
@@ -237,6 +245,11 @@ def test_governance_mutation_never_serves_stale_allow(rig):
         thread.start()
     result = rig.archive.admit_batch(rig.producer.create_batch(records=[tightened]))
     assert result["status"] == "committed", result
+    tightened_committed.set()
+    with observed_post_commit:
+        observed = observed_post_commit.wait_for(
+            lambda: len(post_commit_decisions) >= len(readers), timeout=30
+        )
     stop.set()
     for thread in readers:
         thread.join(timeout=60)
@@ -244,6 +257,8 @@ def test_governance_mutation_never_serves_stale_allow(rig):
     assert not errors, errors[:3]
     assert decisions  # the readers actually ran during the mutation
     assert set(decisions) <= {"allow", "deny"}
+    assert observed, "readers never exercised the post-commit safety window"
+    assert set(post_commit_decisions) == {"deny"}, post_commit_decisions
     # Post-mutation reads deny, from a fresh evaluation.
     denied = engine.authorize(**kwargs)
     assert denied.decision["decision"] == "deny"
@@ -294,11 +309,15 @@ def test_concurrent_erasure_never_returns_erased_plaintext(rig):
 
     errors: list[BaseException] = []
     saw_plaintext_after_block: list[str] = []
-    erased_marker = threading.Event()
+    stop = threading.Event()
+    block_committed = threading.Event()
+    observed_post_block = threading.Condition()
+    post_block_reads: list[str] = []
 
     def _reader():
-        while not erased_marker.is_set():
+        while not stop.is_set():
             try:
+                began_after_block = block_committed.is_set()
                 obj = rig.archive.get_object(record["id"])
                 assert obj is not None
                 semantic = obj["compartments"]["semantic"]
@@ -310,19 +329,34 @@ def test_concurrent_erasure_never_returns_erased_plaintext(rig):
                 else:
                     # Once erased, no plaintext form may ever be served.
                     assert semantic["envelope"] is None
+                if began_after_block:
+                    if semantic["state"] == "plaintext":
+                        saw_plaintext_after_block.append(record["id"])
+                    with observed_post_block:
+                        post_block_reads.append(semantic["state"])
+                        observed_post_block.notify_all()
             except BaseException as exc:  # noqa: BLE001 - collected, asserted
                 errors.append(exc)
 
     readers = [threading.Thread(target=_reader) for _ in range(4)]
     for thread in readers:
         thread.start()
+    blocked = svc.advance(decided["operation_id"])
+    assert blocked["stage"] == "block", blocked
+    block_committed.set()
+    with observed_post_block:
+        observed = observed_post_block.wait_for(
+            lambda: len(post_block_reads) >= len(readers), timeout=30
+        )
     status = svc.execute(decided["operation_id"])
-    erased_marker.set()
+    stop.set()
     for thread in readers:
         thread.join(timeout=60)
 
     assert status["stage"] == "receipt", status
     assert not errors, errors[:3]
+    assert observed, "readers never exercised the post-block safety window"
+    assert set(post_block_reads) == {"erased"}, post_block_reads
     assert not saw_plaintext_after_block
 
     # Post-saga reads: erased, and re-admission is suppressed/refused.

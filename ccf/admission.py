@@ -469,6 +469,14 @@ class _BatchRejected(Exception):
         self.reason = reason
 
 
+class _PredecessorMissing(Exception):
+    """A valid signed batch whose exact producer predecessor is not present."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 def _verify_batch_envelope(conn, archive: dict, batch: dict, schemas: SchemaSet) -> None:
     """Schema, catalog, credential, signature, and producer-chain checks."""
     try:
@@ -500,43 +508,39 @@ def _verify_batch_envelope(conn, archive: dict, batch: dict, schemas: SchemaSet)
     except Exception as exc:
         raise _BatchRejected(f"batch signature invalid: {exc}") from exc
 
-    # Chain anchor: the persisted batch with the highest sequence below
-    # this batch's own. The table only ever holds (a) batches the local
-    # producer signed and spooled itself ('queued') and (b) received
-    # batches that passed envelope verification and were answered
-    # ('committed'/'partial'/'conflict', plus content 'rejected') — both
-    # are legitimate members of the producer's signed chain, including a
-    # content-rejected batch the producer rightfully chains past.
-    # Envelope-rejected arrivals are never persisted (see
-    # admit_producer_batch), so a forgery cannot poison the anchor.
-    # Anchoring below the batch's own sequence handles every ordering: a
-    # locally spooled batch chains onto its own predecessor (not its
-    # queued self-row), later spooled batches do not hijack the anchor,
-    # and out-of-order redelivery from a disconnected producer verifies
-    # against its true predecessor.
-    last = conn.execute(
-        """
-        SELECT batch_hash, producer_sequence FROM producer_batch
-        WHERE producer_id = %s AND producer_sequence < %s
-        ORDER BY producer_sequence DESC LIMIT 1
-        """,
-        (batch["producer_id"], int(batch["producer_sequence"])),
-    ).fetchone()
-    if last is None:
+    # Producer-chain continuity follows the exact predecessor, independent
+    # of arrival/admission order. A cryptographically valid batch that arrives
+    # early remains queued; it is not permanently content-rejected. Rows exist
+    # only for locally signed batches or remotely verified envelopes, so a
+    # content-rejected predecessor remains a valid chain anchor while an
+    # invalid signature/credential/envelope can never poison the chain.
+    sequence = int(batch["producer_sequence"])
+    if sequence == 1:
         if batch["previous_batch_hash"] is not None:
             raise _BatchRejected(
-                "producer chain conflict: first known batch must have no previous hash"
+                "producer chain conflict: sequence 1 must have no previous hash"
             )
-    else:
-        if batch["previous_batch_hash"] != last[0] or int(
-            batch["producer_sequence"]
-        ) != int(last[1]) + 1:
-            raise _BatchRejected(
-                "producer chain conflict: expected sequence "
-                f"{int(last[1]) + 1} with previous hash {last[0]}, got sequence "
-                f"{batch['producer_sequence']} with previous "
-                f"{batch['previous_batch_hash']}"
-            )
+        return
+    if batch["previous_batch_hash"] is None:
+        raise _BatchRejected(
+            f"producer chain conflict: sequence {sequence} requires a previous hash"
+        )
+    predecessor = conn.execute(
+        """
+        SELECT batch_hash FROM producer_batch
+        WHERE producer_id = %s AND producer_sequence = %s
+        """,
+        (batch["producer_id"], sequence - 1),
+    ).fetchone()
+    if predecessor is None:
+        raise _PredecessorMissing(
+            f"predecessor_missing: producer sequence {sequence - 1} is not present"
+        )
+    if batch["previous_batch_hash"] != predecessor[0]:
+        raise _BatchRejected(
+            "producer chain conflict: expected previous hash "
+            f"{predecessor[0]}, got {batch['previous_batch_hash']}"
+        )
 
 
 def _resolve_policy_ref(conn, lineage_heads: dict, policy_hint, catalog_root: str) -> dict:
@@ -617,6 +621,12 @@ def admit_producer_batch(
 
     try:
         _verify_batch_envelope(conn, archive, batch, schemas)
+    except _PredecessorMissing as exc:
+        result = _batch_result(
+            batch["batch_id"], "queued", archive_id, reason=exc.reason
+        )
+        _record_batch_outcome(conn, batch, result, committed_sequence=None)
+        return result
     except _BatchRejected as exc:
         # Fail closed WITHOUT persisting an outcome row: an envelope
         # rejection (bad schema, catalog or credential mismatch, invalid
