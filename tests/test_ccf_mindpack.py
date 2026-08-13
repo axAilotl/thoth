@@ -159,7 +159,10 @@ def test_restore_zip_container(rig, settings_factory, tmp_path, ccf_package_root
 
     zip_path = zip_pack_dir(pack_dir, tmp_path / "archive.mindpack.zip")
     report = restore_mindpack(
-        settings_factory(), package_root=ccf_package_root, pack_path=zip_path
+        settings_factory(),
+        package_root=ccf_package_root,
+        pack_path=zip_path,
+        trusted_genesis_hash=manifest["genesis_commit_hash"],
     )
     assert report["head_commit_hash"] == manifest["head_commit_hash"]
 
@@ -167,35 +170,38 @@ def test_restore_zip_container(rig, settings_factory, tmp_path, ccf_package_root
 def test_restore_rejects_tampered_stream(rig, settings_factory, tmp_path, ccf_package_root):
     _populate(rig)
     pack_dir = tmp_path / "archive.mindpack"
-    rig.archive.sync().export_mindpack(pack_dir)
+    manifest = rig.archive.sync().export_mindpack(pack_dir)
     target = next((pack_dir / "compartments" / "records").glob("*.structural.json"))
     data = bytearray(target.read_bytes())
     data[-5] ^= 0xFF
     target.write_bytes(bytes(data))
     with pytest.raises(PackError):
         restore_mindpack(settings_factory(), package_root=ccf_package_root,
-                         pack_path=pack_dir)
+                         pack_path=pack_dir,
+                         trusted_genesis_hash=manifest["genesis_commit_hash"])
 
 
 def test_restore_refuses_non_empty_store(rig, tmp_path, ccf_package_root):
     _populate(rig)
     pack_dir = tmp_path / "archive.mindpack"
-    rig.archive.sync().export_mindpack(pack_dir)
+    manifest = rig.archive.sync().export_mindpack(pack_dir)
     with pytest.raises(RestoreError, match="not empty"):
-        restore_mindpack(rig.settings, package_root=ccf_package_root, pack_path=pack_dir)
+        restore_mindpack(rig.settings, package_root=ccf_package_root, pack_path=pack_dir,
+                         trusted_genesis_hash=manifest["genesis_commit_hash"])
 
 
 def test_restore_rejects_wrong_trusted_head(rig, settings_factory, tmp_path,
                                             ccf_package_root):
     _populate(rig)
     pack_dir = tmp_path / "archive.mindpack"
-    rig.archive.sync().export_mindpack(pack_dir)
+    manifest = rig.archive.sync().export_mindpack(pack_dir)
     bogus = "sha256:" + "00" * 32
     with pytest.raises(RestoreError, match="trusted head"):
         restore_mindpack(
             settings_factory(),
             package_root=ccf_package_root,
             pack_path=pack_dir,
+            trusted_genesis_hash=manifest["genesis_commit_hash"],
             trusted_head_hash=bogus,
         )
 
@@ -393,3 +399,131 @@ def test_foreign_merge_records_erased_compartments(
     assert semantic["state"] == "erased"
     assert semantic["envelope"] is None  # no fabricated content
     rig_b.archive.verify_chain()
+
+
+# ---------------------------------------------------------------------------
+# Security review regression tests (ccf-0.1.2-rc1)
+# ---------------------------------------------------------------------------
+
+
+def test_restore_requires_identity_anchor(rig, settings_factory, tmp_path,
+                                          ccf_package_root):
+    """H1: without an out-of-band anchor, restore fails closed."""
+    _populate(rig)
+    pack_dir = tmp_path / "archive.mindpack"
+    rig.archive.sync().export_mindpack(pack_dir)
+    with pytest.raises(RestoreError, match="trusted genesis hash"):
+        restore_mindpack(
+            settings_factory(), package_root=ccf_package_root, pack_path=pack_dir
+        )
+
+
+def test_restore_bootstrap_new_archive(rig, settings_factory, tmp_path,
+                                       ccf_package_root):
+    """H1: explicit bootstrap opt-in restores and surfaces the genesis hash."""
+    _populate(rig)
+    pack_dir = tmp_path / "archive.mindpack"
+    manifest = rig.archive.sync().export_mindpack(pack_dir)
+    report = restore_mindpack(
+        settings_factory(),
+        package_root=ccf_package_root,
+        pack_path=pack_dir,
+        bootstrap_new_archive=True,
+    )
+    assert report["status"] == "restored"
+    assert report["genesis_commit_hash"] == manifest["genesis_commit_hash"]
+
+
+def test_operational_reread_detects_post_verification_swap(
+    rig, tmp_path, ccf_package_root
+):
+    """M1: an operational stream swapped after verification fails the digest re-check."""
+    from ccf.sync.restore import _reread_operational_streams
+
+    _populate(rig)
+    pack_dir = tmp_path / "archive.mindpack"
+    rig.archive.sync().export_mindpack(pack_dir)
+    pack = verify_mindpack(pack_dir, package_root=ccf_package_root)
+    target = pack_dir / "origin-index.ndjson"
+    data = bytearray(target.read_bytes())
+    data[-1] ^= 0xFF  # length-preserving tamper: only the digest re-check catches it
+    target.write_bytes(bytes(data))
+    with pytest.raises(RestoreError, match="changed since verification"):
+        _reread_operational_streams(pack_dir, pack)
+
+
+def test_pack_reader_enforces_entry_size_cap(tmp_path):
+    """M2: a ZIP entry beyond the cap fails before it is fully decompressed."""
+    import zipfile
+
+    from ccf.sync.packio import PackReader
+
+    zip_path = tmp_path / "bomb.mindpack"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("big.bin", b"A" * 4096)
+    with PackReader(zip_path, max_entry_bytes=1024) as reader:
+        with pytest.raises(PackError, match="limit"):
+            reader.read("big.bin")
+
+
+def test_pack_reader_enforces_total_size_cap(tmp_path):
+    """M2: cumulative uncompressed reads across entries are capped too."""
+    from ccf.sync.packio import PackReader
+
+    pack_dir = tmp_path / "pack"
+    pack_dir.mkdir()
+    (pack_dir / "a.bin").write_bytes(b"a" * 64)
+    (pack_dir / "b.bin").write_bytes(b"b" * 64)
+    with PackReader(pack_dir, max_total_bytes=96) as reader:
+        reader.read("a.bin")
+        with pytest.raises(PackError, match="total size limit"):
+            reader.read("b.bin")
+
+
+def test_verify_stream_digests_rejects_inflated_stream(tmp_path):
+    """M2: a stream longer than its manifest byte_length fails at the declaration."""
+    from ccf.hashing import digest_string
+    from ccf.sync.packio import PackReader, StreamEntry, verify_stream_digests
+
+    pack_dir = tmp_path / "pack"
+    pack_dir.mkdir()
+    data = b"x" * 100
+    (pack_dir / "data.bin").write_bytes(data)
+    entry = StreamEntry(
+        path="data.bin", digest=digest_string(data), byte_length=10
+    )
+    with PackReader(pack_dir) as reader:
+        with pytest.raises(PackError, match="size limit"):
+            verify_stream_digests(reader, [entry])
+
+
+def test_pack_writer_outputs_owner_only(tmp_path):
+    """L2: exported pack trees and zip containers are owner-only."""
+    import stat
+
+    from ccf.sync.packio import PackWriter, zip_pack_dir
+
+    root = tmp_path / "pack"
+    writer = PackWriter(root)
+    writer.write_json("manifest.json", {"a": 1})
+    writer.write_bytes("blob-data/x.bin", b"data")
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert stat.S_IMODE((root / "manifest.json").stat().st_mode) == 0o600
+    assert stat.S_IMODE((root / "blob-data").stat().st_mode) == 0o700
+    assert stat.S_IMODE((root / "blob-data" / "x.bin").stat().st_mode) == 0o600
+    out = zip_pack_dir(root, tmp_path / "pack.zip")
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_verify_commit_chain_wraps_malformed_members(rig, tmp_path, ccf_package_root):
+    """L4: malformed member fields surface as PackVerificationError, not KeyError."""
+    from ccf.sync.verify import PackVerificationError, verify_commit_chain
+
+    _populate(rig)
+    pack_dir = tmp_path / "archive.mindpack"
+    rig.archive.sync().export_mindpack(pack_dir)
+    pack = verify_mindpack(pack_dir, package_root=ccf_package_root)
+    bad_members = [dict(m) for m in pack.members]
+    bad_members[0].pop("commit_position")
+    with pytest.raises(PackVerificationError, match="malformed"):
+        verify_commit_chain(pack.commits, bad_members, pack.objects)

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import secrets
 from pathlib import Path
 
@@ -62,9 +63,21 @@ _TOKEN_PREFIX = "hmac-sha256:"
 
 
 def generate_suppression_key(path: str | Path) -> Path:
-    """Generate a fresh 32-byte suppression key at ``path`` (base64url)."""
+    """Generate a fresh 32-byte suppression key at ``path`` (base64url).
+
+    Written mode 0600 with ``O_EXCL`` (same discipline as
+    :func:`ccf.keys.generate_signing_key`): the key protects
+    suppression-after-erasure, so it is never world-readable and never
+    silently overwritten.
+    """
     path = Path(path)
-    path.write_text(encode_b64url(secrets.token_bytes(32)), encoding="utf-8")
+    if path.exists():
+        raise SuppressionKeyError(
+            f"refusing to overwrite existing suppression key: {path}"
+        )
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(encode_b64url(secrets.token_bytes(32)))
     return path
 
 

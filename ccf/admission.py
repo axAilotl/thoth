@@ -494,7 +494,9 @@ class _PredecessorMissing(Exception):
         self.reason = reason
 
 
-def _verify_batch_envelope(conn, archive: dict, batch: dict, schemas: SchemaSet) -> None:
+def _verify_batch_envelope(
+    conn, archive: dict, batch: dict, schemas: SchemaSet, now: str
+) -> None:
     """Schema, catalog, credential, signature, and producer-chain checks."""
     try:
         schemas.validate(SCHEMA_PRODUCER_BATCH, batch, what="producer batch")
@@ -507,7 +509,9 @@ def _verify_batch_envelope(conn, archive: dict, batch: dict, schemas: SchemaSet)
             f"archive {archive['semantic_catalog_root']}"
         )
     try:
-        public_key_text = resolve_credential_public_key(conn, batch["credential_id"])
+        public_key_text = resolve_credential_public_key(
+            conn, batch["credential_id"], required_scope="capture", now=now
+        )
     except CredentialError as exc:
         raise _BatchRejected(str(exc)) from exc
 
@@ -637,7 +641,7 @@ def admit_producer_batch(
         return stored[1]
 
     try:
-        _verify_batch_envelope(conn, archive, batch, schemas)
+        _verify_batch_envelope(conn, archive, batch, schemas, clock())
     except _PredecessorMissing as exc:
         result = _batch_result(
             batch["batch_id"], "queued", archive_id, reason=exc.reason

@@ -509,6 +509,134 @@ def test_unknown_credential_rejected(rig):
     assert "unknown credential" in result["extensions"]["reason"]
 
 
+def _lifecycle_credential_producer(
+    rig, tmp_path, name, *, scopes, valid_from, expires_at=None
+):
+    """Admit a second device credential with explicit lifecycle fields."""
+    from ccf.catalog import SemanticCatalog
+    from ccf.credentials import (
+        DeviceCredential,
+        device_credential_structural_payload,
+    )
+    from ccf.producer import Producer
+    from ccf.registry import PinnedRegistries
+    from ccf.schemas import SchemaSet
+
+    from ccf_helpers import make_keypair
+
+    key_path = tmp_path / f"device-{name}.pem"
+    make_keypair(key_path)
+    credential = DeviceCredential.load(
+        key_path, credential_id=generate_id("credential"), key_id=generate_id("key")
+    )
+    runtime_id = generate_id("record")
+    ts = rig.clock()
+    rig.archive.admit_bootstrap(
+        [
+            {
+                "type": "core.runtime",
+                "object_id": runtime_id,
+                "recorded_by": rig.runtime_id,
+                "recorded_at": ts,
+                "person_id": rig.person_id,
+                "authority": authority("runtime_import", rig.runtime_id),
+                "privacy": privacy(),
+                "policy_hint": rig.policy_lineage_id,
+                "payload": {
+                    "kind": "backend",
+                    "name": name,
+                    "version": "0.0.0-test",
+                    "instance_id": name,
+                    "capabilities": ["capture", "sync"],
+                    "operator_id": rig.person_id,
+                    "extensions": {},
+                },
+            },
+            {
+                "type": "core.device_credential",
+                "object_id": generate_id("record"),
+                "recorded_by": rig.runtime_id,
+                "recorded_at": ts,
+                "authority": authority(
+                    "explicit_authorization", rig.person_id, rig.person_id
+                ),
+                "privacy": privacy(),
+                "policy_hint": rig.policy_lineage_id,
+                "semantic": False,
+                "structural_payload": device_credential_structural_payload(
+                    credential,
+                    subject_id=runtime_id,
+                    issuer_key_id=rig.archive_key_id,
+                    scopes=scopes,
+                    valid_from=valid_from,
+                    expires_at=expires_at,
+                ),
+                "lineage": {
+                    "lineage_id": generate_id("lineage"),
+                    "previous_head_id": None,
+                    "transition": "issue",
+                    "valid_from": ts,
+                    "expires_at": None,
+                },
+                "payload": {},
+            },
+        ]
+    )
+    catalog = SemanticCatalog.load(rig.package_root)
+    return Producer(
+        settings=rig.settings,
+        producer_id=runtime_id,
+        credential=credential,
+        catalog=catalog,
+        registries=PinnedRegistries.load(rig.package_root, catalog),
+        schemas=SchemaSet.load(rig.package_root),
+        clock=rig.clock,
+    )
+
+
+def test_expired_credential_rejected(rig, tmp_path):
+    producer = _lifecycle_credential_producer(
+        rig,
+        tmp_path,
+        "expired",
+        scopes=["capture"],
+        valid_from="2026-08-11T00:00:00.000Z",
+        expires_at="2026-08-11T01:00:00.000Z",
+    )
+    batch = producer.create_batch(records=[_concept(rig)])
+    result = rig.archive.admit_batch(batch)
+    assert result["status"] == "rejected"
+    assert "expired" in result["extensions"]["reason"]
+
+
+def test_not_yet_valid_credential_rejected(rig, tmp_path):
+    producer = _lifecycle_credential_producer(
+        rig,
+        tmp_path,
+        "future",
+        scopes=["capture"],
+        valid_from="2027-01-01T00:00:00.000Z",
+    )
+    batch = producer.create_batch(records=[_concept(rig)])
+    result = rig.archive.admit_batch(batch)
+    assert result["status"] == "rejected"
+    assert "not yet valid" in result["extensions"]["reason"]
+
+
+def test_out_of_scope_credential_rejected(rig, tmp_path):
+    producer = _lifecycle_credential_producer(
+        rig,
+        tmp_path,
+        "nosync",
+        scopes=["sync"],
+        valid_from="2026-08-11T00:00:00.000Z",
+    )
+    batch = producer.create_batch(records=[_concept(rig)])
+    result = rig.archive.admit_batch(batch)
+    assert result["status"] == "rejected"
+    assert "scope" in result["extensions"]["reason"]
+
+
 def test_catalog_root_mismatch_rejected(rig):
     batch = rig.producer.create_batch(records=[_concept(rig)])
     wrong_root = "sha256:" + "0" * 64

@@ -13,6 +13,7 @@ digest or size mismatches raise :class:`PackError`.
 from __future__ import annotations
 
 import json
+import os
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -20,6 +21,13 @@ from pathlib import Path, PurePosixPath
 from ccf.hashing import digest_string, parse_digest
 from ccf.jcs import canonical_bytes
 from ccf.jcs import loads as jcs_loads
+
+#: Default uncompressed-size caps guarding against decompression bombs:
+#: packs arrive over HTTP and are read before (and while) their integrity
+#: is established. Operators restoring genuinely huge archives can raise
+#: them per reader; there is no way to disable them.
+MAX_ENTRY_BYTES = 1 << 30  # 1 GiB per pack entry
+MAX_TOTAL_BYTES = 4 << 30  # 4 GiB cumulative per reader
 
 
 class PackError(RuntimeError):
@@ -101,13 +109,26 @@ class PackWriter:
         if self.root.exists() and any(self.root.iterdir()):
             raise PackError(f"pack output directory is not empty: {self.root}")
         self.root.mkdir(parents=True, exist_ok=True)
+        # Pack trees hold plaintext compartments and blob bytes: keep the
+        # export owner-only regardless of the process umask.
+        os.chmod(self.root, 0o700)
         self._entries: list[StreamEntry] = []
 
     def write_bytes(self, name: str, data: bytes, *, required: bool = True) -> None:
         rel = _check_name(name)
         target = self.root / Path(*rel.parts)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        directory = target.parent
+        while True:
+            os.chmod(directory, 0o700)
+            if directory == self.root:
+                break
+            directory = directory.parent
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        # A pre-existing file keeps its mode under O_TRUNC; force 0600.
+        os.chmod(target, 0o600)
         self._entries.append(
             StreamEntry(str(rel), digest_string(data), len(data), required)
         )
@@ -127,9 +148,25 @@ class PackWriter:
 
 
 class PackReader:
-    """Read access to a pack, whether a directory or a ZIP-compatible file."""
+    """Read access to a pack, whether a directory or a ZIP-compatible file.
 
-    def __init__(self, path: str | Path) -> None:
+    Every read enforces uncompressed-size caps (``max_entry_bytes`` per
+    entry, ``max_total_bytes`` cumulative) so a hostile pack cannot
+    decompress-bomb the host before its integrity is established.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        max_entry_bytes: int = MAX_ENTRY_BYTES,
+        max_total_bytes: int = MAX_TOTAL_BYTES,
+    ) -> None:
+        if max_entry_bytes <= 0 or max_total_bytes <= 0:
+            raise PackError("pack size caps must be positive")
+        self.max_entry_bytes = max_entry_bytes
+        self.max_total_bytes = max_total_bytes
+        self._bytes_read = 0
         self.path = Path(path)
         self._zip: zipfile.ZipFile | None = None
         if self.path.is_dir():
@@ -166,13 +203,44 @@ class PackReader:
     def has(self, name: str) -> bool:
         return str(_check_name(name)) in self._names
 
-    def read(self, name: str) -> bytes:
+    def read(self, name: str, *, max_bytes: int | None = None) -> bytes:
+        """Read one entry fully, enforcing the uncompressed-size caps.
+
+        ``max_bytes`` tightens the per-entry cap for this read; stream
+        verification passes the manifest's declared ``byte_length`` so an
+        inflated stream fails as soon as it grows past its declaration.
+        """
         rel = str(_check_name(name))
         if rel not in self._names:
             raise PackError(f"pack entry missing: {rel}")
+        limit = self.max_entry_bytes if max_bytes is None else max_bytes
         if self._zip is not None:
-            return self._zip.read(rel)
-        return (self.path / Path(*PurePosixPath(rel).parts)).read_bytes()
+            info = self._zip.getinfo(rel)
+            if info.file_size > limit:
+                raise PackError(
+                    f"pack entry {rel} declares {info.file_size} uncompressed "
+                    f"bytes, over the {limit}-byte limit"
+                )
+            with self._zip.open(info) as fh:
+                data = fh.read(limit + 1)
+        else:
+            entry_path = self.path / Path(*PurePosixPath(rel).parts)
+            if entry_path.stat().st_size > limit:
+                raise PackError(
+                    f"pack entry {rel} is over the {limit}-byte size limit"
+                )
+            with entry_path.open("rb") as fh:
+                data = fh.read(limit + 1)
+        if len(data) > limit:
+            raise PackError(
+                f"pack entry {rel} exceeds the {limit}-byte size limit"
+            )
+        self._bytes_read += len(data)
+        if self._bytes_read > self.max_total_bytes:
+            raise PackError(
+                f"pack exceeds the {self.max_total_bytes}-byte total size limit"
+            )
+        return data
 
     def read_json(self, name: str) -> dict:
         value = jcs_loads(self.read(name))
@@ -197,7 +265,12 @@ def verify_stream_digests(reader: PackReader, streams: list[StreamEntry]) -> lis
                 raise PackError(f"required pack stream missing: {entry.path}")
             notes.append(f"optional stream absent: {entry.path}")
             continue
-        data = reader.read(entry.path)
+        if entry.byte_length < 0 or entry.byte_length > reader.max_entry_bytes:
+            raise PackError(
+                f"stream {entry.path} manifest byte_length {entry.byte_length} "
+                f"is outside the per-entry cap ({reader.max_entry_bytes})"
+            )
+        data = reader.read(entry.path, max_bytes=entry.byte_length)
         if len(data) != entry.byte_length:
             raise PackError(
                 f"stream {entry.path} byte length {len(data)} != "
@@ -219,6 +292,7 @@ def zip_pack_dir(pack_dir: str | Path, out_file: str | Path) -> Path:
         for path in sorted(pack_dir.rglob("*")):
             if path.is_file():
                 archive.write(path, str(path.relative_to(pack_dir)))
+    os.chmod(out_file, 0o600)
     return out_file
 
 

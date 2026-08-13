@@ -16,7 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from ccf.db import CcfPostgresSettings, migrate_ccf_store, open_ccf_connection
-from ccf.hashing import commit_leaf, decode_b64url, submission_hash
+from ccf.hashing import commit_leaf, decode_b64url, digest_string, submission_hash
+from ccf.jcs import loads as jcs_loads
 from ccf.journal import verify_chain
 from ccf.objects import now_timestamp
 from ccf.schemas import SchemaSet
@@ -28,6 +29,7 @@ from ccf.sync.packio import (
     PackReader,
     StreamEntry,
     load_pack_objects,
+    parse_ndjson,
     verify_stream_digests,
 )
 from ccf.sync.verify import verify_commit_chain, verify_pack_object
@@ -63,6 +65,7 @@ class VerifiedMindpack:
         schemas.validate(SCHEMA_MINDPACK_MANIFEST, self.manifest, what="mindpack manifest")
 
         streams = [StreamEntry.from_dict(s) for s in self.manifest["streams"]]
+        self.streams = streams
         self.stream_notes = verify_stream_digests(reader, streams)
 
         contents = load_pack_objects(reader)
@@ -386,6 +389,61 @@ def append_pack_commits(
     )
 
 
+def _reread_operational_streams(
+    pack_path: str | Path, pack: VerifiedMindpack
+) -> tuple[dict, list[dict], list[dict], list[dict], list[dict]]:
+    """Re-read the operational streams with digest re-verification.
+
+    Full verification ran through a reader that is closed by the time the
+    restore transaction consumes the operational streams. Every re-read is
+    checked against the verified manifest's byte length and digest, so a
+    pack swapped between the two opens fails closed instead of landing
+    unverified epoch, origin, or producer state.
+    """
+    entries = {s.path: s for s in pack.streams}
+    with PackReader(pack_path) as reader:
+
+        def read_verified(name: str) -> bytes:
+            entry = entries.get(name)
+            if entry is None:
+                raise RestoreError(
+                    f"operational stream {name} is not in the verified manifest"
+                )
+            data = reader.read(name, max_bytes=entry.byte_length)
+            if len(data) != entry.byte_length or digest_string(data) != entry.digest:
+                raise RestoreError(
+                    f"operational stream {name} changed since verification"
+                )
+            return data
+
+        def read_json(name: str) -> dict:
+            value = jcs_loads(read_verified(name))
+            if not isinstance(value, dict):
+                raise RestoreError(f"operational stream {name} is not a JSON object")
+            return value
+
+        archive_row = read_json("archive.json")
+        lineage_heads = parse_ndjson(
+            read_verified("lineage-heads.ndjson"), what="lineage-heads.ndjson"
+        )
+        origin_rows = parse_ndjson(
+            read_verified("origin-index.ndjson"), what="origin-index.ndjson"
+        )
+        producer_heads = (
+            parse_ndjson(
+                read_verified("producer-heads.ndjson"), what="producer-heads.ndjson"
+            )
+            if reader.has("producer-heads.ndjson")
+            else []
+        )
+        batches = [
+            read_json(name)
+            for name in sorted(reader.names())
+            if name.startswith("producer-batches/") and name.endswith(".json")
+        ]
+    return archive_row, lineage_heads, origin_rows, producer_heads, batches
+
+
 def restore_mindpack(
     settings: CcfPostgresSettings,
     *,
@@ -393,6 +451,7 @@ def restore_mindpack(
     pack_path: str | Path,
     trusted_genesis_hash: str | None = None,
     trusted_head_hash: str | None = None,
+    bootstrap_new_archive: bool = False,
     allow_partial: bool = False,
     clock=now_timestamp,
 ) -> dict:
@@ -400,7 +459,20 @@ def restore_mindpack(
 
     Fails closed unless the store has no archive row: restore never
     re-admits into an existing history and never remaps portable IDs.
+
+    The pack's chain is signed by a key carried inside the pack itself, so
+    verification alone cannot distinguish a genuine archive from a forged,
+    self-consistent one. Restore therefore refuses to run without an
+    identity anchor: pass ``trusted_genesis_hash`` obtained out-of-band, or
+    pass ``bootstrap_new_archive=True`` to pin a brand-new archive — the
+    report's ``genesis_commit_hash`` must then be recorded out-of-band as
+    the anchor for every future restore of this archive.
     """
+    if trusted_genesis_hash is None and not bootstrap_new_archive:
+        raise RestoreError(
+            "restore requires a trusted genesis hash obtained out-of-band "
+            "(or bootstrap_new_archive=True to pin a brand-new archive)"
+        )
     pack = verify_mindpack(
         pack_path, package_root=package_root, allow_partial=allow_partial
     )
@@ -429,22 +501,15 @@ def restore_mindpack(
                         f"pack lacks the {required} stream; cannot restore "
                         "operational state (fail closed)"
                     )
-            # Streams were digest-verified already; re-read through a fresh
-            # reader bound to the same path.
-            with PackReader(pack_path) as reader:
-                archive_row = reader.read_json("archive.json")
-                lineage_heads = reader.read_ndjson("lineage-heads.ndjson")
-                origin_rows = reader.read_ndjson("origin-index.ndjson")
-                producer_heads = (
-                    reader.read_ndjson("producer-heads.ndjson")
-                    if reader.has("producer-heads.ndjson")
-                    else []
-                )
-                batches = [
-                    reader.read_json(name)
-                    for name in sorted(reader.names())
-                    if name.startswith("producer-batches/") and name.endswith(".json")
-                ]
+            # Streams were digest-verified already; re-read them with
+            # digest re-verification against the verified manifest.
+            (
+                archive_row,
+                lineage_heads,
+                origin_rows,
+                producer_heads,
+                batches,
+            ) = _reread_operational_streams(pack_path, pack)
 
             received_at = clock()
             archive_id = manifest["archive_id"]

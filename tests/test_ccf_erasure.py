@@ -665,3 +665,15 @@ def test_receipt_membership_links(rig):
             (receipt_id, drop["id"]),
         ).fetchall()
     assert len(rows) == 1
+
+
+def test_suppression_key_is_owner_only_and_never_overwritten(tmp_path):
+    """L1: the suppression HMAC key is 0600 and refuses silent overwrite."""
+    import stat
+
+    from ccf.erasure.errors import SuppressionKeyError
+
+    key_path = generate_suppression_key(tmp_path / "suppression.key")
+    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+    with pytest.raises(SuppressionKeyError, match="overwrite"):
+        generate_suppression_key(key_path)
