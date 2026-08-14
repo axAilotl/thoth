@@ -23,15 +23,15 @@ from ccf.sync.chunks import SIDECAR_SUFFIX, load_sidecar, verify_file
 from ccf.sync.delta import apply_delta_pack, build_delta_pack
 from ccf.sync.export import export_mindpack
 from ccf.sync.heads import build_sync_head, negotiate
-from ccf.sync.manifest import check_manifest_mode
 from ccf.sync.merge import merge_mindpack
-from ccf.sync.packio import PackError
+from ccf.sync.packio import MANIFEST_COMPLETENESS_MISMATCH, PackError
 from ccf.sync.restore import (
     VerifiedMindpack,
     append_pack_commits,
     insert_pack_objects,
     verify_mindpack,
 )
+from ccf.sync.verify import PackVerificationError
 
 
 class ForkRecord:
@@ -147,32 +147,25 @@ class SyncService:
         Dispatches on identity and chain relationship; fails closed on
         incomplete packs unless ``allow_partial`` is set.
         """
-        from ccf.sync.export import SCHEMA_MINDPACK_MANIFEST
-        from ccf.sync.packio import PackReader
-
-        with PackReader(pack_path) as reader:
-            if not reader.has("manifest.json"):
-                raise PackError(f"pack has no manifest.json: {pack_path}")
-            preview = reader.read_json("manifest.json")
-            self._archive.schemas.validate(
-                SCHEMA_MINDPACK_MANIFEST, preview, what="mindpack manifest"
-            )
-        foreign = preview["archive_id"] != self._archive.archive_id
         pack = verify_mindpack(
             pack_path,
             package_root=self._package_root(),
             allow_partial=allow_partial,
-            # A foreign merge of a partial pack tolerates member objects
-            # absent from the pack; same-identity imports stay strict.
-            allow_missing_member_objects=foreign,
-            operation="merge" if foreign else "import",
+            # Reconstruct missing signed members before deciding dispatch;
+            # the unsigned manifest must never select a permissive path.
+            allow_missing_member_objects=True,
+            operation="import",
+            destination_archive_id=self._archive.archive_id,
         )
+        foreign = pack.chain["archive_id"] != self._archive.archive_id
+        if not foreign and pack.inventory.missing_member_ids:
+            raise PackVerificationError(
+                "same-archive import is missing signed member objects",
+                reason=MANIFEST_COMPLETENESS_MISMATCH,
+            )
         manifest = pack.manifest
         archive_id = self._archive.archive_id
-        # The manifest mode is non-authoritative exporter intent; it must
-        # be consistent with the operation the caller requested.
-        check_manifest_mode(manifest, operation="merge" if foreign else "import")
-        if manifest["archive_id"] != archive_id:
+        if foreign:
             return self._merge(pack)
 
         local_head = self._archive.head()

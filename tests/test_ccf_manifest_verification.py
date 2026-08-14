@@ -10,12 +10,14 @@ any destination state is created or modified.
 from __future__ import annotations
 
 import json
+import copy
 import uuid
 from dataclasses import replace
 
 import pytest
 
 from ccf.db import CcfPostgresSettings
+from ccf.sync.manifest import DerivedInventory
 from ccf.sync.packio import PackError
 from ccf.sync.restore import restore_mindpack, verify_mindpack
 from ccf.sync.verify import PackVerificationError
@@ -40,12 +42,28 @@ def test_manifest_tamper_vector_coverage(ccf_vectors_dir):
         "fabricated-dependency",
         "changed-genesis",
         "changed-head",
+        "changed-archive-id",
+        "changed-catalog-root",
         "complete-changed-to-partial",
         "restore-changed-to-foreign-merge",
         "duplicate-availability-row",
         "contradictory-availability-row",
+        "absent-optional-stream",
+        "changed-dependency-metadata",
+        "fabricated-custody-proof",
     }
     assert {case["expected"] for case in vector["cases"]} == {"reject"}
+
+
+def test_withheld_inventory_is_partial_and_not_restore_capable():
+    inventory = DerivedInventory(
+        counts={"records": 1, "links": 0, "blobs": 0, "commits": 1},
+        unavailable_ids={"urn:ccf:record:00000000-0000-4000-8000-000000000001"},
+        withheld={"urn:ccf:record:00000000-0000-4000-8000-000000000001"},
+        erased=set(),
+    )
+    assert inventory.custody_complete is False
+    assert inventory.restore_capable is False
 
 
 @pytest.fixture()
@@ -125,6 +143,31 @@ def _tamper(pack_dir, fn):
     manifest = json.loads(path.read_text())
     fn(manifest)
     path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def _rewrite_operational_stream(pack_dir, relative_path, mutate, *, ndjson=False):
+    """Mutate a stream and update only its unsigned manifest digest claim."""
+    from ccf.hashing import digest_string
+
+    path = pack_dir / relative_path
+    if ndjson:
+        document = [json.loads(line) for line in path.read_text().splitlines()]
+        mutate(document)
+        data = ("\n".join(json.dumps(row) for row in document) + "\n").encode()
+    else:
+        document = json.loads(path.read_text())
+        mutate(document)
+        data = (json.dumps(document, indent=2) + "\n").encode()
+    path.write_bytes(data)
+
+    def edit(manifest):
+        stream = next(
+            row for row in manifest["streams"] if row["path"] == relative_path
+        )
+        stream["digest"] = digest_string(data)
+        stream["byte_length"] = str(len(data))
+
+    _tamper(pack_dir, edit)
 
 
 def _assert_store_untouched(ccf_postgres_dsn, settings):
@@ -318,7 +361,7 @@ def test_external_dependency_for_included_object(pack, settings_factory,
 
     def edit(m):
         m["external_dependencies"].append(
-            {"object_id": ids["source"], "reason": "claimed external"}
+            {"object_id": ids["source"], "reason": "unresolved_reference"}
         )
 
     _tamper(pack_dir, edit)
@@ -382,6 +425,34 @@ def test_real_external_dependency_removed_even_for_partial_import(
         )
     assert excinfo.value.reason == "manifest_external_dependency_mismatch"
     assert ids["source"] in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "edit_dependency",
+    [
+        lambda dep: dep.update(reason="attacker-selected"),
+        lambda dep: dep.update(locator="https://attacker.invalid/object"),
+    ],
+)
+def test_external_dependency_metadata_must_be_derived(
+    rig, tmp_path, ccf_package_root, edit_dependency
+):
+    pack_dir, _ = _partial_pack_with_external_dep(
+        rig, tmp_path, ccf_package_root
+    )
+
+    def edit(manifest):
+        edit_dependency(manifest["external_dependencies"][0])
+
+    _tamper(pack_dir, edit)
+    with pytest.raises(PackVerificationError) as excinfo:
+        verify_mindpack(
+            pack_dir,
+            package_root=ccf_package_root,
+            allow_partial=True,
+            allow_missing_member_objects=True,
+        )
+    assert excinfo.value.reason == "manifest_external_dependency_mismatch"
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +546,19 @@ def test_same_identity_import_rejects_foreign_merge_mode(rig, pack,
     assert excinfo.value.reason == "manifest_mode_mismatch"
 
 
+def test_unsigned_archive_id_cannot_select_foreign_merge(rig, pack):
+    pack_dir, _, _ = pack
+    _tamper(
+        pack_dir,
+        lambda m: m.update(archive_id=f"urn:ccf:archive:{uuid.uuid4()}"),
+    )
+    head_before = rig.archive.head()
+    with pytest.raises(PackVerificationError) as excinfo:
+        rig.archive.sync().import_mindpack(pack_dir, allow_partial=True)
+    assert excinfo.value.reason == "manifest_head_mismatch"
+    assert rig.archive.head() == head_before
+
+
 def test_foreign_merge_mode_consistent_with_merge(rig, pack, settings_factory,
                                                   tmp_path, ccf_package_root):
     """Control: mode=foreign_merge is consistent with a foreign merge."""
@@ -517,6 +601,264 @@ def test_manifest_genesis_mismatch(pack, settings_factory, ccf_package_root,
                    manifest, reason="manifest_head_mismatch")
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("archive_id", f"urn:ccf:archive:{uuid.uuid4()}"),
+        ("epoch_id", f"urn:ccf:lineage:{uuid.uuid4()}"),
+        ("semantic_catalog_root", "sha256:" + "44" * 32),
+    ],
+)
+def test_manifest_signed_chain_identity_mismatch(
+    pack,
+    settings_factory,
+    ccf_package_root,
+    ccf_postgres_dsn,
+    field,
+    value,
+):
+    pack_dir, manifest, _ = pack
+    _tamper(pack_dir, lambda m: m.update({field: value}))
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_head_mismatch",
+    )
+
+
+def test_manifest_profiles_mismatch(
+    pack, settings_factory, ccf_package_root, ccf_postgres_dsn
+):
+    pack_dir, manifest, _ = pack
+    _tamper(pack_dir, lambda m: m["profiles"].reverse())
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_head_mismatch",
+    )
+
+
+def test_actual_semantic_catalog_must_reproduce_signed_root(
+    pack, settings_factory, ccf_package_root, ccf_postgres_dsn
+):
+    from ccf.hashing import digest_string
+
+    pack_dir, manifest, _ = pack
+    catalog_path = pack_dir / "semantic-catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    catalog["version"] = "attacker-selected"
+    data = (json.dumps(catalog, indent=2) + "\n").encode()
+    catalog_path.write_bytes(data)
+
+    def edit(claim):
+        stream = next(
+            entry
+            for entry in claim["streams"]
+            if entry["path"] == "semantic-catalog.json"
+        )
+        stream["digest"] = digest_string(data)
+        stream["byte_length"] = str(len(data))
+
+    _tamper(pack_dir, edit)
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_head_mismatch",
+    )
+
+
+def test_packaged_catalog_artifact_must_match_signed_catalog(
+    pack, settings_factory, ccf_package_root, ccf_postgres_dsn
+):
+    """Unsigned stream digests cannot authorize substituted semantics."""
+    from ccf.hashing import digest_string
+
+    pack_dir, manifest, _ = pack
+    artifact_path = pack_dir / "schemas" / "common" / "defs.schema.json"
+    artifact = json.loads(artifact_path.read_text())
+    artifact["title"] = "attacker-selected schema"
+    data = (json.dumps(artifact, indent=2) + "\n").encode()
+    artifact_path.write_bytes(data)
+
+    def edit(claim):
+        stream = next(
+            entry
+            for entry in claim["streams"]
+            if entry["path"] == "schemas/common/defs.schema.json"
+        )
+        stream["digest"] = digest_string(data)
+        stream["byte_length"] = str(len(data))
+
+    _tamper(pack_dir, edit)
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_head_mismatch",
+    )
+
+
+def test_normal_object_cannot_be_relabelled_as_foreign_custody(
+    pack, settings_factory, ccf_package_root, ccf_postgres_dsn
+):
+    pack_dir, manifest, ids = pack
+    headers = {
+        row["id"]: row
+        for row in (
+            json.loads(line)
+            for line in (pack_dir / "objects" / "records.ndjson")
+            .read_text()
+            .splitlines()
+        )
+    }
+    forged = f"urn:ccf:archive:{uuid.uuid4()}:{headers[ids['session']]['object_hash']}"
+    _tamper(pack_dir, lambda m: m["foreign_custody_proofs"].append(forged))
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_head_mismatch",
+    )
+
+
+@pytest.mark.parametrize(
+    "relative_path,ndjson,mutate",
+    [
+        (
+            "archive.json",
+            False,
+            lambda row: row.update(signer_key_id=f"urn:ccf:key:{uuid.uuid4()}"),
+        ),
+        (
+            "lineage-heads.ndjson",
+            True,
+            lambda rows: rows[0].update(head_record_hash="sha256:" + "66" * 32),
+        ),
+        (
+            "origin-index.ndjson",
+            True,
+            lambda rows: rows[0].update(native_id="attacker-selected"),
+        ),
+        (
+            "producer-heads.ndjson",
+            True,
+            lambda rows: rows[0].update(batch_hash="sha256:" + "77" * 32),
+        ),
+    ],
+)
+def test_unsigned_operational_stream_cannot_mutate_restored_state(
+    pack,
+    settings_factory,
+    ccf_package_root,
+    ccf_postgres_dsn,
+    relative_path,
+    ndjson,
+    mutate,
+):
+    pack_dir, manifest, _ = pack
+    _rewrite_operational_stream(
+        pack_dir, relative_path, mutate, ndjson=ndjson
+    )
+    settings = settings_factory()
+    with pytest.raises(PackVerificationError):
+        restore_mindpack(
+            settings,
+            package_root=ccf_package_root,
+            pack_path=pack_dir,
+            trusted_genesis_hash=manifest["genesis_commit_hash"],
+        )
+    _assert_store_untouched(ccf_postgres_dsn, settings)
+
+
+def test_unsigned_producer_batch_stream_requires_valid_signature(
+    pack, settings_factory, ccf_package_root, ccf_postgres_dsn
+):
+    pack_dir, manifest, _ = pack
+    batch_path = next((pack_dir / "producer-batches").glob("*.json"))
+    relative = str(batch_path.relative_to(pack_dir))
+    _rewrite_operational_stream(
+        pack_dir,
+        relative,
+        lambda batch: batch.update(created_at="2026-08-13T00:00:00.000Z"),
+    )
+    settings = settings_factory()
+    with pytest.raises(PackVerificationError, match="not independently valid"):
+        restore_mindpack(
+            settings,
+            package_root=ccf_package_root,
+            pack_path=pack_dir,
+            trusted_genesis_hash=manifest["genesis_commit_hash"],
+        )
+    _assert_store_untouched(ccf_postgres_dsn, settings)
+
+
+@pytest.mark.parametrize(
+    "mutate,match",
+    [
+        (
+            lambda batch: batch.update(
+                producer_id=f"urn:ccf:record:{uuid.uuid4()}"
+            ),
+            "credential subject does not match producer",
+        ),
+        (
+            lambda batch: batch.update(created_at="2000-01-01T00:00:00.000Z"),
+            "credential is not valid at batch creation time",
+        ),
+    ],
+)
+def test_portable_producer_credential_binding_and_validity(
+    rig, tmp_path, ccf_package_root, mutate, match
+):
+    """A capture key cannot authorize another producer or invalid time."""
+    from ccf.hashing import (
+        encode_b64url,
+        producer_batch_hash,
+        producer_batch_signing_digest,
+        sign_digest,
+    )
+    from ccf.schemas import SchemaSet
+    from ccf.sync.operational import verify_producer_state
+
+    _populate(rig)
+    pack_dir = tmp_path / "credential-binding.mindpack"
+    rig.archive.sync().export_mindpack(pack_dir)
+    verified = verify_mindpack(pack_dir, package_root=ccf_package_root)
+    batch = copy.deepcopy(verified.batch_claims[0])
+    mutate(batch)
+    batch.pop("batch_hash", None)
+    batch.pop("signature", None)
+    batch["batch_hash"] = producer_batch_hash(batch)
+    batch["signature"] = encode_b64url(
+        sign_digest(
+            rig.credential.private_key,
+            producer_batch_signing_digest(batch["batch_hash"]),
+        )
+    )
+    with pytest.raises(PackVerificationError, match=match):
+        verify_producer_state(
+            verified.objects,
+            verified.members,
+            [batch],
+            [],
+            catalog_root=verified.chain["semantic_catalog_root"],
+            schemas=SchemaSet.load(ccf_package_root),
+        )
+
+
 # ---------------------------------------------------------------------------
 # 10. Stream digest claims.
 # ---------------------------------------------------------------------------
@@ -551,6 +893,149 @@ def test_removed_stream_entry_fails(pack, settings_factory, ccf_package_root,
         manifest,
         reason="manifest_stream_digest_mismatch",
     )
+
+
+def test_absent_optional_stream_claim_fails(
+    pack, settings_factory, ccf_package_root, ccf_postgres_dsn
+):
+    """An optional claim cannot fabricate a container member."""
+    pack_dir, manifest, _ = pack
+    _tamper(
+        pack_dir,
+        lambda m: m["streams"].append(
+            {
+                "path": "blob-data/absent.bin",
+                "digest": "sha256:" + "00" * 32,
+                "byte_length": "0",
+                "required": False,
+            }
+        ),
+    )
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_stream_digest_mismatch",
+    )
+
+
+@pytest.mark.parametrize(
+    "path,required",
+    [
+        ("objects/records.ndjson", False),
+        pytest.param(None, True, id="blob-data-made-required"),
+    ],
+)
+def test_stream_required_flag_is_independently_derived(
+    pack,
+    settings_factory,
+    ccf_package_root,
+    ccf_postgres_dsn,
+    path,
+    required,
+):
+    pack_dir, manifest, _ = pack
+
+    def edit(claim):
+        entry = next(
+            stream
+            for stream in claim["streams"]
+            if stream["path"] == path
+            or (path is None and stream["path"].startswith("blob-data/"))
+        )
+        entry["required"] = required
+
+    _tamper(pack_dir, edit)
+    _restore_fails(
+        pack_dir,
+        settings_factory,
+        ccf_package_root,
+        ccf_postgres_dsn,
+        manifest,
+        reason="manifest_stream_digest_mismatch",
+    )
+
+
+def test_valid_unjournaled_object_is_rejected_before_manifest_comparison(
+    pack, settings_factory, ccf_package_root, ccf_postgres_dsn
+):
+    """A self-consistent object stream cannot manufacture custody evidence."""
+    from ccf.hashing import compartment_commitment, digest_string, object_hash
+
+    pack_dir, manifest, ids = pack
+    records_path = pack_dir / "objects" / "records.ndjson"
+    headers = [json.loads(line) for line in records_path.read_text().splitlines()]
+    source = next(header for header in headers if header["id"] == ids["session"])
+    forged = copy.deepcopy(source)
+    forged["id"] = f"urn:ccf:record:{uuid.uuid4()}"
+    stem = forged["id"].removeprefix("urn:ccf:record:")
+    old_stem = source["id"].removeprefix("urn:ccf:record:")
+    old_structural = pack_dir / "compartments" / "records" / f"{old_stem}.structural.json"
+    old_semantic = pack_dir / "compartments" / "records" / f"{old_stem}.semantic.json"
+    structural = json.loads(old_structural.read_text())
+    semantic = json.loads(old_semantic.read_text())
+    forged["structural_commitment"] = compartment_commitment(
+        "record", "structural", structural
+    )
+    forged["semantic_commitment"] = compartment_commitment(
+        "record", "semantic", semantic
+    )
+    forged["object_hash"] = object_hash(forged)
+    headers.append(forged)
+    records_data = ("\n".join(json.dumps(header) for header in headers) + "\n").encode()
+    records_path.write_bytes(records_data)
+    new_structural = pack_dir / "compartments" / "records" / f"{stem}.structural.json"
+    new_semantic = pack_dir / "compartments" / "records" / f"{stem}.semantic.json"
+    new_structural.write_bytes(old_structural.read_bytes())
+    new_semantic.write_bytes(old_semantic.read_bytes())
+
+    def edit(claim):
+        stream = next(
+            entry for entry in claim["streams"]
+            if entry["path"] == "objects/records.ndjson"
+        )
+        stream["digest"] = digest_string(records_data)
+        stream["byte_length"] = str(len(records_data))
+        for new_path in (new_structural, new_semantic):
+            data = new_path.read_bytes()
+            claim["streams"].append(
+                {
+                    "path": str(new_path.relative_to(pack_dir)),
+                    "digest": digest_string(data),
+                    "byte_length": str(len(data)),
+                    "required": True,
+                }
+            )
+        claim["counts"]["records"] = str(int(claim["counts"]["records"]) + 1)
+        for compartment, commitment in (
+            ("structural", forged["structural_commitment"]),
+            ("semantic", forged["semantic_commitment"]),
+        ):
+            claim["compartment_availability"].append(
+                {
+                    "object_kind": "record",
+                    "object_id": forged["id"],
+                    "compartment": compartment,
+                    "availability": "available",
+                    "commitment": commitment,
+                    "retention_profile": structural["content"]["retention_profile"],
+                    "source_custody_proof": None,
+                    "unavailability_lineage_id": None,
+                }
+            )
+
+    _tamper(pack_dir, edit)
+    settings = settings_factory()
+    with pytest.raises(PackVerificationError, match="outside verified journal"):
+        restore_mindpack(
+            settings,
+            package_root=ccf_package_root,
+            pack_path=pack_dir,
+            trusted_genesis_hash=manifest["genesis_commit_hash"],
+        )
+    _assert_store_untouched(ccf_postgres_dsn, settings)
 
 
 def test_restore_capability_flip_fails(pack, settings_factory, ccf_package_root,

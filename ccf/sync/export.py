@@ -21,7 +21,9 @@ from ccf.hashing import blob_content_commitment, encode_b64url
 from ccf.ids import generate_id
 from ccf.objects import compartment_format, now_timestamp
 from ccf.sync.completeness import classify_references
+from ccf.sync.manifest import EXTERNAL_DEPENDENCY_REASON
 from ccf.sync.packio import PackObject, PackWriter
+from ccf.sync.verify import verify_foreign_commit_record
 
 MINDPACK_FORMAT = "ccf.mindpack/0.1.2"
 SCHEMA_MINDPACK_MANIFEST = "urn:ccf:schema:0.1.2:objects.mindpack-manifest"
@@ -179,8 +181,10 @@ def export_mindpack(
             # plaintext; they are declared withheld in the pack.
             withheld.add(obj.object_id)
 
-    external_dependencies = list(external_dependencies or [])
-    external_ids = {dep["object_id"] for dep in external_dependencies}
+    requested_dependencies = list(external_dependencies or [])
+    external_ids = {dep["object_id"] for dep in requested_dependencies}
+    if len(external_ids) != len(requested_dependencies):
+        raise ExportError("external dependency declarations contain duplicates")
     # Object IDs admitted into this archive under foreign custody (11.3).
     foreign_object_ids = _foreign_object_ids(conn) if _has_foreign_custody(conn) else set()
 
@@ -361,19 +365,9 @@ def export_mindpack(
                 )
     writer.write_file("semantic-catalog.json", package_root / "semantic-catalog.json")
 
-    # Foreign custody proofs held by this archive (spec 11.3/11.5).
-    custody_proofs = [
-        f"{row[0]}:{row[1]}"
-        for row in (
-            conn.execute(
-                "SELECT source_archive_id, head_commit_hash FROM foreign_custody"
-                " WHERE archive_id = %s ORDER BY source_archive_id, head_commit_hash",
-                (archive_id,),
-            ).fetchall()
-            if _has_foreign_custody(conn)
-            else []
-        )
-    ]
+    # Foreign custody is reconstructed from foreign integrity.commit Records
+    # that the destination journal itself covers, never from unsigned claims.
+    custody_proofs = _foreign_commit_proofs(objects, archive_id)
 
     report = classify_references(
         {obj.object_id: obj for obj in objects},
@@ -382,6 +376,21 @@ def export_mindpack(
         erased_ids=erased,
         foreign_ids=foreign_object_ids,
     )
+    if report.dangling:
+        raise ExportError(
+            "mindpack has undeclared dangling references: "
+            f"{report.dangling}"
+        )
+    if external_ids != set(report.external):
+        raise ExportError(
+            "external dependency declarations are not exact unresolved "
+            f"references (declared {sorted(external_ids)}, "
+            f"derived {report.external})"
+        )
+    external_dependencies = [
+        {"object_id": object_id, "reason": EXTERNAL_DEPENDENCY_REASON}
+        for object_id in report.external
+    ]
 
     compartment_availability = _compartment_availability(conn, archive_id, objects)
 
@@ -390,9 +399,13 @@ def export_mindpack(
         "mode": mode,
         "custody": {
             "completeness": (
-                "complete" if not report.external and not report.dangling else "partial"
+                "complete"
+                if not report.external and not report.dangling and not withheld
+                else "partial"
             ),
-            "restore_capable": not report.external and not report.dangling,
+            "restore_capable": (
+                not report.external and not report.dangling and not withheld
+            ),
         },
         "pack_id": generate_id("pack"),
         "archive_id": archive_id,
@@ -430,8 +443,9 @@ def _compartment_availability(conn, archive_id: str, objects: list[PackObject]) 
     availability state, commitment, and retention profile. Unavailable
     (withheld/erased) compartments carry a custody anchor — the object's
     own admission coordinates — and, for erasures, the erasure receipt
-    Record as the unavailability lineage. A withheld compartment with no
-    derivable lineage fails closed: the manifest must not fabricate one.
+    Record as the unavailability lineage. For withholding, the admission
+    coordinate is the canonical withholding anchor; a distinct lineage
+    Record is optional and is never fabricated.
     """
     coordinates = {
         row[0]: (int(row[1]), int(row[2]))
@@ -522,12 +536,6 @@ def _compartment_availability(conn, archive_id: str, objects: list[PackObject]) 
                             f"{obj.object_id} is erased but no erasure receipt "
                             "lineage covers it"
                         )
-                else:
-                    raise ExportError(
-                        f"{obj.object_id}/{compartment} is withheld; the "
-                        "unavailability lineage is not derivable for a local "
-                        "export (refusing to fabricate one)"
-                    )
             entries.append(
                 {
                     "object_kind": obj.object_kind,
@@ -561,6 +569,23 @@ def _foreign_object_ids(conn) -> set[str]:
             for member in commit.get("members", []):
                 ids.add(member["object_id"])
     return ids
+
+
+def _foreign_commit_proofs(objects: list[PackObject], archive_id: str) -> list[str]:
+    """Proof IDs independently derivable from covered foreign commit Records."""
+    proofs = set()
+    for obj in objects:
+        content = (obj.structural or {}).get("content") or {}
+        payload = content.get("structural_payload") or {}
+        source_archive_id = payload.get("archive_id")
+        if (
+            content.get("type") == "integrity.commit"
+            and source_archive_id
+            and source_archive_id != archive_id
+        ):
+            verify_foreign_commit_record(obj)
+            proofs.add(f"{source_archive_id}:{obj.header['object_hash']}")
+    return sorted(proofs)
 
 
 def export_mindpack_zip(pack_dir: str | Path, out_file: str | Path) -> Path:

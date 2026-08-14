@@ -9,6 +9,7 @@ incomplete packs with explicit partial import.
 
 from __future__ import annotations
 
+import copy
 import json
 
 import pytest
@@ -155,6 +156,109 @@ def test_export_restore_roundtrip(rig, settings_factory, tmp_path, ccf_package_r
     assert bytes(row[0]) == ids["blob_bytes"]
 
 
+def test_export_represents_withheld_partial_custody(
+    rig, tmp_path, ccf_package_root
+):
+    """Withholding is portable without fabricating a lineage Record."""
+    ids = _populate(rig)
+    with open_ccf_connection(rig.settings) as conn:
+        conn.execute(
+            """
+            UPDATE compartment
+            SET state = 'withheld', salt = NULL, plaintext_json = NULL,
+                ciphertext = NULL, ciphertext_digest = NULL, storage_ref = NULL
+            WHERE object_id = %s AND compartment = 'semantic'
+            """,
+            (ids["session"],),
+        )
+    pack_dir = tmp_path / "withheld.mindpack"
+    manifest = rig.archive.sync().export_mindpack(pack_dir)
+    assert manifest["custody"] == {
+        "completeness": "partial",
+        "restore_capable": False,
+    }
+    assert manifest["withheld"] == [ids["session"]]
+    entry = next(
+        row
+        for row in manifest["compartment_availability"]
+        if row["object_id"] == ids["session"]
+        and row["compartment"] == "semantic"
+    )
+    assert entry["availability"] == "withheld"
+    assert entry["source_custody_proof"].startswith("commit:")
+    assert entry["unavailability_lineage_id"] is None
+
+    verified = verify_mindpack(
+        pack_dir,
+        package_root=ccf_package_root,
+        allow_partial=True,
+        operation="import",
+    )
+    assert verified.partial is True
+    assert verified.inventory.withheld == {ids["session"]}
+
+
+def test_restore_preserves_content_rejected_producer_predecessor(
+    rig, settings_factory, tmp_path, ccf_package_root
+):
+    """A valid rejected batch remains in the restored producer chain."""
+    from ccf.ids import generate_id
+
+    ghost_link = rig.producer.new_link(
+        type="ccf.about",
+        from_id=generate_id("record"),
+        to_id=generate_id("record"),
+        claims=rig.claims(),
+        selector={},
+    )
+    rejected_batch = rig.producer.create_batch(links=[ghost_link])
+    rejected = rig.archive.admit_batch(rejected_batch)
+    assert rejected["status"] == "content_rejected"
+    _populate(rig)
+    with open_ccf_connection(rig.settings) as conn:
+        expected_head_hash = conn.execute(
+            "SELECT batch_hash FROM producer_head WHERE producer_id = %s",
+            (rig.producer.producer_id,),
+        ).fetchone()[0]
+    pack_dir = tmp_path / "producer-continuity.mindpack"
+    manifest = rig.archive.sync().export_mindpack(pack_dir)
+    settings_b = settings_factory()
+    restore_mindpack(
+        settings_b,
+        package_root=ccf_package_root,
+        pack_path=pack_dir,
+        trusted_genesis_hash=manifest["genesis_commit_hash"],
+    )
+    with open_ccf_connection(settings_b) as conn:
+        rows = conn.execute(
+            """
+            SELECT producer_sequence, status FROM producer_batch
+            WHERE producer_id = %s ORDER BY producer_sequence
+            """,
+            (rig.producer.producer_id,),
+        ).fetchall()
+        head = conn.execute(
+            """
+            SELECT producer_sequence, batch_hash FROM producer_head
+            WHERE producer_id = %s
+            """,
+            (rig.producer.producer_id,),
+        ).fetchone()
+    assert [(int(row[0]), row[1]) for row in rows] == [
+        (1, "verifying"),
+        (2, "verifying"),
+    ]
+    assert int(head[0]) == 2
+    assert head[1] == expected_head_hash
+    replica = Archive.open(
+        settings_b,
+        package_root=ccf_package_root,
+        archive_key_path=rig.archive_key_path,
+    )
+    replay = replica.admit_batch(rejected_batch)
+    assert replay["status"] == "content_rejected"
+
+
 def test_restore_zip_container(rig, settings_factory, tmp_path, ccf_package_root):
     _populate(rig)
     pack_dir = tmp_path / "archive.mindpack"
@@ -221,15 +325,67 @@ def test_vendored_example_mindpack_verifies(ccf_package_root):
         "completeness": "complete",
         "restore_capable": True,
     }
-    assert int(manifest["counts"]["records"]) == 15
+    assert int(manifest["counts"]["records"]) == 17
     assert int(manifest["counts"]["commits"]) == 3
     assert pack.chain["commits_verified"] == 3
     assert pack.chain["head_commit_hash"] == manifest["head_commit_hash"]
     assert pack.chain["head_sequence"] == manifest["head_sequence"] == "2"
     assert pack.completeness.complete, pack.completeness.to_dict()
     # Every object hash in the pack recomputes from its compartments.
-    assert len(pack.objects) == 15 + 7 + 1
+    assert len(pack.objects) == 17 + 8 + 1
     assert len(pack.blob_data) == 1
+    assert any(
+        row["state"] == "revoke" for row in pack.derived_lineage_heads
+    ), "example must exercise an issue-to-revoke credential lineage"
+    assert len(pack.verified_batches) == 1
+
+
+def test_vendored_example_rejects_batch_at_credential_revocation(
+    ccf_package_root,
+):
+    from ccf.hashing import (
+        encode_b64url,
+        producer_batch_hash,
+        producer_batch_signing_digest,
+        sign_digest,
+    )
+    from ccf.schemas import SchemaSet
+    from ccf.sync.operational import verify_producer_state
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    pack = verify_mindpack(
+        ccf_package_root / "examples" / "mindpack", package_root=ccf_package_root
+    )
+    batch = copy.deepcopy(pack.batch_claims[0])
+    batch["created_at"] = "2026-08-11T21:42:20.800Z"
+    batch.pop("batch_hash")
+    batch.pop("signature")
+    batch["batch_hash"] = producer_batch_hash(batch)
+    private_key = load_pem_private_key(
+        (
+            ccf_package_root
+            / "vectors"
+            / "TEST-ONLY-device-ed25519-private.pem"
+        ).read_bytes(),
+        password=None,
+    )
+    batch["signature"] = encode_b64url(
+        sign_digest(
+            private_key,
+            producer_batch_signing_digest(batch["batch_hash"]),
+        )
+    )
+    with pytest.raises(
+        PackVerificationError, match="credential is not valid at batch creation time"
+    ):
+        verify_producer_state(
+            pack.objects,
+            pack.members,
+            [batch],
+            [],
+            catalog_root=pack.chain["semantic_catalog_root"],
+            schemas=SchemaSet.load(ccf_package_root),
+        )
 
 
 def _remove_object_from_pack(pack_dir, object_id, *, declare_partial=False):
@@ -268,7 +424,7 @@ def _remove_object_from_pack(pack_dir, object_id, *, declare_partial=False):
             if entry["object_id"] != object_id
         ]
         manifest["external_dependencies"].append(
-            {"object_id": object_id, "reason": "resolves outside the pack"}
+            {"object_id": object_id, "reason": "unresolved_reference"}
         )
         manifest["custody"] = {
             "completeness": "partial",
@@ -307,7 +463,6 @@ def test_incomplete_pack_fails_closed_then_partial_merge(
     # Referencing objects still merged; the destination chain verifies.
     assert ids["session"] in report["admitted"]
     rig.archive.verify_chain()
-
 
 def test_foreign_merge_preserves_ids_and_custody(
     rig, settings_factory, tmp_path, ccf_package_root
@@ -358,6 +513,22 @@ def test_foreign_merge_preserves_ids_and_custody(
     assert int(member_records) == len(report["admitted"])
 
     rig.archive.verify_chain()
+
+    exported = tmp_path / "merged.mindpack"
+    manifest = rig.archive.sync().export_mindpack(exported)
+    verified = verify_mindpack(
+        exported, package_root=ccf_package_root, operation="restore"
+    )
+    expected_prefix = f"{rig_b.archive.archive_id}:sha256:"
+    assert manifest["foreign_custody_proofs"]
+    assert all(
+        proof.startswith(expected_prefix)
+        for proof in manifest["foreign_custody_proofs"]
+    )
+    assert (
+        set(manifest["foreign_custody_proofs"])
+        == verified.inventory.foreign_custody_proofs
+    )
 
     # Re-import is idempotent: all objects already present.
     again = rig.archive.sync().import_mindpack(pack_dir)
@@ -552,4 +723,23 @@ def test_verify_commit_chain_wraps_malformed_members(rig, tmp_path, ccf_package_
     bad_members = [dict(m) for m in pack.members]
     bad_members[0].pop("commit_position")
     with pytest.raises(PackVerificationError, match="malformed"):
+        verify_commit_chain(pack.commits, bad_members, pack.objects)
+
+
+def test_verify_commit_chain_rejects_orphan_member_sequence(
+    rig, tmp_path, ccf_package_root
+):
+    """An unsigned member row cannot create journal coverage."""
+    from ccf.sync.verify import verify_commit_chain
+
+    _populate(rig)
+    pack_dir = tmp_path / "archive.mindpack"
+    rig.archive.sync().export_mindpack(pack_dir)
+    pack = verify_mindpack(pack_dir, package_root=ccf_package_root)
+    bad_members = [dict(member) for member in pack.members]
+    orphan = dict(bad_members[0])
+    orphan["commit_sequence"] = "999"
+    orphan["object_id"] = "urn:ccf:record:00000000-0000-4000-8000-000000000099"
+    bad_members.append(orphan)
+    with pytest.raises(PackVerificationError, match="absent commit sequence"):
         verify_commit_chain(pack.commits, bad_members, pack.objects)

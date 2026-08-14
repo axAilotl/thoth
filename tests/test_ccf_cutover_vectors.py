@@ -147,6 +147,6 @@ def test_gate1_vector_counts_are_stable(ccf_vectors_dir, load_ccf_json):
     assert len(canon["rejections"]) == 7
     merkle = load_ccf_json(ccf_vectors_dir / "merkle.json")
     assert len(merkle["commit1"]["members"]) >= 1
-    assert len(merkle["commit2"]["members"]) == 16
+    assert len(merkle["commit2"]["members"]) == 19
     hashes = load_ccf_json(ccf_vectors_dir / "object-hashes.json")
     assert set(hashes) >= {"record", "link", "blob"}

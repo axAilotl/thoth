@@ -164,10 +164,15 @@ write('mindpack-manifest-tamper.json',{
     {id:'fabricated-dependency',fixture:'complete-example',mutation:'add-dependency',expected:'reject'},
     {id:'changed-genesis',fixture:'complete-example',mutation:'change-genesis',expected:'reject'},
     {id:'changed-head',fixture:'complete-example',mutation:'change-head',expected:'reject'},
+    {id:'changed-archive-id',fixture:'complete-example',mutation:'change-archive-id',expected:'reject'},
+    {id:'changed-catalog-root',fixture:'complete-example',mutation:'change-catalog-root',expected:'reject'},
     {id:'complete-changed-to-partial',fixture:'complete-example',mutation:'complete-to-partial',expected:'reject'},
     {id:'restore-changed-to-foreign-merge',fixture:'complete-example',mutation:'restore-to-foreign-merge',expected:'reject'},
     {id:'duplicate-availability-row',fixture:'complete-example',mutation:'duplicate-availability',expected:'reject'},
     {id:'contradictory-availability-row',fixture:'complete-example',mutation:'contradict-availability',expected:'reject'},
+    {id:'absent-optional-stream',fixture:'complete-example',mutation:'add-optional-stream',expected:'reject'},
+    {id:'changed-dependency-metadata',fixture:'external-dependency-example',mutation:'change-dependency-metadata',expected:'reject'},
+    {id:'fabricated-custody-proof',fixture:'complete-example',mutation:'add-custody-proof',expected:'reject'},
   ],
 });
 console.log('vectors built');

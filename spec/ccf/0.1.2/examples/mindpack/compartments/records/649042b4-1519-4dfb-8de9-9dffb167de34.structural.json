@@ -1,0 +1,40 @@
+{
+  "format": "ccf.record-structural/0.1.2",
+  "salt": "HBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw",
+  "content": {
+    "type": "core.device_credential",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:69e54a37c07e383b71002da67cabfbec0008d50572f534494b20d307786d52e2",
+    "registry_entry_digest": "sha256:72e7ded71e0b4d3c268edba36d3da462177626392aa6f05ccd2432e304d9f221",
+    "retention_profile": "epoch_lifetime_required",
+    "structural_payload": {
+      "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
+      "subject_id": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+      "issuer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+      "signing_key": {
+        "profile": "ed25519",
+        "public_key": "7mY3nbKE15OSKkE-o76nbxt_yn6NWnfKhJ2SjNagl6s",
+        "key_id": "urn:ccf:key:28f19f81-2df9-4830-bfac-879b9de1a141"
+      },
+      "encryption_key": null,
+      "scopes": [
+        "capture",
+        "sync",
+        "derive"
+      ],
+      "valid_from": "2026-08-11T21:40:00.000Z",
+      "expires_at": null,
+      "offline_grace_until": null,
+      "extensions": {}
+    },
+    "extensions": {},
+    "lineage": {
+      "lineage_id": "urn:ccf:lineage:3be84214-4656-452c-8c72-496822d081d8",
+      "previous_head_id": "urn:ccf:record:405c475b-1c4c-4e05-b978-28246bb3a5fa",
+      "transition": "revoke",
+      "valid_from": "2026-08-11T21:42:20.800Z",
+      "expires_at": null
+    }
+  }
+}

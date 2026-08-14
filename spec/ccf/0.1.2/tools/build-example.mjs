@@ -53,8 +53,8 @@ function entryDigest(entry) { return canonicalDigest('ccf:registry-entry:v1', en
 
 const ids = {
   archive: urn('archive', 'archive'), epoch: urn('lineage', 'epoch'), policyLineage: urn('lineage', 'policy'), runLineage: urn('lineage', 'run'), credentialLineage: urn('lineage', 'credential'),
-  person: urn('record', 'person'), runtime: urn('record', 'runtime'), credential: urn('record', 'credential-record'), source: urn('record', 'source'), policy: urn('record', 'policy'), session: urn('record', 'session'), artifact: urn('record', 'artifact'), run: urn('record', 'run'), utterance: urn('record', 'utterance'), candidate: urn('record', 'candidate'), review: urn('record', 'review'), accepted: urn('record', 'accepted'), genesis: urn('record', 'genesis'), commit1: urn('record', 'commit1'), commit2: urn('record', 'commit2'),
-  blob: urn('blob', 'audio'), hasBlob: urn('link', 'hasBlob'), capturedIn: urn('link', 'capturedIn'), derivedFrom: urn('link', 'derivedFrom'), generatedBy: urn('link', 'generatedBy'), evidenceFor: urn('link', 'evidenceFor'), supersedes: urn('link', 'supersedes'), covers: urn('link', 'covers'),
+  person: urn('record', 'person'), runtime: urn('record', 'runtime'), credential: urn('record', 'credential-record'), credentialRevoke: urn('record', 'credential-revoke'), source: urn('record', 'source'), policy: urn('record', 'policy'), session: urn('record', 'session'), artifact: urn('record', 'artifact'), run: urn('record', 'run'), utterance: urn('record', 'utterance'), candidate: urn('record', 'candidate'), review: urn('record', 'review'), accepted: urn('record', 'accepted'), erasureReceipt: urn('record', 'erasure-receipt'), genesis: urn('record', 'genesis'), commit1: urn('record', 'commit1'), commit2: urn('record', 'commit2'),
+  blob: urn('blob', 'audio'), hasBlob: urn('link', 'hasBlob'), capturedIn: urn('link', 'capturedIn'), derivedFrom: urn('link', 'derivedFrom'), generatedBy: urn('link', 'generatedBy'), evidenceFor: urn('link', 'evidenceFor'), supersedes: urn('link', 'supersedes'), covers: urn('link', 'covers'), erasureCovers: urn('link', 'erasure-covers'),
   archiveKey: urn('key', 'archive-signing'), deviceKey: urn('key', 'device-signing'), credentialId: urn('credential', 'device-credential'), batch: urn('batch', 'producer-batch'), pack: urn('pack', 'mindpack'), erasureDomain: urn('lineage', 'erasure-domain')
 };
 
@@ -132,7 +132,8 @@ policyRef = { lineage_id: ids.policyLineage, head_id_at_write: ids.policy, polic
 
 addRecord(ids.person, 'core.person', 2, { person_id: ids.person, perspective_id: ids.person, recorded_by: ids.runtime, recorded_at: '2026-08-11T21:40:00.000Z', privacy: privacy(['identity_data'], [{ person_id: ids.person, role: 'archive_principal', identity_state_at_write: 'verified' }]), policy_ref: policyRef, authority: { basis: 'first_person_statement', asserted_by: ids.person, accepted_by: ids.person }, payload: { kind: 'human', display_name: 'Example Person', aliases: [], identity_anchors: [], extensions: {} }, extensions: {} });
 addRecord(ids.runtime, 'core.runtime', 3, { person_id: ids.person, recorded_by: ids.runtime, recorded_at: '2026-08-11T21:40:00.000Z', policy_ref: policyRef, authority: { basis: 'runtime_import', asserted_by: ids.runtime, accepted_by: null }, payload: { kind: 'backend', name: 'Thoth CCF adapter', version: '0.1.2-example', instance_id: 'thoth-local', capabilities: ['capture','transcribe','extract','sync'], operator_id: ids.person, extensions: {} }, extensions: {} });
-addRecord(ids.credential, 'core.device_credential', 4, null, { semantic: false, structuralPayload: { credential_id: ids.credentialId, subject_id: ids.runtime, issuer_key_id: ids.archiveKey, signing_key: { profile: 'ed25519', public_key: devicePub, key_id: ids.deviceKey }, encryption_key: null, scopes: ['capture','sync','derive'], valid_from: '2026-08-11T21:40:00.000Z', expires_at: null, offline_grace_until: null, extensions: {} }, lineage: { lineage_id: ids.credentialLineage, previous_head_id: null, transition: 'issue', valid_from: '2026-08-11T21:40:00.000Z', expires_at: null } });
+const deviceCredentialPayload = { credential_id: ids.credentialId, subject_id: ids.runtime, issuer_key_id: ids.archiveKey, signing_key: { profile: 'ed25519', public_key: devicePub, key_id: ids.deviceKey }, encryption_key: null, scopes: ['capture','sync','derive'], valid_from: '2026-08-11T21:40:00.000Z', expires_at: null, offline_grace_until: null, extensions: {} };
+addRecord(ids.credential, 'core.device_credential', 4, null, { semantic: false, structuralPayload: deviceCredentialPayload, lineage: { lineage_id: ids.credentialLineage, previous_head_id: null, transition: 'issue', valid_from: '2026-08-11T21:40:00.000Z', expires_at: null } });
 
 function makeCommit(id, seq, parentHash, members, time) {
   const merkle = merkleRoot(members);
@@ -202,6 +203,73 @@ function resolveBlob(sub, n) {
 }
 
 let n=10; for (const s of producerBatch.records) resolveRecord(s,n++); for (const s of producerBatch.links) resolveLink(s,n++); resolveBlob(blobSubmission,n++);
+const receiptClaims = claims(ids.person, ids.person, ['derived_profile'], subject);
+addRecord(ids.erasureReceipt, 'lineage.erasure_receipt', n++, {
+  person_id: ids.person,
+  perspective_id: ids.person,
+  recorded_by: ids.runtime,
+  recorded_at: '2026-08-11T21:42:20.500Z',
+  claimed: receiptClaims,
+  privacy: receiptClaims.privacy,
+  policy_ref: policyRef,
+  authority: { basis: 'explicit_authorization', asserted_by: ids.person, accepted_by: ids.person },
+  payload: {
+    operation_id: 'example-erasure-fixture',
+    decision_id: ids.review,
+    status: 'verified',
+    keys_destroyed: '0',
+    ciphertexts_deleted: '0',
+    selectors_invalidated: '0',
+    completed_at: '2026-08-11T21:42:20.500Z',
+    verification: { fixture: true },
+    extensions: {},
+  },
+  extensions: {},
+}, {
+  structuralPayload: {
+    decision_id: ids.review,
+    profile: 'logical',
+    verified_at: '2026-08-11T21:42:20.500Z',
+    target_count: '1',
+    destroyed_key_count: '0',
+    status: 'verified',
+    membership_link_type: 'ccf.covers',
+    suppression_commitment: {
+      profile: 'ccf-hmac-sha256-suppression-v1',
+      suppression_set_record_id: ids.erasureReceipt,
+      suppression_blob_id: ids.blob,
+      entry_count: '1',
+      entries_merkle_root: catalog.root,
+      key_profile_id: 'example-fixture-v1',
+      scope_commitment: catalog.root,
+    },
+  },
+});
+addLink(ids.erasureCovers, 'ccf.covers', ids.erasureReceipt, ids.candidate, n++, {
+  recorded_by: ids.runtime,
+  recorded_at: '2026-08-11T21:42:20.500Z',
+  claimed: receiptClaims,
+  privacy: receiptClaims.privacy,
+  policy_ref: policyRef,
+  authority: { basis: 'explicit_authorization', asserted_by: ids.person, accepted_by: ids.person },
+  selector: {},
+  payload: {},
+  extensions: {},
+});
+// The package includes an actual issue -> revoke credential lifecycle.  The
+// signed batch predates revocation and must remain independently verifiable;
+// a batch at or after this successor's effective time must fail closed.
+addRecord(ids.credentialRevoke, 'core.device_credential', n++, null, {
+  semantic: false,
+  structuralPayload: deviceCredentialPayload,
+  lineage: {
+    lineage_id: ids.credentialLineage,
+    previous_head_id: ids.credential,
+    transition: 'revoke',
+    valid_from: '2026-08-11T21:42:20.800Z',
+    expires_at: null,
+  },
+});
 const captureObjects = [...records.filter((r) => ![ids.policy,ids.person,ids.runtime,ids.credential,ids.genesis,ids.commit1].includes(r.header.id)), ...links, ...blobs];
 const members2 = captureObjects.map((o,i)=>({commit_sequence:'2',commit_position:i,admitted_at:'2026-08-11T21:42:21.000Z',object_kind:o.header.object_kind,object_id:o.header.id,object_hash:o.header.object_hash}));
 const commit2 = makeCommit(ids.commit2,2,commit1.commit_hash,members2,'2026-08-11T21:42:21.000Z');
@@ -226,6 +294,36 @@ fs.writeFileSync(path.join(MP,'blob-data',`${stem(ids.blob)}.bin`),wav);
 fs.writeFileSync(path.join(MP,'integrity','commits.ndjson'),[genesis,commit1,commit2].map((c)=>canonicalize({sequence:c.sequence,record_id:c.header.id,commit_hash:c.commit_hash,parent_commit_hash:c.structural.content.structural_payload.parent_commit_hash,merkle_root:c.merkle_root})).join('\n')+'\n');
 fs.writeFileSync(path.join(MP,'integrity','members.ndjson'),[...members1,...members2].map(canonicalize).join('\n')+'\n');
 writeJson(path.join(MP,'producer-batches',`${stem(ids.batch)}.json`),producerBatch);
+writeJson(path.join(MP,'archive.json'),{
+  format:'ccf.archive-row/0.1.2',archive_id:ids.archive,epoch_id:ids.epoch,
+  genesis_commit_hash:genesis.commit_hash,hash_profile:'ccf-jcs-sha256-v2',
+  signature_profile:'ed25519-jcs-v1',semantic_catalog_root:catalog.root,
+  active_profiles:['ccf-core-0.1.2','ccf-local-sync-0.1.2','ccf-continuity-pack-0.1.2'],
+  signer_key_id:ids.archiveKey,erasure_domain_id:ids.erasureDomain,
+  created_at:'2026-08-11T21:40:00.000Z'
+});
+const allMembers=[...members1,...members2];
+const coordinateOf=new Map(allMembers.map((member)=>[member.object_id,member]));
+const lineageHeads=new Map();
+for(const o of records){
+  const lineage=o.structural?.content?.lineage;
+  if(!lineage)continue;
+  const member=coordinateOf.get(o.header.id);
+  lineageHeads.set(lineage.lineage_id,{
+    lineage_id:lineage.lineage_id,head_record_id:o.header.id,
+    head_record_hash:o.header.object_hash,head_commit_sequence:member.commit_sequence,
+    state:lineage.transition,valid_from:lineage.valid_from,expires_at:lineage.expires_at
+  });
+}
+fs.writeFileSync(path.join(MP,'lineage-heads.ndjson'),[...lineageHeads.values()].sort((a,b)=>a.lineage_id.localeCompare(b.lineage_id)).map(canonicalize).join('\n')+'\n');
+const originRows=[];
+for(const o of [...records,...blobs]){
+  const origin=o.semantic?.content?.origin;if(!origin)continue;
+  originRows.push({source_id:origin.source_id,native_id:origin.native_id,revision:origin.revision,submission_hash:origin.submission_hash,object_kind:o.header.object_kind,object_id:o.header.id,lifecycle:'active'});
+}
+originRows.sort((a,b)=>`${a.source_id}\0${a.native_id}\0${a.revision}\0${a.object_kind}`.localeCompare(`${b.source_id}\0${b.native_id}\0${b.revision}\0${b.object_kind}`));
+fs.writeFileSync(path.join(MP,'origin-index.ndjson'),originRows.map(canonicalize).join('\n')+'\n');
+fs.writeFileSync(path.join(MP,'producer-heads.ndjson'),canonicalize({producer_id:ids.runtime,producer_sequence:'1',batch_hash:producerBatch.batch_hash,credential_id:ids.credentialId,updated_at:producerBatch.created_at})+'\n');
 fs.writeFileSync(path.join(MP,'README.md'),'# Example CCF 0.1.2 mindpack\n\nSelf-contained restore example generated from `tools/build-example.mjs`.\n');
 
 function walk(dir){const out=[];for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())out.push(...walk(p));else out.push(p);}return out;}

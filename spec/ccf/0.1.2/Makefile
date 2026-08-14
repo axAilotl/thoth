@@ -13,4 +13,4 @@ reproduce:
 	bash ./tools/verify-reproducible.sh
 
 package: rebuild check
-	cd .. && zip -qr ccf-0.1.2.zip ccf-0.1.2
+	python ./tools/build-release-zip.py

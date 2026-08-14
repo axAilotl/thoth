@@ -66,3 +66,8 @@ regenerating its oracle. Maintainers use `make rebuild`, then `make check`.
 `make reproduce` stages a clean temporary copy, regenerates catalog, genesis,
 mindpack, vectors, inventory, and checksums there, and proves the resulting
 package is byte-for-byte identical.
+
+`make package` produces a deterministic, FAT-profile ZIP with no dependency on
+Unix executable bits. All documented shell entry points are invoked through
+`bash`, so checks work unchanged after extraction by permission-neutral ZIP
+tools and on Windows-mounted filesystems.

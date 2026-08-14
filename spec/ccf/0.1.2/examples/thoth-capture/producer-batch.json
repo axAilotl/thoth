@@ -6,7 +6,7 @@
   "previous_batch_hash": null,
   "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
   "created_at": "2026-08-11T21:42:20.300Z",
-  "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7",
+  "semantic_catalog_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10",
   "records": [
     {
       "submission_kind": "record",
@@ -718,6 +718,6 @@
   ],
   "extensions": {},
   "signature_profile": "ed25519-jcs-v1",
-  "batch_hash": "sha256:042617fda9172942c1419ae3ff7329be6988cd381f3ca3e8d5400032dd85effd",
-  "signature": "fiiGbR6KT6odaCA4cIjG_qiVQpPyILgyatz9JE0v-WPuUkEuZ7TJ7mShecUkGPujOYfkIdMSKBRYIeEWw-XMCg"
+  "batch_hash": "sha256:0563af1df5bb8fc3712cc2c92eee10c513169d812a1e477f344794a618c03f5e",
+  "signature": "LZdiZJwrubfEcR1hYBLrC9pdSDsobPi_4fAKsrftSrz61tH2XK5vhCmY7oIDUSYDmJEMBj8iyuHpvFSGDKmbCA"
 }

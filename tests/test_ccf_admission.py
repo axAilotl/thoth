@@ -509,6 +509,61 @@ def test_unknown_credential_rejected(rig):
     assert "unknown credential" in result["extensions"]["reason"]
 
 
+def test_credential_subject_mismatch_rejected(rig):
+    batch = rig.producer.create_batch(records=[_concept(rig)])
+    forged = _resigned_batch(rig, batch, producer_id=generate_id("record"))
+    result = rig.archive.admit_batch(forged)
+    assert result["status"] == "quarantined"
+    assert "subject does not match producer" in result["extensions"]["reason"]
+
+
+def test_revoked_credential_rejected_from_canonical_lineage_head(rig):
+    from ccf.credentials import device_credential_structural_payload
+
+    with open_ccf_connection(rig.settings) as conn:
+        previous = conn.execute(
+            "SELECT head_record_id FROM lineage_head WHERE lineage_id = %s",
+            (rig.credential_lineage_id,),
+        ).fetchone()[0]
+    revoked_at = rig.clock()
+    rig.archive.admit_bootstrap(
+        [
+            {
+                "type": "core.device_credential",
+                "object_id": generate_id("record"),
+                "recorded_by": rig.runtime_id,
+                "recorded_at": revoked_at,
+                "authority": authority(
+                    "explicit_authorization", rig.person_id, rig.person_id
+                ),
+                "privacy": privacy(),
+                "policy_hint": rig.policy_lineage_id,
+                "semantic": False,
+                "structural_payload": device_credential_structural_payload(
+                    rig.credential,
+                    subject_id=rig.runtime_id,
+                    issuer_key_id=rig.archive_key_id,
+                    scopes=["capture", "sync", "derive"],
+                    valid_from=revoked_at,
+                ),
+                "lineage": {
+                    "lineage_id": rig.credential_lineage_id,
+                    "previous_head_id": previous,
+                    "transition": "revoke",
+                    "valid_from": revoked_at,
+                    "expires_at": None,
+                },
+                "payload": {},
+            }
+        ]
+    )
+    result = rig.archive.admit_batch(
+        rig.producer.create_batch(records=[_concept(rig)])
+    )
+    assert result["status"] == "quarantined"
+    assert "credential is revoked" in result["extensions"]["reason"]
+
+
 def _lifecycle_credential_producer(
     rig, tmp_path, name, *, scopes, valid_from, expires_at=None
 ):

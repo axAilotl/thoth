@@ -80,7 +80,7 @@
     {
       "id": "urn:ccf:schema:0.1.2:objects.mindpack-manifest",
       "path": "schemas/objects/mindpack-manifest.schema.json",
-      "digest": "sha256:575dba6f7fa69497dc8df2d7f61eaf950308eb11674e064b9afb21963ce67424"
+      "digest": "sha256:da24528428570aa55e5a64ba1ef000826dd1857d1082c560e5c00a0f48a0e474"
     },
     {
       "id": "urn:ccf:schema:0.1.2:objects.record-header",
@@ -635,5 +635,5 @@
       "digest": "sha256:6b1296d6c9f98fe5ff67c47569af7223de532e5a70b1aafc04176b93ee8d51a3"
     }
   ],
-  "root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+  "root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10"
 }

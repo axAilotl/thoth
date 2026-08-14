@@ -12,21 +12,21 @@
       "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
       "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
       "sequence": "2",
-      "parent_commit_hash": "sha256:05e445180c9c08070ad07452eec3b4a662586c368af7ad585734274e808143b2",
-      "batch_merkle_root": "sha256:c130590d2bd0aad4369dd604a9ee50e037173e24d1ecbbcf1e7da86a4913c13e",
-      "member_count": "16",
+      "parent_commit_hash": "sha256:0bde0fdbb0d65dc3be66b120035dfe4395e67b2d741801ace85816e74e0c0ac2",
+      "batch_merkle_root": "sha256:776fab91b4d542d3287639c75c4170fd6e0ac5d109bdf42edc89f8552402d843",
+      "member_count": "19",
       "hash_profile": "ccf-jcs-sha256-v2",
       "signature_profile": "ed25519-jcs-v1",
       "signer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
       "signer_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
-      "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7",
+      "semantic_catalog_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10",
       "active_profiles": [
         "ccf-core-0.1.2",
         "ccf-local-sync-0.1.2",
         "ccf-continuity-pack-0.1.2"
       ],
       "committed_at": "2026-08-11T21:42:21.000Z",
-      "signature": "qfjvSuOxnW58NUhn06AD9BFkU_soK7QbAGW2ah0U5UJeTvWEx1XHgcfvMznwFG5Zmhip-QQKoGC6WgjucIn3BQ"
+      "signature": "SYndQW8MwQa5Ua0n-1TEww6njCiG-hxJs9Qw6c39hRbfa6VSOgkt3QlvT2dIv5Vmo_EXp5E928r78KTLqmp7BA"
     },
     "extensions": {}
   }

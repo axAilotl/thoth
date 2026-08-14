@@ -79,7 +79,7 @@
     {
       "id": "urn:ccf:schema:0.1.2:objects.mindpack-manifest",
       "path": "schemas/objects/mindpack-manifest.schema.json",
-      "digest": "sha256:575dba6f7fa69497dc8df2d7f61eaf950308eb11674e064b9afb21963ce67424"
+      "digest": "sha256:da24528428570aa55e5a64ba1ef000826dd1857d1082c560e5c00a0f48a0e474"
     },
     {
       "id": "urn:ccf:schema:0.1.2:objects.record-header",

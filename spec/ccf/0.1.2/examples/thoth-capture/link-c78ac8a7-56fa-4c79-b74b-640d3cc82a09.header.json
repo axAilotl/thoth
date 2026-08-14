@@ -1,0 +1,9 @@
+{
+  "spec": "ccf/0.1.2",
+  "object_kind": "link",
+  "id": "urn:ccf:link:c78ac8a7-56fa-4c79-b74b-640d3cc82a09",
+  "hash_profile": "ccf-jcs-sha256-v2",
+  "structural_commitment": "sha256:714d8c334fa9cd1c5ac214c8262a9291c275196139d221f8605eeb9f48e2e1c9",
+  "semantic_commitment": "sha256:3834f57a229926d946eee4b1793733669f29373cdc8041644e49bca6dba1355d",
+  "object_hash": "sha256:403d3e64a7af295f43c75513b0cd28a533b404ed6e37165ef939124c77344cc8"
+}

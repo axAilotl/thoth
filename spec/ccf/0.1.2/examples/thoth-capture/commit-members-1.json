@@ -5,7 +5,7 @@
     "admitted_at": "2026-08-11T21:40:01.000Z",
     "object_kind": "record",
     "object_id": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
-    "object_hash": "sha256:e57851ddec5a839632de3ebd13c350ae8db724496473078180d94f5f52fcf225"
+    "object_hash": "sha256:f38859c1c529e285e05e7538359cf69136ff36c98dc452e8279ab1cfec50920a"
   },
   {
     "commit_sequence": "1",
@@ -13,7 +13,7 @@
     "admitted_at": "2026-08-11T21:40:01.000Z",
     "object_kind": "record",
     "object_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
-    "object_hash": "sha256:74b9093df187b9d10c742f3bae34bbde6046c5cef42f4d7e25213a26c9b717aa"
+    "object_hash": "sha256:44d05cdd0a0f750c5aa49cbc078df8cb21ad27137ebd190ee9c37254d87ee4ee"
   },
   {
     "commit_sequence": "1",
@@ -21,7 +21,7 @@
     "admitted_at": "2026-08-11T21:40:01.000Z",
     "object_kind": "record",
     "object_id": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
-    "object_hash": "sha256:9e00cefbab5cefcea109e27788d83f4e14881e3b161475aba1653bd2dd377827"
+    "object_hash": "sha256:197e4623c5f09eaa8183d456d393b9fe25dba40ee09f27276d768b8a06f0c1f5"
   },
   {
     "commit_sequence": "1",

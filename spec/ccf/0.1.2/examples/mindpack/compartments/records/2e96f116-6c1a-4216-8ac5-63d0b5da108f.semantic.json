@@ -50,9 +50,9 @@
     "policy_ref": {
       "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
       "head_id_at_write": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
-      "policy_object_hash": "sha256:e57851ddec5a839632de3ebd13c350ae8db724496473078180d94f5f52fcf225",
+      "policy_object_hash": "sha256:f38859c1c529e285e05e7538359cf69136ff36c98dc452e8279ab1cfec50920a",
       "evaluator_profile": "ccf-deny-overrides-v1",
-      "semantic_catalog_root": "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+      "semantic_catalog_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10"
     },
     "authority": {
       "basis": "person_accepted",

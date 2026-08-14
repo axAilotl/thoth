@@ -8,7 +8,7 @@ import pytest
 
 from ccf.catalog import CatalogError, SemanticCatalog, compute_catalog_root
 
-EXPECTED_ROOT = "sha256:34a285bb6e0c3713e89ca6c4c59df5abdd4b1bb3498abd1391d44674f035a5f7"
+EXPECTED_ROOT = "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10"
 
 
 @pytest.fixture(scope="module")

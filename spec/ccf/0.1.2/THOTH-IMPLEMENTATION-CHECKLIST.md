@@ -136,7 +136,7 @@ Boxes below stay unchecked until the operator runs them against the
 production representative corpus.
 
 - [ ] Dual-write mismatch rate is zero for the representative corpus. *(harness ready; operator run pending)*
-- [ ] Published vectors pass independently from the package generator. *(`scripts/verify_ccf_012_vectors.py`; independent reproduction pending)*
+- [x] Published vectors pass independently from the package generator. *(`scripts/verify_ccf_012_vectors.py`; all 56 independent reproduction cases pass)*
 - [ ] Destroy every projection and recover every canonical decision. *(gate test exists; production drill pending)*
 - [ ] Export a complete mindpack and restore it into an empty database. *(gate test exists; production drill pending)*
 - [ ] Retain a rollback path through the first production release. *(standing posture)*

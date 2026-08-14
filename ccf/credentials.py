@@ -81,14 +81,12 @@ def device_credential_structural_payload(
     }
 
 
-def _credential_payloads(row) -> tuple[str, dict]:
-    return row[0], row[1]
-
-
 def resolve_credential_public_key(
     conn,
     credential_id: str,
     *,
+    archive_id: str,
+    subject_id: str,
     required_scope: str,
     now: str,
 ) -> str:
@@ -105,47 +103,51 @@ def resolve_credential_public_key(
 
     rows = conn.execute(
         """
-        SELECT oh.id, c.plaintext_json -> 'structural_payload' AS payload
-        FROM object_header oh
-        JOIN compartment c
-          ON c.object_id = oh.id AND c.compartment = 'structural'
-        WHERE oh.object_kind = 'record'
-          AND c.state = 'plaintext'
-          AND c.plaintext_json ->> 'type' = 'core.device_credential'
-          AND c.plaintext_json -> 'structural_payload' ->> 'credential_id' = %s
+        WITH matching_lineages AS (
+            SELECT DISTINCT
+                   oh.archive_id,
+                   c.plaintext_json -> 'lineage' ->> 'lineage_id' AS lineage_id
+            FROM object_header oh
+            JOIN compartment c
+              ON c.object_id = oh.id AND c.compartment = 'structural'
+            WHERE oh.archive_id = %s
+              AND oh.object_kind = 'record'
+              AND c.state = 'plaintext'
+              AND c.plaintext_json ->> 'type' = 'core.device_credential'
+              AND c.plaintext_json -> 'structural_payload' ->> 'credential_id' = %s
+        )
+        SELECT lh.state,
+               head.plaintext_json -> 'structural_payload' AS payload
+        FROM matching_lineages matched
+        JOIN lineage_head lh
+          ON lh.archive_id = matched.archive_id
+         AND lh.lineage_id = matched.lineage_id
+        JOIN compartment head
+          ON head.object_id = lh.head_record_id
+         AND head.compartment = 'structural'
+         AND head.state = 'plaintext'
         """,
-        (credential_id,),
+        (archive_id, credential_id),
     ).fetchall()
     if not rows:
         raise CredentialError(f"unknown credential: {credential_id}")
-
-    active: list[tuple[str, dict]] = []
-    for record_id, payload in (_credential_payloads(row) for row in rows):
-        state_row = conn.execute(
-            """
-            SELECT state FROM lineage_head
-            WHERE head_record_id = %s
-            """,
-            (record_id,),
-        ).fetchone()
-        if state_row is not None and state_row[0] == "revoke":
-            continue
-        active.append((record_id, payload))
-
-    if not active:
-        raise CredentialError(f"credential is revoked: {credential_id}")
-    if len(active) > 1:
+    if len(rows) > 1:
         raise CredentialError(
-            f"ambiguous credential {credential_id}: {len(active)} active records"
+            f"ambiguous credential {credential_id}: {len(rows)} canonical lineages"
         )
-
-    _, payload = active[0]
+    state, payload = rows[0]
+    if state == "revoke" or payload.get("credential_id") != credential_id:
+        raise CredentialError(f"credential is revoked: {credential_id}")
 
     scopes = payload.get("scopes")
     if not isinstance(scopes, list) or required_scope not in scopes:
         raise CredentialError(
             f"credential {credential_id} lacks the required scope "
             f"{required_scope!r}"
+        )
+    if payload.get("subject_id") != subject_id:
+        raise CredentialError(
+            f"credential {credential_id} subject does not match producer {subject_id}"
         )
     try:
         now_dt = parse_timestamp(now)

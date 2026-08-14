@@ -4,6 +4,6 @@
   "id": "urn:ccf:record:63607ea0-9d26-4625-ab23-65ce7415b571",
   "hash_profile": "ccf-jcs-sha256-v2",
   "structural_commitment": "sha256:cfc4fedf388d75310c2912b0efedcfda42a1828a0c4e834c263292f92c3ba3de",
-  "semantic_commitment": "sha256:e9c98a20f1f90d2a25bf7457c51ce2a06a5632e5b3c93e91d41615901e27911b",
-  "object_hash": "sha256:8bab105b1677637a8c5bb9846f9b57bb1561274b33dfc7ecb59b04f8dd80b799"
+  "semantic_commitment": "sha256:c1c8659e99d99f8aca63b6c34fb522af1c903e20e289bf144341f147caee8374",
+  "object_hash": "sha256:b6019ece8627cb30a56769cffdc126850a00532bcf504e80c4d88a5dfbddf9e9"
 }

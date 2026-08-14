@@ -147,7 +147,25 @@ export function deriveManifestGroundTruth({
   const missingMemberIds = new Set(
     members.map((member) => member.object_id).filter((objectId) => !includedIds.has(objectId)),
   );
-  const custodyComplete = references.size === 0 && missingMemberIds.size === 0;
+  const custodyComplete = references.size === 0
+    && missingMemberIds.size === 0
+    && withheld.size === 0;
+  const externalDependencies = new Map(
+    [...references].map((objectId) => [
+      objectId,
+      { object_id: objectId, reason: 'unresolved_reference' },
+    ]),
+  );
+  const foreignCustodyProofs = new Set();
+  for (const header of headers) {
+    const content = structuralById.get(header.id)?.content;
+    const sourceArchiveId = content?.structural_payload?.archive_id;
+    if (content?.type === 'integrity.commit'
+        && sourceArchiveId
+        && sourceArchiveId !== chain.archive_id) {
+      foreignCustodyProofs.add(`${sourceArchiveId}:${header.object_hash}`);
+    }
+  }
   return {
     counts: {
       records: String(records.length),
@@ -156,7 +174,7 @@ export function deriveManifestGroundTruth({
       commits: String(commitSummaries.length),
     },
     streams: actualStreams(root),
-    external_dependencies: references,
+    external_dependencies: externalDependencies,
     withheld,
     erased,
     availability,
@@ -168,8 +186,11 @@ export function deriveManifestGroundTruth({
     head_commit_hash: chain.head_commit_hash,
     head_sequence: chain.head_sequence,
     semantic_catalog_root: catalogRoot,
-    hash_profile: 'ccf-jcs-sha256-v2',
-    foreign_custody_proofs: new Set(),
+    hash_profile: chain.hash_profile,
+    archive_id: chain.archive_id,
+    epoch_id: chain.epoch_id,
+    profiles: chain.active_profiles,
+    foreign_custody_proofs: foreignCustodyProofs,
   };
 }
 
@@ -188,8 +209,20 @@ export function compareManifest(manifest, truth, { operation = 'restore' } = {})
     if (!equalJson(claimedStreams.get(actual.path), actual)) fail(`stream ${actual.path}`);
   }
 
-  for (const field of ['genesis_commit_hash', 'head_commit_hash', 'head_sequence', 'semantic_catalog_root', 'hash_profile']) {
-    if (manifest[field] !== truth[field]) fail(field);
+  for (const field of [
+    'archive_id',
+    'epoch_id',
+    'genesis_commit_hash',
+    'head_commit_hash',
+    'head_sequence',
+    'semantic_catalog_root',
+    'hash_profile',
+    'profiles',
+  ]) {
+    const matches = field === 'profiles'
+      ? equalJson(manifest[field], truth[field])
+      : manifest[field] === truth[field];
+    if (!matches) fail(field);
   }
   const allowedModes = operation === 'restore'
     ? new Set(['restore', 'replica'])
@@ -213,9 +246,15 @@ export function compareManifest(manifest, truth, { operation = 'restore' } = {})
     if (!equalJson(claimedAvailability.get(key), actual)) fail(`availability ${key}`);
   }
 
-  const dependencyIds = manifest.external_dependencies.map((entry) => entry.object_id);
-  if (new Set(dependencyIds).size !== dependencyIds.length) fail('duplicate external dependency');
-  if (!equalJson(sorted(dependencyIds), sorted(truth.external_dependencies))) fail('external dependencies');
+  const claimedDependencies = new Map();
+  for (const entry of manifest.external_dependencies) {
+    if (claimedDependencies.has(entry.object_id)) fail('duplicate external dependency');
+    claimedDependencies.set(entry.object_id, entry);
+  }
+  if (claimedDependencies.size !== truth.external_dependencies.size) fail('external dependencies');
+  for (const [objectId, actual] of truth.external_dependencies) {
+    if (!equalJson(claimedDependencies.get(objectId), actual)) fail(`external dependency ${objectId}`);
+  }
   if (!equalJson(sorted(manifest.foreign_custody_proofs), sorted(truth.foreign_custody_proofs))) fail('foreign custody proofs');
   if (Object.keys(manifest.extensions).length !== 0) fail('unknown extensions');
 }

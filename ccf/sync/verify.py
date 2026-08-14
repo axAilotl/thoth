@@ -144,6 +144,31 @@ def _envelope(raw: dict):
     return CompartmentEnvelope.from_dict(raw)
 
 
+def verify_foreign_commit_record(obj: PackObject) -> None:
+    """Verify the embedded signature of a foreign ``integrity.commit`` Record."""
+    content = (obj.structural or {}).get("content") or {}
+    payload = content.get("structural_payload") or {}
+    _require(content.get("type") == "integrity.commit", "foreign proof is not a commit")
+    signature = payload.get("signature", "")
+    unsigned_payload = {key: value for key, value in payload.items() if key != "signature"}
+    unsigned_content = dict(content, structural_payload=unsigned_payload)
+    signing_header = {
+        key: value
+        for key, value in obj.header.items()
+        if key not in ("structural_commitment", "object_hash")
+    }
+    try:
+        verify_digest(
+            public_key_from_b64url(payload.get("signer_public_key", "")),
+            decode_b64url(signature),
+            commit_signing_digest(signing_header, unsigned_content),
+        )
+    except Exception as exc:
+        raise PackVerificationError(
+            f"foreign commit Record {obj.object_id} signature invalid: {exc}"
+        ) from exc
+
+
 def verify_commit_chain(
     commits: list[dict],
     members: list[dict],
@@ -202,13 +227,36 @@ def _verify_commit_chain(
     """Implementation of :func:`verify_commit_chain`."""
     _require(bool(commits), "pack contains no commits")
     known_object_hashes = known_object_hashes or {}
+    commit_sequences = {int(commit["sequence"]) for commit in commits}
+    _require(
+        len(commit_sequences) == len(commits),
+        "pack commit summaries contain duplicate sequences",
+    )
     members_by_sequence: dict[int, list[dict]] = {}
+    member_object_ids: set[str] = set()
     for member in members:
-        members_by_sequence.setdefault(int(member["commit_sequence"]), []).append(member)
+        member_sequence = int(member["commit_sequence"])
+        _require(
+            member_sequence in commit_sequences,
+            f"member {member['object_id']} refers to absent commit sequence "
+            f"{member_sequence}",
+        )
+        _require(
+            member["object_id"] not in member_object_ids,
+            f"object {member['object_id']} appears in more than one member row",
+        )
+        member_object_ids.add(member["object_id"])
+        members_by_sequence.setdefault(member_sequence, []).append(member)
+    commit_record_ids = {commit["record_id"] for commit in commits}
+    _require(
+        member_object_ids.isdisjoint(commit_record_ids),
+        "verified chain commit Record also appears as an admitted member",
+    )
 
     signer_public_key: str | None = None
     previous_hash = expected_parent_hash
     verified_members = 0
+    chain_identity: dict | None = None
 
     for offset, commit in enumerate(commits):
         sequence = int(commit["sequence"])
@@ -242,6 +290,26 @@ def _verify_commit_chain(
             and payload.get("signature_profile") == CCF_SIGNATURE_PROFILE,
             f"{context}: unexpected hash/signature profile",
         )
+        identity = {
+            "archive_id": payload.get("archive_id"),
+            "epoch_id": payload.get("epoch_id"),
+            "semantic_catalog_root": payload.get("semantic_catalog_root"),
+            "active_profiles": payload.get("active_profiles"),
+            "hash_profile": payload.get("hash_profile"),
+            "signature_profile": payload.get("signature_profile"),
+            "signer_key_id": payload.get("signer_key_id"),
+        }
+        _require(
+            all(identity.values()) and isinstance(identity["active_profiles"], list),
+            f"{context}: signed chain identity is incomplete",
+        )
+        if chain_identity is None:
+            chain_identity = identity
+        else:
+            _require(
+                identity == chain_identity,
+                f"{context}: signed chain identity changed",
+            )
         if offset == 0 and expected_first_sequence == 0:
             signer_public_key = payload.get("signer_public_key")
             _require(bool(signer_public_key), "genesis: signer public key missing")
@@ -320,6 +388,16 @@ def _verify_commit_chain(
         verified_members += len(commit_members)
         previous_hash = commit["commit_hash"]
 
+    _require(chain_identity is not None, "pack chain identity missing")
+    covered_object_ids = {
+        member["object_id"] for member in members
+    } | {commit["record_id"] for commit in commits}
+    unjournaled_object_ids = set(objects) - covered_object_ids
+    _require(
+        not unjournaled_object_ids,
+        "pack contains objects outside verified journal membership: "
+        f"{sorted(unjournaled_object_ids)}",
+    )
     return {
         "genesis_commit_hash": commits[0]["commit_hash"],
         "head_commit_hash": previous_hash,
@@ -327,4 +405,5 @@ def _verify_commit_chain(
         "commits_verified": len(commits),
         "members_verified": verified_members,
         "signer_public_key": signer_public_key,
+        **chain_identity,
     }

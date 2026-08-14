@@ -356,6 +356,10 @@ and semantic commitments, retention profile, exact availability state, source
 custody proof, and erasure or withholding lineage even when plaintext bytes are
 unavailable. Portable availability states are `available`, `withheld`,
 `erased`, and `external`; importers MUST NOT collapse one into another.
+For `erased`, `unavailability_lineage_id` MUST identify the covering canonical
+erasure-receipt Record. For `withheld`, `source_custody_proof` is the canonical
+withholding anchor; `unavailability_lineage_id` MAY be null when no distinct
+lineage Record exists and MUST NOT be fabricated.
 
 ## 3.7 Erasure assurance levels
 
@@ -1174,10 +1178,36 @@ The manifest is unsigned and non-authoritative:
 
 - the verifier MUST independently reconstruct counts and availability from
   verified streams and journal membership;
+- every packaged schema and registry MUST reproduce its digest in the signed
+  semantic catalog, and the packaged artifact set MUST equal catalog membership;
+- every object stream entry MUST be covered by a signed journal member or be a
+  signed commit Record in the verified chain;
+- stream `required` flags MUST be derived from the transport profile (only
+  `blob-data/` members are optional), not trusted from the manifest;
+- `archive.json`, lineage heads, origin rows, producer batches, and producer
+  heads are operational caches: restore MUST derive signed archive fields and
+  indexes from the verified chain/objects, MUST independently verify producer
+  hashes, signatures, credentials, evidence bindings, and continuity, and MUST
+  ignore rather than insert any cache row that cannot be canonically verified;
+- portable producer verification MUST bind the credential subject to
+  `producer_id`, reject a canonically revoked credential, and enforce its
+  validity interval at signed `batch.created_at`;
+- an importer MUST preserve every independently valid signed producer batch and
+  the latest signed predecessor/head. Unless a signed archive receipt proves a
+  terminal disposition, restored batches remain nonterminal and exact replay is
+  re-evaluated; a terminal status MUST NOT be guessed from evidence counts;
 - manifest values MUST NOT determine iteration bounds;
 - every mismatch fails BEFORE any destination mutation;
 - `mode` is only an exporter claim and cannot authorize restore or foreign
   merge.
+
+An external dependency descriptor is independently reproducible: its
+`object_id` is an unresolved reference in verified object contents, its
+`reason` is the fixed string `unresolved_reference`, and `locator` is absent.
+Foreign custody proofs are exactly the archive-ID/object-hash pairs of foreign
+`integrity.commit` Records whose embedded signature verifies and whose object is
+covered by verified destination journal membership; ordinary or unjournaled
+object hashes cannot be relabeled as custody evidence.
 
 The final manifest-tamper vectors are published in
 `vectors/mindpack-manifest-tamper.json` (see §13.8).

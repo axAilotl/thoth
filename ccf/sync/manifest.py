@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ccf.hashing import parse_digest
 from ccf.sync.completeness import object_references
 from ccf.sync.packio import (
     MANIFEST_AVAILABILITY_MISMATCH,
@@ -38,6 +37,7 @@ from ccf.sync.verify import PackVerificationError
 
 _RECEIPT_TYPE = "lineage.erasure_receipt"
 _COVERS_LINK_TYPE = "ccf.covers"
+EXTERNAL_DEPENDENCY_REASON = "unresolved_reference"
 
 #: No final-0.1.2 manifest extensions are defined. Unknown claims fail closed.
 _KNOWN_EXTENSIONS: frozenset[str] = frozenset()
@@ -64,11 +64,16 @@ class DerivedInventory:
     unresolved_references: set[str] = field(default_factory=set)
     missing_member_ids: set[str] = field(default_factory=set)
     object_hashes: set[str] = field(default_factory=set)
+    foreign_custody_proofs: set[str] = field(default_factory=set)
 
     @property
     def custody_complete(self) -> bool:
         """Whether the pack carries its full journal membership and references."""
-        return not self.missing_member_ids and not self.unresolved_references
+        return (
+            not self.missing_member_ids
+            and not self.unresolved_references
+            and not self.withheld
+        )
 
     @property
     def restore_capable(self) -> bool:
@@ -140,6 +145,7 @@ def derive_pack_inventory(
     commits: list[dict],
     members: list[dict],
     *,
+    archive_id: str,
     known_ids: set[str] | None = None,
 ) -> DerivedInventory:
     """Reconstruct the actual pack inventory from verified material.
@@ -218,6 +224,20 @@ def derive_pack_inventory(
     for obj in objects.values():
         unresolved |= object_references(obj) - present_or_satisfied
 
+    foreign_custody_proofs = set()
+    for obj in objects.values():
+        content = (obj.structural or {}).get("content") or {}
+        payload = content.get("structural_payload") or {}
+        source_archive_id = payload.get("archive_id")
+        if (
+            content.get("type") == "integrity.commit"
+            and source_archive_id
+            and source_archive_id != archive_id
+        ):
+            foreign_custody_proofs.add(
+                f"{source_archive_id}:{obj.header['object_hash']}"
+            )
+
     return DerivedInventory(
         counts=counts,
         unavailable_ids=withheld | erased,
@@ -227,6 +247,7 @@ def derive_pack_inventory(
         unresolved_references=unresolved,
         missing_member_ids={member["object_id"] for member in members} - set(objects),
         object_hashes={obj.header["object_hash"] for obj in objects.values()},
+        foreign_custody_proofs=foreign_custody_proofs,
     )
 
 
@@ -257,6 +278,7 @@ def compare_manifest(
     with a stable ``MANIFEST_*`` reason.
     """
     check_manifest_mode(manifest, operation=operation)
+    _compare_chain_identity(manifest, chain)
     _compare_counts(manifest, inventory)
     _compare_streams(manifest, pack_names)
     _compare_head(manifest, chain)
@@ -286,12 +308,43 @@ def _compare_streams(manifest: dict, pack_names: set[str]) -> None:
             "manifest lists a stream path more than once",
             reason=MANIFEST_STREAM_DIGEST_MISMATCH,
         )
-    unlisted = (set(pack_names) - {"manifest.json"}) - set(listed)
-    if unlisted:
+    actual = set(pack_names) - {"manifest.json"}
+    claimed = set(listed)
+    if actual != claimed:
         raise PackVerificationError(
-            f"pack content not declared in manifest streams: {sorted(unlisted)}",
+            "manifest stream membership differs from actual container members "
+            f"(missing claims {sorted(actual - claimed)}, "
+            f"absent members {sorted(claimed - actual)})",
             reason=MANIFEST_STREAM_DIGEST_MISMATCH,
         )
+    for entry in manifest["streams"]:
+        # The transport profile independently defines only Blob plaintext
+        # bytes as optional. All object, compartment, journal, catalog, and
+        # operational streams are required; the unsigned flag cannot weaken
+        # that contract.
+        expected_required = not entry["path"].startswith("blob-data/")
+        if entry["required"] is not expected_required:
+            raise PackVerificationError(
+                f"manifest stream {entry['path']} has required="
+                f"{entry['required']}, derived {expected_required}",
+                reason=MANIFEST_STREAM_DIGEST_MISMATCH,
+            )
+
+
+def _compare_chain_identity(manifest: dict, chain: dict) -> None:
+    """Compare unsigned identity/profile claims with signed commit payloads."""
+    for manifest_field, chain_field in (
+        ("archive_id", "archive_id"),
+        ("epoch_id", "epoch_id"),
+        ("semantic_catalog_root", "semantic_catalog_root"),
+        ("hash_profile", "hash_profile"),
+        ("profiles", "active_profiles"),
+    ):
+        if manifest[manifest_field] != chain[chain_field]:
+            raise PackVerificationError(
+                f"manifest {manifest_field} does not match the signed chain",
+                reason=MANIFEST_HEAD_MISMATCH,
+            )
 
 
 def _compare_head(manifest: dict, chain: dict) -> None:
@@ -364,24 +417,6 @@ def _compare_availability_entry(
             f"derived {derived['availability']!r}",
             reason=MANIFEST_AVAILABILITY_MISMATCH,
         )
-    if claimed["availability"] == "withheld":
-        # The unavailability lineage of a withheld compartment is not
-        # derivable from pack contents (the exporter itself refuses to
-        # fabricate one), so only its presence is pinned by the schema;
-        # every other field is derived and compared.
-        compared = {
-            k: v for k, v in derived.items() if k != "unavailability_lineage_id"
-        }
-        claimed = {
-            k: v for k, v in claimed.items() if k != "unavailability_lineage_id"
-        }
-        if claimed != compared:
-            raise PackVerificationError(
-                f"manifest availability entry for {key} disagrees with the "
-                f"derived entry (claimed {claimed}, derived {compared})",
-                reason=MANIFEST_AVAILABILITY_MISMATCH,
-            )
-        return
     if claimed != derived:
         raise PackVerificationError(
             f"manifest availability entry for {key} disagrees with the "
@@ -398,8 +433,10 @@ def _compare_external_dependencies(
     A dependency existing only as a manifest entry — pointing at nothing,
     or at material the pack verifiably carries — is invalid.
     """
-    claimed = [dep["object_id"] for dep in manifest["external_dependencies"]]
-    if len(set(claimed)) != len(claimed):
+    claimed = {
+        dep["object_id"]: dep for dep in manifest["external_dependencies"]
+    }
+    if len(claimed) != len(manifest["external_dependencies"]):
         raise PackVerificationError(
             "manifest external_dependencies contains duplicates",
             reason=MANIFEST_EXTERNAL_DEPENDENCY_MISMATCH,
@@ -418,34 +455,36 @@ def _compare_external_dependencies(
             f"references in the verified pack contents: {sorted(missing)}",
             reason=MANIFEST_EXTERNAL_DEPENDENCY_MISMATCH,
         )
+    expected = {
+        object_id: {
+            "object_id": object_id,
+            "reason": EXTERNAL_DEPENDENCY_REASON,
+        }
+        for object_id in inventory.unresolved_references
+    }
+    if claimed != expected:
+        raise PackVerificationError(
+            "manifest dependency metadata is not independently derivable "
+            f"(claimed {claimed}, derived {expected})",
+            reason=MANIFEST_EXTERNAL_DEPENDENCY_MISMATCH,
+        )
 
 
 def _compare_custody_proofs(manifest: dict, inventory: DerivedInventory) -> None:
-    """Foreign custody proofs must be backed by verified pack objects."""
-    seen: set[str] = set()
-    for proof in manifest["foreign_custody_proofs"]:
-        if not isinstance(proof, str):
-            raise PackVerificationError(
-                f"malformed foreign custody proof: {proof!r}"
-            )
-        source_archive_id, sep, hex_part = proof.rpartition(":sha256:")
-        if not sep or not source_archive_id:
-            raise PackVerificationError(
-                f"malformed foreign custody proof: {proof!r}"
-            )
-        head_hash = f"sha256:{hex_part}"
-        if proof in seen or source_archive_id == manifest["archive_id"]:
-            raise PackVerificationError(
-                f"contradictory foreign custody proof: {proof!r}"
-            )
-        seen.add(proof)
-        parse_digest(head_hash)
-        if head_hash not in inventory.object_hashes:
-            raise PackVerificationError(
-                f"foreign custody proof head {proof!r} is not backed by any "
-                "verified pack object",
-                reason=MANIFEST_HEAD_MISMATCH,
-            )
+    """Compare proofs with foreign commit Records in verified contents."""
+    claimed = set(manifest["foreign_custody_proofs"])
+    if len(claimed) != len(manifest["foreign_custody_proofs"]):
+        raise PackVerificationError(
+            "manifest foreign_custody_proofs contains duplicates",
+            reason=MANIFEST_HEAD_MISMATCH,
+        )
+    if claimed != inventory.foreign_custody_proofs:
+        raise PackVerificationError(
+            "manifest foreign custody proofs differ from verified foreign "
+            f"commit Records (claimed {sorted(claimed)}, "
+            f"derived {sorted(inventory.foreign_custody_proofs)})",
+            reason=MANIFEST_HEAD_MISMATCH,
+        )
 
 
 def _compare_custody(

@@ -15,8 +15,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ccf.catalog import compute_catalog_root
 from ccf.db import CcfPostgresSettings, migrate_ccf_store, open_ccf_connection
-from ccf.hashing import commit_leaf, decode_b64url, digest_string, submission_hash
+from ccf.hashing import (
+    commit_leaf,
+    decode_b64url,
+    digest_string,
+    registry_artifact_digest,
+    schema_artifact_digest,
+    submission_hash,
+)
+from ccf.ids import generate_id
 from ccf.jcs import loads as jcs_loads
 from ccf.journal import verify_chain
 from ccf.objects import now_timestamp
@@ -28,7 +37,16 @@ from ccf.sync.manifest import (
     derive_pack_inventory,
     unavailable_object_ids,
 )
+from ccf.sync.operational import (
+    compare_archive_row,
+    compare_derived_rows,
+    derive_archive_row,
+    derive_lineage_heads,
+    derive_origin_rows,
+    verify_producer_state,
+)
 from ccf.sync.packio import (
+    MANIFEST_HEAD_MISMATCH,
     MANIFEST_MODE_MISMATCH,
     IncompletePackError,
     PackError,
@@ -38,7 +56,12 @@ from ccf.sync.packio import (
     parse_ndjson,
     verify_stream_digests,
 )
-from ccf.sync.verify import verify_commit_chain, verify_pack_object
+from ccf.sync.verify import (
+    PackVerificationError,
+    verify_commit_chain,
+    verify_foreign_commit_record,
+    verify_pack_object,
+)
 
 
 class RestoreError(PackError):
@@ -57,7 +80,8 @@ class VerifiedMindpack:
     def __init__(self, reader: PackReader, schemas: SchemaSet, *, allow_partial: bool = False,
                  known_ids: set[str] | None = None,
                  allow_missing_member_objects: bool = False,
-                 operation: str = "import") -> None:
+                 operation: str = "import",
+                 destination_archive_id: str | None = None) -> None:
         if not reader.has("manifest.json"):
             raise RestoreError("pack has no manifest.json")
         self.manifest = reader.read_json("manifest.json")
@@ -101,6 +125,36 @@ class VerifiedMindpack:
             self.objects,
             allow_missing_member_objects=allow_missing_member_objects,
         )
+        if not reader.has("semantic-catalog.json"):
+            raise RestoreError("pack has no semantic-catalog.json")
+        pack_catalog = reader.read_json("semantic-catalog.json")
+        catalog_root = pack_catalog.get("root")
+        if catalog_root != compute_catalog_root(pack_catalog):
+            raise PackVerificationError(
+                "pack semantic catalog root does not reproduce",
+                reason=MANIFEST_HEAD_MISMATCH,
+            )
+        if catalog_root != self.chain["semantic_catalog_root"]:
+            raise PackVerificationError(
+                "pack semantic catalog differs from signed commit chain",
+                reason=MANIFEST_HEAD_MISMATCH,
+            )
+        _verify_pack_catalog_artifacts(reader, pack_catalog)
+        self.archive_row = None
+        self.derived_archive_row = derive_archive_row(
+            self.chain, self.commits, self.objects
+        )
+        if reader.has("archive.json"):
+            self.archive_row = reader.read_json("archive.json")
+            compare_archive_row(self.archive_row, self.derived_archive_row)
+        for obj in self.objects.values():
+            content = (obj.structural or {}).get("content") or {}
+            payload = content.get("structural_payload") or {}
+            if (
+                content.get("type") == "integrity.commit"
+                and payload.get("archive_id") != self.chain["archive_id"]
+            ):
+                verify_foreign_commit_record(obj)
 
         # The manifest is an unsigned transport index: reconstruct the
         # actual inventory from the verified material and fail closed on
@@ -110,6 +164,7 @@ class VerifiedMindpack:
             self.blob_data,
             self.commits,
             self.members,
+            archive_id=self.chain["archive_id"],
             known_ids=known_ids,
         )
         self.custody_complete = self.inventory.custody_complete
@@ -127,18 +182,125 @@ class VerifiedMindpack:
                 "pack has undeclared dangling references: "
                 f"{self.completeness.dangling}"
             )
+        comparison_operation = operation
+        if operation == "import" and destination_archive_id is not None:
+            comparison_operation = (
+                "merge"
+                if self.chain["archive_id"] != destination_archive_id
+                else "import"
+            )
         compare_manifest(
             manifest,
             self.inventory,
             chain=self.chain,
             pack_names=reader.names(),
             allow_partial=allow_partial,
-            operation=operation,
+            operation=comparison_operation,
+        )
+        self.lineage_head_claims = (
+            reader.read_ndjson("lineage-heads.ndjson")
+            if reader.has("lineage-heads.ndjson")
+            else []
+        )
+        self.derived_lineage_heads = derive_lineage_heads(self.objects, self.members)
+        compare_derived_rows(
+            "lineage-heads.ndjson",
+            self.lineage_head_claims,
+            self.derived_lineage_heads,
+            unavailable_ids=self.inventory.unavailable_ids,
+        )
+        self.producer_head_claims = (
+            reader.read_ndjson("producer-heads.ndjson")
+            if reader.has("producer-heads.ndjson")
+            else []
+        )
+        self.batch_claims = [
+            reader.read_json(name)
+            for name in sorted(reader.names())
+            if name.startswith("producer-batches/") and name.endswith(".json")
+        ]
+        (
+            self.verified_batches,
+            self.derived_producer_heads,
+            self.skipped_batches,
+            producer_bound_object_ids,
+        ) = verify_producer_state(
+            self.objects,
+            self.members,
+            self.batch_claims,
+            self.producer_head_claims,
+            catalog_root=self.chain["semantic_catalog_root"],
+            schemas=schemas,
+        )
+        self.origin_claims = (
+            reader.read_ndjson("origin-index.ndjson")
+            if reader.has("origin-index.ndjson")
+            else []
+        )
+        self.derived_origin_rows = derive_origin_rows(
+            self.objects,
+            self.inventory.unavailable_ids,
+            producer_bound_object_ids,
+        )
+        compare_derived_rows(
+            "origin-index.ndjson",
+            self.origin_claims,
+            self.derived_origin_rows,
+            unavailable_ids=self.inventory.unavailable_ids,
         )
 
     @property
     def partial(self) -> bool:
         return not self.custody_complete
+
+
+def _verify_pack_catalog_artifacts(reader: PackReader, catalog: dict) -> None:
+    """Bind every packaged schema/registry byte stream to the signed catalog."""
+    schema_catalog_path = "schemas/catalog.json"
+    if not reader.has(schema_catalog_path) or reader.read_json(schema_catalog_path) != {
+        "format": "ccf.schema-catalog/0.1.2",
+        "schemas": catalog.get("schemas"),
+    }:
+        raise PackVerificationError(
+            "schemas/catalog.json differs from the signed semantic catalog",
+            reason=MANIFEST_HEAD_MISMATCH,
+        )
+    expected_paths: set[str] = set()
+    for field, prefix, digest_fn in (
+        ("schemas", "schemas/", schema_artifact_digest),
+        ("registries", "registries/", registry_artifact_digest),
+    ):
+        for entry in catalog.get(field, []):
+            artifact_path = entry.get("path")
+            if not isinstance(artifact_path, str) or not artifact_path.startswith(prefix):
+                raise PackVerificationError(
+                    f"semantic catalog {field} path is invalid: {artifact_path!r}",
+                    reason=MANIFEST_HEAD_MISMATCH,
+                )
+            if artifact_path in expected_paths or not reader.has(artifact_path):
+                raise PackVerificationError(
+                    f"semantic catalog artifact missing or duplicated: {artifact_path}",
+                    reason=MANIFEST_HEAD_MISMATCH,
+                )
+            expected_paths.add(artifact_path)
+            artifact = reader.read_json(artifact_path)
+            if digest_fn(artifact) != entry.get("digest"):
+                raise PackVerificationError(
+                    f"semantic catalog artifact digest mismatch: {artifact_path}",
+                    reason=MANIFEST_HEAD_MISMATCH,
+                )
+    actual_paths = {
+        name
+        for name in reader.names()
+        if name.endswith(".json")
+        and name != schema_catalog_path
+        and name.startswith(("schemas/", "registries/"))
+    }
+    if actual_paths != expected_paths:
+        raise PackVerificationError(
+            "packaged schema/registry membership differs from the signed catalog",
+            reason=MANIFEST_HEAD_MISMATCH,
+        )
 
 
 def verify_mindpack(
@@ -149,6 +311,7 @@ def verify_mindpack(
     known_ids: set[str] | None = None,
     allow_missing_member_objects: bool = False,
     operation: str = "import",
+    destination_archive_id: str | None = None,
 ) -> VerifiedMindpack:
     """Open and fully verify a mindpack (directory or ZIP container)."""
     schemas = SchemaSet.load(package_root)
@@ -160,6 +323,7 @@ def verify_mindpack(
             known_ids=known_ids,
             allow_missing_member_objects=allow_missing_member_objects,
             operation=operation,
+            destination_archive_id=destination_archive_id,
         )
 
 
@@ -540,9 +704,23 @@ def restore_mindpack(
                 producer_heads,
                 batches,
             ) = _reread_operational_streams(pack_path, pack)
+            if (
+                archive_row != pack.archive_row
+                or lineage_heads != pack.lineage_head_claims
+                or origin_rows != pack.origin_claims
+                or producer_heads != pack.producer_head_claims
+                or batches != pack.batch_claims
+            ):
+                raise RestoreError(
+                    "operational streams changed since canonical verification"
+                )
 
             received_at = clock()
-            archive_id = manifest["archive_id"]
+            archive_id = pack.chain["archive_id"]
+            derived_archive = pack.derived_archive_row
+            erasure_domain_id = (
+                derived_archive["erasure_domain_id"] or generate_id("lineage")
+            )
             conn.execute(
                 """
                 INSERT INTO archive (
@@ -553,15 +731,15 @@ def restore_mindpack(
                 """,
                 (
                     archive_id,
-                    archive_row["epoch_id"],
-                    archive_row["genesis_commit_hash"],
-                    archive_row["hash_profile"],
-                    archive_row["signature_profile"],
-                    archive_row["semantic_catalog_root"],
-                    _jsonb(archive_row["active_profiles"]),
-                    archive_row["signer_key_id"],
-                    archive_row["erasure_domain_id"],
-                    archive_row["created_at"],
+                    derived_archive["epoch_id"],
+                    derived_archive["genesis_commit_hash"],
+                    derived_archive["hash_profile"],
+                    derived_archive["signature_profile"],
+                    derived_archive["semantic_catalog_root"],
+                    _jsonb(derived_archive["active_profiles"]),
+                    derived_archive["signer_key_id"],
+                    erasure_domain_id,
+                    derived_archive["created_at"],
                 ),
             )
             inserted, _ = insert_pack_objects(
@@ -591,7 +769,7 @@ def restore_mindpack(
             append_pack_commits(conn, archive_id, pack.commits, pack.members,
                                 start_sequence=0)
 
-            for row in lineage_heads:
+            for row in pack.derived_lineage_heads:
                 conn.execute(
                     """
                     INSERT INTO lineage_head (
@@ -610,7 +788,7 @@ def restore_mindpack(
                         row["expires_at"],
                     ),
                 )
-            for row in origin_rows:
+            for row in pack.derived_origin_rows:
                 conn.execute(
                     """
                     INSERT INTO origin_index (
@@ -629,9 +807,8 @@ def restore_mindpack(
                         row["lifecycle"],
                     ),
                 )
-            skipped_batches = _restore_producer_state(
-                conn, pack, batches, producer_heads, received_at
-            )
+            _restore_producer_state(conn, pack, received_at)
+            skipped_batches = pack.skipped_batches
 
             report = verify_chain(
                 conn,
@@ -658,32 +835,33 @@ def restore_mindpack(
 
 
 def _restore_producer_state(
-    conn, pack: VerifiedMindpack, batches: list[dict], producer_heads: list[dict],
-    received_at: str,
-) -> list[str]:
+    conn, pack: VerifiedMindpack, received_at: str
+) -> None:
     """Restore producer batch rows (chain continuity) and producer heads."""
     commit_of: dict[str, int] = {}
     for member in pack.members:
         commit_of[member["object_id"]] = int(member["commit_sequence"])
 
-    skipped: list[str] = []
-    for batch in batches:
+    for verified in pack.verified_batches:
+        batch = verified["batch"]
+        bound_object_ids = set(verified["bound_object_ids"])
         object_ids = [
             sub["id"]
             for kind in ("records", "links", "blobs")
             for sub in batch.get(kind, [])
         ]
-        sequences = [commit_of[oid] for oid in object_ids if oid in commit_of]
-        if not sequences:
-            skipped.append(batch["batch_id"])
-            continue
+        sequences = [
+            commit_of[oid]
+            for oid in object_ids
+            if oid in commit_of and oid in bound_object_ids
+        ]
         conn.execute(
             """
             INSERT INTO producer_batch (
                 batch_id, producer_id, producer_sequence, previous_batch_hash,
                 credential_id, created_at, semantic_catalog_root, batch_hash,
                 signature, batch_json, status, spooled_at, committed_sequence
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'accepted', %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 batch["batch_id"],
@@ -696,18 +874,25 @@ def _restore_producer_state(
                 batch["batch_hash"],
                 decode_b64url(batch["signature"]),
                 _jsonb(batch),
+                # Terminal archive disposition is not signed by the producer
+                # and cannot be reconstructed from evidence count alone.
+                # Preserve the signed predecessor nonterminal; an exact replay
+                # is re-evaluated instead of returning an invented result.
+                "verifying",
                 received_at,
-                min(sequences),
+                min(sequences) if sequences else None,
             ),
         )
         # Recover portable submission hashes for idempotent re-admission.
         for kind in ("records", "links", "blobs"):
             for sub in batch.get(kind, []):
+                if sub["id"] not in bound_object_ids:
+                    continue
                 conn.execute(
                     "UPDATE object_header SET submission_hash = %s WHERE id = %s",
                     (submission_hash(sub), sub["id"]),
                 )
-    for head in producer_heads:
+    for head in pack.derived_producer_heads:
         conn.execute(
             """
             INSERT INTO producer_head (
@@ -719,7 +904,6 @@ def _restore_producer_state(
                 int(head["producer_sequence"]),
                 head["batch_hash"],
                 head["credential_id"],
-                head["updated_at"],
+                received_at,
             ),
         )
-    return skipped

@@ -2,7 +2,7 @@
 
 Generated deterministically from the validated reference package.
 
-- Files before checksum manifest and inventory: **445**
+- Files before checksum manifest and inventory: **463**
 - JSON Schemas: **112**
 - Registry files: **14**
 - Markdown documents: **36**
@@ -12,7 +12,7 @@ Generated deterministically from the validated reference package.
 - `CCF-0.1.2-SPEC.md`: 1
 - `CHANGELOG-0.1.2.md`: 1
 - `docs`: 23
-- `examples`: 252
+- `examples`: 269
 - `Makefile`: 1
 - `openapi`: 2
 - `README.md`: 1
@@ -22,7 +22,7 @@ Generated deterministically from the validated reference package.
 - `semantic-catalog.json`: 1
 - `sql`: 2
 - `THOTH-IMPLEMENTATION-CHECKLIST.md`: 1
-- `tools`: 13
+- `tools`: 14
 - `vectors`: 17
 
 ## Files
@@ -56,6 +56,7 @@ Generated deterministically from the validated reference package.
 - `docs/profiles/succession.md`
 - `docs/profiles/witnessed-integrity.md`
 - `examples/mindpack/README.md`
+- `examples/mindpack/archive.json`
 - `examples/mindpack/blob-data/4393e9d0-c150-448d-9b27-05872973abab.bin`
 - `examples/mindpack/compartments/blobs/4393e9d0-c150-448d-9b27-05872973abab.semantic.json`
 - `examples/mindpack/compartments/blobs/4393e9d0-c150-448d-9b27-05872973abab.structural.json`
@@ -69,6 +70,8 @@ Generated deterministically from the validated reference package.
 - `examples/mindpack/compartments/links/a3a6c051-271d-47cf-bee5-35fc66d903c2.structural.json`
 - `examples/mindpack/compartments/links/a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.semantic.json`
 - `examples/mindpack/compartments/links/a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.structural.json`
+- `examples/mindpack/compartments/links/c78ac8a7-56fa-4c79-b74b-640d3cc82a09.semantic.json`
+- `examples/mindpack/compartments/links/c78ac8a7-56fa-4c79-b74b-640d3cc82a09.structural.json`
 - `examples/mindpack/compartments/links/d8302220-fcda-466a-ae4f-58b116746b4e.semantic.json`
 - `examples/mindpack/compartments/links/d8302220-fcda-466a-ae4f-58b116746b4e.structural.json`
 - `examples/mindpack/compartments/links/e807d6c8-6589-4ac2-bed4-032207901261.semantic.json`
@@ -81,6 +84,8 @@ Generated deterministically from the validated reference package.
 - `examples/mindpack/compartments/records/2e96f116-6c1a-4216-8ac5-63d0b5da108f.structural.json`
 - `examples/mindpack/compartments/records/396faaaf-52c3-494d-b456-bbb1b8889cbf.semantic.json`
 - `examples/mindpack/compartments/records/396faaaf-52c3-494d-b456-bbb1b8889cbf.structural.json`
+- `examples/mindpack/compartments/records/4034e10b-7a56-46b6-9162-d1cf909f8a78.semantic.json`
+- `examples/mindpack/compartments/records/4034e10b-7a56-46b6-9162-d1cf909f8a78.structural.json`
 - `examples/mindpack/compartments/records/405c475b-1c4c-4e05-b978-28246bb3a5fa.structural.json`
 - `examples/mindpack/compartments/records/4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.semantic.json`
 - `examples/mindpack/compartments/records/4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.structural.json`
@@ -90,6 +95,7 @@ Generated deterministically from the validated reference package.
 - `examples/mindpack/compartments/records/4e9f8cc9-563a-4d61-8221-9f55e9db39bd.structural.json`
 - `examples/mindpack/compartments/records/63607ea0-9d26-4625-ab23-65ce7415b571.semantic.json`
 - `examples/mindpack/compartments/records/63607ea0-9d26-4625-ab23-65ce7415b571.structural.json`
+- `examples/mindpack/compartments/records/649042b4-1519-4dfb-8de9-9dffb167de34.structural.json`
 - `examples/mindpack/compartments/records/682d6151-5dd6-42d8-874c-895c3a501f09.semantic.json`
 - `examples/mindpack/compartments/records/682d6151-5dd6-42d8-874c-895c3a501f09.structural.json`
 - `examples/mindpack/compartments/records/908e42a4-f136-458f-8cf9-7597922fab21.semantic.json`
@@ -101,11 +107,14 @@ Generated deterministically from the validated reference package.
 - `examples/mindpack/compartments/records/c59fe210-08b0-4ae7-9896-024d9ebbe47b.structural.json`
 - `examples/mindpack/integrity/commits.ndjson`
 - `examples/mindpack/integrity/members.ndjson`
+- `examples/mindpack/lineage-heads.ndjson`
 - `examples/mindpack/manifest.json`
 - `examples/mindpack/objects/blobs.ndjson`
 - `examples/mindpack/objects/links.ndjson`
 - `examples/mindpack/objects/records.ndjson`
+- `examples/mindpack/origin-index.ndjson`
 - `examples/mindpack/producer-batches/98d352bf-7abb-4fdf-824c-3c93c4e55901.json`
+- `examples/mindpack/producer-heads.ndjson`
 - `examples/mindpack/registries/README.md`
 - `examples/mindpack/registries/admission-authority-classes.registry.json`
 - `examples/mindpack/registries/authority-bases.registry.json`
@@ -258,6 +267,9 @@ Generated deterministically from the validated reference package.
 - `examples/thoth-capture/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.header.json`
 - `examples/thoth-capture/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.semantic.json`
 - `examples/thoth-capture/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.structural.json`
+- `examples/thoth-capture/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.header.json`
+- `examples/thoth-capture/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.semantic.json`
+- `examples/thoth-capture/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.structural.json`
 - `examples/thoth-capture/link-d8302220-fcda-466a-ae4f-58b116746b4e.header.json`
 - `examples/thoth-capture/link-d8302220-fcda-466a-ae4f-58b116746b4e.semantic.json`
 - `examples/thoth-capture/link-d8302220-fcda-466a-ae4f-58b116746b4e.structural.json`
@@ -278,6 +290,9 @@ Generated deterministically from the validated reference package.
 - `examples/thoth-capture/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.header.json`
 - `examples/thoth-capture/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.semantic.json`
 - `examples/thoth-capture/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.structural.json`
+- `examples/thoth-capture/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.header.json`
+- `examples/thoth-capture/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.semantic.json`
+- `examples/thoth-capture/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.structural.json`
 - `examples/thoth-capture/record-405c475b-1c4c-4e05-b978-28246bb3a5fa.header.json`
 - `examples/thoth-capture/record-405c475b-1c4c-4e05-b978-28246bb3a5fa.structural.json`
 - `examples/thoth-capture/record-4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.header.json`
@@ -292,6 +307,8 @@ Generated deterministically from the validated reference package.
 - `examples/thoth-capture/record-63607ea0-9d26-4625-ab23-65ce7415b571.header.json`
 - `examples/thoth-capture/record-63607ea0-9d26-4625-ab23-65ce7415b571.semantic.json`
 - `examples/thoth-capture/record-63607ea0-9d26-4625-ab23-65ce7415b571.structural.json`
+- `examples/thoth-capture/record-649042b4-1519-4dfb-8de9-9dffb167de34.header.json`
+- `examples/thoth-capture/record-649042b4-1519-4dfb-8de9-9dffb167de34.structural.json`
 - `examples/thoth-capture/record-682d6151-5dd6-42d8-874c-895c3a501f09.header.json`
 - `examples/thoth-capture/record-682d6151-5dd6-42d8-874c-895c3a501f09.semantic.json`
 - `examples/thoth-capture/record-682d6151-5dd6-42d8-874c-895c3a501f09.structural.json`
@@ -445,6 +462,7 @@ Generated deterministically from the validated reference package.
 - `tools/build-catalog.mjs`
 - `tools/build-example.mjs`
 - `tools/build-package-metadata.mjs`
+- `tools/build-release-zip.py`
 - `tools/build-vectors.mjs`
 - `tools/ccf-jcs.mjs`
 - `tools/check-all.sh`

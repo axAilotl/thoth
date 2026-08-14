@@ -216,7 +216,17 @@
             },
             "then": {
               "properties": {
-                "source_custody_proof": { "type": "string", "minLength": 1 },
+                "source_custody_proof": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "availability": { "const": "erased" } },
+              "required": ["availability"]
+            },
+            "then": {
+              "properties": {
                 "unavailability_lineage_id": {
                   "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
                 }

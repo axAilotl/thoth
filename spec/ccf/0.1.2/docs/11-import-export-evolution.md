@@ -41,6 +41,9 @@ Foreign merge preserves source portable objects and custody proofs, then re-admi
 - destination overlays may tighten, not silently widen, imported policy.
 - unavailable compartments retain exact state, commitments, retention, custody
   proof, and erasure/withholding lineage; erased MUST NOT collapse to withheld.
+- an erased compartment names its covering erasure-receipt Record; a withheld
+  compartment uses its admission custody proof as the withholding anchor and
+  may leave `unavailability_lineage_id` null rather than fabricate a Record.
 
 ## 11.4 Delta packs
 
@@ -63,10 +66,30 @@ The manifest is unsigned and non-authoritative:
 
 - the verifier MUST independently reconstruct counts and availability from
   verified streams and journal membership;
+- packaged schemas and registries MUST exactly reproduce signed catalog entry
+  digests and membership;
+- every object MUST be covered by verified journal membership or be a verified
+  chain commit Record, and stream `required` flags are independently derived;
+- operational archive/index/producer streams are caches, not authority;
+  restore derives their mutable state from signed objects and inserts only
+  independently verified rows;
+- signed producer predecessors and the latest signed head are preserved, but an
+  unsigned terminal disposition is restored as nonterminal and re-evaluated on
+  exact replay rather than guessed from admission-evidence counts;
+- producer verification also binds credential subject to producer identity and
+  enforces canonical revocation and validity at signed batch creation time;
 - manifest values MUST NOT determine iteration bounds;
 - every mismatch fails BEFORE any destination mutation;
 - `mode` is only an exporter claim and cannot authorize restore or foreign
   merge.
+
+An external dependency descriptor is independently reproducible: its
+`object_id` is an unresolved reference in verified object contents, its
+`reason` is the fixed string `unresolved_reference`, and `locator` is absent.
+Foreign custody proofs are exactly the archive-ID/object-hash pairs of foreign
+`integrity.commit` Records with valid embedded signatures and verified journal
+membership; ordinary or unjournaled object hashes cannot be relabeled as
+custody evidence.
 
 The final manifest-tamper vectors are published in
 `vectors/mindpack-manifest-tamper.json` (see `docs/13-conformance.md` §13.8).

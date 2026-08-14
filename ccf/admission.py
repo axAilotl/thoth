@@ -510,7 +510,12 @@ def _verify_batch_envelope(
         )
     try:
         public_key_text = resolve_credential_public_key(
-            conn, batch["credential_id"], required_scope="capture", now=now
+            conn,
+            batch["credential_id"],
+            archive_id=archive["archive_id"],
+            subject_id=batch["producer_id"],
+            required_scope="capture",
+            now=now,
         )
     except CredentialError as exc:
         raise _BatchRejected(str(exc)) from exc

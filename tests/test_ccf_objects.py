@@ -269,5 +269,6 @@ def test_thoth_capture_example_objects_verify(ccf_examples_dir, load_ccf_json):
             assert header.semantic_commitment is None, stem
         header.verify(structural, semantic)
         checked += 1
-    # 13 records, 7 links, 1 blob, plus 2 commit Records without semantics.
-    assert checked == 23
+    # 15 records (including the credential revocation successor), 8 links,
+    # 1 blob, plus 2 commit Records without semantics.
+    assert checked == 26
