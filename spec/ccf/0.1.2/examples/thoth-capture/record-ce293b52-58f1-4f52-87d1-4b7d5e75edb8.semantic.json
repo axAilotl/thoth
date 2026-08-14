@@ -1,11 +1,11 @@
 {
   "format": "ccf.record-semantic/0.1.2",
-  "salt": "X19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX18",
+  "salt": "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s",
   "content": {
     "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
     "perspective_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
     "recorded_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
-    "recorded_at": "2026-08-11T21:42:19.200Z",
+    "recorded_at": "2026-08-11T21:42:20.500Z",
     "claimed": {
       "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
       "perspective_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
@@ -25,7 +25,7 @@
         "subject_coverage": "complete"
       },
       "authority": {
-        "basis": "machine_inference",
+        "basis": "runtime_import",
         "asserted_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
         "accepted_by": null
       },
@@ -55,34 +55,15 @@
       "semantic_catalog_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10"
     },
     "authority": {
-      "basis": "machine_inference",
-      "asserted_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
-      "accepted_by": null
-    },
-    "producer_evidence": {
-      "batch_id": "urn:ccf:batch:98d352bf-7abb-4fdf-824c-3c93c4e55901",
-      "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
-      "producer_sequence": "1",
-      "submission_hash": "sha256:cf9f462b2ca152ac68dff2c2cff940bbfc10fd2c21b5525ed0e5287887dfb994"
+      "basis": "explicit_authorization",
+      "asserted_by": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+      "accepted_by": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21"
     },
     "payload": {
-      "target": {
-        "value": "open adoption of the continuity schema",
-        "datatype": "string"
-      },
-      "stance": "prefer",
-      "strength": 0.9,
-      "context": {
-        "domain": "software standards"
-      },
-      "rationale": "Explicitly stated as a strategic preference.",
+      "sensitivity": "governed_sensitive_metadata",
+      "purpose": "erased_content_reintroduction_prevention",
       "extensions": {}
     },
-    "extensions": {},
-    "epistemic": {
-      "confidence": 0.83,
-      "method": "preference-extractor-v1",
-      "calibration_profile": "example-v1"
-    }
+    "extensions": {}
   }
 }

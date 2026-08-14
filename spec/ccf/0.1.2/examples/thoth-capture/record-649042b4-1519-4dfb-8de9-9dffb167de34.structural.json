@@ -1,6 +1,6 @@
 {
   "format": "ccf.record-structural/0.1.2",
-  "salt": "HBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw",
+  "salt": "Hh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4",
   "content": {
     "type": "core.device_credential",
     "type_version": 1,

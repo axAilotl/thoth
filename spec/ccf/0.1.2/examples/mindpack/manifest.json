@@ -10,7 +10,7 @@
   "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
   "created_at": "2026-08-11T21:42:22.000Z",
   "genesis_commit_hash": "sha256:71d5d31058b06ac395430b5342513ac4d3998c1a26872e0d3ed7472b843a05c1",
-  "head_commit_hash": "sha256:6e4baca2c25e2087a2bb4cbd960c83633dfc9a383eb34f4dfbd10985c9de4cdf",
+  "head_commit_hash": "sha256:3fbbf99a26f1e24c0e9f0925757faeea618549171caf2038019ecbd091ff12b6",
   "head_sequence": "2",
   "semantic_catalog_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10",
   "hash_profile": "ccf-jcs-sha256-v2",
@@ -20,16 +20,16 @@
     "ccf-continuity-pack-0.1.2"
   ],
   "counts": {
-    "records": "17",
+    "records": "18",
     "links": "8",
-    "blobs": "1",
+    "blobs": "2",
     "commits": "3"
   },
   "streams": [
     {
       "path": "README.md",
-      "digest": "sha256:65bbe8cb608b08524baeb007abc187cf784e9c60cd925198ff205cc0a9936f06",
-      "byte_length": "103",
+      "digest": "sha256:9b5b6c98532f18e669d0446e4caaa2b558331572a9bea0cb633544e2b5951e9b",
+      "byte_length": "236",
       "required": true
     },
     {
@@ -45,6 +45,12 @@
       "required": false
     },
     {
+      "path": "blob-data/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.bin",
+      "digest": "sha256:d0065d827d9451583715173bd47fc43124d74f15b3c093ae03a64a3c6df80e42",
+      "byte_length": "135",
+      "required": false
+    },
+    {
       "path": "compartments/blobs/4393e9d0-c150-448d-9b27-05872973abab.semantic.json",
       "digest": "sha256:0bc7ca754a798fa651ca63b9024c32fb318d299adc757e8c92de9bba68bb04ff",
       "byte_length": "1726",
@@ -54,6 +60,18 @@
       "path": "compartments/blobs/4393e9d0-c150-448d-9b27-05872973abab.structural.json",
       "digest": "sha256:da88cba71d3e4c23fed8d7a91045f13ea6977f9434ee934fccfcb3edae19df75",
       "byte_length": "827",
+      "required": true
+    },
+    {
+      "path": "compartments/blobs/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.semantic.json",
+      "digest": "sha256:23c0ccc9125999793128eca9c4a65a914a3ff590678b5d1572d17ea7f7fc2d8d",
+      "byte_length": "1147",
+      "required": true
+    },
+    {
+      "path": "compartments/blobs/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.structural.json",
+      "digest": "sha256:8f9e8d21d6f2846c0561ae3b77d576c44090094aff61dd1cd064a59c49617139",
+      "byte_length": "883",
       "required": true
     },
     {
@@ -118,13 +136,13 @@
     },
     {
       "path": "compartments/links/c78ac8a7-56fa-4c79-b74b-640d3cc82a09.semantic.json",
-      "digest": "sha256:74896ef3a35e4b83f015328c574b5acfa99bdea729ab2eb5ecc1a89d63789a11",
+      "digest": "sha256:e7c56c08f1904fcd4623a11da83c2ebd89cd5de38aae87cd1f52492e022cbc88",
       "byte_length": "2210",
       "required": true
     },
     {
       "path": "compartments/links/c78ac8a7-56fa-4c79-b74b-640d3cc82a09.structural.json",
-      "digest": "sha256:42c4188f7f11d42787bc74498cac7984d94287f59f56c083c5e1691b5f0c133d",
+      "digest": "sha256:34747254eb4cf308c9a9d85ce95dd8fbaebbce178d639e1cb646c05887db6c89",
       "byte_length": "649",
       "required": true
     },
@@ -172,7 +190,7 @@
     },
     {
       "path": "compartments/records/2afb37bd-f796-40d5-bfdd-49375344f059.structural.json",
-      "digest": "sha256:6a7947c5a40a9f93fca92ee69964f08ee834919af0fde1162b77777371cdf771",
+      "digest": "sha256:a76a6e9d28ae45be56bbad299f2eb07c17a80872549ffe7c9aa88474a013cb01",
       "byte_length": "1555",
       "required": true
     },
@@ -189,12 +207,6 @@
       "required": true
     },
     {
-      "path": "compartments/records/396faaaf-52c3-494d-b456-bbb1b8889cbf.semantic.json",
-      "digest": "sha256:cac5be21e692fcafcc695b80e177e377a0a18f88f2dc68d43b73bf572d21db56",
-      "byte_length": "3072",
-      "required": true
-    },
-    {
       "path": "compartments/records/396faaaf-52c3-494d-b456-bbb1b8889cbf.structural.json",
       "digest": "sha256:f1904411a792c7f65a33767ed56eb74df08f5292216cabff86fcc11e7695ed7a",
       "byte_length": "511",
@@ -202,13 +214,13 @@
     },
     {
       "path": "compartments/records/4034e10b-7a56-46b6-9162-d1cf909f8a78.semantic.json",
-      "digest": "sha256:a19b343b4a7076cad30caa1322e97b1f89745f037e48b2bfef19c9efb119d372",
+      "digest": "sha256:2040214ef2eaef7cf7e2b1a2b82fe0f79a1a5c7d8ad8ac520d09be755dd82371",
       "byte_length": "2728",
       "required": true
     },
     {
       "path": "compartments/records/4034e10b-7a56-46b6-9162-d1cf909f8a78.structural.json",
-      "digest": "sha256:3f7c3e504c112072e1650deb09b4c727a93694f0b0573bbf53f30ddfd130fe55",
+      "digest": "sha256:b28ce3051ca7c011b8061a50975003f8debef6aa74bbd4e69e6118af9496210f",
       "byte_length": "1372",
       "required": true
     },
@@ -268,7 +280,7 @@
     },
     {
       "path": "compartments/records/649042b4-1519-4dfb-8de9-9dffb167de34.structural.json",
-      "digest": "sha256:a70e432a72c29cb0ed9ef4ffb27b6871e4f2c9e76fc4f566ed30508b91b48684",
+      "digest": "sha256:f3dcef213abbdaac5b352e496e37cd79e9859e0793b437c8486773656f4a1429",
       "byte_length": "1481",
       "required": true
     },
@@ -327,39 +339,51 @@
       "required": true
     },
     {
+      "path": "compartments/records/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.semantic.json",
+      "digest": "sha256:0e5db54789f3377abd4bc04a8258213340236ed920d95bd15c3612b90b92c31a",
+      "byte_length": "2482",
+      "required": true
+    },
+    {
+      "path": "compartments/records/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.structural.json",
+      "digest": "sha256:6c47f03b665742e35997c70c2d7d873f5f763b3cf0b1fee6515a493213f67c36",
+      "byte_length": "1023",
+      "required": true
+    },
+    {
       "path": "integrity/commits.ndjson",
-      "digest": "sha256:2983fae13d6dda1e72062382b68ef389f0df69f06030fcb1838fa87a0804353e",
+      "digest": "sha256:4902b71c70b88a37429163e43389a3378ee7df0baae55d63fa55dcb67ce756b4",
       "byte_length": "993",
       "required": true
     },
     {
       "path": "integrity/members.ndjson",
-      "digest": "sha256:e82f1e79d9ca4260d3f20e3671ac55a685922bebeaf230557a247b438b91c94e",
-      "byte_length": "5999",
+      "digest": "sha256:d4551ffc5eb61e33f4c32341f4f04d5f0f2202bdc635ab46b66ca5c3b7f0516d",
+      "byte_length": "6521",
       "required": true
     },
     {
       "path": "lineage-heads.ndjson",
-      "digest": "sha256:b2be4320d35cfba7ce84f24855afc0bbd8d4a2ab65b79e728711fc9a8706ad7d",
+      "digest": "sha256:cf2a04182306dfa1c9cee95495981b3fef82245bc82b997b1057d42fb7e16a5f",
       "byte_length": "1009",
       "required": true
     },
     {
       "path": "objects/blobs.ndjson",
-      "digest": "sha256:b238466817423a8a98fd35a318e405c77aec65be61b21cd6a1230f2d31367dd2",
-      "byte_length": "416",
+      "digest": "sha256:2d06075090618994c79fe56c47afa9a2d5fd5a2cb603c17537360f0077157341",
+      "byte_length": "832",
       "required": true
     },
     {
       "path": "objects/links.ndjson",
-      "digest": "sha256:466625c01766f8207c7510cafbfe776528b3a6cb36f06825c8c759c01e935349",
+      "digest": "sha256:8e2684a7d7bb1f49c9ea62396887780040023b10d830798a955bd75909bb6064",
       "byte_length": "3328",
       "required": true
     },
     {
       "path": "objects/records.ndjson",
-      "digest": "sha256:454fab5d496ba7f9dba3df7f9ac5433c7a6383eb1547487b5dbb21a88df8e3e8",
-      "byte_length": "6795",
+      "digest": "sha256:a60f9dff9595975c7ab2c12548e5e35c872cd25da26606770f78504cbea0e1b4",
+      "byte_length": "7215",
       "required": true
     },
     {
@@ -1163,7 +1187,9 @@
   ],
   "external_dependencies": [],
   "withheld": [],
-  "erased": [],
+  "erased": [
+    "urn:ccf:record:396faaaf-52c3-494d-b456-bbb1b8889cbf"
+  ],
   "foreign_custody_proofs": [],
   "compartment_availability": [
     {
@@ -1370,11 +1396,11 @@
       "object_kind": "record",
       "object_id": "urn:ccf:record:396faaaf-52c3-494d-b456-bbb1b8889cbf",
       "compartment": "semantic",
-      "availability": "available",
+      "availability": "erased",
       "commitment": "sha256:1eac74d13b2acdab329d964214bb7e7830ffbea5dbe58214af42c787e41e21fb",
       "retention_profile": "payload_erasable",
-      "source_custody_proof": null,
-      "unavailability_lineage_id": null
+      "source_custody_proof": "commit:2:5",
+      "unavailability_lineage_id": "urn:ccf:record:4034e10b-7a56-46b6-9162-d1cf909f8a78"
     },
     {
       "object_kind": "record",
@@ -1418,10 +1444,30 @@
     },
     {
       "object_kind": "record",
+      "object_id": "urn:ccf:record:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
+      "compartment": "structural",
+      "availability": "available",
+      "commitment": "sha256:951545b19c376463aa3195ba309e66e08a699d2d6d8503ca5cedfee55c26625d",
+      "retention_profile": "structural_retention_required",
+      "source_custody_proof": null,
+      "unavailability_lineage_id": null
+    },
+    {
+      "object_kind": "record",
+      "object_id": "urn:ccf:record:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
+      "compartment": "semantic",
+      "availability": "available",
+      "commitment": "sha256:7e0abf3e59b951f8cfc1d60d0e2986c38fc98ceea580c4583db876aea1afc05b",
+      "retention_profile": "structural_retention_required",
+      "source_custody_proof": null,
+      "unavailability_lineage_id": null
+    },
+    {
+      "object_kind": "record",
       "object_id": "urn:ccf:record:4034e10b-7a56-46b6-9162-d1cf909f8a78",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:17341672bfddf6d16619085501c96e64d6ec6c72ca4454e743178f0a63a397ee",
+      "commitment": "sha256:357f79e72fdbf64fc2078ecf7e11e97dd736cd96411f5e68ac6ca3f4b7b852c2",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1431,7 +1477,7 @@
       "object_id": "urn:ccf:record:4034e10b-7a56-46b6-9162-d1cf909f8a78",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:a691733b01f00f58a5a6b2068dfdc8d84f8d4c050c5ac4d5a6714e7487af0a03",
+      "commitment": "sha256:b5df5e864b652284619041dcf264f9be103be64f250bf538650dd9955e2a5db9",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1441,7 +1487,7 @@
       "object_id": "urn:ccf:record:649042b4-1519-4dfb-8de9-9dffb167de34",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:6d254983b92d5abbbdf4df0a8133f7dc7bd4892fd0a1daff61a7eafa6ef7e1bf",
+      "commitment": "sha256:f42d0ba34ace8dce92240e3f64cbfe9d85779bf7e449560fe70bb7892bba8da9",
       "retention_profile": "epoch_lifetime_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1451,7 +1497,7 @@
       "object_id": "urn:ccf:record:2afb37bd-f796-40d5-bfdd-49375344f059",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:4e3368cb90451eaadb56ca11b7f9db433a31e55d97e809f5914d63ff6218c63e",
+      "commitment": "sha256:4026a12bb89ce186648b6f33149f5df4805efc1c0dd81217c271c1cb6c52e0bd",
       "retention_profile": "epoch_lifetime_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1601,7 +1647,7 @@
       "object_id": "urn:ccf:link:c78ac8a7-56fa-4c79-b74b-640d3cc82a09",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:714d8c334fa9cd1c5ac214c8262a9291c275196139d221f8605eeb9f48e2e1c9",
+      "commitment": "sha256:62e77ef8b60e9a6002dcf6b706f6eef700fc6c8c775bc39b74cb51bb85773a05",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1611,7 +1657,7 @@
       "object_id": "urn:ccf:link:c78ac8a7-56fa-4c79-b74b-640d3cc82a09",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:3834f57a229926d946eee4b1793733669f29373cdc8041644e49bca6dba1355d",
+      "commitment": "sha256:1c4c2f4a62337258335d1f0f4b1fbcef8b5379ec3fc1e0c0d305c4d3a4395d14",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1643,6 +1689,36 @@
       "availability": "available",
       "commitment": "sha256:a569ae3b982d098052fc4e0a8a20ea969b3990c601280b63ac305ab2e6a86468",
       "retention_profile": "payload_erasable",
+      "source_custody_proof": null,
+      "unavailability_lineage_id": null
+    },
+    {
+      "object_kind": "blob",
+      "object_id": "urn:ccf:blob:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
+      "compartment": "structural",
+      "availability": "available",
+      "commitment": "sha256:176af756c76cb8df45181913f7c53ecafa0ada8ae58abc2850f27eb5ef102e20",
+      "retention_profile": "structural_retention_required",
+      "source_custody_proof": null,
+      "unavailability_lineage_id": null
+    },
+    {
+      "object_kind": "blob",
+      "object_id": "urn:ccf:blob:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
+      "compartment": "semantic",
+      "availability": "available",
+      "commitment": "sha256:be1e61c5efa9228c1613e983514b146b0a694e6962a7814e022e161105727694",
+      "retention_profile": "structural_retention_required",
+      "source_custody_proof": null,
+      "unavailability_lineage_id": null
+    },
+    {
+      "object_kind": "blob",
+      "object_id": "urn:ccf:blob:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
+      "compartment": "blob_content",
+      "availability": "available",
+      "commitment": "sha256:1d312a70d9963432dd41e886b186d6dcfc1eafcd1e19b362705a1b061d92a1e1",
+      "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
     }

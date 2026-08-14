@@ -325,15 +325,19 @@ def test_vendored_example_mindpack_verifies(ccf_package_root):
         "completeness": "complete",
         "restore_capable": True,
     }
-    assert int(manifest["counts"]["records"]) == 17
+    assert int(manifest["counts"]["records"]) == 18
+    assert int(manifest["counts"]["blobs"]) == 2
     assert int(manifest["counts"]["commits"]) == 3
     assert pack.chain["commits_verified"] == 3
     assert pack.chain["head_commit_hash"] == manifest["head_commit_hash"]
     assert pack.chain["head_sequence"] == manifest["head_sequence"] == "2"
     assert pack.completeness.complete, pack.completeness.to_dict()
     # Every object hash in the pack recomputes from its compartments.
-    assert len(pack.objects) == 17 + 8 + 1
-    assert len(pack.blob_data) == 1
+    assert len(pack.objects) == 18 + 8 + 2
+    assert len(pack.blob_data) == 2
+    assert pack.inventory.erased == {
+        "urn:ccf:record:396faaaf-52c3-494d-b456-bbb1b8889cbf"
+    }
     assert any(
         row["state"] == "revoke" for row in pack.derived_lineage_heads
     ), "example must exercise an issue-to-revoke credential lineage"

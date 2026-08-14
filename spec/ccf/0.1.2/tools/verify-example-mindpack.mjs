@@ -20,6 +20,7 @@ import {
   deriveManifestGroundTruth,
   actualStreams,
 } from './mindpack-manifest.mjs';
+import { verifySuppressionFixture } from './verify-suppression-fixture.mjs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const MP = path.join(ROOT, 'examples', 'mindpack');
@@ -325,6 +326,107 @@ const groundTruth = deriveManifestGroundTruth({
 compareManifest(manifest, groundTruth, { operation: 'restore' });
 check(true, 'unsigned manifest matches independently derived ground truth');
 
+function suppressionFixture() {
+  return {
+    records,
+    links,
+    blobs,
+    structuralById: new Map(
+      [...structuralById].map(([objectId, value]) => [objectId, structuredClone(value)]),
+    ),
+    semanticById: new Map(
+      [...semanticById].map(([objectId, value]) => [objectId, structuredClone(value)]),
+    ),
+    blobBytesById: new Map(
+      blobs
+        .map((header) => [
+          header.id,
+          path.join(MP, 'blob-data', `${uuidOf(header.id)}.bin`),
+        ])
+        .filter(([, file]) => fs.existsSync(file))
+        .map(([objectId, file]) => [objectId, fs.readFileSync(file)]),
+    ),
+    availability: new Map(
+      [...groundTruth.availability].map(([key, value]) => [key, structuredClone(value)]),
+    ),
+  };
+}
+
+const suppression = suppressionFixture();
+check(verifySuppressionFixture(suppression) > 0, 'suppression fixture cross-check');
+const receiptHeader = records.find(
+  (header) => structuralById.get(header.id)?.content?.type === 'lineage.erasure_receipt',
+);
+const receiptCommitment = structuralById
+  .get(receiptHeader.id).content.structural_payload.suppression_commitment;
+const coveredTargetId = links
+  .map((header) => structuralById.get(header.id)?.content)
+  .find((content) => content?.type === 'ccf.covers' && content.from_id === receiptHeader.id)
+  .to_id;
+
+function expectSuppressionRejection(label, mutate) {
+  const fixture = suppressionFixture();
+  mutate(fixture);
+  let rejected = false;
+  try {
+    verifySuppressionFixture(fixture);
+  } catch {
+    rejected = true;
+  }
+  check(rejected, `suppression fixture rejects ${label}`);
+}
+
+function rewriteSuppressionBlob(fixture, transform) {
+  const blobId = receiptCommitment.suppression_blob_id;
+  const document = JSON.parse(fixture.blobBytesById.get(blobId).toString('utf8'));
+  transform(document);
+  const bytes = Buffer.from(canonicalize(document), 'utf8');
+  fixture.blobBytesById.set(blobId, bytes);
+  const structural = fixture.structuralById.get(blobId).content;
+  const semantic = fixture.semanticById.get(blobId).content;
+  structural.byte_length = String(bytes.length);
+  structural.content_commitment = blobContentCommitment(semantic.content_salt, bytes);
+}
+
+expectSuppressionRejection('wrong suppression-set type', (fixture) => {
+  fixture.structuralById.get(receiptCommitment.suppression_set_record_id).content.type = 'core.runtime';
+});
+expectSuppressionRejection('ordinary media as suppression Blob', (fixture) => {
+  const blob = fixture.structuralById.get(receiptCommitment.suppression_blob_id).content;
+  blob.type = 'blob.manifest';
+  blob.media_type = 'audio/wav';
+});
+expectSuppressionRejection('mismatched receipt/set fields', (fixture) => {
+  fixture.structuralById
+    .get(receiptCommitment.suppression_set_record_id)
+    .content.structural_payload.key_profile_id = 'mismatched-key-profile';
+});
+expectSuppressionRejection('bad suppression token count', (fixture) => {
+  rewriteSuppressionBlob(fixture, (document) => { document.entries = []; });
+});
+expectSuppressionRejection('bad suppression Merkle root', (fixture) => {
+  rewriteSuppressionBlob(fixture, (document) => {
+    document.entries[0] = `hmac-sha256:${'00'.repeat(32)}`;
+  });
+});
+expectSuppressionRejection('bad suppression scope commitment', (fixture) => {
+  const wrong = `sha256:${'00'.repeat(32)}`;
+  fixture.structuralById
+    .get(receiptCommitment.suppression_set_record_id)
+    .content.structural_payload.scope_commitment = wrong;
+  fixture.structuralById
+    .get(receiptHeader.id)
+    .content.structural_payload.suppression_commitment.scope_commitment = wrong;
+});
+expectSuppressionRejection('verified erasure availability contradiction', (fixture) => {
+  const entry = fixture.availability.get(`${coveredTargetId}\0semantic`);
+  Object.assign(entry, {
+    availability: 'available',
+    source_custody_proof: null,
+    unavailability_lineage_id: null,
+  });
+});
+
 function availabilityEntry(claim, compartment = 'semantic') {
   return claim.compartment_availability.find((entry) => entry.compartment === compartment);
 }
@@ -401,7 +503,8 @@ function tamperFixture(name) {
     const targetId = contents.structuralById.get(cover.id).content.to_id;
     const target = contents.records.find((header) => header.id === targetId);
     check(Boolean(target), 'erased fixture target is present');
-    fs.unlinkSync(compartmentPathAt(temporaryPack, target, 'semantic'));
+    const semanticPath = compartmentPathAt(temporaryPack, target, 'semantic');
+    if (fs.existsSync(semanticPath)) fs.unlinkSync(semanticPath);
   } else if (name === 'external-dependency-example') {
     const contents = fixtureContents(temporaryPack);
     const source = contents.records.find(
@@ -563,7 +666,15 @@ for (const name of batchFiles) {
   for (const kind of ['records', 'links', 'blobs']) {
     for (const submission of batch[kind]) {
       const evidence = semanticById.get(submission.id)?.content?.producer_evidence;
-      check(Boolean(evidence), `producer evidence: ${submission.id}`);
+      if (!evidence) {
+        const state = groundTruth.availability.get(`${submission.id}\0semantic`);
+        check(
+          state?.availability === 'erased',
+          `producer evidence absent without verified erasure: ${submission.id}`,
+        );
+        continue;
+      }
+      check(true, `producer evidence: ${submission.id}`);
       check(evidence.batch_id === batch.batch_id, `producer evidence batch: ${submission.id}`);
       check(evidence.credential_id === batch.credential_id, `producer evidence credential: ${submission.id}`);
       check(evidence.producer_sequence === batch.producer_sequence, `producer evidence sequence: ${submission.id}`);

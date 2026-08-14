@@ -1,0 +1,22 @@
+{
+  "format": "ccf.blob-structural/0.1.2",
+  "salt": "GhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGho",
+  "content": {
+    "type": "blob.suppression_set",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:c4d58e1b16431cd4fda2265507a1343caf6c10436ab39265f4774c8ad83c33ad",
+    "registry_entry_digest": "sha256:88f068584511890c571a544e56732f566e9b0708bdf9b3c6d9407881cdf47246",
+    "retention_profile": "structural_retention_required",
+    "media_type": "application/vnd.ccf.suppression-set+json",
+    "byte_length": "135",
+    "content_commitment": "sha256:1d312a70d9963432dd41e886b186d6dcfc1eafcd1e19b362705a1b061d92a1e1",
+    "content_profile": "ccf-blob-content-v2",
+    "availability_class": "controlled",
+    "erasure_domain_id": null,
+    "structural_payload": {
+      "sensitivity": "governed_sensitive_metadata"
+    },
+    "extensions": {}
+  }
+}

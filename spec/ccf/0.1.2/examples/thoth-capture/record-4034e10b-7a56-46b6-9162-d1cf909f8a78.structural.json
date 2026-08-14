@@ -1,6 +1,6 @@
 {
   "format": "ccf.record-structural/0.1.2",
-  "salt": "GhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGho",
+  "salt": "HBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw",
   "content": {
     "type": "lineage.erasure_receipt",
     "type_version": 1,
@@ -18,12 +18,12 @@
       "membership_link_type": "ccf.covers",
       "suppression_commitment": {
         "profile": "ccf-hmac-sha256-suppression-v1",
-        "suppression_set_record_id": "urn:ccf:record:4034e10b-7a56-46b6-9162-d1cf909f8a78",
-        "suppression_blob_id": "urn:ccf:blob:4393e9d0-c150-448d-9b27-05872973abab",
+        "suppression_set_record_id": "urn:ccf:record:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
+        "suppression_blob_id": "urn:ccf:blob:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
         "entry_count": "1",
-        "entries_merkle_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10",
+        "entries_merkle_root": "sha256:9eeac70a0cdc7dba6a42af0f581421c735c002e80fe0a1b59f001081f927d566",
         "key_profile_id": "example-fixture-v1",
-        "scope_commitment": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10"
+        "scope_commitment": "sha256:1f26ffe6a04bb5ddba47d3be55478edfd3ba640863eb874068499567dae2de84"
       }
     },
     "extensions": {}

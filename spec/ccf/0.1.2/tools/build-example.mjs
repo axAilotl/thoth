@@ -13,6 +13,10 @@ import {
   merkleRoot,
   commitSigningDigest,
   digestString,
+  suppressionContentDigest,
+  suppressionContentToken,
+  suppressionMerkleRoot,
+  suppressionScopeCommitment,
 } from './ccf-jcs.mjs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -49,12 +53,13 @@ const blobsRegistry = JSON.parse(fs.readFileSync(path.join(ROOT, 'registries', '
 const typeEntry = new Map(types.entries.map((e) => [`${e.name}@${e.version}`, e]));
 const linkEntry = new Map(linksRegistry.entries.map((e) => [`${e.name}@${e.version}`, e]));
 const blobEntry = blobsRegistry.entries[0];
+const suppressionBlobEntry = blobsRegistry.entries.find((entry) => entry.name === 'blob.suppression_set');
 function entryDigest(entry) { return canonicalDigest('ccf:registry-entry:v1', entry); }
 
 const ids = {
   archive: urn('archive', 'archive'), epoch: urn('lineage', 'epoch'), policyLineage: urn('lineage', 'policy'), runLineage: urn('lineage', 'run'), credentialLineage: urn('lineage', 'credential'),
-  person: urn('record', 'person'), runtime: urn('record', 'runtime'), credential: urn('record', 'credential-record'), credentialRevoke: urn('record', 'credential-revoke'), source: urn('record', 'source'), policy: urn('record', 'policy'), session: urn('record', 'session'), artifact: urn('record', 'artifact'), run: urn('record', 'run'), utterance: urn('record', 'utterance'), candidate: urn('record', 'candidate'), review: urn('record', 'review'), accepted: urn('record', 'accepted'), erasureReceipt: urn('record', 'erasure-receipt'), genesis: urn('record', 'genesis'), commit1: urn('record', 'commit1'), commit2: urn('record', 'commit2'),
-  blob: urn('blob', 'audio'), hasBlob: urn('link', 'hasBlob'), capturedIn: urn('link', 'capturedIn'), derivedFrom: urn('link', 'derivedFrom'), generatedBy: urn('link', 'generatedBy'), evidenceFor: urn('link', 'evidenceFor'), supersedes: urn('link', 'supersedes'), covers: urn('link', 'covers'), erasureCovers: urn('link', 'erasure-covers'),
+  person: urn('record', 'person'), runtime: urn('record', 'runtime'), credential: urn('record', 'credential-record'), credentialRevoke: urn('record', 'credential-revoke'), source: urn('record', 'source'), policy: urn('record', 'policy'), session: urn('record', 'session'), artifact: urn('record', 'artifact'), run: urn('record', 'run'), utterance: urn('record', 'utterance'), candidate: urn('record', 'candidate'), review: urn('record', 'review'), accepted: urn('record', 'accepted'), suppressionSet: urn('record', 'suppression-set'), erasureReceipt: urn('record', 'erasure-receipt'), genesis: urn('record', 'genesis'), commit1: urn('record', 'commit1'), commit2: urn('record', 'commit2'),
+  blob: urn('blob', 'audio'), suppressionBlob: urn('blob', 'suppression-set'), hasBlob: urn('link', 'hasBlob'), capturedIn: urn('link', 'capturedIn'), derivedFrom: urn('link', 'derivedFrom'), generatedBy: urn('link', 'generatedBy'), evidenceFor: urn('link', 'evidenceFor'), supersedes: urn('link', 'supersedes'), covers: urn('link', 'covers'), erasureCovers: urn('link', 'erasure-covers'),
   archiveKey: urn('key', 'archive-signing'), deviceKey: urn('key', 'device-signing'), credentialId: urn('credential', 'device-credential'), batch: urn('batch', 'producer-batch'), pack: urn('pack', 'mindpack'), erasureDomain: urn('lineage', 'erasure-domain')
 };
 
@@ -204,6 +209,72 @@ function resolveBlob(sub, n) {
 
 let n=10; for (const s of producerBatch.records) resolveRecord(s,n++); for (const s of producerBatch.links) resolveLink(s,n++); resolveBlob(blobSubmission,n++);
 const receiptClaims = claims(ids.person, ids.person, ['derived_profile'], subject);
+const suppressionProfile = 'ccf-hmac-sha256-suppression-v1';
+const suppressionKey = Buffer.alloc(32, 203); // TEST-ONLY deterministic fixture key; not retained canonically.
+const suppressionPreimage = {
+  format: 'ccf.suppression-preimage/1',
+  kind: 'content',
+  content_class: 'record-semantic',
+  content_digest: suppressionContentDigest(candidateSubmission.payload),
+};
+const suppressionEntries = [suppressionContentToken(suppressionKey, suppressionPreimage)];
+const suppressionRoot = suppressionMerkleRoot(suppressionEntries);
+const suppressionScope = suppressionScopeCommitment([ids.candidate]);
+const suppressionSalt = salt(204);
+const suppressionBytes = Buffer.from(canonicalize({
+  profile: suppressionProfile,
+  entries: suppressionEntries,
+}), 'utf8');
+const suppressionBlobStructural = {
+  type: 'blob.suppression_set',
+  type_version: 1,
+  type_visibility: 'clear',
+  schema_digest: schemaDigest.get(suppressionBlobEntry.semantic_schema_id),
+  registry_entry_digest: entryDigest(suppressionBlobEntry),
+  retention_profile: 'structural_retention_required',
+  media_type: 'application/vnd.ccf.suppression-set+json',
+  byte_length: String(suppressionBytes.length),
+  content_commitment: blobContentCommitment(suppressionSalt, suppressionBytes),
+  content_profile: 'ccf-blob-content-v2',
+  availability_class: 'controlled',
+  erasure_domain_id: null,
+  structural_payload: { sensitivity: 'governed_sensitive_metadata' },
+  extensions: {},
+};
+addBlob(ids.suppressionBlob, n++, suppressionBlobStructural, {
+  content_salt: suppressionSalt,
+  filename: 'suppression-set.json',
+  privacy: receiptClaims.privacy,
+  policy_ref: policyRef,
+  content_encryption_profile: 'none',
+  content_key_ref: null,
+  extensions: {},
+});
+const suppressionRecordPayload = {
+  profile: suppressionProfile,
+  suppression_blob_id: ids.suppressionBlob,
+  entry_count: String(suppressionEntries.length),
+  entries_merkle_root: suppressionRoot,
+  key_profile_id: 'example-fixture-v1',
+  scope_commitment: suppressionScope,
+  erasure_receipt_id: ids.erasureReceipt,
+};
+addRecord(ids.suppressionSet, 'lineage.suppression_set', n++, {
+  person_id: ids.person,
+  perspective_id: ids.person,
+  recorded_by: ids.runtime,
+  recorded_at: '2026-08-11T21:42:20.500Z',
+  claimed: receiptClaims,
+  privacy: receiptClaims.privacy,
+  policy_ref: policyRef,
+  authority: { basis: 'explicit_authorization', asserted_by: ids.person, accepted_by: ids.person },
+  payload: {
+    sensitivity: 'governed_sensitive_metadata',
+    purpose: 'erased_content_reintroduction_prevention',
+    extensions: {},
+  },
+  extensions: {},
+}, { structuralPayload: suppressionRecordPayload });
 addRecord(ids.erasureReceipt, 'lineage.erasure_receipt', n++, {
   person_id: ids.person,
   perspective_id: ids.person,
@@ -235,13 +306,13 @@ addRecord(ids.erasureReceipt, 'lineage.erasure_receipt', n++, {
     status: 'verified',
     membership_link_type: 'ccf.covers',
     suppression_commitment: {
-      profile: 'ccf-hmac-sha256-suppression-v1',
-      suppression_set_record_id: ids.erasureReceipt,
-      suppression_blob_id: ids.blob,
-      entry_count: '1',
-      entries_merkle_root: catalog.root,
-      key_profile_id: 'example-fixture-v1',
-      scope_commitment: catalog.root,
+      profile: suppressionRecordPayload.profile,
+      suppression_set_record_id: ids.suppressionSet,
+      suppression_blob_id: suppressionRecordPayload.suppression_blob_id,
+      entry_count: suppressionRecordPayload.entry_count,
+      entries_merkle_root: suppressionRecordPayload.entries_merkle_root,
+      key_profile_id: suppressionRecordPayload.key_profile_id,
+      scope_commitment: suppressionRecordPayload.scope_commitment,
     },
   },
 });
@@ -290,7 +361,12 @@ fs.writeFileSync(path.join(MP,'objects','blobs.ndjson'),blobs.map((o)=>canonical
 for (const o of records) { const s=stem(o.header.id); writeJson(path.join(MP,'compartments','records',`${s}.structural.json`),o.structural); if(o.semantic) writeJson(path.join(MP,'compartments','records',`${s}.semantic.json`),o.semantic); }
 for (const o of links) { const s=stem(o.header.id); writeJson(path.join(MP,'compartments','links',`${s}.structural.json`),o.structural); writeJson(path.join(MP,'compartments','links',`${s}.semantic.json`),o.semantic); }
 for (const o of blobs) { const s=stem(o.header.id); writeJson(path.join(MP,'compartments','blobs',`${s}.structural.json`),o.structural); writeJson(path.join(MP,'compartments','blobs',`${s}.semantic.json`),o.semantic); }
+// The candidate's semantic compartment is canonically erased; its commitment
+// remains in the header and its reintroduction token remains in the governed
+// suppression Blob.
+fs.unlinkSync(path.join(MP,'compartments','records',`${stem(ids.candidate)}.semantic.json`));
 fs.writeFileSync(path.join(MP,'blob-data',`${stem(ids.blob)}.bin`),wav);
+fs.writeFileSync(path.join(MP,'blob-data',`${stem(ids.suppressionBlob)}.bin`),suppressionBytes);
 fs.writeFileSync(path.join(MP,'integrity','commits.ndjson'),[genesis,commit1,commit2].map((c)=>canonicalize({sequence:c.sequence,record_id:c.header.id,commit_hash:c.commit_hash,parent_commit_hash:c.structural.content.structural_payload.parent_commit_hash,merkle_root:c.merkle_root})).join('\n')+'\n');
 fs.writeFileSync(path.join(MP,'integrity','members.ndjson'),[...members1,...members2].map(canonicalize).join('\n')+'\n');
 writeJson(path.join(MP,'producer-batches',`${stem(ids.batch)}.json`),producerBatch);
@@ -324,17 +400,22 @@ for(const o of [...records,...blobs]){
 originRows.sort((a,b)=>`${a.source_id}\0${a.native_id}\0${a.revision}\0${a.object_kind}`.localeCompare(`${b.source_id}\0${b.native_id}\0${b.revision}\0${b.object_kind}`));
 fs.writeFileSync(path.join(MP,'origin-index.ndjson'),originRows.map(canonicalize).join('\n')+'\n');
 fs.writeFileSync(path.join(MP,'producer-heads.ndjson'),canonicalize({producer_id:ids.runtime,producer_sequence:'1',batch_hash:producerBatch.batch_hash,credential_id:ids.credentialId,updated_at:producerBatch.created_at})+'\n');
-fs.writeFileSync(path.join(MP,'README.md'),'# Example CCF 0.1.2 mindpack\n\nSelf-contained restore example generated from `tools/build-example.mjs`.\n');
+fs.writeFileSync(path.join(MP,'README.md'),'# Example CCF 0.1.2 mindpack\n\nSelf-contained restore example generated from `tools/build-example.mjs`. It includes a verified logical erasure, a governed suppression-set Record and Blob, and one canonically erased semantic compartment.\n');
 
 function walk(dir){const out=[];for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())out.push(...walk(p));else out.push(p);}return out;}
 const streams=[]; for(const f of walk(MP).sort()){const rel=path.relative(MP,f).replaceAll(path.sep,'/'); if(rel==='manifest.json')continue; const b=fs.readFileSync(f); streams.push({path:rel,digest:digestString(b),byte_length:String(b.length),required:!rel.startsWith('blob-data/')});}
 const compartmentAvailability=[];
+const erasedSemanticIds=new Set([ids.candidate]);
 for(const o of [...records,...links,...blobs]){
   const retentionProfile=o.structural.content.retention_profile;
   compartmentAvailability.push({object_kind:o.header.object_kind,object_id:o.header.id,compartment:'structural',availability:'available',commitment:o.header.structural_commitment,retention_profile:retentionProfile,source_custody_proof:null,unavailability_lineage_id:null});
-  if(o.header.semantic_commitment!==null) compartmentAvailability.push({object_kind:o.header.object_kind,object_id:o.header.id,compartment:'semantic',availability:'available',commitment:o.header.semantic_commitment,retention_profile:retentionProfile,source_custody_proof:null,unavailability_lineage_id:null});
+  if(o.header.semantic_commitment!==null){
+    const erased=erasedSemanticIds.has(o.header.id);
+    const coordinate=coordinateOf.get(o.header.id);
+    compartmentAvailability.push({object_kind:o.header.object_kind,object_id:o.header.id,compartment:'semantic',availability:erased?'erased':'available',commitment:o.header.semantic_commitment,retention_profile:retentionProfile,source_custody_proof:erased?`commit:${coordinate.commit_sequence}:${coordinate.commit_position}`:null,unavailability_lineage_id:erased?ids.erasureReceipt:null});
+  }
   if(o.header.object_kind==='blob') compartmentAvailability.push({object_kind:'blob',object_id:o.header.id,compartment:'blob_content',availability:'available',commitment:o.structural.content.content_commitment,retention_profile:retentionProfile,source_custody_proof:null,unavailability_lineage_id:null});
 }
-const manifest={format:'ccf.mindpack/0.1.2',mode:'restore',custody:{completeness:'complete',restore_capable:true},pack_id:ids.pack,archive_id:ids.archive,epoch_id:ids.epoch,created_at:'2026-08-11T21:42:22.000Z',genesis_commit_hash:genesis.commit_hash,head_commit_hash:commit2.commit_hash,head_sequence:'2',semantic_catalog_root:catalog.root,hash_profile:'ccf-jcs-sha256-v2',profiles:['ccf-core-0.1.2','ccf-local-sync-0.1.2','ccf-continuity-pack-0.1.2'],counts:{records:String(records.length),links:String(links.length),blobs:String(blobs.length),commits:'3'},streams,external_dependencies:[],withheld:[],erased:[],foreign_custody_proofs:[],compartment_availability:compartmentAvailability,extensions:{}};
+const manifest={format:'ccf.mindpack/0.1.2',mode:'restore',custody:{completeness:'complete',restore_capable:true},pack_id:ids.pack,archive_id:ids.archive,epoch_id:ids.epoch,created_at:'2026-08-11T21:42:22.000Z',genesis_commit_hash:genesis.commit_hash,head_commit_hash:commit2.commit_hash,head_sequence:'2',semantic_catalog_root:catalog.root,hash_profile:'ccf-jcs-sha256-v2',profiles:['ccf-core-0.1.2','ccf-local-sync-0.1.2','ccf-continuity-pack-0.1.2'],counts:{records:String(records.length),links:String(links.length),blobs:String(blobs.length),commits:'3'},streams,external_dependencies:[],withheld:[],erased:[ids.candidate],foreign_custody_proofs:[],compartment_availability:compartmentAvailability,extensions:{}};
 writeJson(path.join(MP,'manifest.json'),manifest);
 console.log(`built example: ${records.length} records, ${links.length} links, ${blobs.length} blob`);
