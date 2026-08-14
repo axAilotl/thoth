@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   blobContentCommitment,
+  canonicalize,
   suppressionMerkleRoot,
   suppressionScopeCommitment,
 } from './ccf-jcs.mjs';
@@ -125,4 +128,127 @@ export function verifySuppressionFixture({
     }
   }
   return verifiedReceipts.length;
+}
+
+function exampleFixture({
+  root,
+  records,
+  links,
+  blobs,
+  structuralById,
+  semanticById,
+  availability,
+}) {
+  return {
+    records,
+    links,
+    blobs,
+    structuralById: new Map(
+      [...structuralById].map(([objectId, value]) => [objectId, structuredClone(value)]),
+    ),
+    semanticById: new Map(
+      [...semanticById].map(([objectId, value]) => [objectId, structuredClone(value)]),
+    ),
+    blobBytesById: new Map(
+      blobs
+        .map((header) => [
+          header.id,
+          path.join(root, 'blob-data', `${header.id.slice(header.id.lastIndexOf(':') + 1)}.bin`),
+        ])
+        .filter(([, file]) => fs.existsSync(file))
+        .map(([objectId, file]) => [objectId, fs.readFileSync(file)]),
+    ),
+    availability: new Map(
+      [...availability].map(([key, value]) => [key, structuredClone(value)]),
+    ),
+  };
+}
+
+function rewriteSuppressionBlob(fixture, blobId, transform) {
+  const document = JSON.parse(fixture.blobBytesById.get(blobId).toString('utf8'));
+  transform(document);
+  const bytes = Buffer.from(canonicalize(document), 'utf8');
+  fixture.blobBytesById.set(blobId, bytes);
+  const structural = fixture.structuralById.get(blobId).content;
+  const semantic = fixture.semanticById.get(blobId).content;
+  structural.byte_length = String(bytes.length);
+  structural.content_commitment = blobContentCommitment(semantic.content_salt, bytes);
+}
+
+/** Run the example's positive suppression check and fail-closed mutations. */
+export function verifyExampleSuppressionFixtures(options) {
+  const fixture = exampleFixture(options);
+  requireFixture(verifySuppressionFixture(fixture) > 0, 'cross-check failed');
+
+  const { records, links, structuralById } = options;
+  const receiptHeader = records.find(
+    (header) => structuralById.get(header.id)?.content?.type === 'lineage.erasure_receipt',
+  );
+  const receiptCommitment = structuralById
+    .get(receiptHeader.id).content.structural_payload.suppression_commitment;
+  const coveredTargetId = links
+    .map((header) => structuralById.get(header.id)?.content)
+    .find((content) => content?.type === 'ccf.covers' && content.from_id === receiptHeader.id)
+    .to_id;
+  let checks = 1;
+
+  function expectRejection(label, mutate) {
+    const mutation = exampleFixture(options);
+    mutate(mutation);
+    try {
+      verifySuppressionFixture(mutation);
+    } catch {
+      checks += 1;
+      return;
+    }
+    throw new Error(`suppression fixture: accepted ${label}`);
+  }
+
+  expectRejection('wrong suppression-set type', (mutation) => {
+    mutation.structuralById
+      .get(receiptCommitment.suppression_set_record_id).content.type = 'core.runtime';
+  });
+  expectRejection('ordinary media as suppression Blob', (mutation) => {
+    const blob = mutation.structuralById.get(receiptCommitment.suppression_blob_id).content;
+    blob.type = 'blob.manifest';
+    blob.media_type = 'audio/wav';
+  });
+  expectRejection('mismatched receipt/set fields', (mutation) => {
+    mutation.structuralById
+      .get(receiptCommitment.suppression_set_record_id)
+      .content.structural_payload.key_profile_id = 'mismatched-key-profile';
+  });
+  expectRejection('bad suppression token count', (mutation) => {
+    rewriteSuppressionBlob(
+      mutation,
+      receiptCommitment.suppression_blob_id,
+      (document) => { document.entries = []; },
+    );
+  });
+  expectRejection('bad suppression Merkle root', (mutation) => {
+    rewriteSuppressionBlob(
+      mutation,
+      receiptCommitment.suppression_blob_id,
+      (document) => { document.entries[0] = `hmac-sha256:${'00'.repeat(32)}`; },
+    );
+  });
+  expectRejection('bad suppression scope commitment', (mutation) => {
+    const wrong = `sha256:${'00'.repeat(32)}`;
+    mutation.structuralById
+      .get(receiptCommitment.suppression_set_record_id)
+      .content.structural_payload.scope_commitment = wrong;
+    mutation.structuralById
+      .get(receiptHeader.id)
+      .content.structural_payload.suppression_commitment.scope_commitment = wrong;
+  });
+  expectRejection('verified erasure availability contradiction', (mutation) => {
+    const entry = mutation.availability.get(`${coveredTargetId}\0semantic`);
+    Object.assign(entry, {
+      availability: 'available',
+      source_custody_proof: null,
+      unavailability_lineage_id: null,
+    });
+  });
+
+  return checks;
 }

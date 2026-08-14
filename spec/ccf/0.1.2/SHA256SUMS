@@ -451,10 +451,10 @@ f235336d4ff5f66a25be2c49b0ac021bf512d3158993d146e6011f1a407597c5  ./tools/build-
 3c09c9fbc5c199b25e74c25f2b9d57ea5b83d0b8b3655097075613079728b660  ./tools/mindpack-manifest.mjs
 3138092517309d3d7e91dd54da6487775afae899d0eda124ef5eb30e08456b87  ./tools/validate-package.py
 8b981853633d9a436afdd901a16c72f316c617aeb87e2a28ed5854c9037aef72  ./tools/verify-conformance.mjs
-33ef8c2159413b869ae38eec23f6a387084321cab114468a004a2f5041b5153f  ./tools/verify-example-mindpack.mjs
+42d521deede549e9e4fc221cc6eb3b9ebb3a5ea3578f2362f1e80d0c167939ed  ./tools/verify-example-mindpack.mjs
 eb7357825f68d998c1d68a8c14a383b948c50fc1b143f0a9e9a5faf36ff4ec9a  ./tools/verify-postgres-fixture.sh
 064d6a10ff89e45e1962dcf12002a698bd3f7175ec0938130b612d8f3ecb5655  ./tools/verify-reproducible.sh
-76c596a196060b49d8b276987cd5a8a2788cf7fe19ad3fa941d29e2fde7ce532  ./tools/verify-suppression-fixture.mjs
+980779e8f12d0fb920a86ff75c84c67e1bb120d7d6df1cf7a9256e4752fd1e74  ./tools/verify-suppression-fixture.mjs
 f2a68d4d0134801eefefb0b3857a140b982460a7d331a47c06594f773d994440  ./tools/verify-vectors.mjs
 30486299b8e6fbb70a88be095c9ffafbc9493de39a1ba159697c5e501b03f78f  ./vectors/README.md
 3d80cb63ab1489ee146ec76bd376b03f6cb8e2ad10d6d64778293bd95b792847  ./vectors/TEST-ONLY-archive-ed25519-private.pem
