@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -111,7 +112,7 @@ def test_pi_skills_dry_run_exposes_locked_down_command(tmp_path: Path):
     assert payload["run_plan"]["route"]["remote_install_blocked"] is False
 
 
-def test_pi_skills_legacy_config_defaults_artifact_types_in_plan(tmp_path: Path):
+def test_pi_skills_legacy_config_defaults_artifact_types_in_plan(tmp_path: Path, caplog):
     config = _config(tmp_path)
     skills = config.get("sources.pi_skills.skills")
     skills[0].pop("artifact_types")
@@ -119,15 +120,30 @@ def test_pi_skills_legacy_config_defaults_artifact_types_in_plan(tmp_path: Path)
     db = MetadataDB(str(layout.database_path))
     service = AgentSurfaceService(config, layout=layout, db=db)
 
-    payload = service.run_connector(
-        "pi_skills",
-        options={"skill": "collect-notes"},
-    )
+    with caplog.at_level(logging.WARNING, logger="collectors.pi_skill_connector"):
+        payload = service.run_connector(
+            "pi_skills",
+            options={"skill": "collect-notes"},
+        )
 
     assert payload["status"] == "planned"
     assert payload["run_plan"]["artifact_types_defaulted"] is True
     assert "transcript" in payload["run_plan"]["artifact_types"]
     assert "repository" in payload["run_plan"]["artifact_types"]
+
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "collectors.pi_skill_connector"
+        and record.levelno == logging.WARNING
+    ]
+    assert any(
+        "'collect-notes'" in message
+        and "defaulting to all supported types" in message
+        and "transcript" in message
+        and "repository" in message
+        for message in warnings
+    )
 
 
 def test_pi_skills_rejects_unallowlisted_skill(tmp_path: Path):

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -80,6 +81,29 @@ def test_map_bounded_continues_sibling_items_after_worker_exception():
     started = asyncio.run(run())
 
     assert sorted(started) == [0, 1, 2, 3]
+
+
+def test_map_bounded_logs_all_collected_errors(caplog):
+    async def run():
+        async def worker(item: int) -> int:
+            await asyncio.sleep(0)
+            if item in (1, 2):
+                raise RuntimeError(f"item {item} failed")
+            return item
+
+        with pytest.raises(RuntimeError, match="item 1 failed"):
+            await map_bounded([0, 1, 2], worker, concurrency=2)
+
+    with caplog.at_level(logging.ERROR, logger="core.bounded_workers"):
+        asyncio.run(run())
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "core.bounded_workers" and record.levelno == logging.ERROR
+    ]
+    assert any("Bounded worker item 1 failed: item 1 failed" == m for m in messages)
+    assert any("Bounded worker item 2 failed: item 2 failed" == m for m in messages)
 
 
 def test_document_factory_async_downloads_use_bounded_workers(monkeypatch):
