@@ -1,0 +1,65 @@
+{
+  "name": "omi",
+  "source_name": "omi",
+  "source_aliases": [
+    "personal_transcripts",
+    "personal_transcript"
+  ],
+  "display_name": "Omi / Personal Transcripts",
+  "description": "Collect Omi conversations or local transcript exports while preserving raw sources and speaker/session/device metadata.",
+  "artifact_types": [
+    "transcript"
+  ],
+  "inputs": [
+    "remote_api:omi",
+    "local_files:omi_exports"
+  ],
+  "outputs": [
+    "artifact_queue:transcript"
+  ],
+  "capabilities": [
+    "transcripts",
+    "personal_data",
+    "speaker_metadata",
+    "session_metadata",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.omi.enabled",
+    "sources.omi.export_paths",
+    "sources.omi.export_dirs",
+    "sources.omi.file_patterns",
+    "sources.omi.api_enabled",
+    "sources.omi.api_key_env",
+    "sources.omi.base_url",
+    "sources.omi.api_limit",
+    "sources.omi.api_page_size",
+    "sources.omi.include_transcript",
+    "sources.omi.source_name",
+    "sources.omi.device_id",
+    "sources.omi.speaker",
+    "sources.omi.language"
+  ],
+  "auth": [
+    "sources.omi.api_key",
+    "OMI_API_KEY"
+  ],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "network_ingest_queue",
+  "allowed_side_effects": [
+    "network_read",
+    "auth_token_read",
+    "local_file_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.personal_transcript_connector:PersonalTranscriptConnector",
+  "cli_command": "connectors run omi",
+  "config_namespace": "sources.omi",
+  "default_enabled": true,
+  "ccf": {
+    "lane": "transcript",
+    "artifact_role": "raw_capture"
+  }
+}

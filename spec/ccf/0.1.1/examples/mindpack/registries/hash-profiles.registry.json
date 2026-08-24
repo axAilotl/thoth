@@ -1,0 +1,10 @@
+{
+  "registry": "ccf.hash-profiles/0.1.1",
+  "entries": [
+    {
+      "name": "ccf-jcs-sha256-v2",
+      "status": "active",
+      "description": "JCS with CCF canonical string and number restrictions; split structural/semantic commitments; domain-separated SHA-256 constructions."
+    }
+  ]
+}

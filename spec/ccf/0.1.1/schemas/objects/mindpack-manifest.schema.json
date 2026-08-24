@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:objects.mindpack-manifest",
+  "title": "CCF Mindpack Manifest 0.1.1",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "ccf.mindpack/0.1.1"
+    },
+    "mode": {
+      "enum": [
+        "restore",
+        "replica",
+        "foreign_merge",
+        "delta"
+      ]
+    },
+    "pack_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/packUrn"
+    },
+    "archive_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/archiveUrn"
+    },
+    "epoch_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/lineageUrn"
+    },
+    "created_at": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+    },
+    "genesis_commit_hash": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+    },
+    "head_commit_hash": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+    },
+    "head_sequence": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "semantic_catalog_root": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+    },
+    "hash_profile": {
+      "const": "ccf-jcs-sha256-v2"
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/profileName"
+      },
+      "uniqueItems": true
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "records": {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+        },
+        "links": {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+        },
+        "blobs": {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+        },
+        "commits": {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+        }
+      },
+      "required": [
+        "records",
+        "links",
+        "blobs",
+        "commits"
+      ],
+      "additionalProperties": false
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "digest": {
+            "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+          },
+          "byte_length": {
+            "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "digest",
+          "byte_length",
+          "required"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external_dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/objectUrn"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "locator": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_id",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "withheld": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "erased": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "foreign_custody_proofs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "format",
+    "mode",
+    "pack_id",
+    "archive_id",
+    "epoch_id",
+    "created_at",
+    "genesis_commit_hash",
+    "head_commit_hash",
+    "head_sequence",
+    "semantic_catalog_root",
+    "hash_profile",
+    "profiles",
+    "counts",
+    "streams",
+    "external_dependencies",
+    "withheld",
+    "erased",
+    "foreign_custody_proofs",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

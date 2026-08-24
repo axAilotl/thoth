@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import logging
 import os
 from pathlib import Path
 from typing import Any, Mapping
@@ -21,6 +22,7 @@ from .artifacts import (
 )
 from .capture_event_store import CaptureEventStore
 from .canonical_identity import CanonicalArtifactIdentity, CanonicalIdentityService
+from .ccf_dualwrite import open_dual_write_service
 from .wiki_capture_compiler import CaptureWikiCompiler
 from .config import Config
 from .metadata_db import MetadataDB
@@ -55,6 +57,8 @@ from .wiki_scaffold import (
     append_wiki_log_entry,
     ensure_wiki_scaffold,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -460,6 +464,11 @@ class CompiledWikiUpdater:
             for result in compiled
         )
         self.refresh_index()
+        # No CCF wiki-projection mirror here: capture-event pages cite
+        # capture events and raw vault paths as inputs, and capture events
+        # have no mirrored CCF object — no honest evidence Links can be
+        # built, and the projection converter's refusal is not weakened.
+        # (Semantic-memory pages ARE mirrored; see _mirror_wiki_projections.)
         if results:
             append_wiki_log_entry(
                 self.scaffold,
@@ -489,6 +498,7 @@ class CompiledWikiUpdater:
             for result in compiled
         )
         self.refresh_index()
+        self._mirror_wiki_projections(results)
         if results:
             append_wiki_log_entry(
                 self.scaffold,
@@ -499,6 +509,83 @@ class CompiledWikiUpdater:
                 + ".",
             )
         return results
+
+    def _mirror_wiki_projections(
+        self, results: tuple[WikiUpdateResult, ...]
+    ) -> None:
+        """Mirror compiled semantic wiki pages as CCF projection artifacts.
+
+        Fail-open and ledgered per page (``database.ccf_archive`` flags
+        ``dual_write`` + ``mirror_wiki``). Evidence is resolved from the
+        page's ``thoth_semantic_candidate_ids`` to mirrored candidate
+        assertions; a page with no resolvable inputs is skipped with a
+        warning — the projection converter rightly refuses evidence-less
+        pages, and that refusal is never weakened.
+
+        Capture-event pages (``update_from_capture_events``) are
+        deliberately NOT wired: their inputs are capture events and raw
+        vault paths, and capture events have no mirrored CCF object to
+        cite, so no honest evidence Links can be constructed there.
+        """
+        service = open_dual_write_service(self.config)
+        if service is None or not service.settings.mirror_wiki:
+            return
+        from ccf.dualwrite import families
+        from ccf.dualwrite.conventions import ASSERTION_REVISION
+
+        for result in results:
+            if result.action not in ("created", "updated"):
+                continue
+            try:
+                frontmatter = _read_frontmatter(result.page_path)
+                candidate_ids = [
+                    str(item)
+                    for item in frontmatter.get("thoth_semantic_candidate_ids") or []
+                ]
+                evidence = []
+                for candidate_id in candidate_ids:
+                    found = families.find_mirrored_object(
+                        service,
+                        native_id=candidate_id,
+                        revision=ASSERTION_REVISION,
+                    )
+                    if found is not None:
+                        evidence.append(found)
+                if not evidence:
+                    logger.warning(
+                        "skipping CCF wiki projection mirror for %s: no "
+                        "mirrored candidate assertions to cite as evidence",
+                        result.slug,
+                    )
+                    continue
+                families.mirror_wiki_projection(
+                    service,
+                    page={
+                        "slug": result.slug,
+                        "title": str(
+                            frontmatter.get("title") or result.slug
+                        ),
+                        "summary": frontmatter.get("thoth_summary")
+                        or frontmatter.get("description"),
+                        "kind": frontmatter.get("thoth_kind"),
+                        "input_hash": frontmatter.get("thoth_input_hash"),
+                        "source_paths": frontmatter.get("thoth_source_paths")
+                        or [],
+                        "event_ids": frontmatter.get("thoth_event_ids") or [],
+                        "semantic_candidate_ids": candidate_ids,
+                        "updated_at": frontmatter.get("thoth_updated_at"),
+                    },
+                    evidence=evidence,
+                )
+            except Exception as exc:
+                service.record_error(
+                    {
+                        "family": "wiki",
+                        "slug": result.slug,
+                        "page_path": str(result.page_path),
+                    },
+                    exc,
+                )
 
     def refresh_index(self) -> Path:
         self.prune_legacy_tweet_pages()

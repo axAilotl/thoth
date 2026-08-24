@@ -221,6 +221,43 @@
             "migration_lock_id": { "type": "integer" }
           },
           "additionalProperties": false
+        },
+        "ccf_archive": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "dual_write": { "type": "boolean" },
+            "mirror_transcripts": {
+              "type": "boolean",
+              "description": "Dual-write family flag: mirror transcript captures as experience.utterance records. Requires dual_write."
+            },
+            "mirror_semantic": {
+              "type": "boolean",
+              "description": "Dual-write family flag: mirror canonical entities resolved at capture time as semantic.entity records. Requires dual_write."
+            },
+            "mirror_review": {
+              "type": "boolean",
+              "description": "Dual-write family flag: mirror artifact/semantic-memory review decisions as governance.review_decision records (materializing candidate semantic.assertion targets). Requires dual_write."
+            },
+            "mirror_wiki": {
+              "type": "boolean",
+              "description": "Dual-write family flag: mirror compiled semantic wiki pages as experience.artifact wiki projections with mandatory evidence links. Requires dual_write."
+            },
+            "backend": { "type": "string", "enum": ["postgres"] },
+            "dsn_env": { "type": "string" },
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "connect_timeout_seconds": { "type": "integer", "minimum": 1 },
+            "application_name": { "type": "string", "minLength": 1 },
+            "migration_lock_id": { "type": "integer" },
+            "device_key_path": { "type": "string", "minLength": 1 },
+            "archive_key_path": { "type": "string", "minLength": 1 },
+            "package_root": { "type": "string", "minLength": 1 },
+            "error_log_path": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

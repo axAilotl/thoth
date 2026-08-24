@@ -1,0 +1,47 @@
+{
+  "name": "arxiv",
+  "source_name": "arxiv",
+  "source_aliases": [
+    "arxiv_rss"
+  ],
+  "display_name": "arXiv",
+  "description": "Discover papers from arXiv search and category feeds.",
+  "artifact_types": [
+    "paper"
+  ],
+  "inputs": [
+    "remote_api:arxiv"
+  ],
+  "outputs": [
+    "artifact_queue:paper"
+  ],
+  "capabilities": [
+    "papers",
+    "metadata",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.arxiv.source",
+    "sources.arxiv.feed_format",
+    "sources.arxiv.topics",
+    "sources.arxiv.categories",
+    "sources.arxiv.limit"
+  ],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "network_ingest_queue",
+  "allowed_side_effects": [
+    "network_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.arxiv_collector:ArXivCollector",
+  "cli_command": "arxiv",
+  "config_namespace": "sources.arxiv",
+  "default_enabled": true,
+  "ccf": {
+    "lane": "paper",
+    "artifact_role": "raw_capture"
+  }
+}

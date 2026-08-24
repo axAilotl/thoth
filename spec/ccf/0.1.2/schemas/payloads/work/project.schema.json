@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.work.project",
+  "title": "work.project payload",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "idea",
+        "active",
+        "paused",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "owner_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+      },
+      "uniqueItems": true
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "name",
+    "summary",
+    "status",
+    "owner_ids",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

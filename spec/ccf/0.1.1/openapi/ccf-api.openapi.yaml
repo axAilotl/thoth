@@ -1,0 +1,172 @@
+openapi: 3.1.0
+info:
+  title: CCF 0.1.1 Archive and Local Sync API
+  version: 0.1.1
+  description: >-
+    Reference batch-oriented API. CCF permits local-only and file/USB sync;
+    this HTTP surface is not a requirement for local reads or capture.
+servers:
+  - url: https://example.invalid/ccf
+paths:
+  /v0.1.1/sync/head:
+    get:
+      summary: Read the archive and producer heads
+      responses:
+        '200':
+          description: Current synchronized head
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/sync/sync-head.schema.json
+  /v0.1.1/producer-batches:
+    post:
+      summary: Submit a signed offline producer batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/sync/producer-batch.schema.json
+      responses:
+        '200':
+          description: Existing or synchronously committed batch
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/operational/batch-result.schema.json
+        '202':
+          description: Durable queue acceptance; not yet canonical
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/operational/batch-result.schema.json
+        '409':
+          description: Producer-chain, origin-revision, ID, or lineage conflict
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/operational/batch-result.schema.json
+  /v0.1.1/producer-batches/{batchId}:
+    get:
+      summary: Read a batch result
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Batch state
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/operational/batch-result.schema.json
+  /v0.1.1/packs/delta:
+    post:
+      summary: Negotiate or create a delta pack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_sequence, through_sequence]
+              properties:
+                from_sequence: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+                through_sequence: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+                include_blobs: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Delta pack manifest
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/sync/delta-pack-manifest.schema.json
+  /v0.1.1/blob-transfers/{transferRef}:
+    put:
+      summary: Upload a resumable Blob byte range
+      parameters:
+        - name: transferRef
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Content-Range
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, contentEncoding: binary }
+      responses:
+        '204': { description: Range verified and stored }
+        '409': { description: Range or digest conflict }
+  /v0.1.1/objects/{objectId}:
+    get:
+      summary: Read a portable header and authorized compartment availability
+      parameters:
+        - name: objectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: purpose
+          in: query
+          required: true
+          schema: { type: string }
+        - name: wait_ms
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, maximum: 30000 }
+      responses:
+        '200':
+          description: Authorized object view
+          content:
+            application/json:
+              schema: { type: object }
+        '202':
+          description: Fail-closed policy resolution pending
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/operational/policy-pending.schema.json
+        '403': { description: Denied }
+        '404': { description: Not found or not disclosed }
+  /v0.1.1/authorization:
+    post:
+      summary: Evaluate a contextual decision locally at the Archive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/governance/decision-context.schema.json
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/governance/authorization-decision.schema.json
+        '202':
+          description: Dependencies pending
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/operational/policy-pending.schema.json
+  /v0.1.1/mindpacks:
+    post:
+      summary: Request a restore, replica, foreign-merge, or delta mindpack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { enum: [restore, replica, foreign_merge, delta] }
+                through_sequence: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+                include_blobs: { type: boolean, default: true }
+      responses:
+        '202': { description: Pack creation queued }

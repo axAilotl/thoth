@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:payload.process.run",
+  "title": "process.run payload",
+  "type": "object",
+  "properties": {
+    "run_kind": {
+      "type": "string"
+    },
+    "framework": {
+      "type": "string"
+    },
+    "task": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "configuration_ref": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/objectUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parent_run_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/recordUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "started_at": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+    },
+    "terminal_at": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "run_kind",
+    "framework",
+    "task",
+    "status",
+    "started_at",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

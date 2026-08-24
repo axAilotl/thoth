@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:structural.integrity.head_witness",
+  "title": "Head Witness Structural Payload",
+  "allOf": [
+    {
+      "$ref": "urn:ccf:schema:0.1.2:payload.integrity.head_witness"
+    }
+  ]
+}

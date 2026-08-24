@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:submissions.blob",
+  "title": "CCF Blob Submission",
+  "type": "object",
+  "properties": {
+    "submission_kind": {
+      "const": "blob"
+    },
+    "id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/blobUrn"
+    },
+    "retention_profile_hint": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/retentionProfile"
+    },
+    "media_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "byte_length": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "content_salt": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/salt256"
+    },
+    "content_commitment": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    },
+    "content_profile": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/profileName"
+    },
+    "origin": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/originClaim"
+    },
+    "claims": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/claimedRecordContext"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "submission_kind",
+    "id",
+    "retention_profile_hint",
+    "media_type",
+    "byte_length",
+    "content_salt",
+    "content_commitment",
+    "content_profile",
+    "claims",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

@@ -529,6 +529,22 @@
       "connect_timeout_seconds": 10,
       "application_name": "thoth-capture-event-store",
       "migration_lock_id": 840729145
+    },
+    "ccf_archive": {
+      "enabled": false,
+      "dual_write": false,
+      "mirror_transcripts": false,
+      "mirror_semantic": false,
+      "mirror_review": false,
+      "mirror_wiki": false,
+      "backend": "postgres",
+      "dsn_env": "THOTH_CCF_POSTGRES_DSN",
+      "schema": "ccf",
+      "connect_timeout_seconds": 10,
+      "application_name": "thoth-ccf-archive",
+      "migration_lock_id": 840729146,
+      "device_key_path": ".thoth_system/ccf/device-ed25519.pem",
+      "archive_key_path": ".thoth_system/ccf/archive-ed25519.pem"
     }
   },
   "research_graph": {

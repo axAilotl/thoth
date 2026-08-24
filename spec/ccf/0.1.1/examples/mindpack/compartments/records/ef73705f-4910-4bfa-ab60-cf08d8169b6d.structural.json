@@ -1,0 +1,14 @@
+{
+  "format": "ccf.record-structural/0.1.1",
+  "salt": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+  "content": {
+    "type": "core.person",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:d47be1dcfff338ec7653a2a1296daf06707235ec9451c67c8dd5a18277bc636b",
+    "registry_entry_digest": "sha256:da5f9280299041c3433c9460e1cea7b0e33fcb701f0889fda14f203367a2e356",
+    "retention_profile": "payload_erasable",
+    "structural_payload": {},
+    "extensions": {}
+  }
+}

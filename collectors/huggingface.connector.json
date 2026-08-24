@@ -1,0 +1,53 @@
+{
+  "name": "huggingface",
+  "source_name": "huggingface",
+  "display_name": "Hugging Face Likes",
+  "description": "Collect liked Hugging Face models, datasets, and spaces.",
+  "artifact_types": [
+    "repository"
+  ],
+  "inputs": [
+    "remote_api:huggingface_likes"
+  ],
+  "outputs": [
+    "artifact_queue:repository"
+  ],
+  "capabilities": [
+    "repositories",
+    "likes",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.huggingface.enabled",
+    "sources.huggingface.username",
+    "sources.huggingface.limit",
+    "sources.huggingface.token",
+    "sources.huggingface.include_models",
+    "sources.huggingface.include_datasets",
+    "sources.huggingface.include_spaces"
+  ],
+  "auth": [
+    "sources.huggingface.token",
+    "HF_USER",
+    "HF_TOKEN",
+    "HUGGINGFACEHUB_API_TOKEN",
+    "HUGGINGFACE_API_TOKEN"
+  ],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "network_ingest_queue",
+  "allowed_side_effects": [
+    "network_read",
+    "auth_token_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.social_collector:SocialCollector.discover_hf_likes",
+  "cli_command": "social",
+  "config_namespace": "sources.huggingface",
+  "default_enabled": true,
+  "ccf": {
+    "lane": "repository",
+    "artifact_role": "raw_capture"
+  }
+}

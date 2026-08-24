@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.continuity.value",
+  "title": "continuity.value payload",
+  "type": "object",
+  "properties": {
+    "value": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/refOrLiteral"
+    },
+    "stance": {
+      "type": "string"
+    },
+    "strength": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "context": {
+      "type": "object"
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "value",
+    "stance",
+    "context",
+    "rationale",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:submissions.link",
+  "title": "CCF Link Submission",
+  "type": "object",
+  "properties": {
+    "submission_kind": {
+      "const": "link"
+    },
+    "id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/linkUrn"
+    },
+    "type": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/typeName"
+    },
+    "type_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "type_visibility": {
+      "enum": [
+        "clear",
+        "sealed"
+      ]
+    },
+    "retention_profile_hint": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/retentionProfile"
+    },
+    "from_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/objectUrn"
+    },
+    "to_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/objectUrn"
+    },
+    "recorded_by": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/recordUrn"
+    },
+    "recorded_at": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+    },
+    "claims": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/claimedRecordContext"
+    },
+    "selector": {
+      "type": "object"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "submission_kind",
+    "id",
+    "type",
+    "type_version",
+    "type_visibility",
+    "retention_profile_hint",
+    "from_id",
+    "to_id",
+    "recorded_by",
+    "recorded_at",
+    "claims",
+    "payload",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

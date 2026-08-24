@@ -1,0 +1,604 @@
+{
+  "format": "ccf.semantic-catalog/0.1.1",
+  "version": "0.1.1",
+  "schemas": [
+    {
+      "id": "urn:ccf:schema:0.1.1:common.compartment-envelope",
+      "path": "schemas/common/compartment-envelope.schema.json",
+      "digest": "sha256:1d1eb86098d1e1ed4964151d105dae7a1518c6d9d9076a9c3b85c7ff65bdc383"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:common.defs",
+      "path": "schemas/common/defs.schema.json",
+      "digest": "sha256:55de2f7083d6c80c961956d1abff842eed3b15fa07b799f89d40e74e2a2f3c64"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:governance.authorization-decision",
+      "path": "schemas/governance/authorization-decision.schema.json",
+      "digest": "sha256:10f6ebff141d84133054ac19a257c73ff019bf52c66750d25686582efde62370"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:governance.decision-context",
+      "path": "schemas/governance/decision-context.schema.json",
+      "digest": "sha256:d2c28aa2343d440227d1dd34741f19cc8ddbc3fc85be14ba5ff52609070c2612"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.blob-header",
+      "path": "schemas/objects/blob-header.schema.json",
+      "digest": "sha256:2f7b10bfb1f84464b5532408204d16d5547e76721d8734bbf0bc6400515ecea7"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.blob-semantic-content",
+      "path": "schemas/objects/blob-semantic-content.schema.json",
+      "digest": "sha256:c94180171f05de856f255f6240f893f56f57d3e5388680b3aef88f37046f9581"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.blob-semantic",
+      "path": "schemas/objects/blob-semantic.schema.json",
+      "digest": "sha256:98b3d8325a147bcf9d630b8359ec9397c1c5415eea7adb879837f5e716465118"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.blob-structural-content",
+      "path": "schemas/objects/blob-structural-content.schema.json",
+      "digest": "sha256:49dd4efb74e67900c859ef6d0b1a825b0e7fb20e1723f114024e90860880c6d8"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.blob-structural",
+      "path": "schemas/objects/blob-structural.schema.json",
+      "digest": "sha256:eb90ae2cb0460e5cd6195afc854db3bb30b3b437d14215e0bf7243599d4594e3"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.commit-member",
+      "path": "schemas/objects/commit-member.schema.json",
+      "digest": "sha256:352417d4fbe77be69569230a965567606b336295ed7a03d19438ad5b59187f37"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.link-header",
+      "path": "schemas/objects/link-header.schema.json",
+      "digest": "sha256:021ca77c2d00a4eb1c3311cfc8fe506a92adfff391386fbf7d984a3018bceb09"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.link-semantic-content",
+      "path": "schemas/objects/link-semantic-content.schema.json",
+      "digest": "sha256:37fa245905a8019f8c362316f222ef098833cd680cc5d94f883f29be5ec362db"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.link-semantic",
+      "path": "schemas/objects/link-semantic.schema.json",
+      "digest": "sha256:434688fb674b4ee3fc835984101d6f32fff963cb8e0fc30d24c3b7291c580057"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.link-structural-content",
+      "path": "schemas/objects/link-structural-content.schema.json",
+      "digest": "sha256:88dc275b9dd9ebff2246ed8f9d132529f6d92fb0f0fe675968a7c55c7b10bd10"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.link-structural",
+      "path": "schemas/objects/link-structural.schema.json",
+      "digest": "sha256:d83fccca1a7028fc6b0cce84b46138abc337fc4d9ef9427ff2fe6e60af480530"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.mindpack-manifest",
+      "path": "schemas/objects/mindpack-manifest.schema.json",
+      "digest": "sha256:5c8a100e5b2a137542a65f4a7f2358d90c03eaab4a1eadb5e82a6ea696205105"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.record-header",
+      "path": "schemas/objects/record-header.schema.json",
+      "digest": "sha256:28963a2c532dc87be0595a850b80e98158ec4d5f4d566da7158f67012bf9416b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.record-semantic-content",
+      "path": "schemas/objects/record-semantic-content.schema.json",
+      "digest": "sha256:7a7a6f91b0318542820d05217a0e0656056dca77b90ad054cfb9260d1a2d520e"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.record-semantic",
+      "path": "schemas/objects/record-semantic.schema.json",
+      "digest": "sha256:219d4bfe76b8c6ef1b2bd611cf40ce54d5db3ebf580ccb8d674f71c07cdf95dc"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.record-structural-content",
+      "path": "schemas/objects/record-structural-content.schema.json",
+      "digest": "sha256:800a55756da2c4bf829c89d2dd6554c85e22b72b654ee0e19f54d442387208a5"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:objects.record-structural",
+      "path": "schemas/objects/record-structural.schema.json",
+      "digest": "sha256:8b647ade0a43f04705983c106e9666ef521e8f4f328ef96b85a64b6efdc97855"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.core.device_credential",
+      "path": "schemas/objects/structural/core-device-credential.schema.json",
+      "digest": "sha256:90bbe4ccd4c7b1f2af10f642c79620339f76410309d3be98e0c2539efe3f5d2c"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.empty",
+      "path": "schemas/objects/structural/empty.schema.json",
+      "digest": "sha256:2a2729dfb0beb937608e99a4054ea0e0cf6ac5a0b1dc1ebc980d5b796e4b2351"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.integrity.catalog_transition",
+      "path": "schemas/objects/structural/integrity-catalog-transition.schema.json",
+      "digest": "sha256:39eab5dad0e4ca51ecfda557c984f680fc195ed1366ca69c85861b32cdd6e56a"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.integrity.commit",
+      "path": "schemas/objects/structural/integrity-commit.schema.json",
+      "digest": "sha256:6dda713a2a569e040fdc729bb0f010030d1026b04c7e71cd840bf4b6e4459ace"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.integrity.head_witness",
+      "path": "schemas/objects/structural/integrity-head-witness.schema.json",
+      "digest": "sha256:306b2cb02bb3c8b616731b5367702c896fc97b9029efc71d905bed008ce10e77"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.integrity.signer_rotation",
+      "path": "schemas/objects/structural/integrity-signer-rotation.schema.json",
+      "digest": "sha256:6c7c0c80cd872e8aebe4f16e2b162ea072edc73e94f2bdea8c1180ecd6e6580d"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.integrity.successor_activation",
+      "path": "schemas/objects/structural/integrity-successor-activation.schema.json",
+      "digest": "sha256:5d813f717515221b1c6a619927cad75a337684a15eeab4996446b48316227a31"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.integrity.successor_authorization_revocation",
+      "path": "schemas/objects/structural/integrity-successor-authorization-revocation.schema.json",
+      "digest": "sha256:d3d6db456fbcdb7a1a7968947e986e42bf9581eef8dda3665800b6160cdf5879"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.integrity.successor_authorization",
+      "path": "schemas/objects/structural/integrity-successor-authorization.schema.json",
+      "digest": "sha256:94b506b05422c4883e43e5145814c041e3fdcfea86735c9519c50b927dab4b8b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.lineage.erasure_receipt",
+      "path": "schemas/objects/structural/lineage-erasure-receipt.schema.json",
+      "digest": "sha256:8f0907c1bcde4694210fbcd69bfb9a78f674619e3c9baa32469aa0b7c46788ed"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:structural.lineage.link_disposition",
+      "path": "schemas/objects/structural/lineage-link-disposition.schema.json",
+      "digest": "sha256:9f0d69655ad1898b10eb5f2b0e743524f58733ac54f56f934bf88bbda5aaafb7"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:operational.admission",
+      "path": "schemas/operational/admission.schema.json",
+      "digest": "sha256:f2614c84310c5ba910828ac4ede944f3bf072894161760352aa425cb58e42467"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:operational.batch-result",
+      "path": "schemas/operational/batch-result.schema.json",
+      "digest": "sha256:42071b9bbb3af080540e6bb18d5c955a0bbe5c64ecd0cd1a2c62477825a83d29"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:operational.compartment-storage",
+      "path": "schemas/operational/body-storage.schema.json",
+      "digest": "sha256:69fe7cc83796669336ce38fc8190067989a14c2ad1dd135709781a7276a89a16"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:operational.erasure-operation",
+      "path": "schemas/operational/erasure-operation.schema.json",
+      "digest": "sha256:677d546452548bdd0fb281825d84c936850c0ee5c48abcc92487ce9697f1ad68"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:operational.lineage-head",
+      "path": "schemas/operational/lineage-head.schema.json",
+      "digest": "sha256:c2dd78a6affae0c4f25da7fc790171f9b3d8df52cdb35842bdf4291ace22f44a"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:operational.policy-pending",
+      "path": "schemas/operational/policy-pending.schema.json",
+      "digest": "sha256:70c195de165e77562e0ff5c3828c344566c46ef42d887fffcddc0cdcbcd6c93e"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:operational.projection-checkpoint",
+      "path": "schemas/operational/projection-checkpoint.schema.json",
+      "digest": "sha256:8fe097b3dd62fc1bfde59a02e14b5f19a4db91643b57778acc9b93c57c252f61"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.agent.finding",
+      "path": "schemas/payloads/agent/finding.schema.json",
+      "digest": "sha256:04ce64e653af2cfb95fef4d5eed0390cb4cac33166df2673ea4d55759fbcb6e5"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.agent.handoff",
+      "path": "schemas/payloads/agent/handoff.schema.json",
+      "digest": "sha256:62995e8377bac0a2ac35544bbfa99d46dc87a38dc8e7b9e63286ed6e74f00b42"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.agent.proposal",
+      "path": "schemas/payloads/agent/proposal.schema.json",
+      "digest": "sha256:ae8669703f09a8bc97c6a916db010059b51ee354d7273a9a81d55b650b5eace6"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.agent.receipt",
+      "path": "schemas/payloads/agent/receipt.schema.json",
+      "digest": "sha256:662c6a52fe89cbb08b4fdaa856e4ab7f91d31061a957673cda7631f38d962a09"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.agent.run",
+      "path": "schemas/payloads/agent/run.schema.json",
+      "digest": "sha256:9f3c7be9fffe0756e5933ff1c74b21dadaa3901a6f20a8f4990fa59284487961"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.continuity.boundary",
+      "path": "schemas/payloads/continuity/boundary.schema.json",
+      "digest": "sha256:4a3774c7682657b7a31422146440d2549e41c80a1146e02048a3af40b9d0e150"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.continuity.commitment",
+      "path": "schemas/payloads/continuity/commitment.schema.json",
+      "digest": "sha256:dcc65015bcd99ace9d0966c2ac18ad04f0fbb491477395a85f1bc9350d361115"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.continuity.episode",
+      "path": "schemas/payloads/continuity/episode.schema.json",
+      "digest": "sha256:bd1c9391681fd056560045ecdc10c35b28816d25985b06ab1565a96ca9a5830d"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.continuity.goal",
+      "path": "schemas/payloads/continuity/goal.schema.json",
+      "digest": "sha256:a56279072760a6e6c7268d32747b83ec173b16c36bc116ccc27a35a00e33c34f"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.continuity.preference",
+      "path": "schemas/payloads/continuity/preference.schema.json",
+      "digest": "sha256:07f4b479d477f9eb21c1e31447c9b31817be14a500972b7bb0d7c719e98a5b7d"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.continuity.relationship",
+      "path": "schemas/payloads/continuity/relationship.schema.json",
+      "digest": "sha256:d924750231456f702019752db000d6603076222c5a8e50e7c4afdf933adb68d1"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.continuity.value",
+      "path": "schemas/payloads/continuity/value.schema.json",
+      "digest": "sha256:2c657950e85443ae08d3df9510a4628689d725894101ca4527229f10b507348d"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.core.empty",
+      "path": "schemas/payloads/core/empty.schema.json",
+      "digest": "sha256:dc6feed5627a017963ec0bbc78aa6604db2c0cafd1bd06a1a7f2182d4beafd4c"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.core.person",
+      "path": "schemas/payloads/core/person.schema.json",
+      "digest": "sha256:d47be1dcfff338ec7653a2a1296daf06707235ec9451c67c8dd5a18277bc636b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.core.runtime",
+      "path": "schemas/payloads/core/runtime.schema.json",
+      "digest": "sha256:91f037eb9eec9886ed967d4e2b88a9e524cd4ea4f22eb4803353d09ed69e002c"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.core.session",
+      "path": "schemas/payloads/core/session.schema.json",
+      "digest": "sha256:970542121cfc3eb4fc674dbc2d4cba60f008a0540182e00079c83957502d68e7"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.core.source",
+      "path": "schemas/payloads/core/source.schema.json",
+      "digest": "sha256:05a3ebcd79f72bdd0874d865281ae2fd0d6178b9a0270f7ea0105947c4e820cd"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.experience.artifact",
+      "path": "schemas/payloads/experience/artifact.schema.json",
+      "digest": "sha256:4508898cad62d9bb9effc0ecdfe71a12091ce46a92b2581c667f169919d408bf"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.experience.event",
+      "path": "schemas/payloads/experience/event.schema.json",
+      "digest": "sha256:a1a985748cf234fcf89247051c5cf43c2506434409ac546f96e0cf00646138d4"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.experience.observation",
+      "path": "schemas/payloads/experience/observation.schema.json",
+      "digest": "sha256:c2881fb6ae24bac09f3096ab1ed37f1f5b189f31e265fbd3d2d69bd767a2b608"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.experience.utterance",
+      "path": "schemas/payloads/experience/utterance.schema.json",
+      "digest": "sha256:b3aaed4d84dce259d6c2c57ba75e624b2dd28e88567a3917f2787ccef1fb0d4f"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.consent",
+      "path": "schemas/payloads/governance/consent.schema.json",
+      "digest": "sha256:86478dfa6ad3e6f7d558dcf207dbc13fe8ba89985b451411330d0b10021cd20b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.erasure_decision",
+      "path": "schemas/payloads/governance/erasure_decision.schema.json",
+      "digest": "sha256:0c1d6f709b7378942632264ca09318511a63c1c5d7a5d1652b14506d1ecb8743"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.erasure_request",
+      "path": "schemas/payloads/governance/erasure_request.schema.json",
+      "digest": "sha256:7356fb942ec44cd09d42a39b96586f1a4a1e00a6f63865a67c6235debe335385"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.grant",
+      "path": "schemas/payloads/governance/grant.schema.json",
+      "digest": "sha256:e9b92f7ebe9bcc13fa1b76b76feea7a74ccb1608b30bacfbcf9497d1710d626c"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.legal_basis",
+      "path": "schemas/payloads/governance/legal_basis.schema.json",
+      "digest": "sha256:cd3d831fb82c6d54ba5b85faefd40eb8e65f63d6b2327555073226e7b9e907cc"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.legal_hold",
+      "path": "schemas/payloads/governance/legal_hold.schema.json",
+      "digest": "sha256:cb9a7b2bcd13080bc5c775e70ee73d8148fb4ed133156e199cb648e331431d7b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.objection",
+      "path": "schemas/payloads/governance/objection.schema.json",
+      "digest": "sha256:d1bb8e8330ca0205bd234997cb8c93441c8f63f2b20fa87feefafedc7f3af601"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.policy",
+      "path": "schemas/payloads/governance/policy.schema.json",
+      "digest": "sha256:b44758444117c92339a24158f7d29eaf22586059e7a37c3dc74aab3dcf209e6a"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.restriction",
+      "path": "schemas/payloads/governance/restriction.schema.json",
+      "digest": "sha256:c9ce5ebfa55b651673c1661843649d565517c218f1145f76a5b083d84d7245b4"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.retention_trigger",
+      "path": "schemas/payloads/governance/retention_trigger.schema.json",
+      "digest": "sha256:b492bf9aba9b961a844dc9d7811c6850712c287167562e7c95272ae554b99c67"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.review_decision",
+      "path": "schemas/payloads/governance/review_decision.schema.json",
+      "digest": "sha256:1e78a9e9a5b60b955aad42ce402e70d279044a2d6510336c5c0b959e801ab827"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.governance.subject_access_request",
+      "path": "schemas/payloads/governance/subject_access_request.schema.json",
+      "digest": "sha256:4162cb09beabb1b87878bb84497553f2b5a4eb033b9e3ae826867aacf86b31b1"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.integrity.catalog_transition",
+      "path": "schemas/payloads/integrity/catalog_transition.schema.json",
+      "digest": "sha256:4ce31ad5f89815b651258479347d318704d661f6c4f0b31117ae18650fa22bd5"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.integrity.commit",
+      "path": "schemas/payloads/integrity/commit.schema.json",
+      "digest": "sha256:ac362362947e0ad8ae76d478784c6292fccb33a35d27089d86506bc7cce73761"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.integrity.head_witness",
+      "path": "schemas/payloads/integrity/head_witness.schema.json",
+      "digest": "sha256:1f04f90121895b9a8f4559755f1ac253a4f97270aa17b7c40a92316bc652cd14"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.integrity.signer_rotation",
+      "path": "schemas/payloads/integrity/signer_rotation.schema.json",
+      "digest": "sha256:c762cc6b0859017f81ffcca377abbe999e82fc4d2f156d46d1ed5c50a53d1446"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.integrity.successor_activation",
+      "path": "schemas/payloads/integrity/successor_activation.schema.json",
+      "digest": "sha256:546189a415188096b30f52013ff9e2aa2a56d03d6c83f5f0dd16e4c65f36080b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.integrity.successor_authorization",
+      "path": "schemas/payloads/integrity/successor_authorization.schema.json",
+      "digest": "sha256:79ef7e7ca030dbbfc36e6b6dd2b5af93a1a2b9767c57741a0d275a9e571c442a"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.integrity.successor_authorization_revocation",
+      "path": "schemas/payloads/integrity/successor_authorization_revocation.schema.json",
+      "digest": "sha256:d635cb4cad5cb1bb1b1659a120e20f517390df826d1078283830804823931338"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.lineage.erasure_receipt",
+      "path": "schemas/payloads/lineage/erasure_receipt.schema.json",
+      "digest": "sha256:00378c0367ae427595b3ab3e6bbac3be0252da19434b6b500773e6fa102bb77b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.lineage.link_disposition",
+      "path": "schemas/payloads/lineage/link_disposition.schema.json",
+      "digest": "sha256:4650a75bbfa73eda68a0e6b72a79c1247ad7b70889a73945f4ad8cc933158d19"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.process.run",
+      "path": "schemas/payloads/process/run.schema.json",
+      "digest": "sha256:48f4b3167c7b66f9b825622b7a724384dd6f447278e67d354d64f61bd655ad53"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.security.finding",
+      "path": "schemas/payloads/security/finding.schema.json",
+      "digest": "sha256:426a3c6493ec7a230969076eccf27b709541b807a0aa8716558b2c84f28d00ee"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.security.keyset_manifest",
+      "path": "schemas/payloads/security/keyset_manifest.schema.json",
+      "digest": "sha256:c8a0fd2825718d9b093a7de56ec771db79556b0fcc47a63de5cf0825966a8e7b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.semantic.assertion",
+      "path": "schemas/payloads/semantic/assertion.schema.json",
+      "digest": "sha256:133b7be012708f4616cfb8e39d807da83e0fd2182c022ed86dedd7973d274dce"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.semantic.concept",
+      "path": "schemas/payloads/semantic/concept.schema.json",
+      "digest": "sha256:65f4394ffc68cf6501e4f2dae15adc86a15dbe85323d62db7769b26db145246c"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.semantic.entity",
+      "path": "schemas/payloads/semantic/entity.schema.json",
+      "digest": "sha256:4b8e94b5d14a026d3c3440ad4915a1db1299e681e5bd4537242eab440bbc6a83"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.semantic.entity_resolution",
+      "path": "schemas/payloads/semantic/entity_resolution.schema.json",
+      "digest": "sha256:30366ce2283f5fba6b2df7571ae833075b7cd3e49fe905bddad9dee2b8d6e194"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.sync.producer_batch_receipt",
+      "path": "schemas/payloads/sync/producer_batch_receipt.schema.json",
+      "digest": "sha256:361412f55fa8024489178749a37b9cd2526db1d4cda2e6f86e1e5fbe0ce20510"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.work.constraint",
+      "path": "schemas/payloads/work/constraint.schema.json",
+      "digest": "sha256:cb0cc1faf577b23aeed26c54b9e106498d7af056e0765d9139171f708464bdbf"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.work.decision",
+      "path": "schemas/payloads/work/decision.schema.json",
+      "digest": "sha256:7c6b836bd426e2e7df99a26b349578712aa0f379060480b923cec8dcf696cce5"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.work.project",
+      "path": "schemas/payloads/work/project.schema.json",
+      "digest": "sha256:632d64fb443b7f4da8cd5407b6b15b0f802486feeb21d486762af55afa36ea96"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.work.task",
+      "path": "schemas/payloads/work/task.schema.json",
+      "digest": "sha256:1d5e443581b258abd105201d96f344efbe19faed7d1d039198276fdc3b1955f4"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:registries.blob-registry",
+      "path": "schemas/registries/blob-registry.schema.json",
+      "digest": "sha256:2895f6b4ca37cb883e6e57937fc4a10be6debc3efbfe39dff3c427eac015373d"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:registries.link-registry",
+      "path": "schemas/registries/link-registry.schema.json",
+      "digest": "sha256:f11228dac0612ca01355c03d71726359fbc0f7d86d565b37942a6373dbc693b0"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:registries.predicate-registry",
+      "path": "schemas/registries/predicate-registry.schema.json",
+      "digest": "sha256:5ab50427b32d923b7999e7683d97bdf55580db9623ebfea3bff0b7f6d01ca0eb"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:registries.profile-registry",
+      "path": "schemas/registries/profile-registry.schema.json",
+      "digest": "sha256:40d66d07d5ff45363e9012a077d26346f03462c6b72d0fa50d486685e33b75ba"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:registries.state-machine-registry",
+      "path": "schemas/registries/state-machine-registry.schema.json",
+      "digest": "sha256:ad9a1cc8a38ce5d53e607e8d70b72d7feb1fccbb643cc4ca15c1405c400a0320"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:registries.type-registry",
+      "path": "schemas/registries/type-registry.schema.json",
+      "digest": "sha256:386d366f593195225174b5d6d879d13c28019cb64a3fcfed131a0ac049a7ab4f"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:payload.core.device_credential",
+      "path": "schemas/security/device-credential.schema.json",
+      "digest": "sha256:4ce38294e05e099aec8f951b96e86897b7ccc12ee35124eebda87de519271db0"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:security.keyset-manifest",
+      "path": "schemas/security/keyset-manifest.schema.json",
+      "digest": "sha256:0794f65a7be1287c5b6e2107eb6a79cb0ff99ad02eb6ce6b790b9195bee7b3d3"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:submissions.blob",
+      "path": "schemas/submissions/blob-submission.schema.json",
+      "digest": "sha256:49637dcadc3e514c3fca3c3941158371030f5f38c59a63e280fc5ae0db31fb68"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:submissions.link",
+      "path": "schemas/submissions/link-submission.schema.json",
+      "digest": "sha256:b437e47db5baf9bcbfb409c1e6d0bca255c778c3298d78a3080a39070e10d9dc"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:submissions.record",
+      "path": "schemas/submissions/record-submission.schema.json",
+      "digest": "sha256:28c8da83c642d960927caf0d27c6182d75ad93adb1dc68fef9fb79975b0fe717"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:sync.delta-pack-manifest",
+      "path": "schemas/sync/delta-pack-manifest.schema.json",
+      "digest": "sha256:b8dc12bee79aa710f8e598c7375e8216e6eb081a76aca6c8a35004907084c36b"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:sync.producer-batch",
+      "path": "schemas/sync/producer-batch.schema.json",
+      "digest": "sha256:da320b7c9fd28d6c6b9e19a6454a0e99b5629766ea898a51525f9a7fd4f9b440"
+    },
+    {
+      "id": "urn:ccf:schema:0.1.1:sync.head",
+      "path": "schemas/sync/sync-head.schema.json",
+      "digest": "sha256:db6583a2ffd4bae496ca67820e2262bb890640afca223362ceb83bcf3ee04086"
+    }
+  ],
+  "registries": [
+    {
+      "name": "ccf.authority-bases/0.1.1",
+      "path": "registries/authority-bases.registry.json",
+      "digest": "sha256:7055fb48c81fd8a494021117871e70f2bdeae246538dda65cef7847750f9dad7"
+    },
+    {
+      "name": "ccf.blobs/0.1.1",
+      "path": "registries/blobs.registry.json",
+      "digest": "sha256:09e4b510a471f2c54eb4f95df21568edaeb60fc3c36ba0fd3d827b80e60c9818"
+    },
+    {
+      "name": "ccf.data-classes/0.1.1",
+      "path": "registries/data-classes.registry.json",
+      "digest": "sha256:a6c27bbae04d49dc30a0861c22c143ee2fd091fee3fce63420bdb57f2c5fc81b"
+    },
+    {
+      "name": "ccf.hash-profiles/0.1.1",
+      "path": "registries/hash-profiles.registry.json",
+      "digest": "sha256:7b2685132bd40e828e91f2692d8b6f3a12038a718f85d68e4cd10a149fba64f1"
+    },
+    {
+      "name": "ccf.links/0.1.1",
+      "path": "registries/links.registry.json",
+      "digest": "sha256:8853684553e860a4999b5da9507a284a519b8856502a589330292f51b5e90a03"
+    },
+    {
+      "name": "ccf.policy-evaluators/0.1.1",
+      "path": "registries/policy-evaluators.registry.json",
+      "digest": "sha256:adedff13eb68cb1070c58efed1e9ae2658b3d238d0d9dca6c8805f62deb6838e"
+    },
+    {
+      "name": "ccf.predicates/0.1.1",
+      "path": "registries/predicates.registry.json",
+      "digest": "sha256:ca41941c37100fa2184c1989d5d30384f218421f826798265510836ad7ecbb10"
+    },
+    {
+      "name": "ccf.profiles/0.1.1",
+      "path": "registries/profiles.registry.json",
+      "digest": "sha256:7cbac743101630d0e59842525aa59a258b488b802d739981dcdc789e5a21d432"
+    },
+    {
+      "name": "ccf.retention-profiles/0.1.1",
+      "path": "registries/retention-profiles.registry.json",
+      "digest": "sha256:49905a78d40b30e046c347d6f9681627cad2691940411274b535b0d6e78bd7eb"
+    },
+    {
+      "name": "ccf.signature-profiles/0.1.1",
+      "path": "registries/signature-profiles.registry.json",
+      "digest": "sha256:3a31d3e04f365c3336830dd7df47fb9ac525b3a6ffb27393cfb48e2a751caea2"
+    },
+    {
+      "name": "ccf.state-machines/0.1.1",
+      "path": "registries/state-machines.registry.json",
+      "digest": "sha256:a5dd880aa340aebdc1067153a7457f99eb6a214878123cbc8056ae5666cd37b5"
+    },
+    {
+      "name": "ccf.types/0.1.1",
+      "path": "registries/types.registry.json",
+      "digest": "sha256:a7af3c2bb467b5d1ca0dce86bacc6b594784e854310183c5c81185bb4853ea89"
+    }
+  ],
+  "root": "sha256:1d4986414a6c0e76ee979e654487df739a96604593d7a18f8765643f3c32cc9a"
+}

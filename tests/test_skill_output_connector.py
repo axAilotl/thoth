@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from collectors.skill_output_connector import SkillOutputConnector
-from core.agent_surface import AgentSurfaceError, AgentSurfaceService
+from core.agent_surface import AgentSurfaceService
+from core.connector_runners import ConnectorRunnerError
 from core.config import Config
 from core.connector_budgets import ConnectorBudgetError
 from core.ingestion_runtime import KnowledgeArtifactRuntime
@@ -210,5 +211,110 @@ def test_skill_output_agent_surface_requires_output_source(tmp_path: Path):
     db = MetadataDB(str(layout.database_path))
     service = AgentSurfaceService(config, layout=layout, db=db)
 
-    with pytest.raises(AgentSurfaceError, match="requires output_paths or output_dirs"):
+    with pytest.raises(ConnectorRunnerError, match="requires output_paths or output_dirs"):
         service.run_connector("skill_outputs", execute=True)
+
+
+def _write_envelope(tmp_path: Path, envelope: dict, name: str = "envelope.json") -> Path:
+    output_path = tmp_path / name
+    output_path.write_text(json.dumps(envelope), encoding="utf-8")
+    return output_path
+
+
+def _collect_one(tmp_path: Path, envelope: dict):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    output_path = _write_envelope(tmp_path, envelope)
+    connector = SkillOutputConnector(config, layout=layout, db=db)
+    return connector, db, asyncio.run(connector.collect(output_paths=[output_path]))
+
+
+def test_skill_output_connector_threads_envelope_ccf_into_queue_payload(tmp_path: Path):
+    # Fold form (no explicit "payload" key): v1.1 fields must not fold in.
+    _, db, result = _collect_one(
+        tmp_path,
+        {
+            "artifact_type": "transcript",
+            "artifact_id": "laned-skill-output",
+            "lane": "transcript",
+            "ccf": {"thoth.lane": "transcript", "acme.channel": "calls"},
+            "title": "Laned",
+            "raw_transcript": "Transcript body.",
+        },
+    )
+
+    assert result.records[0].artifact_id == "laned-skill-output"
+    entry = db.get_ingestion_entry("laned-skill-output")
+    assert entry is not None
+    payload = json.loads(entry.payload_json)
+    assert payload["title"] == "Laned"
+    assert payload["normalized_metadata"]["ccf"] == {
+        "lane": "transcript",
+        "extensions": {"thoth.lane": "transcript", "acme.channel": "calls"},
+    }
+    # The v1.1 envelope fields do not leak into the queued payload body.
+    assert "lane" not in payload
+    assert "ccf" not in payload
+
+
+def test_skill_output_connector_v1_envelope_has_no_ccf_metadata(tmp_path: Path):
+    _, db, result = _collect_one(
+        tmp_path,
+        {
+            "artifact_type": "web_clipper",
+            "artifact_id": "v1-skill-output",
+            "payload": {"url": "https://example.com/clip"},
+        },
+    )
+
+    assert result.records[0].artifact_id == "v1-skill-output"
+    entry = db.get_ingestion_entry("v1-skill-output")
+    assert entry is not None
+    payload = json.loads(entry.payload_json)
+    assert "ccf" not in payload["normalized_metadata"]
+
+
+@pytest.mark.parametrize(
+    ("envelope", "match"),
+    [
+        (
+            {"artifact_type": "transcript", "lane": "hologram", "payload": {}},
+            "unknown ccf lane 'hologram'",
+        ),
+        (
+            {"artifact_type": "transcript", "lane": "  ", "payload": {}},
+            "non-empty",
+        ),
+        (
+            {"artifact_type": "transcript", "ccf": ["thoth.lane"], "payload": {}},
+            "extensions must be an object",
+        ),
+        (
+            {"artifact_type": "transcript", "ccf": {"lane": "paper"}, "payload": {}},
+            "namespaced",
+        ),
+        (
+            {
+                "artifact_type": "transcript",
+                "ccf": {"thoth.meta": {"nested": True}},
+                "payload": {},
+            },
+            "scalar",
+        ),
+    ],
+)
+def test_skill_output_connector_rejects_invalid_envelope_ccf(
+    tmp_path: Path, envelope, match
+):
+    envelope.setdefault("artifact_id", "bad-ccf-envelope")
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    output_path = _write_envelope(tmp_path, envelope)
+    connector = SkillOutputConnector(config, layout=layout, db=db)
+
+    with pytest.raises(ValueError, match=match):
+        asyncio.run(connector.collect(output_paths=[output_path]))
+
+    assert db.get_ingestion_entry("bad-ccf-envelope") is None

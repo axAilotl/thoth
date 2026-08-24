@@ -1,4 +1,28 @@
-"""Connector for external skill output envelopes."""
+"""Connector for external skill output envelopes.
+
+Envelope contract v1.1 — each JSON/JSONL envelope is an object with:
+
+- ``artifact_type`` (required): one of ``SUPPORTED_ARTIFACT_TYPES``.
+- ``payload`` (required object, or the envelope's non-envelope keys are
+  folded into one): the artifact payload queued verbatim.
+- ``source_name``/``source``, ``artifact_id``, ``priority``,
+  ``capabilities``: optional routing/queue metadata.
+- ``lane`` (optional, v1.1): a CCF lane from the closed
+  ``core.connector_registry.CCF_LANES`` vocabulary.
+- ``ccf`` (optional, v1.1): a CCF extensions object — namespaced dotted
+  keys (``thoth.lane``) with JSON scalar values.
+
+The v1.1 fields are validated fail closed with the same rules as the
+connector manifest ``ccf`` block (``core.connector_registry``); an
+unknown lane or a malformed extension rejects the envelope. When
+present they are threaded into the queued payload's
+``normalized_metadata.ccf`` (``{"lane": ..., "extensions": {...}}``),
+where the dual-write mirror (``ccf.dualwrite``) applies them as a
+per-artifact override of the ingesting connector's manifest ``ccf``
+block — this is how ``mixed``-lane connectors (skill_outputs,
+pi_skills) get precise per-envelope lanes. Envelopes without the v1.1
+fields (v1.0) ingest exactly as before.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +44,7 @@ from core.connector_budgets import (
     transcript_text_from_payload,
 )
 from core.connector_capture import ConnectorCaptureQueue
+from core.connector_registry import parse_ccf_extensions, validate_ccf_lane
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
 
@@ -44,6 +69,8 @@ ENVELOPE_KEYS = {
     "artifact_id",
     "artifact_type",
     "capabilities",
+    "ccf",
+    "lane",
     "payload",
     "priority",
     "source",
@@ -384,6 +411,10 @@ class SkillOutputConnector:
             "skill_output_source": source_name,
         }
 
+        envelope_ccf = _parse_envelope_ccf(envelope)
+        if envelope_ccf:
+            payload["normalized_metadata"]["ccf"] = envelope_ccf
+
         capabilities = tuple(_string_list(envelope.get("capabilities")))
         priority = _optional_int(envelope.get("priority"), default=0)
         return _PreparedEnvelope(
@@ -536,6 +567,29 @@ def _looks_like_direct_wiki_path(value: str, *, wiki_root: Path | None) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _parse_envelope_ccf(envelope: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the optional v1.1 ``lane``/``ccf`` envelope fields (fail closed).
+
+    Returns the ``normalized_metadata.ccf`` block to thread into the queued
+    payload — only the fields the envelope actually declared, so the
+    dual-write mirror falls back to the connector manifest's ``ccf`` block
+    for anything absent. Unknown lanes and malformed extensions raise
+    ``ValueError`` like every other envelope rejection.
+    """
+    block: dict[str, Any] = {}
+    if envelope.get("lane") is not None:
+        block["lane"] = validate_ccf_lane(
+            envelope.get("lane"),
+            origin="skill output envelope",
+        )
+    if envelope.get("ccf") is not None:
+        block["extensions"] = parse_ccf_extensions(
+            envelope.get("ccf"),
+            origin="skill output envelope",
+        )
+    return block
 
 
 def _source_name_from_envelope(

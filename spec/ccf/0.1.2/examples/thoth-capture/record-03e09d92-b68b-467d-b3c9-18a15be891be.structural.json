@@ -1,0 +1,21 @@
+{
+  "format": "ccf.record-structural/0.1.2",
+  "salt": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+  "content": {
+    "type": "governance.policy",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:ffd8d5ea39dccb1bb9e0a1bb54261eccdb7f25ed166d298f63854e623f78088f",
+    "registry_entry_digest": "sha256:43ef5020680125b1fea19350de5e793df3c217302336d958fc9d892b5e5fcaeb",
+    "retention_profile": "structural_retention_required",
+    "structural_payload": {},
+    "extensions": {},
+    "lineage": {
+      "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "previous_head_id": null,
+      "transition": "create",
+      "valid_from": "2026-08-11T21:40:00.000Z",
+      "expires_at": null
+    }
+  }
+}

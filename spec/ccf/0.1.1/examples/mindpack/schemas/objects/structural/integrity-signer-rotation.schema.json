@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:structural.integrity.signer_rotation",
+  "title": "Signer Rotation Structural Payload",
+  "type": "object",
+  "properties": {
+    "old_key_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/keyUrn"
+    },
+    "new_key_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/keyUrn"
+    },
+    "new_public_key": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/base64url"
+    },
+    "activation_sequence": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "new_key_proof": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/base64url"
+    },
+    "revoke_old_key": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "old_key_id",
+    "new_key_id",
+    "new_public_key",
+    "activation_sequence",
+    "new_key_proof",
+    "revoke_old_key"
+  ],
+  "additionalProperties": false
+}

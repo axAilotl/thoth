@@ -1,0 +1,52 @@
+{
+  "input": {
+    "mode": "foreign_merge",
+    "source_archive_id": "urn:ccf:archive:00000000-0000-4000-8000-000000000010",
+    "compartments": [
+      {
+        "object_kind": "record",
+        "object_id": "urn:ccf:record:00000000-0000-4000-8000-000000000011",
+        "compartment": "semantic",
+        "availability": "erased",
+        "commitment": "sha256:f8d4ca6dc4987ce8fb14dc970fbf69f242e692fa46164c2b0d93426177608fc4",
+        "retention_profile": "payload_erasable",
+        "source_custody_proof": "source-commit:7:2",
+        "unavailability_lineage_id": "urn:ccf:record:00000000-0000-4000-8000-000000000012"
+      },
+      {
+        "object_kind": "blob",
+        "object_id": "urn:ccf:blob:00000000-0000-4000-8000-000000000013",
+        "compartment": "blob_content",
+        "availability": "withheld",
+        "commitment": "sha256:4e6de320b14541a0029e60db5bba073fbd1e40232baace8557a41e2cb254687b",
+        "retention_profile": "payload_erasable",
+        "source_custody_proof": "source-commit:8:1",
+        "unavailability_lineage_id": "urn:ccf:record:00000000-0000-4000-8000-000000000014"
+      }
+    ]
+  },
+  "expected_destination_compartments": [
+    {
+      "object_kind": "record",
+      "object_id": "urn:ccf:record:00000000-0000-4000-8000-000000000011",
+      "compartment": "semantic",
+      "availability": "erased",
+      "commitment": "sha256:f8d4ca6dc4987ce8fb14dc970fbf69f242e692fa46164c2b0d93426177608fc4",
+      "retention_profile": "payload_erasable",
+      "source_custody_proof": "source-commit:7:2",
+      "unavailability_lineage_id": "urn:ccf:record:00000000-0000-4000-8000-000000000012",
+      "plaintext": null
+    },
+    {
+      "object_kind": "blob",
+      "object_id": "urn:ccf:blob:00000000-0000-4000-8000-000000000013",
+      "compartment": "blob_content",
+      "availability": "withheld",
+      "commitment": "sha256:4e6de320b14541a0029e60db5bba073fbd1e40232baace8557a41e2cb254687b",
+      "retention_profile": "payload_erasable",
+      "source_custody_proof": "source-commit:8:1",
+      "unavailability_lineage_id": "urn:ccf:record:00000000-0000-4000-8000-000000000014",
+      "plaintext": null
+    }
+  ]
+}

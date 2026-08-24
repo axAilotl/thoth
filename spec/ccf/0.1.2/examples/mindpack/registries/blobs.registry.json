@@ -1,0 +1,25 @@
+{
+  "registry": "ccf.blobs/0.1.2",
+  "entries": [
+    {
+      "name": "blob.manifest",
+      "version": 1,
+      "description": "Governed manifest and commitment for separately stored bytes",
+      "status": "active",
+      "profile": "ccf-core-0.1.2",
+      "retention_profile": "payload_erasable",
+      "structural_schema_id": "urn:ccf:schema:0.1.2:objects.blob-structural-content",
+      "semantic_schema_id": "urn:ccf:schema:0.1.2:objects.blob-semantic-content"
+    },
+    {
+      "name": "blob.suppression_set",
+      "version": 1,
+      "description": "Governed exact keyed suppression commitments; content is sensitive and structurally retained for suppression reconstruction",
+      "status": "active",
+      "profile": "ccf-core-0.1.2",
+      "retention_profile": "structural_retention_required",
+      "structural_schema_id": "urn:ccf:schema:0.1.2:objects.blob-structural-content",
+      "semantic_schema_id": "urn:ccf:schema:0.1.2:objects.blob-semantic-content"
+    }
+  ]
+}

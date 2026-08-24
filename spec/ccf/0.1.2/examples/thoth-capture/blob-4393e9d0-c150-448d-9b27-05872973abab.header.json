@@ -1,0 +1,9 @@
+{
+  "spec": "ccf/0.1.2",
+  "object_kind": "blob",
+  "id": "urn:ccf:blob:4393e9d0-c150-448d-9b27-05872973abab",
+  "hash_profile": "ccf-jcs-sha256-v2",
+  "structural_commitment": "sha256:c342304f7d25a07e7bdd873ce2005d5419a319300b2fde2efcf2e3c3fd0f789b",
+  "semantic_commitment": "sha256:2a432475ec44f50223ff0c28261726dc6b2d3a3d1abcb87fc707caddfa8b5d0f",
+  "object_hash": "sha256:f527192180ee4a4764d4b4a9cf3037197f0a6936c21e3210eb1d59263110379a"
+}

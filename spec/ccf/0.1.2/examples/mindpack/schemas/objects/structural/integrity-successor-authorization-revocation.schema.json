@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:structural.integrity.successor_authorization_revocation",
+  "title": "Successor Authorization Revocation Structural Payload",
+  "type": "object",
+  "properties": {
+    "authorization_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "revoked_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "authorization_id",
+    "reason",
+    "revoked_at"
+  ],
+  "additionalProperties": false
+}

@@ -56,6 +56,7 @@ from core import (
     summarize_x_api_auth,
     load_x_api_token_bundle,
     ensure_wiki_scaffold,
+    load_connector_registry,
     run_x_api_bookmark_backfill,
     queue_archivist_topic_force,
     resolve_archivist_sync_config as resolve_archivist_runtime_config,
@@ -1460,6 +1461,24 @@ def promote_semantic_memory_candidate(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.error(f"Error promoting semantic memory candidate {candidate_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/connectors")
+def list_connectors_endpoint():
+    """Return the effective connector registry tree with policy and budgets."""
+    try:
+        runtime_config = Config()
+        runtime_config.data = load_runtime_settings()
+        registry = load_connector_registry(
+            runtime_config,
+            project_root=BASE_CONFIG_PATH.parent,
+        )
+        return registry.to_dict(config=runtime_config)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Error listing connectors: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

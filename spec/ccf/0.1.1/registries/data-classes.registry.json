@@ -1,0 +1,65 @@
+{
+  "registry": "ccf.data-classes/0.1.1",
+  "entries": [
+    {
+      "name": "speech_content",
+      "description": "Words spoken or transcribed."
+    },
+    {
+      "name": "voice_recording",
+      "description": "Audio containing a human voice."
+    },
+    {
+      "name": "voice_biometric",
+      "description": "Voice-derived identity features or templates."
+    },
+    {
+      "name": "image",
+      "description": "Still image content."
+    },
+    {
+      "name": "video",
+      "description": "Video content."
+    },
+    {
+      "name": "location",
+      "description": "Precise or approximate location."
+    },
+    {
+      "name": "message_content",
+      "description": "Private or public message content."
+    },
+    {
+      "name": "document_content",
+      "description": "Document or webpage content."
+    },
+    {
+      "name": "relationship_data",
+      "description": "Social, contact, or relationship information."
+    },
+    {
+      "name": "health_data",
+      "description": "Health or wellness information."
+    },
+    {
+      "name": "financial_data",
+      "description": "Financial account, transaction, or economic information."
+    },
+    {
+      "name": "behavioral_data",
+      "description": "Observed behavior or usage patterns."
+    },
+    {
+      "name": "identity_data",
+      "description": "Identifiers and identity evidence."
+    },
+    {
+      "name": "derived_profile",
+      "description": "Inferred preferences, traits, risks, or profiles."
+    },
+    {
+      "name": "unknown",
+      "description": "Unclassified governed content."
+    }
+  ]
+}

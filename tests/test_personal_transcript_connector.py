@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from collectors.personal_transcript_connector import PersonalTranscriptConnector
-from core.agent_surface import AgentSurfaceError, AgentSurfaceService
+from core.agent_surface import AgentSurfaceService
+from core.connector_runners import ConnectorRunnerError
 from core.config import Config
 from core.ingestion_runtime import IngestionRuntimeError, KnowledgeArtifactRuntime
 from core.metadata_db import MetadataDB
@@ -173,7 +174,7 @@ def test_omi_agent_surface_requires_export_source(tmp_path: Path):
     db = MetadataDB(str(layout.database_path))
     service = AgentSurfaceService(config, layout=layout, db=db)
 
-    with pytest.raises(AgentSurfaceError, match="requires export_paths, export_dirs, or an Omi API key"):
+    with pytest.raises(ConnectorRunnerError, match="requires export_paths, export_dirs, or an Omi API key"):
         service.run_connector("omi", execute=True)
 
 

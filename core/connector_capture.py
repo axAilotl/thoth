@@ -15,6 +15,7 @@ from typing import Any, Iterable, Iterator, Mapping
 from .artifacts import KnowledgeArtifact
 from .capture_event_store import CaptureEventStore
 from .capture_lifecycle import CaptureLifecycleResult, CaptureLifecycleService
+from .ccf_dualwrite import dual_write_requested
 from .config import Config, config
 from .metadata_db import MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
@@ -129,7 +130,7 @@ class ConnectorCaptureQueue:
             source=source,
             session=session,
             event=event,
-            raw_path=raw_path if lifecycle.capture_event_store is not None else None,
+            raw_path=_raw_path_for_stores(lifecycle, self.config, raw_path),
             queue_artifact_id=artifact.id,
             priority=priority,
             capabilities=capabilities if capabilities is not None else artifact.capabilities,
@@ -158,7 +159,7 @@ class ConnectorCaptureQueue:
             source=source,
             session=session,
             event=event,
-            raw_path=raw_path if lifecycle.capture_event_store is not None else None,
+            raw_path=_raw_path_for_stores(lifecycle, self.config, raw_path),
             queue_artifact_id=queue_artifact_id,
             priority=priority,
             capabilities=capabilities,
@@ -191,6 +192,20 @@ class ConnectorCaptureQueue:
 def connector_raw_roots(layout: PathLayout) -> tuple[Path, ...]:
     """Roots under which connectors may record immutable raw references."""
     return (layout.raw_root, layout.library_root, layout.vault_root)
+
+
+def _raw_path_for_stores(lifecycle, runtime_config, raw_path):
+    """Keep the raw path when any capture-side store consumes it.
+
+    The raw file is the content both the capture event store and the CCF
+    dual-write mirror commit against; when neither is active the path is
+    dropped exactly as before.
+    """
+    if lifecycle.capture_event_store is not None or dual_write_requested(
+        runtime_config
+    ):
+        return raw_path
+    return None
 
 
 def write_connector_raw_json(

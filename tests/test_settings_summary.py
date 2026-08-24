@@ -112,16 +112,16 @@ topics:
     ]
     assert summary["connectors"]["total"] == 10
     assert [item["name"] for item in summary["connectors"]["connectors"]] == [
-        "x_api",
         "arxiv",
         "github",
         "huggingface",
-        "web_clipper",
-        "youtube",
-        "omi",
-        "skill_outputs",
-        "pi_skills",
         "imported_markdown",
+        "omi",
+        "pi_skills",
+        "skill_outputs",
+        "web_clipper",
+        "x_api",
+        "youtube",
     ]
     web_clipper_connector = next(
         item

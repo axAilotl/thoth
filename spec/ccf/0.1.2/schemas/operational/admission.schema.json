@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:operational.admission",
+  "title": "CCF Object Admission",
+  "type": "object",
+  "properties": {
+    "object_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+    },
+    "status": {
+      "enum": [
+        "admitted",
+        "existing",
+        "quarantined",
+        "rejected",
+        "lineage_conflict",
+        "origin_revision_conflict"
+      ]
+    },
+    "object_hash": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "commit_sequence": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "commit_position": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "current_lifecycle": {
+      "type": "string"
+    },
+    "payload_available": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "object_id",
+    "status",
+    "object_hash",
+    "commit_sequence",
+    "commit_position",
+    "payload_available"
+  ],
+  "additionalProperties": false
+}

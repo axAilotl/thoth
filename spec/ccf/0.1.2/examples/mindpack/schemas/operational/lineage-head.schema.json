@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:operational.lineage-head",
+  "title": "CCF Lineage Head Projection",
+  "type": "object",
+  "properties": {
+    "lineage_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/lineageUrn"
+    },
+    "head_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "head_hash": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    },
+    "commit_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "state": {
+      "type": "string"
+    },
+    "valid_from": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "expires_at": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "lineage_id",
+    "head_id",
+    "head_hash",
+    "commit_sequence",
+    "state",
+    "valid_from",
+    "expires_at"
+  ],
+  "additionalProperties": false
+}

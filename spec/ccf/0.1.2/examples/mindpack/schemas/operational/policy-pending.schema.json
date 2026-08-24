@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:operational.policy-pending",
+  "title": "CCF Policy Resolution Pending",
+  "type": "object",
+  "properties": {
+    "status": {
+      "const": "policy_resolution_pending"
+    },
+    "object_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+    },
+    "head_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "dirty_since_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "remaining_dependencies_estimate": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "retry_after_ms": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "request_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "object_id",
+    "head_sequence",
+    "dirty_since_sequence",
+    "remaining_dependencies_estimate",
+    "retry_after_ms",
+    "request_id"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,88 @@
+{
+  "format": "ccf.record-semantic/0.1.1",
+  "salt": "X19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX18",
+  "content": {
+    "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+    "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+    "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+    "recorded_at": "2026-08-11T21:42:19.200Z",
+    "claimed": {
+      "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+      "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+      "privacy": {
+        "data_subjects": [
+          {
+            "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+            "role": "speaker",
+            "identity_state_at_write": "verified"
+          }
+        ],
+        "data_classes": [
+          "derived_profile"
+        ],
+        "consent_refs": [],
+        "legal_basis_refs": [],
+        "subject_coverage": "complete"
+      },
+      "authority": {
+        "basis": "machine_inference",
+        "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+        "accepted_by": null
+      },
+      "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+      "extensions": {}
+    },
+    "privacy": {
+      "data_subjects": [
+        {
+          "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+          "role": "speaker",
+          "identity_state_at_write": "verified"
+        }
+      ],
+      "data_classes": [
+        "derived_profile"
+      ],
+      "consent_refs": [],
+      "legal_basis_refs": [],
+      "subject_coverage": "complete"
+    },
+    "policy_ref": {
+      "lineage_id": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+      "head_id_at_write": "urn:ccf:record:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+      "policy_object_hash": "sha256:58efe94b07ee215fee6bd8a26d5a8c19801658e3b3011a0d643d248a7087e564",
+      "evaluator_profile": "ccf-deny-overrides-v1",
+      "semantic_catalog_root": "sha256:1d4986414a6c0e76ee979e654487df739a96604593d7a18f8765643f3c32cc9a"
+    },
+    "authority": {
+      "basis": "machine_inference",
+      "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "accepted_by": null
+    },
+    "producer_evidence": {
+      "batch_id": "urn:ccf:batch:2eac061a-ef5e-4d62-a674-c8fd2be09eb7",
+      "credential_id": "urn:ccf:credential:bf559a3e-2d74-44a2-98b2-f317fdc9bb50",
+      "producer_sequence": "1",
+      "submission_hash": "sha256:02b08b1d7fc4bb4c5916e0faa29bab0759ee3c21a9343aa07acfb308925216e8"
+    },
+    "payload": {
+      "target": {
+        "value": "open adoption of the continuity schema",
+        "datatype": "string"
+      },
+      "stance": "prefer",
+      "strength": 0.9,
+      "context": {
+        "domain": "software standards"
+      },
+      "rationale": "Explicitly stated as a strategic preference.",
+      "extensions": {}
+    },
+    "extensions": {},
+    "epistemic": {
+      "confidence": 0.83,
+      "method": "preference-extractor-v1",
+      "calibration_profile": "example-v1"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:objects.blob-semantic-content",
+  "title": "CCF Blob Semantic Content",
+  "type": "object",
+  "properties": {
+    "content_salt": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/salt256"
+    },
+    "filename": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "origin": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/origin"
+    },
+    "privacy": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/privacy"
+    },
+    "policy_ref": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/policyRef"
+    },
+    "producer_evidence": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/producerEvidence"
+    },
+    "content_encryption_profile": {
+      "oneOf": [
+        {
+          "const": "none"
+        },
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/profileName"
+        }
+      ]
+    },
+    "content_key_ref": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/keyUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "content_salt",
+    "content_encryption_profile",
+    "content_key_ref",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

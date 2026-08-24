@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:operational.projection-checkpoint",
+  "title": "CCF Projection Checkpoint",
+  "type": "object",
+  "properties": {
+    "projection_name": {
+      "type": "string"
+    },
+    "generation": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "through_commit_sequence": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+    },
+    "dependency_generations": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/uint64"
+      }
+    },
+    "snapshot_digest": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/digest"
+    },
+    "created_at": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+    },
+    "storage_ref": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "projection_name",
+    "generation",
+    "through_commit_sequence",
+    "dependency_generations",
+    "snapshot_digest",
+    "created_at",
+    "storage_ref"
+  ],
+  "additionalProperties": false
+}

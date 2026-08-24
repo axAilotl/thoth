@@ -1,0 +1,55 @@
+{
+  "name": "skill_outputs",
+  "source_name": "skill_outputs",
+  "source_aliases": [
+    "external_skill",
+    "last30days-skill",
+    "skill_output_connector"
+  ],
+  "display_name": "External Skill Outputs",
+  "description": "Ingest JSON/JSONL output envelopes from external skills through the artifact queue.",
+  "artifact_types": [
+    "paper",
+    "repository",
+    "transcript",
+    "tweet",
+    "video",
+    "web_clipper"
+  ],
+  "inputs": [
+    "local_files:skill_output_envelopes"
+  ],
+  "outputs": [
+    "artifact_queue:*"
+  ],
+  "capabilities": [
+    "skills",
+    "envelopes",
+    "queue",
+    "raw_preservation"
+  ],
+  "config_keys": [
+    "sources.skill_outputs.enabled",
+    "sources.skill_outputs.output_paths",
+    "sources.skill_outputs.output_dirs",
+    "sources.skill_outputs.file_patterns",
+    "sources.skill_outputs.source_name"
+  ],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "queue_only",
+  "allowed_side_effects": [
+    "local_file_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.skill_output_connector:SkillOutputConnector",
+  "cli_command": "connectors run skill_outputs",
+  "config_namespace": "sources.skill_outputs",
+  "default_enabled": true,
+  "ccf": {
+    "lane": "mixed",
+    "artifact_role": "raw_capture"
+  }
+}

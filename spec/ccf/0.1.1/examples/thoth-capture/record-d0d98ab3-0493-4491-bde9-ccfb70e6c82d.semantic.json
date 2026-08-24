@@ -1,0 +1,100 @@
+{
+  "format": "ccf.record-semantic/0.1.1",
+  "salt": "Xl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4",
+  "content": {
+    "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+    "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+    "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+    "recorded_at": "2026-08-11T21:42:19.100Z",
+    "occurred_at": {
+      "start": "2026-08-11T21:41:48.000Z",
+      "end": "2026-08-11T21:42:18.000Z",
+      "precision": "millisecond",
+      "clock_uncertainty_ms": 12
+    },
+    "origin": {
+      "source_id": "urn:ccf:record:8a28d4f2-8e94-4ab1-a0b4-08d6c6f1cc81",
+      "native_id": "boot-8891/segment-1842/utterance-1",
+      "revision": "1",
+      "submission_hash": "sha256:476e61fd7072683334bc08ec52a2088dc91e0721c333ecbe073a3401dbc1b193"
+    },
+    "claimed": {
+      "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+      "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+      "privacy": {
+        "data_subjects": [
+          {
+            "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+            "role": "speaker",
+            "identity_state_at_write": "verified"
+          }
+        ],
+        "data_classes": [
+          "speech_content"
+        ],
+        "consent_refs": [],
+        "legal_basis_refs": [],
+        "subject_coverage": "complete"
+      },
+      "authority": {
+        "basis": "quoted_statement",
+        "asserted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "accepted_by": null
+      },
+      "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+      "extensions": {}
+    },
+    "privacy": {
+      "data_subjects": [
+        {
+          "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+          "role": "speaker",
+          "identity_state_at_write": "verified"
+        }
+      ],
+      "data_classes": [
+        "speech_content"
+      ],
+      "consent_refs": [],
+      "legal_basis_refs": [],
+      "subject_coverage": "complete"
+    },
+    "policy_ref": {
+      "lineage_id": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+      "head_id_at_write": "urn:ccf:record:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+      "policy_object_hash": "sha256:58efe94b07ee215fee6bd8a26d5a8c19801658e3b3011a0d643d248a7087e564",
+      "evaluator_profile": "ccf-deny-overrides-v1",
+      "semantic_catalog_root": "sha256:1d4986414a6c0e76ee979e654487df739a96604593d7a18f8765643f3c32cc9a"
+    },
+    "authority": {
+      "basis": "quoted_statement",
+      "asserted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+      "accepted_by": null
+    },
+    "producer_evidence": {
+      "batch_id": "urn:ccf:batch:2eac061a-ef5e-4d62-a674-c8fd2be09eb7",
+      "credential_id": "urn:ccf:credential:bf559a3e-2d74-44a2-98b2-f317fdc9bb50",
+      "producer_sequence": "1",
+      "submission_hash": "sha256:476e61fd7072683334bc08ec52a2088dc91e0721c333ecbe073a3401dbc1b193"
+    },
+    "payload": {
+      "text": "I want the schema open because adoption is still a win.",
+      "language": "en",
+      "speaker_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+      "sequence": "1",
+      "transcription": {
+        "engine": "example-stt",
+        "engine_version": "1",
+        "mean_confidence": 0.96,
+        "language_detected": "en"
+      },
+      "extensions": {}
+    },
+    "extensions": {},
+    "epistemic": {
+      "confidence": 0.98,
+      "method": "source-grounded-transcript",
+      "calibration_profile": "example-v1"
+    }
+  }
+}

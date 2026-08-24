@@ -1,0 +1,15 @@
+{
+  "registry": "ccf.blobs/0.1.1",
+  "entries": [
+    {
+      "name": "blob.manifest",
+      "version": 1,
+      "description": "Governed manifest and commitment for separately stored bytes",
+      "status": "active",
+      "profile": "ccf-core-0.1.1",
+      "retention_profile": "payload_erasable",
+      "structural_schema_id": "urn:ccf:schema:0.1.1:objects.blob-structural-content",
+      "semantic_schema_id": "urn:ccf:schema:0.1.1:objects.blob-semantic-content"
+    }
+  ]
+}

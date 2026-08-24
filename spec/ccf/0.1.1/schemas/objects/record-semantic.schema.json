@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:objects.record-semantic",
+  "title": "CCF Record Semantic Compartment",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "ccf.record-semantic/0.1.1"
+    },
+    "salt": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/salt256"
+    },
+    "content": {
+      "$ref": "urn:ccf:schema:0.1.1:objects.record-semantic-content"
+    }
+  },
+  "required": [
+    "format",
+    "salt",
+    "content"
+  ],
+  "additionalProperties": false
+}

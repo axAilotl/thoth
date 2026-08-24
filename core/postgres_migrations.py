@@ -286,8 +286,13 @@ def quote_identifier(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
-def validate_migration_sequence(migrations: Sequence[PostgresMigration]) -> None:
-    """Validate migration ordering and uniqueness before applying SQL."""
+def validate_migration_sequence(
+    migrations: Sequence[PostgresMigration],
+) -> None:
+    """Validate migration ordering and uniqueness before applying SQL.
+
+    Versions must be unique, positive, ascending, and contiguous from 1.
+    """
 
     seen_versions: set[int] = set()
     expected_version = 1
@@ -302,7 +307,7 @@ def validate_migration_sequence(migrations: Sequence[PostgresMigration]) -> None
                 f"expected {expected_version}, found {migration.version}"
             )
         seen_versions.add(migration.version)
-        expected_version += 1
+        expected_version = migration.version + 1
 
 
 def apply_postgres_migrations(

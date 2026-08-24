@@ -1,0 +1,72 @@
+{
+  "records": [
+    {
+      "id": "urn:ccf:record:4e9f8cc9-563a-4d61-8221-9f55e9db39bd",
+      "expected_submission_hash": "sha256:5f029fff2458721027acc14fe7c70d761c7eb17aebd4f2ca8335f987a5908090"
+    },
+    {
+      "id": "urn:ccf:record:b7972dfb-99c3-4376-897f-3c9f2848138b",
+      "expected_submission_hash": "sha256:6d3c9ac68d4999287d2e66d72c7db67d3c33d3af6a5198e692f8423863829167"
+    },
+    {
+      "id": "urn:ccf:record:4d8feff5-3956-4190-9679-203f34a09de1",
+      "expected_submission_hash": "sha256:49791eb815e7eeedaa36a3883a026c4c7b3bd670369d94611be6111936f49d12"
+    },
+    {
+      "id": "urn:ccf:record:4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203",
+      "expected_submission_hash": "sha256:b72a84c596f552ac0eb4e872b0b1a1ab2729403c3358ff3b79c90c5b879b634b"
+    },
+    {
+      "id": "urn:ccf:record:63607ea0-9d26-4625-ab23-65ce7415b571",
+      "expected_submission_hash": "sha256:7208e022b337289bd657310acc70cb81a748df7231c1b4b863dead5d07eab6ec"
+    },
+    {
+      "id": "urn:ccf:record:396faaaf-52c3-494d-b456-bbb1b8889cbf",
+      "expected_submission_hash": "sha256:cf9f462b2ca152ac68dff2c2cff940bbfc10fd2c21b5525ed0e5287887dfb994"
+    },
+    {
+      "id": "urn:ccf:record:a01f8c5c-8278-4a2b-bccb-c270ca803586",
+      "expected_submission_hash": "sha256:4017851d2ad55c5988de5c045946851530c6b56fd718874f6ded7004d2ca8438"
+    },
+    {
+      "id": "urn:ccf:record:2e96f116-6c1a-4216-8ac5-63d0b5da108f",
+      "expected_submission_hash": "sha256:9cbf876e996807774ebe7b3ec3c2e1a7627d2f35f86afded27f5e4fae81ea523"
+    }
+  ],
+  "links": [
+    {
+      "id": "urn:ccf:link:a3a6c051-271d-47cf-bee5-35fc66d903c2",
+      "expected_submission_hash": "sha256:6dac2df76c91bf1a6a112536f86fbc8e1bbdc1d37c55d30f712a8fa19520d08d"
+    },
+    {
+      "id": "urn:ccf:link:1ae193bd-79bd-4535-bbd3-a670dba025ff",
+      "expected_submission_hash": "sha256:3b9fbabea23cda7e5c66ebb73a4f973ffe01a09f2a2bbec0ffbcc52dc797057c"
+    },
+    {
+      "id": "urn:ccf:link:098c30cb-13fa-42b1-96f4-923ce82dd9d3",
+      "expected_submission_hash": "sha256:3b2885c3d0360f68acbb92eedbed674374b1b302631b1d9d0517cbaae10f3a9d"
+    },
+    {
+      "id": "urn:ccf:link:d8302220-fcda-466a-ae4f-58b116746b4e",
+      "expected_submission_hash": "sha256:e29b2a79e33b246aedf80881fcefd382c287088da1acbfffef737ed1a478214b"
+    },
+    {
+      "id": "urn:ccf:link:a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62",
+      "expected_submission_hash": "sha256:856994e9590194c5147431b05772d189937d75c898f6095dbb1108e18f38756d"
+    },
+    {
+      "id": "urn:ccf:link:76a63205-f0d1-4502-b29e-c44e0d1c6645",
+      "expected_submission_hash": "sha256:58d6bcdeb3eb8c9cf67255ef93c60d217b556949d413f758f6fb48a4898d5ed8"
+    },
+    {
+      "id": "urn:ccf:link:e807d6c8-6589-4ac2-bed4-032207901261",
+      "expected_submission_hash": "sha256:b0e743c544d1da3781520fe83585e7afa1a484d8eae99b61678230a68d33d3ef"
+    }
+  ],
+  "blobs": [
+    {
+      "id": "urn:ccf:blob:4393e9d0-c150-448d-9b27-05872973abab",
+      "expected_submission_hash": "sha256:bb19a1f3c3322f367671de8eddf5d5ac4a4fcbe1cc8f9a9737952439170d0290"
+    }
+  ]
+}

@@ -1,0 +1,723 @@
+{
+  "format": "ccf.producer-batch/0.1.1",
+  "batch_id": "urn:ccf:batch:2eac061a-ef5e-4d62-a674-c8fd2be09eb7",
+  "producer_id": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+  "producer_sequence": "1",
+  "previous_batch_hash": null,
+  "credential_id": "urn:ccf:credential:bf559a3e-2d74-44a2-98b2-f317fdc9bb50",
+  "created_at": "2026-08-11T21:42:20.300Z",
+  "semantic_catalog_root": "sha256:1d4986414a6c0e76ee979e654487df739a96604593d7a18f8765643f3c32cc9a",
+  "records": [
+    {
+      "submission_kind": "record",
+      "id": "urn:ccf:record:8a28d4f2-8e94-4ab1-a0b4-08d6c6f1cc81",
+      "type": "core.source",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "payload_erasable",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:41:47.900Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [
+            "identity_data"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "payload": {
+        "kind": "wearable_audio",
+        "name": "Maxc test source",
+        "connector": "thoth.capture",
+        "native_identity": "device:maxc-test",
+        "trust_class": "authenticated",
+        "producer_key_id": "urn:ccf:key:482e698a-909c-43b3-817c-4043b7db46da",
+        "extensions": {}
+      },
+      "extensions": {}
+    },
+    {
+      "submission_kind": "record",
+      "id": "urn:ccf:record:86fb5ba3-070c-4557-b5f5-24688206ad80",
+      "type": "core.session",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "payload_erasable",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:41:48.000Z",
+      "occurred_at": {
+        "start": "2026-08-11T21:41:48.000Z",
+        "end": "2026-08-11T21:42:18.000Z",
+        "precision": "millisecond",
+        "clock_uncertainty_ms": 12
+      },
+      "origin": {
+        "source_id": "urn:ccf:record:8a28d4f2-8e94-4ab1-a0b4-08d6c6f1cc81",
+        "native_id": "boot-8891/session-1",
+        "revision": "1"
+      },
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "voice_recording"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "payload": {
+        "source_id": "urn:ccf:record:8a28d4f2-8e94-4ab1-a0b4-08d6c6f1cc81",
+        "native_id": "boot-8891/session-1",
+        "channel": "ambient",
+        "started_at": "2026-08-11T21:41:48.000Z",
+        "ended_at": "2026-08-11T21:42:18.000Z",
+        "participants": [
+          "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d"
+        ],
+        "capture_mode": "manual-test",
+        "extensions": {}
+      },
+      "extensions": {}
+    },
+    {
+      "submission_kind": "record",
+      "id": "urn:ccf:record:ec80197e-7b6d-4164-a82a-317f7ef748e8",
+      "type": "experience.artifact",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "payload_erasable",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:18.331Z",
+      "occurred_at": {
+        "start": "2026-08-11T21:41:48.000Z",
+        "end": "2026-08-11T21:42:18.000Z",
+        "precision": "millisecond",
+        "clock_uncertainty_ms": 12
+      },
+      "origin": {
+        "source_id": "urn:ccf:record:8a28d4f2-8e94-4ab1-a0b4-08d6c6f1cc81",
+        "native_id": "boot-8891/segment-1842",
+        "revision": "1"
+      },
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "voice_recording"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "payload": {
+        "name": "segment-1842.wav",
+        "media_type": "audio/wav",
+        "description": "Short test capture",
+        "external_uri": null,
+        "artifact_role": "raw_capture",
+        "extensions": {}
+      },
+      "extensions": {}
+    },
+    {
+      "submission_kind": "record",
+      "id": "urn:ccf:record:11ecb434-503d-475e-8d94-602398794896",
+      "type": "process.run",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "payload_erasable",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:19.000Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "lineage": {
+        "lineage_id": "urn:ccf:lineage:11ecb434-503d-475e-8d94-602398794896",
+        "previous_head_id": null,
+        "transition": "succeed",
+        "valid_from": "2026-08-11T21:42:19.000Z",
+        "expires_at": null
+      },
+      "payload": {
+        "run_kind": "transcription",
+        "framework": "thoth",
+        "task": "Transcribe captured audio",
+        "status": "succeeded",
+        "configuration_ref": null,
+        "parent_run_id": null,
+        "started_at": "2026-08-11T21:42:18.400Z",
+        "terminal_at": "2026-08-11T21:42:19.000Z",
+        "extensions": {}
+      },
+      "extensions": {}
+    },
+    {
+      "submission_kind": "record",
+      "id": "urn:ccf:record:d0d98ab3-0493-4491-bde9-ccfb70e6c82d",
+      "type": "experience.utterance",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "payload_erasable",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:19.100Z",
+      "occurred_at": {
+        "start": "2026-08-11T21:41:48.000Z",
+        "end": "2026-08-11T21:42:18.000Z",
+        "precision": "millisecond",
+        "clock_uncertainty_ms": 12
+      },
+      "origin": {
+        "source_id": "urn:ccf:record:8a28d4f2-8e94-4ab1-a0b4-08d6c6f1cc81",
+        "native_id": "boot-8891/segment-1842/utterance-1",
+        "revision": "1"
+      },
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "speech_content"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "authority": {
+          "basis": "quoted_statement",
+          "asserted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "payload": {
+        "text": "I want the schema open because adoption is still a win.",
+        "language": "en",
+        "speaker_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "sequence": "1",
+        "transcription": {
+          "engine": "example-stt",
+          "engine_version": "1",
+          "mean_confidence": 0.96,
+          "language_detected": "en"
+        },
+        "extensions": {}
+      },
+      "extensions": {}
+    },
+    {
+      "submission_kind": "record",
+      "id": "urn:ccf:record:2fd2e84a-3d89-47b6-83c2-1be7729ff839",
+      "type": "continuity.preference",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "payload_erasable",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:19.200Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "derived_profile"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "authority": {
+          "basis": "machine_inference",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "payload": {
+        "target": {
+          "value": "open adoption of the continuity schema",
+          "datatype": "string"
+        },
+        "stance": "prefer",
+        "strength": 0.9,
+        "context": {
+          "domain": "software standards"
+        },
+        "rationale": "Explicitly stated as a strategic preference.",
+        "extensions": {}
+      },
+      "extensions": {}
+    },
+    {
+      "submission_kind": "record",
+      "id": "urn:ccf:record:6acc6514-2dab-4ba0-9851-89d51a83e1c1",
+      "type": "governance.review_decision",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "payload_erasable",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.000Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "derived_profile"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "authority": {
+          "basis": "person_accepted",
+          "asserted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+          "accepted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d"
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "payload": {
+        "target_ids": [
+          "urn:ccf:record:2fd2e84a-3d89-47b6-83c2-1be7729ff839"
+        ],
+        "decision": "accept",
+        "reason": "The extraction matches the stated intent.",
+        "reviewer_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "evidence_refs": [
+          "urn:ccf:record:d0d98ab3-0493-4491-bde9-ccfb70e6c82d"
+        ],
+        "extensions": {}
+      },
+      "extensions": {}
+    },
+    {
+      "submission_kind": "record",
+      "id": "urn:ccf:record:85441aca-60e4-4a94-bf4b-10e71046dbec",
+      "type": "continuity.preference",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "payload_erasable",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.100Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "derived_profile"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "authority": {
+          "basis": "person_accepted",
+          "asserted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+          "accepted_by": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d"
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "payload": {
+        "target": {
+          "value": "open adoption of the continuity schema",
+          "datatype": "string"
+        },
+        "stance": "prefer",
+        "strength": 0.9,
+        "context": {
+          "domain": "software standards"
+        },
+        "rationale": "Explicitly stated as a strategic preference.",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "links": [
+    {
+      "submission_kind": "link",
+      "id": "urn:ccf:link:b8eca641-3df7-4f0f-90c4-5ad0b1c4bed2",
+      "type": "ccf.has_blob",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "structural_retention_required",
+      "from_id": "urn:ccf:record:ec80197e-7b6d-4164-a82a-317f7ef748e8",
+      "to_id": "urn:ccf:blob:1347aae2-aa68-44ff-bb95-fd864a648d0f",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.200Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "selector": {},
+      "payload": {},
+      "extensions": {}
+    },
+    {
+      "submission_kind": "link",
+      "id": "urn:ccf:link:280e2137-89fe-4da4-aa7f-2e132c0e51b6",
+      "type": "ccf.captured_in",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "structural_retention_required",
+      "from_id": "urn:ccf:record:ec80197e-7b6d-4164-a82a-317f7ef748e8",
+      "to_id": "urn:ccf:record:86fb5ba3-070c-4557-b5f5-24688206ad80",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.200Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "selector": {},
+      "payload": {},
+      "extensions": {}
+    },
+    {
+      "submission_kind": "link",
+      "id": "urn:ccf:link:3b8624df-05b0-4bb0-9a4a-092a183f50a9",
+      "type": "ccf.derived_from",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "structural_retention_required",
+      "from_id": "urn:ccf:record:d0d98ab3-0493-4491-bde9-ccfb70e6c82d",
+      "to_id": "urn:ccf:record:ec80197e-7b6d-4164-a82a-317f7ef748e8",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.200Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "selector": {
+        "kind": "media_time",
+        "start_ms": 0,
+        "end_ms": 30000
+      },
+      "payload": {},
+      "extensions": {}
+    },
+    {
+      "submission_kind": "link",
+      "id": "urn:ccf:link:b6f86d6f-d5ae-42e1-9b45-1e196b3bc15a",
+      "type": "ccf.generated_by",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "structural_retention_required",
+      "from_id": "urn:ccf:record:d0d98ab3-0493-4491-bde9-ccfb70e6c82d",
+      "to_id": "urn:ccf:record:11ecb434-503d-475e-8d94-602398794896",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.200Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "selector": {},
+      "payload": {},
+      "extensions": {}
+    },
+    {
+      "submission_kind": "link",
+      "id": "urn:ccf:link:a4357ced-f874-4ab8-97ad-6eb95171879d",
+      "type": "ccf.evidence_for",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "structural_retention_required",
+      "from_id": "urn:ccf:record:d0d98ab3-0493-4491-bde9-ccfb70e6c82d",
+      "to_id": "urn:ccf:record:2fd2e84a-3d89-47b6-83c2-1be7729ff839",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.200Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "selector": {
+        "kind": "text_span",
+        "start": 0,
+        "end": 57
+      },
+      "payload": {},
+      "extensions": {}
+    },
+    {
+      "submission_kind": "link",
+      "id": "urn:ccf:link:39d32f3d-12e0-4c8a-8014-5325d3c835e3",
+      "type": "ccf.supersedes",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "structural_retention_required",
+      "from_id": "urn:ccf:record:85441aca-60e4-4a94-bf4b-10e71046dbec",
+      "to_id": "urn:ccf:record:2fd2e84a-3d89-47b6-83c2-1be7729ff839",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.200Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "selector": {},
+      "payload": {},
+      "extensions": {}
+    },
+    {
+      "submission_kind": "link",
+      "id": "urn:ccf:link:394dbb9d-d4d3-4796-b5fe-473c2004f761",
+      "type": "ccf.covers",
+      "type_version": 1,
+      "type_visibility": "clear",
+      "retention_profile_hint": "structural_retention_required",
+      "from_id": "urn:ccf:record:6acc6514-2dab-4ba0-9851-89d51a83e1c1",
+      "to_id": "urn:ccf:record:2fd2e84a-3d89-47b6-83c2-1be7729ff839",
+      "recorded_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+      "recorded_at": "2026-08-11T21:42:20.200Z",
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [],
+          "data_classes": [],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "unknown"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "selector": {},
+      "payload": {},
+      "extensions": {}
+    }
+  ],
+  "blobs": [
+    {
+      "submission_kind": "blob",
+      "id": "urn:ccf:blob:1347aae2-aa68-44ff-bb95-fd864a648d0f",
+      "retention_profile_hint": "payload_erasable",
+      "media_type": "audio/wav",
+      "byte_length": "3244",
+      "content_salt": "yMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMg",
+      "content_commitment": "sha256:a569ae3b982d098052fc4e0a8a20ea969b3990c601280b63ac305ab2e6a86468",
+      "content_profile": "ccf-blob-content-v2",
+      "origin": {
+        "source_id": "urn:ccf:record:8a28d4f2-8e94-4ab1-a0b4-08d6c6f1cc81",
+        "native_id": "boot-8891/segment-1842",
+        "revision": "1"
+      },
+      "claims": {
+        "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "perspective_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+        "privacy": {
+          "data_subjects": [
+            {
+              "person_id": "urn:ccf:record:ef73705f-4910-4bfa-ab60-cf08d8169b6d",
+              "role": "speaker",
+              "identity_state_at_write": "verified"
+            }
+          ],
+          "data_classes": [
+            "voice_recording"
+          ],
+          "consent_refs": [],
+          "legal_basis_refs": [],
+          "subject_coverage": "complete"
+        },
+        "authority": {
+          "basis": "runtime_import",
+          "asserted_by": "urn:ccf:record:a5e2e478-195c-4f2e-8329-a13a1e1fef7e",
+          "accepted_by": null
+        },
+        "policy_hint": "urn:ccf:lineage:15b2492f-59a8-4e6a-93a2-c3b4a134c345",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "blob_transfers": [
+    {
+      "blob_id": "urn:ccf:blob:1347aae2-aa68-44ff-bb95-fd864a648d0f",
+      "transfer_ref": "segment-1842.wav",
+      "offset": "0",
+      "length": "3244",
+      "complete": true
+    }
+  ],
+  "extensions": {},
+  "signature_profile": "ed25519-jcs-v1",
+  "batch_hash": "sha256:406303229c5371098c9f69f518fa5d9779dce51915eba468c316ef5e4577fa09",
+  "signature": "JmfDNY9EFLAhtd7_qvJCuZQUaXpQzGBNFqVEgPNcipNDb4UqslCsmgOJqqfDbK-VvLSGeQPWJT4I3zbB6sFGDw"
+}

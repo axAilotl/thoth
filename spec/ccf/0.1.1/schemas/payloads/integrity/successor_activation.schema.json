@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:payload.integrity.successor_activation",
+  "title": "integrity.successor_activation payload",
+  "type": "object",
+  "properties": {
+    "authorization_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/recordUrn"
+    },
+    "certificate": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/base64url"
+    },
+    "activation_evidence_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "new_key_proof": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/base64url"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "authorization_id",
+    "certificate",
+    "activation_evidence_refs",
+    "new_key_proof",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

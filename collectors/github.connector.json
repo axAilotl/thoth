@@ -1,0 +1,48 @@
+{
+  "name": "github",
+  "source_name": "github",
+  "display_name": "GitHub Stars",
+  "description": "Collect starred GitHub repositories.",
+  "artifact_types": [
+    "repository"
+  ],
+  "inputs": [
+    "remote_api:github_stars"
+  ],
+  "outputs": [
+    "artifact_queue:repository"
+  ],
+  "capabilities": [
+    "repositories",
+    "stars",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.github.enabled",
+    "sources.github.username",
+    "sources.github.limit",
+    "sources.github.token"
+  ],
+  "auth": [
+    "sources.github.token",
+    "GITHUB_API",
+    "GITHUB_TOKEN"
+  ],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "network_ingest_queue",
+  "allowed_side_effects": [
+    "network_read",
+    "auth_token_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.social_collector:SocialCollector.discover_github_stars",
+  "cli_command": "social",
+  "config_namespace": "sources.github",
+  "default_enabled": true,
+  "ccf": {
+    "lane": "repository",
+    "artifact_role": "raw_capture"
+  }
+}

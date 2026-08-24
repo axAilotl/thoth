@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:registries.state-machine-registry",
+  "title": "CCF State Machine Registry",
+  "type": "object",
+  "properties": {
+    "registry": {
+      "const": "ccf.state-machines/0.1.1"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "head_check": {
+            "const": "required"
+          },
+          "initial_transitions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "terminal_states": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "head_check",
+          "initial_transitions",
+          "transitions",
+          "terminal_states"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "registry",
+    "entries"
+  ],
+  "additionalProperties": false
+}

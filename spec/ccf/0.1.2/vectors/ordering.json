@@ -1,0 +1,22 @@
+{
+  "rule": "compare commit_sequence as unsigned integer, then commit_position as integer",
+  "ordered": [
+    {
+      "commit_sequence": "9",
+      "commit_position": 99
+    },
+    {
+      "commit_sequence": "10",
+      "commit_position": 0
+    },
+    {
+      "commit_sequence": "9999",
+      "commit_position": 4
+    },
+    {
+      "commit_sequence": "10000",
+      "commit_position": 0
+    }
+  ],
+  "lexicographic_is_invalid": true
+}

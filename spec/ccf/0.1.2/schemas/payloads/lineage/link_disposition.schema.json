@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:payload.lineage.link_disposition",
+  "title": "lineage.link_disposition payload",
+  "type": "object",
+  "properties": {
+    "target_link_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/linkUrn"
+    },
+    "action": {
+      "enum": [
+        "retract",
+        "supersede",
+        "invalidate_selector",
+        "tombstone",
+        "restore"
+      ]
+    },
+    "replacement_link_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/linkUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "previous_disposition_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "target_link_id",
+    "action",
+    "reason",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

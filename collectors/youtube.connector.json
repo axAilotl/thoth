@@ -1,0 +1,59 @@
+{
+  "name": "youtube",
+  "source_name": "youtube",
+  "display_name": "YouTube",
+  "description": "Collect YouTube video metadata and transcripts from URLs, playlists, and local exports.",
+  "artifact_types": [
+    "video",
+    "transcript"
+  ],
+  "inputs": [
+    "remote_api:youtube",
+    "remote_media:youtube",
+    "local_files:youtube_exports"
+  ],
+  "outputs": [
+    "artifact_queue:video",
+    "artifact_queue:transcript"
+  ],
+  "capabilities": [
+    "video",
+    "transcripts",
+    "playlists",
+    "exports",
+    "queue",
+    "archive"
+  ],
+  "config_keys": [
+    "sources.youtube.enabled",
+    "sources.youtube.urls",
+    "sources.youtube.playlist_urls",
+    "sources.youtube.export_paths",
+    "sources.youtube.archive_video",
+    "sources.youtube.api_key",
+    "youtube.enable_transcripts",
+    "youtube.enable_llm_transcript_processing"
+  ],
+  "auth": [
+    "sources.youtube.api_key",
+    "YOUTUBE_API_KEY"
+  ],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "network_ingest_queue",
+  "allowed_side_effects": [
+    "network_read",
+    "auth_token_read",
+    "local_file_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.youtube_connector:YouTubeConnector",
+  "cli_command": "connectors run youtube",
+  "config_namespace": "sources.youtube",
+  "default_enabled": true,
+  "ccf": {
+    "lane": "video",
+    "artifact_role": "raw_capture"
+  }
+}

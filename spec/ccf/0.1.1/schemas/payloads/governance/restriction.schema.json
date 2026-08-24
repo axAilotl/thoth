@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.1:payload.governance.restriction",
+  "title": "governance.restriction payload",
+  "type": "object",
+  "properties": {
+    "subject_id": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/recordUrn"
+    },
+    "decision": {
+      "enum": [
+        "impose",
+        "release"
+      ]
+    },
+    "scope": {
+      "type": "object"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "effective_at": {
+      "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/timestamp"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:ccf:schema:0.1.1:common.defs#/$defs/objectUrn"
+      },
+      "uniqueItems": true
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "subject_id",
+    "decision",
+    "scope",
+    "reason",
+    "effective_at",
+    "evidence_refs",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

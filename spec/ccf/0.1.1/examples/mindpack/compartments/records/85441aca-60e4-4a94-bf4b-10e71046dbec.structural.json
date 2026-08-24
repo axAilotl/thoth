@@ -1,0 +1,14 @@
+{
+  "format": "ccf.record-structural/0.1.1",
+  "salt": "ERERERERERERERERERERERERERERERERERERERERERE",
+  "content": {
+    "type": "continuity.preference",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:07f4b479d477f9eb21c1e31447c9b31817be14a500972b7bb0d7c719e98a5b7d",
+    "registry_entry_digest": "sha256:ad7dfae79e378c69d741f1811445a0bd2ff580ec86674732f986fb061f5d65d1",
+    "retention_profile": "payload_erasable",
+    "structural_payload": {},
+    "extensions": {}
+  }
+}

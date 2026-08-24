@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:objects.commit-member",
+  "title": "CCF Commit Member",
+  "type": "object",
+  "properties": {
+    "commit_sequence": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"
+    },
+    "commit_position": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "admitted_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "object_kind": {
+      "enum": [
+        "record",
+        "link",
+        "blob"
+      ]
+    },
+    "object_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"
+    },
+    "object_hash": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+    }
+  },
+  "required": [
+    "commit_sequence",
+    "commit_position",
+    "admitted_at",
+    "object_kind",
+    "object_id",
+    "object_hash"
+  ],
+  "additionalProperties": false
+}

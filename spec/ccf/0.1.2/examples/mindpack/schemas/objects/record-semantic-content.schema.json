@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.1.2:objects.record-semantic-content",
+  "title": "CCF Record Semantic Content",
+  "type": "object",
+  "properties": {
+    "sealed_type": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/typeName"
+        },
+        "type_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schema_digest": {
+          "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+        }
+      },
+      "required": [
+        "type",
+        "type_version",
+        "schema_digest"
+      ],
+      "additionalProperties": false
+    },
+    "person_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "perspective_id": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "recorded_by": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"
+    },
+    "recorded_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"
+    },
+    "occurred_at": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/occurredAt"
+    },
+    "origin": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/origin"
+    },
+    "claimed": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/claimedRecordContext"
+    },
+    "privacy": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/privacy"
+    },
+    "policy_ref": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/policyRef"
+    },
+    "authority": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/authority"
+    },
+    "epistemic": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/epistemic"
+    },
+    "producer_evidence": {
+      "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/producerEvidence"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "recorded_by",
+    "recorded_at",
+    "payload",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

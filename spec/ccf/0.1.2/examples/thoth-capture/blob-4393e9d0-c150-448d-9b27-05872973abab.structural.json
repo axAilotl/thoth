@@ -1,0 +1,20 @@
+{
+  "format": "ccf.blob-structural/0.1.2",
+  "salt": "GRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRk",
+  "content": {
+    "type": "blob.manifest",
+    "type_version": 1,
+    "type_visibility": "clear",
+    "schema_digest": "sha256:c4d58e1b16431cd4fda2265507a1343caf6c10436ab39265f4774c8ad83c33ad",
+    "registry_entry_digest": "sha256:7690184e5c7c4fa26a7389f5950a47d40cbc3d15e916466ea5ebf1376a6a4d1c",
+    "retention_profile": "payload_erasable",
+    "media_type": "audio/wav",
+    "byte_length": "3244",
+    "content_commitment": "sha256:a569ae3b982d098052fc4e0a8a20ea969b3990c601280b63ac305ab2e6a86468",
+    "content_profile": "ccf-blob-content-v2",
+    "availability_class": "controlled",
+    "erasure_domain_id": "urn:ccf:lineage:f68a13fb-5e71-4022-9e14-831c490e86ca",
+    "structural_payload": {},
+    "extensions": {}
+  }
+}
