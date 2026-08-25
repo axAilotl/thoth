@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import {
   compartmentCommitment,
   blobContentCommitment,
@@ -22,7 +23,7 @@ import {
 } from './mindpack-manifest.mjs';
 import { verifyExampleSuppressionFixtures } from './verify-suppression-fixture.mjs';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MP = path.join(ROOT, 'examples', 'mindpack');
 const manifest = JSON.parse(fs.readFileSync(path.join(MP, 'manifest.json')));
 let checks = 0;

@@ -1,0 +1,37 @@
+{
+  "format": "ccf.bundle-manifest/0.2.0",
+  "status": "working-draft",
+  "id": "ccf-agent-pack-bundle-v1",
+  "kind": "semantic_pack",
+  "provides": "ccf-agent-pack-v1",
+  "depends_on": [
+    "ccf-exchange-bundle-v1"
+  ],
+  "artifacts": [
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/finding.schema.json",
+      "digest": "sha256:deff7d14610ad2b2f9a7eb3274d5985b35f6348b8c00f7507ee6e24a879df4d4"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/handoff.schema.json",
+      "digest": "sha256:f2b3435d125d35b408c6460c230015ee0f30dfc8bde574cf91c08b32f9e82f7e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/proposal.schema.json",
+      "digest": "sha256:5960316477085760e0d7be8d3134afc8b270e3280b487def8b5a4d47c3e3102c"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/receipt.schema.json",
+      "digest": "sha256:6ca08f8c11b5012adfb47963f3bc4a6b7167e826a3eb17415603a0ec17ce91fd"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/run.schema.json",
+      "digest": "sha256:0f04526283b92299837798f80dccc7df201db861b4edc6ceaa2240bfe2d22e07"
+    }
+  ]
+}

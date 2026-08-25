@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:common.defs",
+  "title": "CCF 0.2.0 layered-conformance definitions",
+  "$defs": {
+    "levelId": {
+      "enum": [
+        "ccf-exchange-v1",
+        "ccf-canonical-store-v1",
+        "ccf-verified-archive-v1",
+        "ccf-governed-archive-v1"
+      ]
+    },
+    "roleId": {
+      "enum": [
+        "preserver",
+        "producer",
+        "processor",
+        "importer-exporter",
+        "archive",
+        "policy-evaluator"
+      ]
+    },
+    "capabilityId": {
+      "type": "string",
+      "pattern": "^ccf-[a-z0-9]+(?:-[a-z0-9]+)*-v[1-9][0-9]*$"
+    },
+    "status": {
+      "enum": ["active", "deprecated", "experimental"]
+    },
+    "resourceKind": {
+      "enum": ["record_type", "link_type", "blob_type", "predicate"]
+    },
+    "omission": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "enum": [
+            "submission",
+            "journal_proof",
+            "policy_state",
+            "lineage_state",
+            "compartment",
+            "blob_content",
+            "unknown_extension",
+            "registry",
+            "schema",
+            "other"
+          ]
+        },
+        "subject": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "required": ["category", "subject", "reason"],
+      "additionalProperties": false
+    }
+  }
+}

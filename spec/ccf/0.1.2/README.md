@@ -1,29 +1,29 @@
 # Continuity Core Format 0.1.2
 
-CCF 0.1.2 is a local-first canonical backend and interchange specification for person-governed experience, knowledge, continuity, provenance, and derived work.
+CCF 0.1.2 is a local-first save-file and interchange specification for
+person-owned knowledge, captured experience, files, provenance, preferences,
+policy, and derived work. It can serve personal knowledge systems, companion
+applications, capture tools, and local archives.
 
 ## Start here
 
-- [`CCF-0.1.2-SPEC.md`](CCF-0.1.2-SPEC.md) — consolidated normative specification.
-- [`CHANGELOG-0.1.2.md`](CHANGELOG-0.1.2.md) — narrow 0.1.1 to 0.1.2 corrections.
-- [`docs/14-thoth-adoption.md`](docs/14-thoth-adoption.md) — implementation mapping for Thoth.
-- [`THOTH-IMPLEMENTATION-CHECKLIST.md`](THOTH-IMPLEMENTATION-CHECKLIST.md) — staged migration and torture-test plan.
-- [`schemas/catalog.json`](schemas/catalog.json) — immutable schema catalog.
-- [`semantic-catalog.json`](semantic-catalog.json) — exact activated schema and registry digests.
-- [`registries/profiles.registry.json`](registries/profiles.registry.json) — core and optional profiles.
-- [`sql/postgres-reference.sql`](sql/postgres-reference.sql) — reference operational envelope.
-- [`openapi/ccf-api.openapi.yaml`](openapi/ccf-api.openapi.yaml) — batch, sync, read, and export contract.
-- [`vectors/`](vectors/) — executable canonicalization, hashing, signing, and ordering expectations.
+- [`CCF-0.1.2-SPEC.md`](CCF-0.1.2-SPEC.md): consolidated normative specification.
+- [`CHANGELOG-0.1.2.md`](CHANGELOG-0.1.2.md): 0.1.1 to 0.1.2 corrections.
+- [`docs/14-integration-guide.md`](docs/14-integration-guide.md): application-neutral integration guidance.
+- [`schemas/catalog.json`](schemas/catalog.json): immutable schema catalog.
+- [`semantic-catalog.json`](semantic-catalog.json): activated schema and registry digests.
+- [`registries/profiles.registry.json`](registries/profiles.registry.json): core and optional profiles.
+- [`sql/postgres-reference.sql`](sql/postgres-reference.sql): reference operational envelope.
+- [`openapi/ccf-api.openapi.yaml`](openapi/ccf-api.openapi.yaml): batch, sync, read, and export contract.
+- [`vectors/`](vectors/): canonicalization, hashing, signing, and ordering expectations.
 
 ## Status
 
 The **Record / Link / Blob algebra** and canonical-versus-projection boundary
-remain unchanged from 0.1.1. This final release packages corrections found by
-the first full reference-implementation pressure test. The independent Thoth
-implementation reproduces every published vector and passes the mandatory
-portable suite (`scripts/verify_ccf_012_vectors.py`,
-`tests/test_ccf_cutover_vectors.py`), providing the interoperability evidence
-for the final wire and profile identifiers.
+remain unchanged from 0.1.1. This release packages corrections found during
+reference implementation and adversarial verification. The package-native
+suite reproduces every published vector and verifies the final wire, schema,
+registry, and profile identifiers.
 
 ## What changed from 0.1.1
 

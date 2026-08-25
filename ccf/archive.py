@@ -656,6 +656,64 @@ class Archive:
                 }
             return result
 
+    def draft_root(self) -> Path:
+        """Sibling 0.2.0 draft package next to the frozen 0.1.2 root."""
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot resolve 0.2.0 draft")
+        return self.package_root.parent / "0.2.0"
+
+    def implementation_declaration(self) -> dict:
+        """Publish Thoth's 0.2.0 layered-conformance declaration."""
+        from ccf.declaration import load_thoth_declaration
+
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot declare conformance")
+        return load_thoth_declaration(
+            base_root=self.package_root,
+            draft_root=self.draft_root(),
+        )
+
+    def preview_capsule(self, capsule_dir: str | Path) -> dict:
+        """Validate a Capsule against this archive's declaration and emit pending uplift."""
+        from ccf.capsule import load_capsule, verify_capsule
+        from ccf.declaration import build_thoth_declaration
+        from ccf.exchange import build_pending_uplift, verify_uplift_receipt
+        from ccf.layered import LayeredRegistries
+        from ccf.schemas import SchemaSet
+
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot preview a Capsule")
+        draft = self.draft_root()
+        layered = LayeredRegistries.load(draft)
+        schemas = SchemaSet.load_layered(self.package_root, draft)
+        declaration = build_thoth_declaration(
+            layered=layered,
+            catalog_roots=(self.catalog.root,),
+            schemas=schemas,
+        )
+        capsule = load_capsule(capsule_dir, schemas=schemas)
+        verify_capsule(
+            capsule,
+            layered=layered,
+            schemas=schemas,
+            recipient_level=declaration["level"],
+            recipient_capabilities=declaration["capabilities"],
+        )
+        receipt = build_pending_uplift(
+            capsule,
+            destination_level=declaration["level"],
+            destination_archive_id=self.archive_id,
+            created_at=self.clock(),
+        )
+        verify_uplift_receipt(
+            receipt, capsule=capsule, layered=layered, schemas=schemas
+        )
+        return {
+            "declaration": declaration,
+            "capsule": capsule.manifest,
+            "uplift": receipt,
+        }
+
 
 def _insert_commit_record(conn, archive_id: str, commit, committed_at: str) -> None:
     """Persist a commit Record's header and structural compartment."""

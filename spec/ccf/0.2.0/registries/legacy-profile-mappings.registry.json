@@ -1,0 +1,68 @@
+{
+  "registry": "ccf.legacy-profile-mappings/0.2.0",
+  "entries": [
+    {
+      "legacy_profile": "ccf-core-0.1.2",
+      "level": "ccf-governed-archive-v1",
+      "capability": null,
+      "semantic_pack": null,
+      "notes": "The 0.1.2 mandatory Core is the ancestor of Governed Archive; it does not imply optional encryption, sync, witnessing, or succession claims."
+    },
+    {
+      "legacy_profile": "ccf-local-sync-0.1.2",
+      "level": null,
+      "capability": "ccf-signed-producer-sync-v1",
+      "semantic_pack": null,
+      "notes": "Local sync becomes an orthogonal capability and does not raise an implementation's guarantee level."
+    },
+    {
+      "legacy_profile": "ccf-archive-encryption-derived-v1",
+      "level": null,
+      "capability": "ccf-archive-encryption-derived-v1",
+      "semantic_pack": null,
+      "notes": "Identifier and security claims are unchanged."
+    },
+    {
+      "legacy_profile": "ccf-object-erasure-v1",
+      "level": null,
+      "capability": "ccf-object-erasure-v1",
+      "semantic_pack": null,
+      "notes": "Identifier and security claims are unchanged."
+    },
+    {
+      "legacy_profile": "ccf-witnessed-integrity-v1",
+      "level": null,
+      "capability": "ccf-witnessed-integrity-v1",
+      "semantic_pack": null,
+      "notes": "Identifier and security claims are unchanged."
+    },
+    {
+      "legacy_profile": "ccf-succession-v1",
+      "level": null,
+      "capability": "ccf-succession-v1",
+      "semantic_pack": null,
+      "notes": "Identifier and security claims are unchanged."
+    },
+    {
+      "legacy_profile": "ccf-continuity-pack-0.1.2",
+      "level": null,
+      "capability": null,
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "notes": "Semantic vocabulary is separated from operational and security capabilities."
+    },
+    {
+      "legacy_profile": "ccf-work-pack-0.1.2",
+      "level": null,
+      "capability": null,
+      "semantic_pack": "ccf-work-pack-v1",
+      "notes": "Semantic vocabulary is separated from operational and security capabilities."
+    },
+    {
+      "legacy_profile": "ccf-agent-pack-0.1.2",
+      "level": null,
+      "capability": null,
+      "semantic_pack": "ccf-agent-pack-v1",
+      "notes": "Semantic vocabulary is separated from operational and security capabilities."
+    }
+  ]
+}

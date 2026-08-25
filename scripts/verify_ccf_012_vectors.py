@@ -83,7 +83,7 @@ for kind in ("record", "link", "blob"):
     check(f"{kind} object hash", object_hash(v["header"]) == v["expected_object_hash"])
 blob = ov["blob"]
 salt = blob["semantic"]["content"]["content_salt"]
-data = (PKG / "examples" / "thoth-capture" / "segment-1842.wav").read_bytes()
+data = (PKG / "examples" / "personal-archive" / "segment-1842.wav").read_bytes()
 check("blob content commitment",
       blob_content_commitment(salt, data) == blob["expected_content_commitment"])
 

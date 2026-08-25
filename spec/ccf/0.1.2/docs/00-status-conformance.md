@@ -15,12 +15,10 @@ The following architectural decisions are frozen for this version:
 - projections are disposable and rebuildable;
 - no required agent framework, graph database, companion runtime, device, key manager, or cloud topology.
 
-CCF 0.1.2 is an interoperability release. The independent Thoth
-implementation reproduces every published vector and passes the mandatory
-portable suite (`scripts/verify_ccf_012_vectors.py`,
-`tests/test_ccf_cutover_vectors.py`). This independent reproduction is the
-positive interoperability evidence for the final wire, schema, registry, and
-profile identifiers.
+CCF 0.1.2 is an interoperability release. The package-native suite reproduces
+every published vector and verifies the final wire, schema, registry, and
+profile identifiers. Independent implementations can use the same vectors and
+portable conformance cases to test compatibility.
 
 ## 0.2 Mandatory and optional profiles
 
@@ -52,7 +50,9 @@ CCF standardizes:
 8. semantic-catalog pinning and unknown-extension preservation;
 9. a reference Postgres operational envelope.
 
-CCF does not standardize a model, prompt, persona, UI, agent topology, metaphysical truth, consciousness claim, legal conclusion, or universal hosted-service custody mode.
+CCF does not standardize application interfaces, model or prompt architecture,
+product behavior, agent topology, legal interpretation, or a universal hosted
+custody model.
 
 ## 0.4 Normative language and source precedence
 

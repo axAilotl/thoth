@@ -1,0 +1,72 @@
+[
+  {
+    "category": "other",
+    "subject": "downgrade-source/objects/records.ndjson",
+    "digest": "sha256:5dce54c1873016f7862b1bc881d753e194121efa01f52cd4d8ba804557f29c06"
+  },
+  {
+    "category": "other",
+    "subject": "downgrade-source/objects/links.ndjson",
+    "digest": "sha256:0ca41656e832a0f2a5317c58b227e5709d9958d93c6d083806cce09af167f353"
+  },
+  {
+    "category": "other",
+    "subject": "downgrade-source/objects/blobs.ndjson",
+    "digest": "sha256:e445ed718af83074252cdc8f51671b0f09f911b12898e9bf1690f4aa02b43fc1"
+  },
+  {
+    "category": "journal_proof",
+    "subject": "downgrade-source/integrity/commits.ndjson",
+    "digest": "sha256:7cf3fd1fd542bd4ebe7a7ebaf0505220e9fe25aedb2810bfeb9b9c9b5ade0c62"
+  },
+  {
+    "category": "journal_proof",
+    "subject": "downgrade-source/integrity/members.ndjson",
+    "digest": "sha256:0c8c17cc69aa8ff11fae50b13f8366879d23d4bec27d33b364f54d108754d0ca"
+  },
+  {
+    "category": "other",
+    "subject": "downgrade-source/origin-index.ndjson",
+    "digest": "sha256:91755b224a20caf44d2458a97c483f66fca06f14c44175884d2bf78d7103790c"
+  },
+  {
+    "category": "other",
+    "subject": "downgrade-source/producer-batches/98d352bf-7abb-4fdf-824c-3c93c4e55901.json",
+    "digest": "sha256:073047218e4f7834c1dcf151a1b846c0d4eaa3e25b0ea7ff54609d7b18c610f0"
+  },
+  {
+    "category": "compartment",
+    "subject": "downgrade-source/compartments/records/b7972dfb-99c3-4376-897f-3c9f2848138b.structural.json",
+    "digest": "sha256:3c3951849e302a35b5c3ee56dbe791871e5d62674d39cc6c2ce5ad15ca32d51f"
+  },
+  {
+    "category": "compartment",
+    "subject": "downgrade-source/compartments/records/b7972dfb-99c3-4376-897f-3c9f2848138b.semantic.json",
+    "digest": "sha256:7a557e8e7b90424fa1482197b2ebc8c650eaca3ff9ae09d77e18f90d8886dfe7"
+  },
+  {
+    "category": "compartment",
+    "subject": "downgrade-source/compartments/records/c59fe210-08b0-4ae7-9896-024d9ebbe47b.structural.json",
+    "digest": "sha256:c11608c1f8ca235c50eee55226e4944a40044ccfff9436018854a2ec11372c68"
+  },
+  {
+    "category": "compartment",
+    "subject": "downgrade-source/compartments/records/11d6493a-061f-46fa-85a6-d32f44cdcd5e.structural.json",
+    "digest": "sha256:636830e9274ebadaa8b707b6b351e13c8e1dde55f8aa12fa98e7e92c249c3b6a"
+  },
+  {
+    "category": "compartment",
+    "subject": "downgrade-source/compartments/records/2afb37bd-f796-40d5-bfdd-49375344f059.structural.json",
+    "digest": "sha256:4136a0a6df0224de3d16c3105579316875ab93a9b0300b2b133657fd25333ece"
+  },
+  {
+    "category": "journal_proof",
+    "subject": "downgrade-source/source-identity.json",
+    "digest": "sha256:ec7f695f0059c802c21b2ff15e84fa7ed68fe462a1cf5657f0e895855f5098e6"
+  },
+  {
+    "category": "submission",
+    "subject": "submission:urn:ccf:record:b7972dfb-99c3-4376-897f-3c9f2848138b",
+    "digest": "sha256:6d3c9ac68d4999287d2e66d72c7db67d3c33d3af6a5198e692f8423863829167"
+  }
+]

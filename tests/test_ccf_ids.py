@@ -9,7 +9,7 @@ import pytest
 from ccf.ids import ID_KINDS, CcfIdError, generate_id, is_valid_id, parse_id
 
 
-def test_all_nine_kinds_supported():
+def test_all_kinds_supported():
     assert ID_KINDS == frozenset(
         {
             "record",
@@ -21,6 +21,7 @@ def test_all_nine_kinds_supported():
             "credential",
             "batch",
             "pack",
+            "receipt",
         }
     )
 

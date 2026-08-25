@@ -1,0 +1,47 @@
+{
+  "format": "ccf.bundle-manifest/0.2.0",
+  "status": "working-draft",
+  "id": "ccf-continuity-pack-bundle-v1",
+  "kind": "semantic_pack",
+  "provides": "ccf-continuity-pack-v1",
+  "depends_on": [
+    "ccf-exchange-bundle-v1"
+  ],
+  "artifacts": [
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/boundary.schema.json",
+      "digest": "sha256:bbb4c103bc6d0dc61ff835ba9013634e3519000dd8663274e4d03e819c8916a0"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/commitment.schema.json",
+      "digest": "sha256:1a573c93f186186526399033d6361c1c35add2ad24f8563742a0bfe2102c6b92"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/episode.schema.json",
+      "digest": "sha256:14fe2eb608c1f7a4531576033183f71fc1b05ace60bdce90236742d5fc4da30e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/goal.schema.json",
+      "digest": "sha256:c09d80b7177f9aa933d201d8ab925922d62bf715790c536c5380dbe872795dbb"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/preference.schema.json",
+      "digest": "sha256:0f062061567ce74d9e208a7ff26e53c405e24b6a9a3efc8374fe3a1a1c1b5acf"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/relationship.schema.json",
+      "digest": "sha256:01a6c7b940443cf0af236a1c8700598e8df4cdad4a4fbec360eed17521a3fc0e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/value.schema.json",
+      "digest": "sha256:99519382bc0f85195c26af0b5a2e4c5774fd9ae26587987d8f56931d109100c5"
+    }
+  ]
+}

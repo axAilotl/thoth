@@ -1,0 +1,647 @@
+{
+  "format": "ccf.bundle-manifest/0.2.0",
+  "status": "working-draft",
+  "id": "ccf-governed-archive-bundle-v1",
+  "kind": "level",
+  "provides": "ccf-governed-archive-v1",
+  "depends_on": [
+    "ccf-verified-archive-bundle-v1"
+  ],
+  "artifacts": [
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/admission-authority-classes.registry.json",
+      "digest": "sha256:75ef84796ccd3f5a0bea7a653eef181d51bf13e7ef79bfbf6f1bccc806a30ad7"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/authority-bases.registry.json",
+      "digest": "sha256:2226c4471008d82151283e5ba2e9935f1e34901f00d1bb14b87c0e3f72292147"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/blobs.registry.json",
+      "digest": "sha256:c90364ed52bb6b56ba6241e2d305adcd6436c43098419ccf669ab4a9006d78bd"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/data-classes.registry.json",
+      "digest": "sha256:c6bfa65016c82cdf9f89b3d29a85f48005971a12ede681473bf34fd8cf35ff30"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/hash-profiles.registry.json",
+      "digest": "sha256:81e061648a4e6470e64ace25132ba89c3688bf0177937dad38e4049833d443a2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/links.registry.json",
+      "digest": "sha256:39f9790315cceeee1375b757326be02a284c22f8b9d128fc4bb47752f836ad64"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/policy-evaluators.registry.json",
+      "digest": "sha256:df18fb28c30d8a15cf8135223be993b1984fa45485c8abd0ef20fc07f35df85b"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/predicates.registry.json",
+      "digest": "sha256:ea79379a18da7c6f4d2f1d3e459e9479af567018937069e9afeaa879e261249a"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/profiles.registry.json",
+      "digest": "sha256:1b58e75d099659ab943d7386073b414468d5bc8493010c82fb66e6c024c98974"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/retention-profiles.registry.json",
+      "digest": "sha256:e3822f8300c8fc077a5d6ff2ee27f97e90837177ce31510f8cd2f9be648df914"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/signature-profiles.registry.json",
+      "digest": "sha256:8c0b7afc36232b168751b972df0b3d7ea6fa6e042e93b16bf5c28ede32956efb"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/state-machines.registry.json",
+      "digest": "sha256:b84006d474aa291c14c44b042ef97d96f1c72337e7eafabc8dabe1ce54d2a9eb"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/suppression-profiles.registry.json",
+      "digest": "sha256:7cad896457d5abbb0b5176e577f1ca78e2419ce479472dddf4e5a10e40c3a0f5"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/types.registry.json",
+      "digest": "sha256:a362ea5db2f5d6a3dcf2dcddc99f4395c9c71583921e7b050027cfb36a5c4d16"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/catalog.json",
+      "digest": "sha256:a7b1332abd73f63971fb8b799aea6e73216f3761f7bb871dcc7f0d379760686d"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/common/compartment-envelope.schema.json",
+      "digest": "sha256:0259e801278c8ad427663e279b30740be10d59cdaea8067b56c6e4bca42debed"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/common/defs.schema.json",
+      "digest": "sha256:2b9eb486d2ec408489f5777a7cac85c240dd83d02a2adbcdad825aeae2a7792c"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/governance/authorization-decision.schema.json",
+      "digest": "sha256:021f7da60677d749c80a3ff2ea784eaf62ad16379c881c38bc949b8b26e8a4ec"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/governance/decision-context.schema.json",
+      "digest": "sha256:de2debcfe58922ec8af7a3d5843ee2a4fd15f0d1a5c546e48edb4a4d8b8ce76c"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-header.schema.json",
+      "digest": "sha256:6bedea855fcdaecef27483675ed773bf124e909a36e9b8736c341de50028841e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-semantic-content.schema.json",
+      "digest": "sha256:996a7da1035bf96f1b1c5c42394a314f9052cd8fdd413891e12f5212da54ce74"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-semantic.schema.json",
+      "digest": "sha256:4cccea12f1b12c21e664156c62b7186ba7f421d2614778593a9b9eac3706be82"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-structural-content.schema.json",
+      "digest": "sha256:00965cc8ed0147375d72057f61c0dcf73496277a61f055b6e204edc5bef565a2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-structural.schema.json",
+      "digest": "sha256:23258bf17c118d1360a283b3f0c75de09627bf50a1278a1e086181d1cb0237e0"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/commit-member.schema.json",
+      "digest": "sha256:1cc55001eaa5943474c38349bd96cb0385c411f61537a1d0f8f2436cb6cb8c77"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-header.schema.json",
+      "digest": "sha256:3ba217fa71e93c82e82cbe5399c46d80163f8c60a7810a543f484c5b5f1d27b1"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-semantic-content.schema.json",
+      "digest": "sha256:6035f3ed17dd4a4638f038ee72b89ada62ff0fafe5bf036eca7d224273a59fa8"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-semantic.schema.json",
+      "digest": "sha256:5dc4c851c61f1b5641f8fd2dc29e864f7045330234d98209f720efee620f972f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-structural-content.schema.json",
+      "digest": "sha256:6efaaef6cdb4e0a95e9bd2fef5de8abb693f0d49df6ab214199c75c2a2dfda88"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-structural.schema.json",
+      "digest": "sha256:a97603a73b31d686b1af6ea3c738f5513b6e2bdccd30cca8c8fa10d77a7f408f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/mindpack-manifest.schema.json",
+      "digest": "sha256:3b737e5e7b34c807a5a978004532a74507445d2473f8066b88ff30fc1638483d"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-header.schema.json",
+      "digest": "sha256:cf3c170123caea3c8eec618f9594c4f0c441361fbf734910720453220ee89476"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-semantic-content.schema.json",
+      "digest": "sha256:916e9d2075dbe0ebec75d3a3a735d56359e054c54fb2d2ccf54d883ff01738f0"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-semantic.schema.json",
+      "digest": "sha256:d5b55e19a711df0d97862ee5db7541f3e5835eac339396e798569797d34cae4e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-structural-content.schema.json",
+      "digest": "sha256:2654e16cb58b1713b68f06da0db7ea1114011e8e73dfb0aa6bfb8f3d920cedaa"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-structural.schema.json",
+      "digest": "sha256:b5cd04d15eba7cfc0f40aaebaa2b2178526a6f807d85afbf1375b30aaf5a7d40"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/core-device-credential.schema.json",
+      "digest": "sha256:668712dfffe3ac512828f5e64f61ffe73a05ea08cfcedd05af8edf78072fc199"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/empty.schema.json",
+      "digest": "sha256:8cbd6f51ebbc735c64cc171a56e12a53dfee0b941142038aa1c74dfbfd8c71a1"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-catalog-transition.schema.json",
+      "digest": "sha256:a1f1fc17af13588da1117b122c1900e63305f9ca98c3adfd5c0a3f0a2efce9e2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-commit.schema.json",
+      "digest": "sha256:0275c63804a7365bea3d747f3946ce2e2bd07be22e17e1ab721def610f3159b9"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-head-witness.schema.json",
+      "digest": "sha256:81e07d2780ca9da042509eeb7c67798fe9194b132e9c3b23d014d1a1497f9d89"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-signer-rotation.schema.json",
+      "digest": "sha256:1e3d8d3375474d9cc69e5213d7925e7cc62c312791050026e39deb871990ca86"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-successor-activation.schema.json",
+      "digest": "sha256:454e94f79db6c02b68f3b7401600d4a6fcef63475efb6d5650321de00c69ed39"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-successor-authorization-revocation.schema.json",
+      "digest": "sha256:0fe452d1295c96b179723bccc91e9c692fa2a015835bcbd44696035a0a6453f8"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-successor-authorization.schema.json",
+      "digest": "sha256:f004886f1f645a22c400bf53b5419ae59e58bf9b09d82df506ddae836bd43c38"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/lineage-erasure-receipt.schema.json",
+      "digest": "sha256:398ea8b33dd87a22e10d5662ade92367617a63c1d81f9d97f5e90ce79d2af031"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/lineage-link-disposition.schema.json",
+      "digest": "sha256:143e2a1b29e426027a39d2e29c62d4ccca77fd9b211f3a18f6027bdf89f057d4"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/lineage-suppression-set.schema.json",
+      "digest": "sha256:8bc8161f7638f0615b50d77d5f513b015bb5a816154c1cb0b35e36ad85ced4f8"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/admission.schema.json",
+      "digest": "sha256:76c424d1062c8160688f1592102f71f38c4db31424905e2fdb8418e8461692ce"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/batch-result.schema.json",
+      "digest": "sha256:be0000fcc2c0c5acd6d30c1b5a41f0fbeafbdc0024926d683f8e29d16ef9c4f6"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/body-storage.schema.json",
+      "digest": "sha256:25ebd4d6fe302babd4ca05fcd7c3ef203a6c9dee726f9b0ae005244938c29c78"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/erasure-operation.schema.json",
+      "digest": "sha256:b05b59db6facc3bfc64b4fecca25b97fedf20594c48e945607db4bda699ca639"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/lineage-head.schema.json",
+      "digest": "sha256:8ad806a2ef7e951905bd8f69f591ac231f0c843d260700f726530567f4297b9f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/policy-pending.schema.json",
+      "digest": "sha256:cf774eee53106630fe4f742bf895028d08d9ce3b029fce9aaac2a350b6424d95"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/projection-checkpoint.schema.json",
+      "digest": "sha256:cad9c03cb19b59410623c61851f339a1c1e7ed2b58bb543ec3514201aad3cc6e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/finding.schema.json",
+      "digest": "sha256:deff7d14610ad2b2f9a7eb3274d5985b35f6348b8c00f7507ee6e24a879df4d4"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/handoff.schema.json",
+      "digest": "sha256:f2b3435d125d35b408c6460c230015ee0f30dfc8bde574cf91c08b32f9e82f7e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/proposal.schema.json",
+      "digest": "sha256:5960316477085760e0d7be8d3134afc8b270e3280b487def8b5a4d47c3e3102c"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/receipt.schema.json",
+      "digest": "sha256:6ca08f8c11b5012adfb47963f3bc4a6b7167e826a3eb17415603a0ec17ce91fd"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/agent/run.schema.json",
+      "digest": "sha256:0f04526283b92299837798f80dccc7df201db861b4edc6ceaa2240bfe2d22e07"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/boundary.schema.json",
+      "digest": "sha256:bbb4c103bc6d0dc61ff835ba9013634e3519000dd8663274e4d03e819c8916a0"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/commitment.schema.json",
+      "digest": "sha256:1a573c93f186186526399033d6361c1c35add2ad24f8563742a0bfe2102c6b92"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/episode.schema.json",
+      "digest": "sha256:14fe2eb608c1f7a4531576033183f71fc1b05ace60bdce90236742d5fc4da30e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/goal.schema.json",
+      "digest": "sha256:c09d80b7177f9aa933d201d8ab925922d62bf715790c536c5380dbe872795dbb"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/preference.schema.json",
+      "digest": "sha256:0f062061567ce74d9e208a7ff26e53c405e24b6a9a3efc8374fe3a1a1c1b5acf"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/relationship.schema.json",
+      "digest": "sha256:01a6c7b940443cf0af236a1c8700598e8df4cdad4a4fbec360eed17521a3fc0e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/continuity/value.schema.json",
+      "digest": "sha256:99519382bc0f85195c26af0b5a2e4c5774fd9ae26587987d8f56931d109100c5"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/empty.schema.json",
+      "digest": "sha256:6d3b7cb241dc03531c492a8367535e728abab9ef46babfedcfa2fd9e7870975e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/person.schema.json",
+      "digest": "sha256:ad15e41a07e7ab2733a065ad8e41ba47898d1913903d635d051bda96c398c542"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/runtime.schema.json",
+      "digest": "sha256:d1a46adb5a84b049700555a7b48ae71215070a2b0ac1d951f23d72af2d544e87"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/session.schema.json",
+      "digest": "sha256:3ceaa3a7335783dd62c6ab86a070650e4ace1192e53e5b37833777b78bcf68c2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/source.schema.json",
+      "digest": "sha256:b69b8ee27098f0fa983ef92b328ede69c938eb4fd17686e7f13c9834afd2e2a0"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/experience/artifact.schema.json",
+      "digest": "sha256:293c7eea1e1edb80b556e1cdd1fb142e44522f73b8003a3ffe3a26ea9b73dc35"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/experience/event.schema.json",
+      "digest": "sha256:bb73d3b53cc792527c7d73d59b50a33d5c7cce62e833aaae9ac1565288bedd25"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/experience/observation.schema.json",
+      "digest": "sha256:bfb0f27651eab3aff157be3a60345943ce2c013c2e4e417274501e49515945eb"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/experience/utterance.schema.json",
+      "digest": "sha256:41c9bc7ab1f8f86571a43da80db0528b1550f8cce70ddca785950ec65f9454b2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/consent.schema.json",
+      "digest": "sha256:4cf67ed8d3e76ecbdb750a4e0ca4713801caa904cc32d2159f4b46ac77d15840"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/erasure_decision.schema.json",
+      "digest": "sha256:3c51036441477f5bca89760319a620c616fbf3e8ec9ad25687c110e2f4071e1e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/erasure_request.schema.json",
+      "digest": "sha256:41bee484e822a77d7aad08b2777fed47e7d96198687a086f80dedd7df98730f1"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/grant.schema.json",
+      "digest": "sha256:f04157da356f282e13ca57e25d7249a1691027f9c5db70e2a566612f02e8ad4c"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/legal_basis.schema.json",
+      "digest": "sha256:552d0173c2b72d23e1e0780bc0cbd6bf57153229b4e3efafb4c17039e4330d2c"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/legal_hold.schema.json",
+      "digest": "sha256:1aab375211adf504824e1d3a355e9f2ab85f94d6501810c45d85053931b00772"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/objection.schema.json",
+      "digest": "sha256:a4b9e86ba3c5bfb8a060360c3be3f30cb9b74ec422c0ab697a9dbd7f4a8aee7e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/policy.schema.json",
+      "digest": "sha256:4f9b68d284b276353853a17db317b4178dcd0832e352ee418c705bb65aacb339"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/restriction.schema.json",
+      "digest": "sha256:c60e9d909ef14a6f01829c335cbc15bfc3cd0d198e83f77e8046d671297dc3d9"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/retention_trigger.schema.json",
+      "digest": "sha256:e9d90c6b37a75c26517b2e6cdb7f639e6c58579d92c73e5cd6943c3a2d33777a"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/review_decision.schema.json",
+      "digest": "sha256:67761189892c989f0f6db4f3f80e644e213b9910aa4b9bf9fe25c9b947fb2a93"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/governance/subject_access_request.schema.json",
+      "digest": "sha256:a302c8329d0904bbcfc2f5d225d1c08599aed7a3865b82977ace0bed91927dc7"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/catalog_transition.schema.json",
+      "digest": "sha256:69370d86228d273072f3639597bb6e3893a0e0139d954c8488f2dcc5a8eb314b"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/commit.schema.json",
+      "digest": "sha256:e0e515dc89f258a0669b62ff082a22654e9f52cae73a744e44979471deea65e2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/head_witness.schema.json",
+      "digest": "sha256:0c8d97b2ce7f95b8ee57cb07989b0071c4f69040aa98242ff03b79ae7b210a9c"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/signer_rotation.schema.json",
+      "digest": "sha256:1c49c48dfdce77b5faf2cb199566db260765ebfc260e821acc3556eaf5bd5fda"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/successor_activation.schema.json",
+      "digest": "sha256:01a6377835faa7923eb38593e7f5567f0c0c0bacf5762144f618bc62d1e2c4fc"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/successor_authorization.schema.json",
+      "digest": "sha256:02e415df329070fddf1577be408eed81dd28fc4d61c38ab825b1f715ce5cd9ce"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/successor_authorization_revocation.schema.json",
+      "digest": "sha256:d8bc2c0013218934c32bc8f4c4385b841da485d149c3540d0e6bf1a935592b69"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/lineage/erasure_receipt.schema.json",
+      "digest": "sha256:4b2ea9ceff48af46033af3397c1715e0f6151e87ffe000f6d46c52e1d9619663"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/lineage/link_disposition.schema.json",
+      "digest": "sha256:9d6a8bfe877859ba361392313040c775cc3b54dd211b15694615d2ea6d9e9246"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/lineage/suppression_set.schema.json",
+      "digest": "sha256:4355ef2e222090cd89d65689622152d34299d5abb4809a0fc792dec9f7756b32"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/process/run.schema.json",
+      "digest": "sha256:63752cda1e820d91d5c7ba652d224d13c8a54da182ab6b99563de0d8904f47f1"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/security/finding.schema.json",
+      "digest": "sha256:c291bcfeeb7599cd774d1b8aca13e7b4b112c13b40ffeddc3a8e1ae8cef788be"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/security/keyset_manifest.schema.json",
+      "digest": "sha256:6cf11ce955ee9f86fd0c05589043bc64b9c7cf5702edba02e734ff0fcaccd71f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/semantic/assertion.schema.json",
+      "digest": "sha256:19fc56a7f484847f620242e75386d8628c615de263d929e5a2332fd5d16fd25b"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/semantic/concept.schema.json",
+      "digest": "sha256:d07371098f0b2ba9dc28eca46933e5ac303662b662c4165431923ec8ed5d0831"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/semantic/entity.schema.json",
+      "digest": "sha256:eeaeff2413dbf9e4940a87f2728f93a2b05b301c65cfca6df3565e1b70d806dc"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/semantic/entity_resolution.schema.json",
+      "digest": "sha256:09dc8b05a3efca52c69ea03282a274758ad49b9bb9ce8113f72fafb622d9cf88"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/sync/producer_batch_receipt.schema.json",
+      "digest": "sha256:516e294b3116111d158321c579a644be657bb74b86d966864c7554d724bf7f1a"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/work/constraint.schema.json",
+      "digest": "sha256:c38ea3916b91d536fb6214b8eaf343c5ea3f883cebf6a17339cbed6ee39ebb9d"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/work/decision.schema.json",
+      "digest": "sha256:80ff02360a2f2e6e8dd3e6a60217bbf9456dda8e9ee349040f72a2957677d996"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/work/project.schema.json",
+      "digest": "sha256:5f48cbb4955945b02633ba2bf65215fc15e171229239e92728771ac814b28fb8"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/work/task.schema.json",
+      "digest": "sha256:6c71f271083899ff0f30d241137908844624a8dd80bf9efdd02f962ab351f9c9"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/registries/admission-authority-class-registry.schema.json",
+      "digest": "sha256:7b4a836d0698ca63bb9d13b2c819f2263418f101b424da585919f429cf883063"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/registries/blob-registry.schema.json",
+      "digest": "sha256:aea8948812d80f4aa202318ef904b0d2641274b9399e21769ae55cabe8f379c2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/registries/link-registry.schema.json",
+      "digest": "sha256:fb64a7668d6b8d597999297ba0daf6e5c56a3e32f9bdd4dc05ad095ace46fe96"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/registries/predicate-registry.schema.json",
+      "digest": "sha256:dd351e5e53e1eab753bd481bf6e253ba68c6b9c305d41b01d02f42e974690377"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/registries/profile-registry.schema.json",
+      "digest": "sha256:32c783a27724194a35f61f6e706010d21cf7e27588dd11d0ab6866de390a41ca"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/registries/state-machine-registry.schema.json",
+      "digest": "sha256:02099a8999c9ce50060d4dddd3cd814c72d6614afef656377970aad21a18dde9"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/registries/suppression-profile-registry.schema.json",
+      "digest": "sha256:e5caa0178d6ef8e2864f52a603842ac8c8d8f5bcea4f7af286f2bbc842a0600f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/registries/type-registry.schema.json",
+      "digest": "sha256:a7f90963f090aee0052f725e9c4394e0b8dd5dd5dc6ef61a4f4e1ebc2b8bd03f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/security/device-credential.schema.json",
+      "digest": "sha256:e76fd2cea360469d7861f5d8f9608d297408ddea302b0879744de461632c3d6b"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/security/keyset-manifest.schema.json",
+      "digest": "sha256:7830b27277e9d7e649a7094af987099e7508137223b8df687f5a419d311f3259"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/security/suppression-preimage.schema.json",
+      "digest": "sha256:5d040399c0dced09cebc373fb8041fe5fef5f71975b4b28da22814e94f488d35"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/submissions/blob-submission.schema.json",
+      "digest": "sha256:95dd9a0bb19559f67fdd3a908faf2a0b0bafc0cf7fd6b80018ff8032d555fa1f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/submissions/link-submission.schema.json",
+      "digest": "sha256:c915be3506c956d347d380b8df91d19f43842bc0d0baed892c7bc66c296951bd"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/submissions/record-submission.schema.json",
+      "digest": "sha256:e7fa250d9798d7c8254888f986db09d39d73d5ac722967610a8b67b99dbc5af2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/sync/delta-pack-manifest.schema.json",
+      "digest": "sha256:da10d333e7d37e8a91874fce5853faf014e4c62996e7626324da057011699f57"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/sync/producer-batch.schema.json",
+      "digest": "sha256:51bfd988ef7f125c652230cd3c84d83c09cf721997d4dfae22a55490dc609b6b"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/sync/sync-head.schema.json",
+      "digest": "sha256:c7079e78a22f4ffdc9e81fed8efa84e5aea06d77b5f79430be8f0b2b2c75e886"
+    }
+  ]
+}

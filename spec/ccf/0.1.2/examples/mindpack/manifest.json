@@ -9,10 +9,10 @@
   "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
   "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
   "created_at": "2026-08-11T21:42:22.000Z",
-  "genesis_commit_hash": "sha256:71d5d31058b06ac395430b5342513ac4d3998c1a26872e0d3ed7472b843a05c1",
-  "head_commit_hash": "sha256:3fbbf99a26f1e24c0e9f0925757faeea618549171caf2038019ecbd091ff12b6",
+  "genesis_commit_hash": "sha256:dcdc8b668b9147fdb25427459613c7e577c3a8ebffb894f10e250d49acb3bace",
+  "head_commit_hash": "sha256:9aa22b97dac8cd0e56bd1eeb360d964b80197df9a9b4dcb14e60fe14ba3e94f9",
   "head_sequence": "2",
-  "semantic_catalog_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10",
+  "semantic_catalog_root": "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8",
   "hash_profile": "ccf-jcs-sha256-v2",
   "profiles": [
     "ccf-core-0.1.2",
@@ -34,7 +34,7 @@
     },
     {
       "path": "archive.json",
-      "digest": "sha256:409df24d7c853c7d563a03b84bd8a9ebee484f04a795e72780a8ec0c7a7e4310",
+      "digest": "sha256:ee078d2d832becc1b1ec3cdd87da2eb19677f4bc64e5fcf3fd6957975e2074d2",
       "byte_length": "768",
       "required": true
     },
@@ -46,13 +46,13 @@
     },
     {
       "path": "blob-data/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.bin",
-      "digest": "sha256:d0065d827d9451583715173bd47fc43124d74f15b3c093ae03a64a3c6df80e42",
+      "digest": "sha256:e83a0f386e93b6093510e6c318dab764d432ba57bceda207feee7094665cfec2",
       "byte_length": "135",
       "required": false
     },
     {
       "path": "compartments/blobs/4393e9d0-c150-448d-9b27-05872973abab.semantic.json",
-      "digest": "sha256:0bc7ca754a798fa651ca63b9024c32fb318d299adc757e8c92de9bba68bb04ff",
+      "digest": "sha256:6f9ecc70a40c234889848690a7daebd5afeb3215884f558e19d112649663c743",
       "byte_length": "1726",
       "required": true
     },
@@ -64,19 +64,19 @@
     },
     {
       "path": "compartments/blobs/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.semantic.json",
-      "digest": "sha256:23c0ccc9125999793128eca9c4a65a914a3ff590678b5d1572d17ea7f7fc2d8d",
+      "digest": "sha256:34c4a06b8999daa29fa1e5149f28a0cf93b51a16210ad5e840f431192dbbaafc",
       "byte_length": "1147",
       "required": true
     },
     {
       "path": "compartments/blobs/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.structural.json",
-      "digest": "sha256:8f9e8d21d6f2846c0561ae3b77d576c44090094aff61dd1cd064a59c49617139",
+      "digest": "sha256:a85be7457f029890a30f634aedb574bebcb966b2c318197f4d1ef764e3b19802",
       "byte_length": "883",
       "required": true
     },
     {
       "path": "compartments/links/098c30cb-13fa-42b1-96f4-923ce82dd9d3.semantic.json",
-      "digest": "sha256:eade73fb11c70b22d229bf21056306afbb7365da6ee463e7db480f07e5635b46",
+      "digest": "sha256:68c3b86d1fe72fff816c772d2a47fedef810fe6cbdbe3a7110ace438958e6e45",
       "byte_length": "2100",
       "required": true
     },
@@ -88,7 +88,7 @@
     },
     {
       "path": "compartments/links/1ae193bd-79bd-4535-bbd3-a670dba025ff.semantic.json",
-      "digest": "sha256:7f9d4b5a232f5fbad1ffba1655931b57be92e0fca1e4c8a0934a19d34f500777",
+      "digest": "sha256:4166807af9245b56f0a0ad831f1d5dc863f22aab9db05a01db59770b2fbd1c07",
       "byte_length": "2024",
       "required": true
     },
@@ -100,7 +100,7 @@
     },
     {
       "path": "compartments/links/76a63205-f0d1-4502-b29e-c44e0d1c6645.semantic.json",
-      "digest": "sha256:459b381d50dcc800e96e0fb78c4402f5b3585130d852b7daa1190b88522fb557",
+      "digest": "sha256:518a3efb8b31cc8cd0e2d9fd19b6e0a5e0787d76d053edd3bf2a50fb588d9d26",
       "byte_length": "2024",
       "required": true
     },
@@ -112,7 +112,7 @@
     },
     {
       "path": "compartments/links/a3a6c051-271d-47cf-bee5-35fc66d903c2.semantic.json",
-      "digest": "sha256:9973b7abf4dfaf3a692325d0f802fa007ebc3f8ac6c5947e7f77eb1ba8dc19b6",
+      "digest": "sha256:77f85cf715992f845b95c328b41805ea151ac1b52650af8b66f79493924668ae",
       "byte_length": "2024",
       "required": true
     },
@@ -124,7 +124,7 @@
     },
     {
       "path": "compartments/links/a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.semantic.json",
-      "digest": "sha256:f0e073562b9dc1b531fe09449acb5f998e5991a6ad10584ff244f9fc4ca749a8",
+      "digest": "sha256:640c9507999d3e54c71b534ad46b3754b8bc8d52f8bf5a2e29ae68edbd9204fd",
       "byte_length": "2090",
       "required": true
     },
@@ -136,7 +136,7 @@
     },
     {
       "path": "compartments/links/c78ac8a7-56fa-4c79-b74b-640d3cc82a09.semantic.json",
-      "digest": "sha256:e7c56c08f1904fcd4623a11da83c2ebd89cd5de38aae87cd1f52492e022cbc88",
+      "digest": "sha256:368fe7cb72c8e9fd38e377205a05b73d524820a6c6468b1cbb97695c2d66d053",
       "byte_length": "2210",
       "required": true
     },
@@ -148,7 +148,7 @@
     },
     {
       "path": "compartments/links/d8302220-fcda-466a-ae4f-58b116746b4e.semantic.json",
-      "digest": "sha256:24d842604f5a47aa5ec2136eb219d77fb2082df909b63cc60826d54642d19e51",
+      "digest": "sha256:1d87fc1ddc1ab41ba62264639a23534b812e23dd5a4f45c50fdee2f08726f1d3",
       "byte_length": "2024",
       "required": true
     },
@@ -160,7 +160,7 @@
     },
     {
       "path": "compartments/links/e807d6c8-6589-4ac2-bed4-032207901261.semantic.json",
-      "digest": "sha256:afd3f2fddac09cf20796b8dba9ab1c8236f267d9cbc3b9d828fe85aa313e0837",
+      "digest": "sha256:68d9e1e6eda9a73ef556107b2a6a1668788ef567e41e8af2be0adfff64dc6240",
       "byte_length": "2024",
       "required": true
     },
@@ -172,7 +172,7 @@
     },
     {
       "path": "compartments/records/03e09d92-b68b-467d-b3c9-18a15be891be.semantic.json",
-      "digest": "sha256:37fc6638d791951ae637aa39fc4d905e24b2710388e7c0072155f3618ea7d514",
+      "digest": "sha256:a44b2f47a4a20906c089ea6d87e0684ee86b9a86be1d8f8f129ca4e5b3ff6a41",
       "byte_length": "2208",
       "required": true
     },
@@ -184,20 +184,20 @@
     },
     {
       "path": "compartments/records/11d6493a-061f-46fa-85a6-d32f44cdcd5e.structural.json",
-      "digest": "sha256:cfa3b046b52e43b792c9aa91523ac1553e1cf0f2a3c919d91db7bccb8f3ee691",
+      "digest": "sha256:636830e9274ebadaa8b707b6b351e13c8e1dde55f8aa12fa98e7e92c249c3b6a",
       "byte_length": "1554",
       "required": true
     },
     {
       "path": "compartments/records/2afb37bd-f796-40d5-bfdd-49375344f059.structural.json",
-      "digest": "sha256:a76a6e9d28ae45be56bbad299f2eb07c17a80872549ffe7c9aa88474a013cb01",
+      "digest": "sha256:4136a0a6df0224de3d16c3105579316875ab93a9b0300b2b133657fd25333ece",
       "byte_length": "1555",
       "required": true
     },
     {
       "path": "compartments/records/2e96f116-6c1a-4216-8ac5-63d0b5da108f.semantic.json",
-      "digest": "sha256:793a62373783645621fbbaed07f2bee488c82d25e662ca321b2d4015607b0125",
-      "byte_length": "3029",
+      "digest": "sha256:3e4fdd056d7d5211b1c208a82d653a3b8f8e370ea34a8d953cd2f2a1d49a92d8",
+      "byte_length": "3042",
       "required": true
     },
     {
@@ -214,13 +214,13 @@
     },
     {
       "path": "compartments/records/4034e10b-7a56-46b6-9162-d1cf909f8a78.semantic.json",
-      "digest": "sha256:2040214ef2eaef7cf7e2b1a2b82fe0f79a1a5c7d8ad8ac520d09be755dd82371",
+      "digest": "sha256:47dd8e293e3fa68fb6fedb4b8fac8a5135450dd79bd7bd4b1ec96181a3ca72ca",
       "byte_length": "2728",
       "required": true
     },
     {
       "path": "compartments/records/4034e10b-7a56-46b6-9162-d1cf909f8a78.structural.json",
-      "digest": "sha256:b28ce3051ca7c011b8061a50975003f8debef6aa74bbd4e69e6118af9496210f",
+      "digest": "sha256:72bc12beb0340cef003c0427fc5688dbd17f977bedf4b5feaab20f22350513da",
       "byte_length": "1372",
       "required": true
     },
@@ -232,8 +232,8 @@
     },
     {
       "path": "compartments/records/4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.semantic.json",
-      "digest": "sha256:cd5fb82fcf7d0deae6949299c5ff285521c84cca71aa8e30d26da575440090bd",
-      "byte_length": "2477",
+      "digest": "sha256:f773830945b33e20ecdfc4a1bbc59206e7b9aebfbb4f66ac392b35ab5fddd501",
+      "byte_length": "2483",
       "required": true
     },
     {
@@ -244,7 +244,7 @@
     },
     {
       "path": "compartments/records/4d8feff5-3956-4190-9679-203f34a09de1.semantic.json",
-      "digest": "sha256:aaafc7677b5bb9410c794d661b983e7743b820013a4fe7038347cfc22e3e11f0",
+      "digest": "sha256:1122836bd554a2e5c40bf48bf8fdc81a1d68d5f0183e4f272aef353142c1d8b8",
       "byte_length": "3250",
       "required": true
     },
@@ -256,8 +256,8 @@
     },
     {
       "path": "compartments/records/4e9f8cc9-563a-4d61-8221-9f55e9db39bd.semantic.json",
-      "digest": "sha256:f68d9addac104c7aee311fafbcc9b1eba0d37d525ee6cfa34cdf62b1225c8b4f",
-      "byte_length": "2511",
+      "digest": "sha256:1d890dc8de7b80d1b26969c6d7257a3df15c015e135857104fdadffba88511d0",
+      "byte_length": "2529",
       "required": true
     },
     {
@@ -268,8 +268,8 @@
     },
     {
       "path": "compartments/records/63607ea0-9d26-4625-ab23-65ce7415b571.semantic.json",
-      "digest": "sha256:7351b189cea6a1a30d105d699731cf8836f040fd25b3d0a16d781479bcd7b1c4",
-      "byte_length": "3588",
+      "digest": "sha256:16d4731513aeda7a186ff010c81f6c49e57285d33b5ca7950478216df0ceac40",
+      "byte_length": "3592",
       "required": true
     },
     {
@@ -286,8 +286,8 @@
     },
     {
       "path": "compartments/records/682d6151-5dd6-42d8-874c-895c3a501f09.semantic.json",
-      "digest": "sha256:db4c95e0ed42948c5f0f0feb08b27d37e3e926a4970cc2de881e0517f4bde896",
-      "byte_length": "1301",
+      "digest": "sha256:47801db0f19271296191c326d8aa081be4ef3c87f4ef4f4246c52cadc5bb2416",
+      "byte_length": "1311",
       "required": true
     },
     {
@@ -298,7 +298,7 @@
     },
     {
       "path": "compartments/records/908e42a4-f136-458f-8cf9-7597922fab21.semantic.json",
-      "digest": "sha256:b6bfd231e21094bca589d0e063e48e81dbb80118f379b93508304abea1f464a2",
+      "digest": "sha256:6f52c9ca125b2d87e5fd9c9f886e090ce351e3ff1cb8420b869836e51d524d15",
       "byte_length": "1628",
       "required": true
     },
@@ -310,7 +310,7 @@
     },
     {
       "path": "compartments/records/a01f8c5c-8278-4a2b-bccb-c270ca803586.semantic.json",
-      "digest": "sha256:4286f9e451e8956bd95e2ca90b39c3a66850698351240411a16d463577fb0696",
+      "digest": "sha256:b479de3ae07964a7091da99f4d3a097a841f234be22c7376f5860c03b6dd4936",
       "byte_length": "3085",
       "required": true
     },
@@ -322,7 +322,7 @@
     },
     {
       "path": "compartments/records/b7972dfb-99c3-4376-897f-3c9f2848138b.semantic.json",
-      "digest": "sha256:7b9376288aedc2d8d6deed58a384eeaf6c7e4f467ed24eeb89f14f5a1a22a63d",
+      "digest": "sha256:7a557e8e7b90424fa1482197b2ebc8c650eaca3ff9ae09d77e18f90d8886dfe7",
       "byte_length": "3441",
       "required": true
     },
@@ -334,73 +334,73 @@
     },
     {
       "path": "compartments/records/c59fe210-08b0-4ae7-9896-024d9ebbe47b.structural.json",
-      "digest": "sha256:8cad4676742468d7996abdb1f1ffb02aeb20c784a015448ddb7a3dff79f87a7a",
+      "digest": "sha256:c11608c1f8ca235c50eee55226e4944a40044ccfff9436018854a2ec11372c68",
       "byte_length": "1485",
       "required": true
     },
     {
       "path": "compartments/records/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.semantic.json",
-      "digest": "sha256:0e5db54789f3377abd4bc04a8258213340236ed920d95bd15c3612b90b92c31a",
+      "digest": "sha256:d8451501d9487ef468aa1650d98e4b55db0e604e6ac9749dcb68b7fbbe95633e",
       "byte_length": "2482",
       "required": true
     },
     {
       "path": "compartments/records/ce293b52-58f1-4f52-87d1-4b7d5e75edb8.structural.json",
-      "digest": "sha256:6c47f03b665742e35997c70c2d7d873f5f763b3cf0b1fee6515a493213f67c36",
+      "digest": "sha256:7cfb35e24bd80f65466b5292bff49faddb6b3d634a688656d2ffebd5091fa9d4",
       "byte_length": "1023",
       "required": true
     },
     {
       "path": "integrity/commits.ndjson",
-      "digest": "sha256:4902b71c70b88a37429163e43389a3378ee7df0baae55d63fa55dcb67ce756b4",
+      "digest": "sha256:7cf3fd1fd542bd4ebe7a7ebaf0505220e9fe25aedb2810bfeb9b9c9b5ade0c62",
       "byte_length": "993",
       "required": true
     },
     {
       "path": "integrity/members.ndjson",
-      "digest": "sha256:d4551ffc5eb61e33f4c32341f4f04d5f0f2202bdc635ab46b66ca5c3b7f0516d",
+      "digest": "sha256:0c8c17cc69aa8ff11fae50b13f8366879d23d4bec27d33b364f54d108754d0ca",
       "byte_length": "6521",
       "required": true
     },
     {
       "path": "lineage-heads.ndjson",
-      "digest": "sha256:cf2a04182306dfa1c9cee95495981b3fef82245bc82b997b1057d42fb7e16a5f",
+      "digest": "sha256:89990b8522b79e9d416d645c70dafa7987c2b842d5bac485c6798c734a2bf406",
       "byte_length": "1009",
       "required": true
     },
     {
       "path": "objects/blobs.ndjson",
-      "digest": "sha256:2d06075090618994c79fe56c47afa9a2d5fd5a2cb603c17537360f0077157341",
+      "digest": "sha256:e445ed718af83074252cdc8f51671b0f09f911b12898e9bf1690f4aa02b43fc1",
       "byte_length": "832",
       "required": true
     },
     {
       "path": "objects/links.ndjson",
-      "digest": "sha256:8e2684a7d7bb1f49c9ea62396887780040023b10d830798a955bd75909bb6064",
+      "digest": "sha256:0ca41656e832a0f2a5317c58b227e5709d9958d93c6d083806cce09af167f353",
       "byte_length": "3328",
       "required": true
     },
     {
       "path": "objects/records.ndjson",
-      "digest": "sha256:a60f9dff9595975c7ab2c12548e5e35c872cd25da26606770f78504cbea0e1b4",
+      "digest": "sha256:5dce54c1873016f7862b1bc881d753e194121efa01f52cd4d8ba804557f29c06",
       "byte_length": "7215",
       "required": true
     },
     {
       "path": "origin-index.ndjson",
-      "digest": "sha256:aa270e2831995ba87508ee12b9027b172bccccb12865a4114151a451ee13306c",
+      "digest": "sha256:91755b224a20caf44d2458a97c483f66fca06f14c44175884d2bf78d7103790c",
       "byte_length": "1293",
       "required": true
     },
     {
       "path": "producer-batches/98d352bf-7abb-4fdf-824c-3c93c4e55901.json",
-      "digest": "sha256:81e7723cd3cce218b55bc81ed119909566e9e58321eed1ba5debf5ce8d378668",
-      "byte_length": "26130",
+      "digest": "sha256:073047218e4f7834c1dcf151a1b846c0d4eaa3e25b0ea7ff54609d7b18c610f0",
+      "byte_length": "26184",
       "required": true
     },
     {
       "path": "producer-heads.ndjson",
-      "digest": "sha256:5ebf90b6ce9b2988b9d91dffd5af601d16bdae47d4992bfff9d2d71fbb6cbb81",
+      "digest": "sha256:29e4fb039a7da422ca67f2addf4971ed68df2494e786d2aefd8e5eb962a8002a",
       "byte_length": "295",
       "required": true
     },
@@ -490,8 +490,8 @@
     },
     {
       "path": "registries/types.registry.json",
-      "digest": "sha256:655aaac5ef5909cfef847e460b4285d6a176785c46e97e976a5c9c503edac0e4",
-      "byte_length": "34526",
+      "digest": "sha256:a362ea5db2f5d6a3dcf2dcddc99f4395c9c71583921e7b050027cfb36a5c4d16",
+      "byte_length": "34523",
       "required": true
     },
     {
@@ -1180,7 +1180,7 @@
     },
     {
       "path": "semantic-catalog.json",
-      "digest": "sha256:2cd06aa4dd0601b98139d45094516277b12a1e8cf1417f0cb1022514e6b545e5",
+      "digest": "sha256:9ea22b398ce8491e702bd2add7f765eae1b6fa2a2473e8196cb5d02a726cd1d2",
       "byte_length": "29281",
       "required": true
     }
@@ -1207,7 +1207,7 @@
       "object_id": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:e02d1f815fde603b93ae47e6d7fc496b895e541d2a8405afa9cea71e3b230cb9",
+      "commitment": "sha256:57a96c7d13dca1a000352c66205541ce811fb98789eee087878b7e00c68ddcaa",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1227,7 +1227,7 @@
       "object_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:7050e13d85dba1fbe1ed3b074ac2e1464267c99641580a59c1dd00a8ffc053d5",
+      "commitment": "sha256:6f93056a90df69107a5cecb9cc2687340bfcb803619bd934bca4265dcbdb122b",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1247,7 +1247,7 @@
       "object_id": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:6a656d4881beeb98c6b847be67b666b6e114df3ca52bd785a20fde8b42fbe80f",
+      "commitment": "sha256:0d1d43c81b346506e63130bac53955b36ac5bd588b2f12d3406b116479569e39",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1267,7 +1267,7 @@
       "object_id": "urn:ccf:record:c59fe210-08b0-4ae7-9896-024d9ebbe47b",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:e7464ca238cadc76b644576c48bcf3d0787a2d3411f783c996b7025852df5bab",
+      "commitment": "sha256:a7f76c963ce07348d43e684b8eb1842014b3cd060ddf4576ce11195638177203",
       "retention_profile": "epoch_lifetime_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1277,7 +1277,7 @@
       "object_id": "urn:ccf:record:11d6493a-061f-46fa-85a6-d32f44cdcd5e",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:4f25193db7bd691b51dd04bb3f6677065690df905595f9fc5689a83be12bb836",
+      "commitment": "sha256:4bef26233e8acc03250112c9698de8837aec79f5b62f78c67dfd11f8d66a8357",
       "retention_profile": "epoch_lifetime_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1297,7 +1297,7 @@
       "object_id": "urn:ccf:record:4e9f8cc9-563a-4d61-8221-9f55e9db39bd",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:35e4d4438dc1826896285294245d69e4ff123d2159cdb1b48b9b07f3ac64b7b7",
+      "commitment": "sha256:f5e40a09990f034cf91eaa6f6e10da679f60a7b65656694818c07f41999d6ff8",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1317,7 +1317,7 @@
       "object_id": "urn:ccf:record:b7972dfb-99c3-4376-897f-3c9f2848138b",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:7b44304726ea9506ec9b491ef1c38cd0be6e0d8af8493229f59e5b172e6d97a3",
+      "commitment": "sha256:c1d2dd0f3bba95bb6f3815033c08d620d4173e60e6ea62ed479e010bd874d44a",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1337,7 +1337,7 @@
       "object_id": "urn:ccf:record:4d8feff5-3956-4190-9679-203f34a09de1",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:14c92123b8e88ca2194bac4313179af78ee6473bc8d2522977c741f2031adfea",
+      "commitment": "sha256:95aed1366adcc7b1600179a343d79b9514e43c8785b61e6ed6b5ef79bca38fe2",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1357,7 +1357,7 @@
       "object_id": "urn:ccf:record:4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:de95fdae78c9c22367ea4ecc9671186c8d76f072d21e2fdf773a806776a7c029",
+      "commitment": "sha256:02de9cc1e39d188ad582fafc50b8b83a19361edd3ddcd0dec40951ec793c53d5",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1377,7 +1377,7 @@
       "object_id": "urn:ccf:record:63607ea0-9d26-4625-ab23-65ce7415b571",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:c1c8659e99d99f8aca63b6c34fb522af1c903e20e289bf144341f147caee8374",
+      "commitment": "sha256:9e77942db2d68f1a6acb240419b47f8f3b8a5d3be17313fbc39e8029c7557a22",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1397,7 +1397,7 @@
       "object_id": "urn:ccf:record:396faaaf-52c3-494d-b456-bbb1b8889cbf",
       "compartment": "semantic",
       "availability": "erased",
-      "commitment": "sha256:1eac74d13b2acdab329d964214bb7e7830ffbea5dbe58214af42c787e41e21fb",
+      "commitment": "sha256:6270b103f6278a9236dba4bd91fed20ef85a8482abe4946a3533302e9bfce303",
       "retention_profile": "payload_erasable",
       "source_custody_proof": "commit:2:5",
       "unavailability_lineage_id": "urn:ccf:record:4034e10b-7a56-46b6-9162-d1cf909f8a78"
@@ -1417,7 +1417,7 @@
       "object_id": "urn:ccf:record:a01f8c5c-8278-4a2b-bccb-c270ca803586",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:64c0e19befcc85d1903bfb33372a03eb8d2522e342b3fdde80706176bb82158e",
+      "commitment": "sha256:4fc6d8f81359992c6266b15f4cd0b30f8c1507d73f124711bfa2949185f5220c",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1437,7 +1437,7 @@
       "object_id": "urn:ccf:record:2e96f116-6c1a-4216-8ac5-63d0b5da108f",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:7dab9b90ba4c9a33bbcd292f2826a0fbe40cad0b5ff2294ad5a8e5ce96ba2200",
+      "commitment": "sha256:3792c505448e37c02a790f384cd257d6feb28d76809a26577a280bdd5aedc9ef",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1447,7 +1447,7 @@
       "object_id": "urn:ccf:record:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:951545b19c376463aa3195ba309e66e08a699d2d6d8503ca5cedfee55c26625d",
+      "commitment": "sha256:1831711316bbf16e55e1a6ed2ac7fc06e702229612b5a18b562f63cd53cf4fc6",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1457,7 +1457,7 @@
       "object_id": "urn:ccf:record:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:7e0abf3e59b951f8cfc1d60d0e2986c38fc98ceea580c4583db876aea1afc05b",
+      "commitment": "sha256:311000a010d34b08f4181fabe1f9a79ca2e9d6366ff3511ec52512bc18d365f4",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1467,7 +1467,7 @@
       "object_id": "urn:ccf:record:4034e10b-7a56-46b6-9162-d1cf909f8a78",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:357f79e72fdbf64fc2078ecf7e11e97dd736cd96411f5e68ac6ca3f4b7b852c2",
+      "commitment": "sha256:235f15e82f6fdd3ca70687c8a1fc30778bbd2b813e552076282e239b80efcd62",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1477,7 +1477,7 @@
       "object_id": "urn:ccf:record:4034e10b-7a56-46b6-9162-d1cf909f8a78",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:b5df5e864b652284619041dcf264f9be103be64f250bf538650dd9955e2a5db9",
+      "commitment": "sha256:0872a45562dda49aa1195f52983072912880416d5d67c8d371a6276cf412925b",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1497,7 +1497,7 @@
       "object_id": "urn:ccf:record:2afb37bd-f796-40d5-bfdd-49375344f059",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:4026a12bb89ce186648b6f33149f5df4805efc1c0dd81217c271c1cb6c52e0bd",
+      "commitment": "sha256:0c4054e7348e654cc8c2fda73300ea5a821237a9fe68224d4cef77d6df182393",
       "retention_profile": "epoch_lifetime_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1517,7 +1517,7 @@
       "object_id": "urn:ccf:link:a3a6c051-271d-47cf-bee5-35fc66d903c2",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:bca457f90249d6de310ec55ef2b17109f7087f0c1b4945e0d0d68ea201acc53c",
+      "commitment": "sha256:04b2c339cacbcea3035de301dec64b92f69ef18504dc875086d3b21f13d74f94",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1537,7 +1537,7 @@
       "object_id": "urn:ccf:link:1ae193bd-79bd-4535-bbd3-a670dba025ff",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:255a64de04eb58adafd252f2bf56db3e6582c58097392d57c7ab0111ed310538",
+      "commitment": "sha256:8e3bb46ef58c1450f645ebff0cd37286f2260bf96912042b35528d2976934571",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1557,7 +1557,7 @@
       "object_id": "urn:ccf:link:098c30cb-13fa-42b1-96f4-923ce82dd9d3",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:16d134de1690807082f5c9eded213c77a61af40d0ea394ab9fe535514d9c9453",
+      "commitment": "sha256:caf0f98f243942f6d4324945d3bb26db5640c9f2d699cc1066ebb9fb1dab0fd0",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1577,7 +1577,7 @@
       "object_id": "urn:ccf:link:d8302220-fcda-466a-ae4f-58b116746b4e",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:e91b0c6aa8bcebecbe43f013f801098adfe49df56e93494566fba0bbdedfb02a",
+      "commitment": "sha256:b116cc3a346819dda9d0346c4f65b286675f5cc4e0270bcd91a2c69d1b976867",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1597,7 +1597,7 @@
       "object_id": "urn:ccf:link:a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:c53b11db96476e80996fcc532452d6ffcd765da6d032dd40276198b73c380926",
+      "commitment": "sha256:29cbbdecf73ed302a8592f9f5e4ff0b88130a7f1e134595611640674834aa4f0",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1617,7 +1617,7 @@
       "object_id": "urn:ccf:link:76a63205-f0d1-4502-b29e-c44e0d1c6645",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:aa0e853566c47b120d7c652b0d30d0e31a039c803a6d6c5364d554b6a22bdcda",
+      "commitment": "sha256:f62071f4265a8c6a347e2c3a18cb8c19026448b5ecc021375610014237dcba0f",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1637,7 +1637,7 @@
       "object_id": "urn:ccf:link:e807d6c8-6589-4ac2-bed4-032207901261",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:1de14f52d8926cedcb2633ca0bfa6cd3d792233905a7caa0875b0b64a9c2f9a9",
+      "commitment": "sha256:70b89a6bc883d5e390fad181d9e08285b4a878de252c5ddf4d842e9b498cafab",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1657,7 +1657,7 @@
       "object_id": "urn:ccf:link:c78ac8a7-56fa-4c79-b74b-640d3cc82a09",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:1c4c2f4a62337258335d1f0f4b1fbcef8b5379ec3fc1e0c0d305c4d3a4395d14",
+      "commitment": "sha256:07a7dccbf79a098a1379820e1b0b67faf1bf1c5650c5d7cb17b5e51000d1ecca",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1677,7 +1677,7 @@
       "object_id": "urn:ccf:blob:4393e9d0-c150-448d-9b27-05872973abab",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:2a432475ec44f50223ff0c28261726dc6b2d3a3d1abcb87fc707caddfa8b5d0f",
+      "commitment": "sha256:9671d3fd649e8802d25d50bd1f9713e19b30bde88c7add675617a6c91becf63b",
       "retention_profile": "payload_erasable",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1697,7 +1697,7 @@
       "object_id": "urn:ccf:blob:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
       "compartment": "structural",
       "availability": "available",
-      "commitment": "sha256:176af756c76cb8df45181913f7c53ecafa0ada8ae58abc2850f27eb5ef102e20",
+      "commitment": "sha256:3aed7fefef9bca1dfe2d91020664e8766d7ecc589e36f981c2907e501cd19bea",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1707,7 +1707,7 @@
       "object_id": "urn:ccf:blob:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
       "compartment": "semantic",
       "availability": "available",
-      "commitment": "sha256:be1e61c5efa9228c1613e983514b146b0a694e6962a7814e022e161105727694",
+      "commitment": "sha256:582d9233708256980f088ba6d8a7593f5e507ee3eb86793a3a57122a1a70bd48",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null
@@ -1717,7 +1717,7 @@
       "object_id": "urn:ccf:blob:ce293b52-58f1-4f52-87d1-4b7d5e75edb8",
       "compartment": "blob_content",
       "availability": "available",
-      "commitment": "sha256:1d312a70d9963432dd41e886b186d6dcfc1eafcd1e19b362705a1b061d92a1e1",
+      "commitment": "sha256:c72955bb2143dc8b22ab1758b7c3abb6cdd8447fa29d7fea87168bda934c0b8e",
       "retention_profile": "structural_retention_required",
       "source_custody_proof": null,
       "unavailability_lineage_id": null

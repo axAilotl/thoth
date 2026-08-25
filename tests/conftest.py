@@ -1,6 +1,6 @@
-"""Shared fixtures for the CCF 0.1.2 conformance tests.
+"""Shared fixtures for the CCF 0.1.2 / 0.2.0 conformance tests.
 
-All fixtures point at the vendored, hash-verified spec package. Tests must
+All fixtures point at the vendored, hash-verified spec packages. Tests must
 never write under ``spec/ccf/``.
 """
 
@@ -14,7 +14,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CCF_PACKAGE_ROOT = REPO_ROOT / "spec" / "ccf" / "0.1.2"
 CCF_VECTORS = CCF_PACKAGE_ROOT / "vectors"
-CCF_EXAMPLES = CCF_PACKAGE_ROOT / "examples" / "thoth-capture"
+CCF_EXAMPLES = CCF_PACKAGE_ROOT / "examples" / "personal-archive"
+CCF_DRAFT_ROOT = REPO_ROOT / "spec" / "ccf" / "0.2.0"
+CCF_CAPSULE_EXAMPLE = CCF_DRAFT_ROOT / "examples" / "capsule"
+
 
 #: The 0.1.2 package pins the same deterministic TEST-ONLY Ed25519 key
 #: material as 0.1.1 (identical public keys; the 0.1.2 SHA256SUMS entries for
@@ -35,6 +38,15 @@ def ccf_test_only_keys_dir() -> Path:
 def ccf_package_root() -> Path:
     return CCF_PACKAGE_ROOT
 
+
+@pytest.fixture(scope="session")
+def ccf_draft_root() -> Path:
+    return CCF_DRAFT_ROOT
+
+
+@pytest.fixture(scope="session")
+def ccf_capsule_example() -> Path:
+    return CCF_CAPSULE_EXAMPLE
 
 @pytest.fixture(scope="session")
 def ccf_vectors_dir() -> Path:

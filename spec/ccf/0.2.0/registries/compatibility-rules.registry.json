@@ -1,0 +1,35 @@
+{
+  "registry": "ccf.compatibility-rules/0.2.0",
+  "entries": [
+    {
+      "id": "CCF-COMPAT-1",
+      "title": "Accept lower levels",
+      "requirement": "A higher-level implementation MUST accept a lower-level package when its object types are supported. Missing signatures or history mean not claimed, not invalid data."
+    },
+    {
+      "id": "CCF-COMPAT-2",
+      "title": "Stable IDs survive uplift",
+      "requirement": "Uplift from a submission to a canonical object MUST retain every supplied portable ID and MUST report archive-added resolution in an uplift receipt."
+    },
+    {
+      "id": "CCF-COMPAT-3",
+      "title": "No silent strengthening",
+      "requirement": "An importer MUST NOT represent unsigned or unverified imported content as authenticated producer evidence."
+    },
+    {
+      "id": "CCF-COMPAT-4",
+      "title": "No silent downgrade",
+      "requirement": "An export that omits proofs, state, compartments, or extensions MUST declare itself lossy and enumerate every omission category and subject."
+    },
+    {
+      "id": "CCF-COMPAT-5",
+      "title": "Preserve or refuse",
+      "requirement": "Unsupported material MUST be preserved opaquely, preserved as a byte-exact containing pack, or refused; it MUST NOT be silently discarded."
+    },
+    {
+      "id": "CCF-COMPAT-6",
+      "title": "Registered semantics declare requirements",
+      "requirement": "Every registered type and predicate MUST declare a minimum guarantee level and required capabilities; material below those requirements remains inert."
+    }
+  ]
+}

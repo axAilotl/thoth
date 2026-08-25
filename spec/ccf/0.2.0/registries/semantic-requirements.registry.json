@@ -1,0 +1,902 @@
+{
+  "registry": "ccf.semantic-requirements/0.2.0",
+  "base_registry_set": "ccf/0.1.2",
+  "entries": [
+    {
+      "resource_kind": "blob_type",
+      "name": "blob.manifest",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "blob_type",
+      "name": "blob.suppression_set",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.about",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.authorized_by",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.captured_in",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.contradicts",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.covers",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.derived_from",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.destroys_key",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.distinct_from",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.evidence_for",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.generated_by",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.governed_by",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.has_artifact",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.has_blob",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.has_source_media",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.has_transcript",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.invalidates",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.part_of",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.participant",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.redacted_from",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.retracts",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.same_as",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.supersedes",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.supports",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "ccf.tombstones",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "link_type",
+      "name": "sealed.link",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "predicate",
+      "name": "ccf.identity.has_alias",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "predicate",
+      "name": "ccf.preference.targets",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "predicate",
+      "name": "ccf.source.selected_for_project",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-work-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "predicate",
+      "name": "ccf.work.depends_on",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-work-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "predicate",
+      "name": "ccf.work.required_by",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-work-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "predicate",
+      "name": "ccf.work.works_on",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-work-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "agent.finding",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-agent-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "agent.handoff",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-agent-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "agent.proposal",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-agent-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "agent.receipt",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-agent-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "agent.run",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": "ccf-agent-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "continuity.boundary",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "continuity.commitment",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "continuity.episode",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "continuity.goal",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "continuity.preference",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "continuity.relationship",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "continuity.value",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": "ccf-continuity-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "core.device_credential",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": "ccf-exchange-v1",
+      "required_capabilities": [
+        "ccf-signed-producer-sync-v1"
+      ],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "core.person",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "core.runtime",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "core.session",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "core.source",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "experience.artifact",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "experience.event",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "experience.observation",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "experience.utterance",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.consent",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.erasure_decision",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.erasure_request",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.grant",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.legal_basis",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.legal_hold",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.objection",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.policy",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.restriction",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.retention_trigger",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.review_decision",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "governance.subject_access_request",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "integrity.catalog_transition",
+      "version": 1,
+      "minimum_level": "ccf-verified-archive-v1",
+      "state_effects_level": "ccf-verified-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "integrity.commit",
+      "version": 1,
+      "minimum_level": "ccf-verified-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "integrity.head_witness",
+      "version": 1,
+      "minimum_level": "ccf-verified-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [
+        "ccf-witnessed-integrity-v1"
+      ],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "integrity.signer_rotation",
+      "version": 1,
+      "minimum_level": "ccf-verified-archive-v1",
+      "state_effects_level": "ccf-verified-archive-v1",
+      "required_capabilities": [
+        "ccf-succession-v1"
+      ],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "integrity.successor_activation",
+      "version": 1,
+      "minimum_level": "ccf-verified-archive-v1",
+      "state_effects_level": "ccf-verified-archive-v1",
+      "required_capabilities": [
+        "ccf-succession-v1"
+      ],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "integrity.successor_authorization_revocation",
+      "version": 1,
+      "minimum_level": "ccf-verified-archive-v1",
+      "state_effects_level": "ccf-verified-archive-v1",
+      "required_capabilities": [
+        "ccf-succession-v1"
+      ],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "integrity.successor_authorization",
+      "version": 1,
+      "minimum_level": "ccf-verified-archive-v1",
+      "state_effects_level": "ccf-verified-archive-v1",
+      "required_capabilities": [
+        "ccf-succession-v1"
+      ],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "lineage.erasure_receipt",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "lineage.link_disposition",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "lineage.suppression_set",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "process.run",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "security.finding",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "security.keyset_manifest",
+      "version": 1,
+      "minimum_level": "ccf-canonical-store-v1",
+      "state_effects_level": "ccf-canonical-store-v1",
+      "required_capabilities": [
+        "ccf-archive-encryption-derived-v1"
+      ],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "semantic.assertion",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "semantic.concept",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "semantic.entity_resolution",
+      "version": 1,
+      "minimum_level": "ccf-governed-archive-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "semantic.entity",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "sync.producer_batch_receipt",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": null,
+      "required_capabilities": [
+        "ccf-signed-producer-sync-v1"
+      ],
+      "semantic_pack": null,
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "work.constraint",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": "ccf-work-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "work.decision",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": "ccf-work-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "work.project",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": "ccf-work-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    },
+    {
+      "resource_kind": "record_type",
+      "name": "work.task",
+      "version": 1,
+      "minimum_level": "ccf-exchange-v1",
+      "state_effects_level": "ccf-governed-archive-v1",
+      "required_capabilities": [],
+      "semantic_pack": "ccf-work-pack-v1",
+      "below_minimum_behavior": "preserve_inert_or_refuse"
+    }
+  ]
+}

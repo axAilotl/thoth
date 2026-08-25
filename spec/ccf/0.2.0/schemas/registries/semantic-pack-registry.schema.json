@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:registries.semantic-pack-registry",
+  "title": "CCF Semantic Pack Registry",
+  "type": "object",
+  "properties": {
+    "registry": {"const": "ccf.semantic-packs/0.2.0"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+          "status": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/status"},
+          "minimum_level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+          "conformance_suite": {
+            "type": "string",
+            "pattern": "^check-semantic-pack-[a-z0-9-]+$"
+          },
+          "description": {"type": "string", "minLength": 1},
+          "namespaces": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "required_capabilities": {
+            "type": "array",
+            "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id", "status", "minimum_level", "conformance_suite", "description", "namespaces",
+          "required_capabilities"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["registry", "entries"],
+  "additionalProperties": false
+}

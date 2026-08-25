@@ -1,7 +1,9 @@
+UV ?= uv
+
 .PHONY: check rebuild reproduce package
 
 check:
-	bash ./tools/check-all.sh
+	PYTHON=python $(UV) run --no-project --with-requirements requirements-checks.txt bash ./tools/check-all.sh
 
 rebuild:
 	node ./tools/build-catalog.mjs
@@ -13,4 +15,4 @@ reproduce:
 	bash ./tools/verify-reproducible.sh
 
 package: rebuild check
-	python ./tools/build-release-zip.py
+	$(UV) run --no-project python ./tools/build-release-zip.py

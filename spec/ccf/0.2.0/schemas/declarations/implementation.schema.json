@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:declarations.implementation",
+  "title": "CCF Implementation Conformance Declaration",
+  "type": "object",
+  "properties": {
+    "format": {"const": "ccf.implementation-declaration/0.2.0"},
+    "implementation": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+    "roles": {
+      "type": "array",
+      "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/roleId"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+      "uniqueItems": true
+    },
+    "portable_formats": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "semantic_catalog_roots": {
+      "type": "array",
+      "items": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "extensions": {"type": "object"}
+  },
+  "required": [
+    "format", "implementation", "version", "level", "roles", "capabilities",
+    "portable_formats", "semantic_catalog_roots", "extensions"
+  ],
+  "additionalProperties": false
+}

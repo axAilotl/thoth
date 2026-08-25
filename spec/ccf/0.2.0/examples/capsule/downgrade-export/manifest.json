@@ -1,0 +1,131 @@
+{
+  "format": "ccf.capsule/0.2.0",
+  "pack_id": "urn:ccf:pack:cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "created_at": "2026-08-24T12:05:00.000Z",
+  "level": "ccf-exchange-v1",
+  "capabilities": [],
+  "root_record_id": "urn:ccf:record:b7972dfb-99c3-4376-897f-3c9f2848138b",
+  "membership_link_types": [
+    "ccf.part_of"
+  ],
+  "custody": {
+    "completeness": "partial",
+    "losslessness": "lossy",
+    "omissions": [
+      {
+        "category": "other",
+        "subject": "downgrade-source/objects/records.ndjson",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "other",
+        "subject": "downgrade-source/objects/links.ndjson",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "other",
+        "subject": "downgrade-source/objects/blobs.ndjson",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "journal_proof",
+        "subject": "downgrade-source/integrity/commits.ndjson",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "journal_proof",
+        "subject": "downgrade-source/integrity/members.ndjson",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "other",
+        "subject": "downgrade-source/origin-index.ndjson",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "other",
+        "subject": "downgrade-source/producer-batches/98d352bf-7abb-4fdf-824c-3c93c4e55901.json",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "compartment",
+        "subject": "downgrade-source/compartments/records/b7972dfb-99c3-4376-897f-3c9f2848138b.structural.json",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "compartment",
+        "subject": "downgrade-source/compartments/records/b7972dfb-99c3-4376-897f-3c9f2848138b.semantic.json",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "compartment",
+        "subject": "downgrade-source/compartments/records/c59fe210-08b0-4ae7-9896-024d9ebbe47b.structural.json",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "compartment",
+        "subject": "downgrade-source/compartments/records/11d6493a-061f-46fa-85a6-d32f44cdcd5e.structural.json",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "compartment",
+        "subject": "downgrade-source/compartments/records/2afb37bd-f796-40d5-bfdd-49375344f059.structural.json",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      },
+      {
+        "category": "journal_proof",
+        "subject": "downgrade-source/source-identity.json",
+        "reason": "The Exchange export retains only the selected source assertions and omits producer-batch, canonical-object, and archive-history material."
+      }
+    ]
+  },
+  "catalog_dependencies": [
+    {
+      "kind": "semantic_catalog",
+      "identifier": "ccf.semantic-catalog/0.1.2",
+      "digest": "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8",
+      "required": true
+    },
+    {
+      "kind": "registry",
+      "identifier": "ccf.types/0.1.2",
+      "digest": "sha256:859d51076665a5996d2922003695c8f8c49ee3a0f509ea22bf29a2744ff6e8ca",
+      "required": true
+    },
+    {
+      "kind": "registry",
+      "identifier": "ccf.links/0.1.2",
+      "digest": "sha256:c5e5ed3dfa4d2ef907aa2c4a0bd68324334be36d36a270c740c78366c729a309",
+      "required": true
+    }
+  ],
+  "streams": [
+    {
+      "path": "submissions/records.ndjson",
+      "media_type": "application/x-ndjson",
+      "content_role": "submissions",
+      "handling": "activate",
+      "activation_requirements": {
+        "minimum_level": "ccf-exchange-v1",
+        "capabilities": []
+      },
+      "digest": "sha256:d554b4474c8c82832a26f727a8d437c66a4b076eb239e3495f51fbfaefb02d01",
+      "byte_length": "1526",
+      "required": true
+    }
+  ],
+  "dependencies": [
+    {
+      "object_id": "urn:ccf:record:4e9f8cc9-563a-4d61-8221-9f55e9db39bd",
+      "availability": "external",
+      "reason": "The source-device Record is outside this scoped downgrade export.",
+      "locator": null,
+      "source_custody_proof": "receipt:urn:ccf:receipt:13131313-1313-4313-8313-131313131313",
+      "unavailability_lineage_id": null
+    }
+  ],
+  "proofs": [],
+  "extensions": {
+    "org.example.transfer_label": "Selected verified source assertion"
+  }
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the vendored CCF package checks for every pinned spec version
-# (spec/ccf/0.1.1 and spec/ccf/0.1.2).
+# (spec/ccf/0.1.1, spec/ccf/0.1.2, and the 0.2.0 working-draft overlay).
 #
 # Each package's tools/check-all.sh expects `python` with jsonschema and
 # referencing installed (see its requirements-checks.txt). This wrapper
@@ -29,3 +29,8 @@ bash tools/check-all.sh
 cd "$ROOT/0.1.2"
 sha256sum -c SHA256SUMS --quiet
 PYTHON="$VENV/bin/python" bash tools/check-all.sh
+
+# --- 0.2.0 working draft ----------------------------------------------
+# Exchange is the default draft gate and does not require Docker.
+cd "$ROOT/0.2.0"
+PYTHON="$VENV/bin/python" python tools/validate-exchange.py

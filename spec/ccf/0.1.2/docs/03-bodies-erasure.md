@@ -59,7 +59,7 @@ This avoids a stored random key per object and permits fully offline encryption 
 
 ### Per-object erasure
 
-`ccf-object-erasure-v1` uses a random DEK per erasable compartment or Blob content, wrapped under a custodian key. Destroying every wrapped copy of one DEK can make that object selectively unrecoverable. This profile requires stronger key inventory, backup, KMS, and recovery controls and is not mandatory for Thoth or local CCF use.
+`ccf-object-erasure-v1` uses a random DEK per erasable compartment or Blob content, wrapped under a custodian key. Destroying every wrapped copy of one DEK can make that object selectively unrecoverable. This profile requires stronger key inventory, backup, KMS, and recovery controls and is not mandatory for local CCF use.
 
 ## 3.5 Public-key identity versus content encryption
 

@@ -2,10 +2,10 @@
 
 Generated deterministically from the validated reference package.
 
-- Files before checksum manifest and inventory: **474**
+- Files before checksum manifest and inventory: **473**
 - JSON Schemas: **112**
 - Registry files: **14**
-- Markdown documents: **36**
+- Markdown documents: **35**
 
 ## Top-level counts
 
@@ -21,7 +21,6 @@ Generated deterministically from the validated reference package.
 - `schemas`: 114
 - `semantic-catalog.json`: 1
 - `sql`: 2
-- `THOTH-IMPLEMENTATION-CHECKLIST.md`: 1
 - `tools`: 15
 - `vectors`: 17
 
@@ -31,7 +30,6 @@ Generated deterministically from the validated reference package.
 - `CHANGELOG-0.1.2.md`
 - `Makefile`
 - `README.md`
-- `THOTH-IMPLEMENTATION-CHECKLIST.md`
 - `docs/00-status-conformance.md`
 - `docs/01-object-model.md`
 - `docs/02-identifiers-references.md`
@@ -46,7 +44,7 @@ Generated deterministically from the validated reference package.
 - `docs/11-import-export-evolution.md`
 - `docs/12-security-trust.md`
 - `docs/13-conformance.md`
-- `docs/14-thoth-adoption.md`
+- `docs/14-integration-guide.md`
 - `docs/15-glossary.md`
 - `docs/16-changelog.md`
 - `docs/profiles/archive-encryption.md`
@@ -249,91 +247,91 @@ Generated deterministically from the validated reference package.
 - `examples/mindpack/schemas/sync/producer-batch.schema.json`
 - `examples/mindpack/schemas/sync/sync-head.schema.json`
 - `examples/mindpack/semantic-catalog.json`
-- `examples/thoth-capture/README.md`
-- `examples/thoth-capture/blob-4393e9d0-c150-448d-9b27-05872973abab.header.json`
-- `examples/thoth-capture/blob-4393e9d0-c150-448d-9b27-05872973abab.semantic.json`
-- `examples/thoth-capture/blob-4393e9d0-c150-448d-9b27-05872973abab.structural.json`
-- `examples/thoth-capture/blob-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.header.json`
-- `examples/thoth-capture/blob-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.semantic.json`
-- `examples/thoth-capture/blob-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.structural.json`
-- `examples/thoth-capture/commit-members-1.json`
-- `examples/thoth-capture/commit-members-2.json`
-- `examples/thoth-capture/ids.json`
-- `examples/thoth-capture/link-098c30cb-13fa-42b1-96f4-923ce82dd9d3.header.json`
-- `examples/thoth-capture/link-098c30cb-13fa-42b1-96f4-923ce82dd9d3.semantic.json`
-- `examples/thoth-capture/link-098c30cb-13fa-42b1-96f4-923ce82dd9d3.structural.json`
-- `examples/thoth-capture/link-1ae193bd-79bd-4535-bbd3-a670dba025ff.header.json`
-- `examples/thoth-capture/link-1ae193bd-79bd-4535-bbd3-a670dba025ff.semantic.json`
-- `examples/thoth-capture/link-1ae193bd-79bd-4535-bbd3-a670dba025ff.structural.json`
-- `examples/thoth-capture/link-76a63205-f0d1-4502-b29e-c44e0d1c6645.header.json`
-- `examples/thoth-capture/link-76a63205-f0d1-4502-b29e-c44e0d1c6645.semantic.json`
-- `examples/thoth-capture/link-76a63205-f0d1-4502-b29e-c44e0d1c6645.structural.json`
-- `examples/thoth-capture/link-a3a6c051-271d-47cf-bee5-35fc66d903c2.header.json`
-- `examples/thoth-capture/link-a3a6c051-271d-47cf-bee5-35fc66d903c2.semantic.json`
-- `examples/thoth-capture/link-a3a6c051-271d-47cf-bee5-35fc66d903c2.structural.json`
-- `examples/thoth-capture/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.header.json`
-- `examples/thoth-capture/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.semantic.json`
-- `examples/thoth-capture/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.structural.json`
-- `examples/thoth-capture/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.header.json`
-- `examples/thoth-capture/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.semantic.json`
-- `examples/thoth-capture/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.structural.json`
-- `examples/thoth-capture/link-d8302220-fcda-466a-ae4f-58b116746b4e.header.json`
-- `examples/thoth-capture/link-d8302220-fcda-466a-ae4f-58b116746b4e.semantic.json`
-- `examples/thoth-capture/link-d8302220-fcda-466a-ae4f-58b116746b4e.structural.json`
-- `examples/thoth-capture/link-e807d6c8-6589-4ac2-bed4-032207901261.header.json`
-- `examples/thoth-capture/link-e807d6c8-6589-4ac2-bed4-032207901261.semantic.json`
-- `examples/thoth-capture/link-e807d6c8-6589-4ac2-bed4-032207901261.structural.json`
-- `examples/thoth-capture/producer-batch.json`
-- `examples/thoth-capture/record-03e09d92-b68b-467d-b3c9-18a15be891be.header.json`
-- `examples/thoth-capture/record-03e09d92-b68b-467d-b3c9-18a15be891be.semantic.json`
-- `examples/thoth-capture/record-03e09d92-b68b-467d-b3c9-18a15be891be.structural.json`
-- `examples/thoth-capture/record-11d6493a-061f-46fa-85a6-d32f44cdcd5e.header.json`
-- `examples/thoth-capture/record-11d6493a-061f-46fa-85a6-d32f44cdcd5e.structural.json`
-- `examples/thoth-capture/record-2afb37bd-f796-40d5-bfdd-49375344f059.header.json`
-- `examples/thoth-capture/record-2afb37bd-f796-40d5-bfdd-49375344f059.structural.json`
-- `examples/thoth-capture/record-2e96f116-6c1a-4216-8ac5-63d0b5da108f.header.json`
-- `examples/thoth-capture/record-2e96f116-6c1a-4216-8ac5-63d0b5da108f.semantic.json`
-- `examples/thoth-capture/record-2e96f116-6c1a-4216-8ac5-63d0b5da108f.structural.json`
-- `examples/thoth-capture/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.header.json`
-- `examples/thoth-capture/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.semantic.json`
-- `examples/thoth-capture/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.structural.json`
-- `examples/thoth-capture/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.header.json`
-- `examples/thoth-capture/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.semantic.json`
-- `examples/thoth-capture/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.structural.json`
-- `examples/thoth-capture/record-405c475b-1c4c-4e05-b978-28246bb3a5fa.header.json`
-- `examples/thoth-capture/record-405c475b-1c4c-4e05-b978-28246bb3a5fa.structural.json`
-- `examples/thoth-capture/record-4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.header.json`
-- `examples/thoth-capture/record-4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.semantic.json`
-- `examples/thoth-capture/record-4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.structural.json`
-- `examples/thoth-capture/record-4d8feff5-3956-4190-9679-203f34a09de1.header.json`
-- `examples/thoth-capture/record-4d8feff5-3956-4190-9679-203f34a09de1.semantic.json`
-- `examples/thoth-capture/record-4d8feff5-3956-4190-9679-203f34a09de1.structural.json`
-- `examples/thoth-capture/record-4e9f8cc9-563a-4d61-8221-9f55e9db39bd.header.json`
-- `examples/thoth-capture/record-4e9f8cc9-563a-4d61-8221-9f55e9db39bd.semantic.json`
-- `examples/thoth-capture/record-4e9f8cc9-563a-4d61-8221-9f55e9db39bd.structural.json`
-- `examples/thoth-capture/record-63607ea0-9d26-4625-ab23-65ce7415b571.header.json`
-- `examples/thoth-capture/record-63607ea0-9d26-4625-ab23-65ce7415b571.semantic.json`
-- `examples/thoth-capture/record-63607ea0-9d26-4625-ab23-65ce7415b571.structural.json`
-- `examples/thoth-capture/record-649042b4-1519-4dfb-8de9-9dffb167de34.header.json`
-- `examples/thoth-capture/record-649042b4-1519-4dfb-8de9-9dffb167de34.structural.json`
-- `examples/thoth-capture/record-682d6151-5dd6-42d8-874c-895c3a501f09.header.json`
-- `examples/thoth-capture/record-682d6151-5dd6-42d8-874c-895c3a501f09.semantic.json`
-- `examples/thoth-capture/record-682d6151-5dd6-42d8-874c-895c3a501f09.structural.json`
-- `examples/thoth-capture/record-908e42a4-f136-458f-8cf9-7597922fab21.header.json`
-- `examples/thoth-capture/record-908e42a4-f136-458f-8cf9-7597922fab21.semantic.json`
-- `examples/thoth-capture/record-908e42a4-f136-458f-8cf9-7597922fab21.structural.json`
-- `examples/thoth-capture/record-a01f8c5c-8278-4a2b-bccb-c270ca803586.header.json`
-- `examples/thoth-capture/record-a01f8c5c-8278-4a2b-bccb-c270ca803586.semantic.json`
-- `examples/thoth-capture/record-a01f8c5c-8278-4a2b-bccb-c270ca803586.structural.json`
-- `examples/thoth-capture/record-b7972dfb-99c3-4376-897f-3c9f2848138b.header.json`
-- `examples/thoth-capture/record-b7972dfb-99c3-4376-897f-3c9f2848138b.semantic.json`
-- `examples/thoth-capture/record-b7972dfb-99c3-4376-897f-3c9f2848138b.structural.json`
-- `examples/thoth-capture/record-c59fe210-08b0-4ae7-9896-024d9ebbe47b.header.json`
-- `examples/thoth-capture/record-c59fe210-08b0-4ae7-9896-024d9ebbe47b.structural.json`
-- `examples/thoth-capture/record-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.header.json`
-- `examples/thoth-capture/record-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.semantic.json`
-- `examples/thoth-capture/record-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.structural.json`
-- `examples/thoth-capture/segment-1842.wav`
+- `examples/personal-archive/README.md`
+- `examples/personal-archive/blob-4393e9d0-c150-448d-9b27-05872973abab.header.json`
+- `examples/personal-archive/blob-4393e9d0-c150-448d-9b27-05872973abab.semantic.json`
+- `examples/personal-archive/blob-4393e9d0-c150-448d-9b27-05872973abab.structural.json`
+- `examples/personal-archive/blob-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.header.json`
+- `examples/personal-archive/blob-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.semantic.json`
+- `examples/personal-archive/blob-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.structural.json`
+- `examples/personal-archive/commit-members-1.json`
+- `examples/personal-archive/commit-members-2.json`
+- `examples/personal-archive/ids.json`
+- `examples/personal-archive/link-098c30cb-13fa-42b1-96f4-923ce82dd9d3.header.json`
+- `examples/personal-archive/link-098c30cb-13fa-42b1-96f4-923ce82dd9d3.semantic.json`
+- `examples/personal-archive/link-098c30cb-13fa-42b1-96f4-923ce82dd9d3.structural.json`
+- `examples/personal-archive/link-1ae193bd-79bd-4535-bbd3-a670dba025ff.header.json`
+- `examples/personal-archive/link-1ae193bd-79bd-4535-bbd3-a670dba025ff.semantic.json`
+- `examples/personal-archive/link-1ae193bd-79bd-4535-bbd3-a670dba025ff.structural.json`
+- `examples/personal-archive/link-76a63205-f0d1-4502-b29e-c44e0d1c6645.header.json`
+- `examples/personal-archive/link-76a63205-f0d1-4502-b29e-c44e0d1c6645.semantic.json`
+- `examples/personal-archive/link-76a63205-f0d1-4502-b29e-c44e0d1c6645.structural.json`
+- `examples/personal-archive/link-a3a6c051-271d-47cf-bee5-35fc66d903c2.header.json`
+- `examples/personal-archive/link-a3a6c051-271d-47cf-bee5-35fc66d903c2.semantic.json`
+- `examples/personal-archive/link-a3a6c051-271d-47cf-bee5-35fc66d903c2.structural.json`
+- `examples/personal-archive/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.header.json`
+- `examples/personal-archive/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.semantic.json`
+- `examples/personal-archive/link-a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62.structural.json`
+- `examples/personal-archive/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.header.json`
+- `examples/personal-archive/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.semantic.json`
+- `examples/personal-archive/link-c78ac8a7-56fa-4c79-b74b-640d3cc82a09.structural.json`
+- `examples/personal-archive/link-d8302220-fcda-466a-ae4f-58b116746b4e.header.json`
+- `examples/personal-archive/link-d8302220-fcda-466a-ae4f-58b116746b4e.semantic.json`
+- `examples/personal-archive/link-d8302220-fcda-466a-ae4f-58b116746b4e.structural.json`
+- `examples/personal-archive/link-e807d6c8-6589-4ac2-bed4-032207901261.header.json`
+- `examples/personal-archive/link-e807d6c8-6589-4ac2-bed4-032207901261.semantic.json`
+- `examples/personal-archive/link-e807d6c8-6589-4ac2-bed4-032207901261.structural.json`
+- `examples/personal-archive/producer-batch.json`
+- `examples/personal-archive/record-03e09d92-b68b-467d-b3c9-18a15be891be.header.json`
+- `examples/personal-archive/record-03e09d92-b68b-467d-b3c9-18a15be891be.semantic.json`
+- `examples/personal-archive/record-03e09d92-b68b-467d-b3c9-18a15be891be.structural.json`
+- `examples/personal-archive/record-11d6493a-061f-46fa-85a6-d32f44cdcd5e.header.json`
+- `examples/personal-archive/record-11d6493a-061f-46fa-85a6-d32f44cdcd5e.structural.json`
+- `examples/personal-archive/record-2afb37bd-f796-40d5-bfdd-49375344f059.header.json`
+- `examples/personal-archive/record-2afb37bd-f796-40d5-bfdd-49375344f059.structural.json`
+- `examples/personal-archive/record-2e96f116-6c1a-4216-8ac5-63d0b5da108f.header.json`
+- `examples/personal-archive/record-2e96f116-6c1a-4216-8ac5-63d0b5da108f.semantic.json`
+- `examples/personal-archive/record-2e96f116-6c1a-4216-8ac5-63d0b5da108f.structural.json`
+- `examples/personal-archive/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.header.json`
+- `examples/personal-archive/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.semantic.json`
+- `examples/personal-archive/record-396faaaf-52c3-494d-b456-bbb1b8889cbf.structural.json`
+- `examples/personal-archive/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.header.json`
+- `examples/personal-archive/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.semantic.json`
+- `examples/personal-archive/record-4034e10b-7a56-46b6-9162-d1cf909f8a78.structural.json`
+- `examples/personal-archive/record-405c475b-1c4c-4e05-b978-28246bb3a5fa.header.json`
+- `examples/personal-archive/record-405c475b-1c4c-4e05-b978-28246bb3a5fa.structural.json`
+- `examples/personal-archive/record-4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.header.json`
+- `examples/personal-archive/record-4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.semantic.json`
+- `examples/personal-archive/record-4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203.structural.json`
+- `examples/personal-archive/record-4d8feff5-3956-4190-9679-203f34a09de1.header.json`
+- `examples/personal-archive/record-4d8feff5-3956-4190-9679-203f34a09de1.semantic.json`
+- `examples/personal-archive/record-4d8feff5-3956-4190-9679-203f34a09de1.structural.json`
+- `examples/personal-archive/record-4e9f8cc9-563a-4d61-8221-9f55e9db39bd.header.json`
+- `examples/personal-archive/record-4e9f8cc9-563a-4d61-8221-9f55e9db39bd.semantic.json`
+- `examples/personal-archive/record-4e9f8cc9-563a-4d61-8221-9f55e9db39bd.structural.json`
+- `examples/personal-archive/record-63607ea0-9d26-4625-ab23-65ce7415b571.header.json`
+- `examples/personal-archive/record-63607ea0-9d26-4625-ab23-65ce7415b571.semantic.json`
+- `examples/personal-archive/record-63607ea0-9d26-4625-ab23-65ce7415b571.structural.json`
+- `examples/personal-archive/record-649042b4-1519-4dfb-8de9-9dffb167de34.header.json`
+- `examples/personal-archive/record-649042b4-1519-4dfb-8de9-9dffb167de34.structural.json`
+- `examples/personal-archive/record-682d6151-5dd6-42d8-874c-895c3a501f09.header.json`
+- `examples/personal-archive/record-682d6151-5dd6-42d8-874c-895c3a501f09.semantic.json`
+- `examples/personal-archive/record-682d6151-5dd6-42d8-874c-895c3a501f09.structural.json`
+- `examples/personal-archive/record-908e42a4-f136-458f-8cf9-7597922fab21.header.json`
+- `examples/personal-archive/record-908e42a4-f136-458f-8cf9-7597922fab21.semantic.json`
+- `examples/personal-archive/record-908e42a4-f136-458f-8cf9-7597922fab21.structural.json`
+- `examples/personal-archive/record-a01f8c5c-8278-4a2b-bccb-c270ca803586.header.json`
+- `examples/personal-archive/record-a01f8c5c-8278-4a2b-bccb-c270ca803586.semantic.json`
+- `examples/personal-archive/record-a01f8c5c-8278-4a2b-bccb-c270ca803586.structural.json`
+- `examples/personal-archive/record-b7972dfb-99c3-4376-897f-3c9f2848138b.header.json`
+- `examples/personal-archive/record-b7972dfb-99c3-4376-897f-3c9f2848138b.semantic.json`
+- `examples/personal-archive/record-b7972dfb-99c3-4376-897f-3c9f2848138b.structural.json`
+- `examples/personal-archive/record-c59fe210-08b0-4ae7-9896-024d9ebbe47b.header.json`
+- `examples/personal-archive/record-c59fe210-08b0-4ae7-9896-024d9ebbe47b.structural.json`
+- `examples/personal-archive/record-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.header.json`
+- `examples/personal-archive/record-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.semantic.json`
+- `examples/personal-archive/record-ce293b52-58f1-4f52-87d1-4b7d5e75edb8.structural.json`
+- `examples/personal-archive/segment-1842.wav`
 - `openapi/README.md`
 - `openapi/ccf-api.openapi.yaml`
 - `registries/README.md`

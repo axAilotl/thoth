@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:exchange.capsule-manifest",
+  "title": "CCF Capsule Manifest",
+  "type": "object",
+  "properties": {
+    "format": {"const": "ccf.capsule/0.2.0"},
+    "pack_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/packUrn"},
+    "created_at": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"},
+    "level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+    "capabilities": {
+      "type": "array",
+      "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+      "uniqueItems": true
+    },
+    "root_record_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"},
+    "membership_link_types": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "custody": {
+      "type": "object",
+      "properties": {
+        "completeness": {"enum": ["complete", "partial"]},
+        "losslessness": {"enum": ["lossless", "lossy"]},
+        "omissions": {
+          "type": "array",
+          "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/omission"}
+        }
+      },
+      "required": ["completeness", "losslessness", "omissions"],
+      "allOf": [
+        {
+          "if": {"properties": {"losslessness": {"const": "lossless"}}, "required": ["losslessness"]},
+          "then": {"properties": {"omissions": {"maxItems": 0}}}
+        },
+        {
+          "if": {"properties": {"losslessness": {"const": "lossy"}}, "required": ["losslessness"]},
+          "then": {"properties": {"omissions": {"minItems": 1}}}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "catalog_dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {"enum": ["semantic_catalog", "schema", "registry"]},
+          "identifier": {"type": "string", "minLength": 1},
+          "digest": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"},
+          "required": {"type": "boolean"}
+        },
+        "required": ["kind", "identifier", "digest", "required"],
+        "additionalProperties": false
+      }
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+          },
+          "media_type": {"type": "string", "minLength": 1},
+          "content_role": {
+            "enum": [
+              "submissions", "canonical_headers", "compartments", "blob_content",
+              "registries", "schemas", "integrity_proofs", "opaque"
+            ]
+          },
+          "handling": {"enum": ["activate", "preserve_inert", "preserve_opaque"]},
+          "activation_requirements": {
+            "type": "object",
+            "properties": {
+              "minimum_level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+              "capabilities": {
+                "type": "array",
+                "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+                "uniqueItems": true
+              }
+            },
+            "required": ["minimum_level", "capabilities"],
+            "additionalProperties": false
+          },
+          "digest": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"},
+          "byte_length": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/uint64"},
+          "required": {"type": "boolean"}
+        },
+        "required": [
+          "path", "media_type", "content_role", "handling", "activation_requirements",
+          "digest", "byte_length", "required"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "object_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"},
+          "availability": {"enum": ["external", "withheld", "erased"]},
+          "reason": {"type": "string", "minLength": 1},
+          "locator": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+          "source_custody_proof": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+          "unavailability_lineage_id": {
+            "oneOf": [
+              {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"},
+              {"type": "null"}
+            ]
+          }
+        },
+        "required": [
+          "object_id", "availability", "reason", "locator", "source_custody_proof",
+          "unavailability_lineage_id"
+        ],
+        "allOf": [
+          {
+            "if": {"properties": {"availability": {"enum": ["withheld", "erased"]}}, "required": ["availability"]},
+            "then": {"properties": {"source_custody_proof": {"type": "string", "minLength": 1}}}
+          },
+          {
+            "if": {"properties": {"availability": {"const": "erased"}}, "required": ["availability"]},
+            "then": {"properties": {"unavailability_lineage_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/recordUrn"}}}
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "proofs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {"type": "string", "minLength": 1},
+          "profile": {"type": "string", "minLength": 1},
+          "covers": {"type": "string", "minLength": 1},
+          "digest": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"},
+          "signature": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}
+        },
+        "required": ["kind", "profile", "covers", "digest", "signature"],
+        "additionalProperties": false
+      }
+    },
+    "extensions": {"type": "object"}
+  },
+  "required": [
+    "format", "pack_id", "created_at", "level", "capabilities", "root_record_id",
+    "membership_link_types", "custody", "catalog_dependencies", "streams",
+    "dependencies", "proofs", "extensions"
+  ],
+  "additionalProperties": false
+}

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import {
   canonicalize, canonicalDigest, compartmentCommitment, objectHash, submissionHash,
   producerBatchHash, producerBatchSigningDigest, merkleRoot, commitSigningDigest,
@@ -11,8 +12,8 @@ import {
   suppressionScopeCommitment,
 } from './ccf-jcs.mjs';
 
-const ROOT=path.resolve(path.dirname(new URL(import.meta.url).pathname),'..');
-const V=path.join(ROOT,'vectors'); const E=path.join(ROOT,'examples','thoth-capture');
+const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const V=path.join(ROOT,'vectors'); const E=path.join(ROOT,'examples','personal-archive');
 let checks=0;
 function ok(cond,label){checks+=1;if(!cond)throw new Error(`FAIL: ${label}`);}
 function read(p){return JSON.parse(fs.readFileSync(p,'utf8'));}

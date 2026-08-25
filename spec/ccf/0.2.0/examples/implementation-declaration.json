@@ -1,0 +1,15 @@
+{
+  "format": "ccf.implementation-declaration/0.2.0",
+  "implementation": "Cissa phone local store",
+  "version": "0.1.0",
+  "level": "ccf-canonical-store-v1",
+  "roles": ["producer", "preserver", "importer-exporter"],
+  "capabilities": [
+    "ccf-continuity-pack-v1"
+  ],
+  "portable_formats": ["ccf/0.1.2"],
+  "semantic_catalog_roots": [
+    "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8"
+  ],
+  "extensions": {}
+}

@@ -2,10 +2,10 @@
   "format": "ccf.archive-row/0.1.2",
   "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
   "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
-  "genesis_commit_hash": "sha256:71d5d31058b06ac395430b5342513ac4d3998c1a26872e0d3ed7472b843a05c1",
+  "genesis_commit_hash": "sha256:dcdc8b668b9147fdb25427459613c7e577c3a8ebffb894f10e250d49acb3bace",
   "hash_profile": "ccf-jcs-sha256-v2",
   "signature_profile": "ed25519-jcs-v1",
-  "semantic_catalog_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10",
+  "semantic_catalog_root": "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8",
   "active_profiles": [
     "ccf-core-0.1.2",
     "ccf-local-sync-0.1.2",

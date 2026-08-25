@@ -1,0 +1,41 @@
+{
+  "registry": "ccf.roles/0.2.0",
+  "entries": [
+    {
+      "id": "preserver",
+      "title": "Preserver",
+      "description": "Retains supported and unsupported material without silently changing or discarding it.",
+      "required_operations": ["preserve known material", "preserve unknown material inertly or refuse the import"]
+    },
+    {
+      "id": "producer",
+      "title": "Producer",
+      "description": "Creates stable portable IDs and valid source submissions before archive admission.",
+      "required_operations": ["allocate stable IDs", "emit schema-valid submissions", "retain source provenance"]
+    },
+    {
+      "id": "processor",
+      "title": "Processor",
+      "description": "Creates derived assertions with exact evidence and an honest authority basis.",
+      "required_operations": ["link derived output to exact evidence", "distinguish inference from acceptance"]
+    },
+    {
+      "id": "importer-exporter",
+      "title": "Importer/Exporter",
+      "description": "Transfers Capsules or mindpacks with explicit completeness, dependency, and losslessness reporting.",
+      "required_operations": ["report dependencies", "preserve stable IDs", "emit uplift or downgrade receipts"]
+    },
+    {
+      "id": "archive",
+      "title": "Archive",
+      "description": "Admits canonical objects and, at higher levels, maintains verifiable archive history.",
+      "required_operations": ["perform idempotent admission", "keep archive-local coordinates outside portable identity"]
+    },
+    {
+      "id": "policy-evaluator",
+      "title": "Policy Evaluator",
+      "description": "Evaluates the pinned policy model and maintains generation-fence behavior.",
+      "required_operations": ["evaluate pinned policy semantics", "produce consequential receipts", "enforce generation fences"]
+    }
+  ]
+}

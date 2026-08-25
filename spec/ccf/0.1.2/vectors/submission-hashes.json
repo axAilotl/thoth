@@ -2,7 +2,7 @@
   "records": [
     {
       "id": "urn:ccf:record:4e9f8cc9-563a-4d61-8221-9f55e9db39bd",
-      "expected_submission_hash": "sha256:5f029fff2458721027acc14fe7c70d761c7eb17aebd4f2ca8335f987a5908090"
+      "expected_submission_hash": "sha256:19f413f8f4bbf65867f7a58292b7a3cc69042f1495d49e1c308cf1d60b715691"
     },
     {
       "id": "urn:ccf:record:b7972dfb-99c3-4376-897f-3c9f2848138b",
@@ -14,15 +14,15 @@
     },
     {
       "id": "urn:ccf:record:4bc9c0eb-a3b3-4d1f-8b61-d58225d3a203",
-      "expected_submission_hash": "sha256:b72a84c596f552ac0eb4e872b0b1a1ab2729403c3358ff3b79c90c5b879b634b"
+      "expected_submission_hash": "sha256:941d2dc392157ded8134e1acc9ee677ca3bc28f233c2fca5727cf2e4049d0225"
     },
     {
       "id": "urn:ccf:record:63607ea0-9d26-4625-ab23-65ce7415b571",
-      "expected_submission_hash": "sha256:7208e022b337289bd657310acc70cb81a748df7231c1b4b863dead5d07eab6ec"
+      "expected_submission_hash": "sha256:b694b8ae1563214752fc783b6b60ce09f53ccaee464fac38212da59f178343e3"
     },
     {
       "id": "urn:ccf:record:396faaaf-52c3-494d-b456-bbb1b8889cbf",
-      "expected_submission_hash": "sha256:cf9f462b2ca152ac68dff2c2cff940bbfc10fd2c21b5525ed0e5287887dfb994"
+      "expected_submission_hash": "sha256:494b3554da1457b811edd9d2b416ce5032f320614cde02ce32e6bdeda7bdcf8c"
     },
     {
       "id": "urn:ccf:record:a01f8c5c-8278-4a2b-bccb-c270ca803586",
@@ -30,7 +30,7 @@
     },
     {
       "id": "urn:ccf:record:2e96f116-6c1a-4216-8ac5-63d0b5da108f",
-      "expected_submission_hash": "sha256:9cbf876e996807774ebe7b3ec3c2e1a7627d2f35f86afded27f5e4fae81ea523"
+      "expected_submission_hash": "sha256:aa5d2dcf400bad281a865a21f24dec71a019885e86be605695b025cca1e04c40"
     }
   ],
   "links": [
@@ -52,7 +52,7 @@
     },
     {
       "id": "urn:ccf:link:a3eedfcb-016b-4f1b-a58a-3afe9b9d1e62",
-      "expected_submission_hash": "sha256:856994e9590194c5147431b05772d189937d75c898f6095dbb1108e18f38756d"
+      "expected_submission_hash": "sha256:a0d865c82e05b2db94ce7229d66764e6928eebff470db29379d7c2ea1c7f1ed3"
     },
     {
       "id": "urn:ccf:link:76a63205-f0d1-4502-b29e-c44e0d1c6645",

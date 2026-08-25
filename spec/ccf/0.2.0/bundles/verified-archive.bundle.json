@@ -1,0 +1,42 @@
+{
+  "format": "ccf.bundle-manifest/0.2.0",
+  "status": "working-draft",
+  "id": "ccf-verified-archive-bundle-v1",
+  "kind": "level",
+  "provides": "ccf-verified-archive-v1",
+  "depends_on": [
+    "ccf-canonical-store-bundle-v1"
+  ],
+  "artifacts": [
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/commit-member.schema.json",
+      "digest": "sha256:1cc55001eaa5943474c38349bd96cb0385c411f61537a1d0f8f2436cb6cb8c77"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/mindpack-manifest.schema.json",
+      "digest": "sha256:3b737e5e7b34c807a5a978004532a74507445d2473f8066b88ff30fc1638483d"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-catalog-transition.schema.json",
+      "digest": "sha256:a1f1fc17af13588da1117b122c1900e63305f9ca98c3adfd5c0a3f0a2efce9e2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/structural/integrity-commit.schema.json",
+      "digest": "sha256:0275c63804a7365bea3d747f3946ce2e2bd07be22e17e1ab721def610f3159b9"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/catalog_transition.schema.json",
+      "digest": "sha256:69370d86228d273072f3639597bb6e3893a0e0139d954c8488f2dcc5a8eb314b"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/integrity/commit.schema.json",
+      "digest": "sha256:e0e515dc89f258a0669b62ff082a22654e9f52cae73a744e44979471deea65e2"
+    }
+  ]
+}

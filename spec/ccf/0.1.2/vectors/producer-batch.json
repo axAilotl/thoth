@@ -7,7 +7,7 @@
     "previous_batch_hash": null,
     "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
     "created_at": "2026-08-11T21:42:20.300Z",
-    "semantic_catalog_root": "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10",
+    "semantic_catalog_root": "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8",
     "records": [
       {
         "submission_kind": "record",
@@ -40,9 +40,9 @@
         },
         "payload": {
           "kind": "wearable_audio",
-          "name": "Maxc test source",
-          "connector": "thoth.capture",
-          "native_identity": "device:maxc-test",
+          "name": "Wearable audio source",
+          "connector": "personal.capture",
+          "native_identity": "device:wearable-audio-test",
           "trust_class": "authenticated",
           "producer_key_id": "urn:ccf:key:28f19f81-2df9-4830-bfac-879b9de1a141",
           "extensions": {}
@@ -201,7 +201,7 @@
         },
         "payload": {
           "run_kind": "transcription",
-          "framework": "thoth",
+          "framework": "ccf-example",
           "task": "Transcribe captured audio",
           "status": "succeeded",
           "configuration_ref": null,
@@ -259,7 +259,7 @@
           "extensions": {}
         },
         "payload": {
-          "text": "I want the schema open because adoption is still a win.",
+          "text": "I want my notes and recordings available across my devices.",
           "language": "en",
           "speaker_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
           "sequence": "1",
@@ -310,15 +310,15 @@
         },
         "payload": {
           "target": {
-            "value": "open adoption of the continuity schema",
+            "value": "portable personal notes and recordings",
             "datatype": "string"
           },
           "stance": "prefer",
           "strength": 0.9,
           "context": {
-            "domain": "software standards"
+            "domain": "personal knowledge management"
           },
-          "rationale": "Explicitly stated as a strategic preference.",
+          "rationale": "Explicitly stated as a portability preference.",
           "extensions": {}
         },
         "extensions": {}
@@ -409,15 +409,15 @@
         },
         "payload": {
           "target": {
-            "value": "open adoption of the continuity schema",
+            "value": "portable personal notes and recordings",
             "datatype": "string"
           },
           "stance": "prefer",
           "strength": 0.9,
           "context": {
-            "domain": "software standards"
+            "domain": "personal knowledge management"
           },
-          "rationale": "Explicitly stated as a strategic preference.",
+          "rationale": "Explicitly stated as a portability preference.",
           "extensions": {}
         },
         "extensions": {}
@@ -592,7 +592,7 @@
         "selector": {
           "kind": "text_span",
           "start": 0,
-          "end": 57
+          "end": 59
         },
         "payload": {},
         "extensions": {}
@@ -719,9 +719,9 @@
     ],
     "extensions": {},
     "signature_profile": "ed25519-jcs-v1",
-    "batch_hash": "sha256:0563af1df5bb8fc3712cc2c92eee10c513169d812a1e477f344794a618c03f5e",
-    "signature": "LZdiZJwrubfEcR1hYBLrC9pdSDsobPi_4fAKsrftSrz61tH2XK5vhCmY7oIDUSYDmJEMBj8iyuHpvFSGDKmbCA"
+    "batch_hash": "sha256:b60b6ed289babc9a42795f5cc8c7f238b3edcef8f5e9a98004b281f47f9b2342",
+    "signature": "EW5LH9sj4ptuMa_mTBCOQVWGba7U104_l7y_AgyTyJIpK4JU80LHpRgT1MRBaHDuIcoeQqfvUTyU-1J0I0tsAw"
   },
-  "expected_batch_hash": "sha256:0563af1df5bb8fc3712cc2c92eee10c513169d812a1e477f344794a618c03f5e",
+  "expected_batch_hash": "sha256:b60b6ed289babc9a42795f5cc8c7f238b3edcef8f5e9a98004b281f47f9b2342",
   "expected_signature_valid": true
 }

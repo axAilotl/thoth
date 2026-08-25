@@ -1,0 +1,11 @@
+{
+  "format": "ccf.verified-source-identity/0.2.0",
+  "archive_id": "urn:ccf:archive:914a6f7f-3e57-40a9-ae63-d01b7323d867",
+  "epoch_id": "urn:ccf:lineage:61217d14-5b9d-4a14-9e5a-f26b034645db",
+  "genesis_commit_hash": "sha256:dcdc8b668b9147fdb25427459613c7e577c3a8ebffb894f10e250d49acb3bace",
+  "head_commit_hash": "sha256:9aa22b97dac8cd0e56bd1eeb360d964b80197df9a9b4dcb14e60fe14ba3e94f9",
+  "head_sequence": "2",
+  "semantic_catalog_root": "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8",
+  "trusted_genesis_signer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+  "trusted_genesis_signer_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ"
+}

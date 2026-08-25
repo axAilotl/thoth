@@ -83,7 +83,7 @@ if suppression['receipt_structural_payload']['suppression_commitment']['suppress
     raise SystemExit('suppression receipt Blob reference mismatch')
 print('OK   canonical suppression fixture')
 
-ex=ROOT/'examples/thoth-capture'
+ex=ROOT/'examples/personal-archive'
 headers={}
 for kind in ['record','link','blob']:
     for hp in sorted(ex.glob(f'{kind}-*.header.json')):

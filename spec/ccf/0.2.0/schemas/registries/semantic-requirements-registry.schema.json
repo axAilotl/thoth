@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:registries.semantic-requirements-registry",
+  "title": "CCF Registered Semantic Requirements",
+  "type": "object",
+  "properties": {
+    "registry": {"const": "ccf.semantic-requirements/0.2.0"},
+    "base_registry_set": {"const": "ccf/0.1.2"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "resource_kind": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/resourceKind"},
+          "name": {"type": "string", "minLength": 1},
+          "version": {"type": "integer", "minimum": 1},
+          "minimum_level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+          "state_effects_level": {
+            "oneOf": [
+              {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+              {"type": "null"}
+            ]
+          },
+          "required_capabilities": {
+            "type": "array",
+            "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+            "uniqueItems": true
+          },
+          "semantic_pack": {
+            "oneOf": [
+              {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+              {"type": "null"}
+            ]
+          },
+          "below_minimum_behavior": {"const": "preserve_inert_or_refuse"}
+        },
+        "required": [
+          "resource_kind", "name", "version", "minimum_level", "state_effects_level",
+          "required_capabilities", "semantic_pack", "below_minimum_behavior"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["registry", "base_registry_set", "entries"],
+  "additionalProperties": false
+}

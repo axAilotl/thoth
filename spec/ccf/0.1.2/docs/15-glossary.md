@@ -20,7 +20,7 @@
 
 **Mindpack** — ZIP-compatible complete or partial CCF transfer container.
 
-**Person** — Continuity-bearing subject distinct from any Runtime.
+**Person** — Individual whose data is represented in an archive, distinct from the software Runtime that processes it.
 
 **Producer batch** — Offline-capable signed chain element containing stable object submissions.
 
