@@ -62,6 +62,7 @@ class Archive:
         salt_fn=None,
         package_root: str | Path | None = None,
         semantic_catalog_root: str | None = None,
+        active_profiles: list[str] | None = None,
     ) -> None:
         if parse_id(archive_id).kind != "archive":
             raise ArchiveError(f"archive_id must be an archive URN: {archive_id!r}")
@@ -74,6 +75,7 @@ class Archive:
         self.clock = clock
         self.package_root = Path(package_root) if package_root is not None else None
         self.semantic_catalog_root = semantic_catalog_root or catalog.root
+        self.active_profiles = list(active_profiles or DEFAULT_ACTIVE_PROFILES)
         from ccf.objects import new_salt
 
         self._salt_fn = salt_fn or new_salt
@@ -121,6 +123,7 @@ class Archive:
             clock=clock,
             salt_fn=salt_fn,
             package_root=package_root,
+            active_profiles=profiles,
         )
         from ccf.journal import build_commit_record
 
@@ -228,12 +231,12 @@ class Archive:
         with open_ccf_connection(settings) as conn:
             row = conn.execute(
                 """
-                SELECT archive_id, semantic_catalog_root FROM archive
+                SELECT archive_id, semantic_catalog_root, active_profiles FROM archive
                 """
             ).fetchone()
             if row is None:
                 raise ArchiveError("no CCF archive exists; run Archive.create first")
-            archive_id, semantic_catalog_root = row
+            archive_id, semantic_catalog_root, active_profiles = row
             if catalog.root != semantic_catalog_root:
                 raise ArchiveError(
                     "semantic catalog root mismatch: "
@@ -250,6 +253,7 @@ class Archive:
             salt_fn=salt_fn,
             package_root=package_root,
             semantic_catalog_root=semantic_catalog_root,
+            active_profiles=list(active_profiles),
         )
 
     # ------------------------------------------------------------------
@@ -691,6 +695,7 @@ class Archive:
             base_root=self.package_root,
             draft_root=self.draft_root(),
             base_catalog_root=self.semantic_catalog_root,
+            profiles=self.active_profiles,
         )
 
     def preview_capsule(self, capsule_dir: str | Path) -> dict:
@@ -717,6 +722,7 @@ class Archive:
             layered=layered,
             catalog_roots=(catalog.base_root, catalog.root),
             schemas=schemas,
+            profiles=self.active_profiles,
         )
         capsule = load_capsule(capsule_dir, schemas=schemas)
         verify_capsule(

@@ -14,6 +14,7 @@ from ccf.capsule import (
     Capsule,
     CapsuleError,
     SCHEMA_CAPSULE,
+    load_capsule,
     submission_hashes_for,
     _resolve_package_path,
 )
@@ -156,8 +157,6 @@ def verify_uplift_receipt(
                 )
             if not entry.get("producer_proof"):
                 raise ExchangeError("verified producer authentication has no retained proof")
-        if auth in {None, "verified"} and entry.get("producer_proof") is None and auth == "verified":
-            raise ExchangeError("verified producer authentication has no retained proof")
 
 
 def load_inventory(path: Path, *, schemas: SchemaSet, what: str) -> list[dict]:
@@ -172,13 +171,29 @@ def load_inventory(path: Path, *, schemas: SchemaSet, what: str) -> list[dict]:
     return entries
 
 
+def _load_source_dir(root: Path) -> Path:
+    """Resolve and verify the contained downgrade-source directory."""
+    source_dir = _secure_path(
+        root, "downgrade-source", must_exist=False, must_be_file=False
+    )
+    if not source_dir.exists():
+        raise ExchangeError(
+            "downgrade source directory missing: downgrade-source"
+        )
+    if not source_dir.is_dir():
+        raise ExchangeError(
+            "downgrade source path is not a directory: downgrade-source"
+        )
+    return source_dir
+
+
 def _load_export_capsule(
     root: Path,
     receipt: dict,
     *,
     layered: LayeredRegistries,
     schemas: SchemaSet,
-) -> None:
+) -> Capsule:
     """Verify the receipt-bound export Capsule manifest and physical files."""
     export_dir = _secure_path(
         root, "downgrade-export", must_exist=False, must_be_file=False
@@ -239,6 +254,8 @@ def _load_export_capsule(
                 f"downgrade export stream byte_length mismatch: {rel}"
             )
 
+    return load_capsule(export_dir, schemas=schemas)
+
 
 def verify_downgrade_receipt(
     receipt: dict,
@@ -283,6 +300,61 @@ def verify_downgrade_receipt(
             (entry["category"], entry["subject"]): entry["digest"] for entry in entries
         }
 
+    # Prove the source inventory completely covers the physical source package
+    # tree. The source directory is required (not optional), and a physical
+    # proof cannot be hidden from both inventory and omissions.
+    source_dir = _load_source_dir(root)
+    physical_source_inventory = {
+        subject.removeprefix("downgrade-source/")
+        for (category, subject) in inventories["source_inventory"]
+        if category != "submission" and subject.startswith("downgrade-source/")
+    }
+    actual_source_files = {
+        path.relative_to(source_dir).as_posix()
+        for path in source_dir.rglob("*")
+        if path.is_file()
+    }
+    if physical_source_inventory != actual_source_files:
+        raise ExchangeError(
+            "downgrade source inventory does not exactly cover physical source package"
+        )
+
+    # Bind the export inventory to the already verified export Capsule before
+    # any subtraction/omission arithmetic: logical submission entries must
+    # exactly cover the exported submissions (ID + JCS hash), and any
+    # non-submission entries must resolve inside downgrade-export and match
+    # actual exported material.
+    export_capsule = _load_export_capsule(
+        root, receipt, layered=layered, schemas=schemas
+    )
+    expected_logical_export = {
+        ("submission", f"submission:{submission['id']}"): submission_hash(submission)
+        for submission in export_capsule.submissions
+    }
+    actual_logical_export = {
+        key: digest
+        for key, digest in inventories["export_inventory"].items()
+        if key[0] == "submission"
+    }
+    if actual_logical_export != expected_logical_export:
+        raise ExchangeError(
+            "downgrade export inventory does not exactly cover exported submissions"
+        )
+
+    for (category, subject), digest in inventories["export_inventory"].items():
+        if category == "submission":
+            continue
+        if not subject.startswith("downgrade-export/"):
+            raise ExchangeError(
+                f"downgrade export inventory references outside export package: {subject}"
+            )
+        artifact_path = _secure_path(root, subject)
+        artifact = artifact_path.read_bytes()
+        if raw_digest(artifact) != digest:
+            raise ExchangeError(
+                f"downgrade export inventory artifact digest mismatch: {subject}"
+            )
+
     source_keys = set(inventories["source_inventory"])
     export_keys = set(inventories["export_inventory"])
     if not export_keys <= source_keys:
@@ -298,31 +370,6 @@ def verify_downgrade_receipt(
         raise ExchangeError(
             "downgrade omissions are not the exact source/export inventory difference"
         )
-
-    # Prove the source inventory completely covers the physical source package
-    # tree, and the export Capsule manifest completely covers the physical
-    # export tree. A physical proof cannot be hidden from both inventory and
-    # omissions.
-    source_dir = root / "downgrade-source"
-    if source_dir.is_dir():
-        physical_inventory = {
-            subject.removeprefix("downgrade-source/")
-            for (category, subject) in inventories["source_inventory"]
-            if category != "submission" and subject.startswith("downgrade-source/")
-        }
-        actual_files = {
-            path.relative_to(source_dir).as_posix()
-            for path in source_dir.rglob("*")
-            if path.is_file()
-        }
-        if physical_inventory != actual_files:
-            raise ExchangeError(
-                "downgrade source inventory does not exactly cover physical source package"
-            )
-
-    _load_export_capsule(
-        root, receipt, layered=layered, schemas=schemas
-    )
 
     for item in receipt["preserved_opaque"]:
         opaque_path = _secure_path(root, item["path"])

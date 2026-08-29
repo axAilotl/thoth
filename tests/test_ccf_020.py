@@ -634,6 +634,222 @@ def test_downgrade_receipt_rejects_missing_export_manifest(
         )
 
 
+def test_downgrade_rejects_invented_logical_submission(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """An invented submission entry added to both inventories must be rejected
+    because the bound export Capsule does not contain it.
+    """
+    invented_id = "urn:ccf:record:00000000-0000-4000-8000-000000000000"
+    invented_entry = {
+        "category": "submission",
+        "subject": f"submission:{invented_id}",
+        "digest": "sha256:" + "0" * 64,
+    }
+
+    def mutate(receipt, root):
+        for name, ref in (
+            ("downgrade-source-inventory.json", "source_inventory"),
+            ("downgrade-export-inventory.json", "export_inventory"),
+        ):
+            entries = json.loads((root / name).read_text())
+            entries.append(invented_entry)
+            encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+            (root / name).write_bytes(encoded)
+            receipt[ref]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade export inventory does not exactly cover exported submissions"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_missing_source_directory(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A receipt claiming a lossless downgrade with no downgrade-source/
+    directory and empty omissions must fail closed with zero source evidence.
+    """
+    def mutate(receipt, root):
+        single_entry = next(
+            entry
+            for entry in json.loads((root / "downgrade-export-inventory.json").read_text())
+            if entry["category"] == "submission"
+        )
+        for name, ref in (
+            ("downgrade-source-inventory.json", "source_inventory"),
+            ("downgrade-export-inventory.json", "export_inventory"),
+        ):
+            encoded = json.dumps([single_entry], indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+            (root / name).write_bytes(encoded)
+            receipt[ref]["digest"] = raw_digest(encoded)
+        shutil.rmtree(root / "downgrade-source")
+        receipt["losslessness"] = "lossless"
+        receipt["omissions"] = []
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade source directory missing"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_source_proof_copied_into_export_inventory(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A physical downgrade-source proof must not be copied into the export
+    inventory to hide an omission from both inventories.
+    """
+    def mutate(receipt, root):
+        source_proof = next(
+            entry
+            for entry in json.loads((root / "downgrade-source-inventory.json").read_text())
+            if entry["category"] != "submission" and entry["subject"].startswith("downgrade-source/")
+        )
+        entries = json.loads((root / "downgrade-export-inventory.json").read_text())
+        entries.append(source_proof)
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-export-inventory.json").write_bytes(encoded)
+        receipt["export_inventory"]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade export inventory references outside export package"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_symlink_source_directory(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A symlinked downgrade-source/ pointing outside the capsule root must be
+    rejected by the containment primitive.
+    """
+    def mutate(receipt, root):
+        external = tmp_path / "external-source"
+        shutil.copytree(root / "downgrade-source", external)
+        shutil.rmtree(root / "downgrade-source")
+        (root / "downgrade-source").symlink_to(external)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="path escapes root"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_mismatched_logical_submission_hash(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A logical submission entry in the export inventory with a mismatched
+    JCS submission hash must fail closed.
+    """
+    def mutate(receipt, root):
+        entries = json.loads((root / "downgrade-export-inventory.json").read_text())
+        for entry in entries:
+            if entry["category"] == "submission":
+                entry["digest"] = "sha256:" + "0" * 64
+                break
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-export-inventory.json").write_bytes(encoded)
+        receipt["export_inventory"]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade export inventory does not exactly cover exported submissions"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_archive_declaration_uses_pinned_active_profiles(
+    ccf_settings, tmp_path, ccf_package_root
+):
+    """Declaration and re-opened archive must use the archive row's pinned
+    active profiles, not DEFAULT_ACTIVE_PROFILES.
+    """
+    from tests.ccf_helpers import make_keypair
+
+    archive_key_path = tmp_path / "archive-ed25519.pem"
+    make_keypair(archive_key_path)
+    custom_profiles = list(DEFAULT_ACTIVE_PROFILES) + ["ccf-work-pack-0.1.2"]
+    archive = Archive.create(
+        ccf_settings,
+        package_root=ccf_package_root,
+        archive_key_path=archive_key_path,
+        active_profiles=custom_profiles,
+    )
+    assert archive.active_profiles == custom_profiles
+    declaration = archive.implementation_declaration()
+    assert "ccf-work-pack-v1" in declaration["capabilities"]
+    assert declaration["extensions"]["thoth.legacy_profiles"] == custom_profiles
+
+    opened = Archive.open(
+        ccf_settings,
+        package_root=ccf_package_root,
+        archive_key_path=archive_key_path,
+    )
+    assert opened.active_profiles == custom_profiles
+
+
+def test_verify_capsule_rejects_submissions_not_activated(
+    ccf_capsule_example, layered, layered_schemas
+):
+    """A submissions stream must use handling=activate; any other handling is
+    a schema/semantic violation.
+    """
+    capsule = load_capsule(ccf_capsule_example, schemas=layered_schemas)
+    for stream in capsule.streams:
+        if stream.content_role == "submissions":
+            stream.spec["handling"] = "preserve_inert"
+    with pytest.raises(CapsuleError, match="submissions stream must use handling=activate"):
+        verify_capsule(
+            capsule,
+            layered=layered,
+            schemas=layered_schemas,
+            recipient_level="ccf-exchange-v1",
+            recipient_capabilities=(),
+        )
+
+
+def test_write_capsule_rejects_schema_invalid_input_before_mkdir(
+    tmp_path, ccf_capsule_example, layered_schemas
+):
+    """write_capsule must schema-validate the input manifest before creating
+    the output directory.
+    """
+    source = load_capsule(ccf_capsule_example, schemas=layered_schemas)
+    manifest = dict(source.manifest)
+    del manifest["pack_id"]
+    out = tmp_path / "schema-invalid-out"
+    with pytest.raises(CapsuleError, match="input capsule manifest"):
+        write_capsule(
+            out,
+            manifest=manifest,
+            submission_streams={},
+            schemas=layered_schemas,
+        )
+    assert not out.exists()
+
+
 def test_downgrade_receipt_rejects_symlink_export_capsule(
     ccf_capsule_example, layered, layered_schemas, tmp_path
 ):

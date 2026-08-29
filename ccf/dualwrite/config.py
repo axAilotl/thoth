@@ -25,10 +25,6 @@ from ccf.db import (
 DEFAULT_PACKAGE_ROOT = (
     Path(__file__).resolve().parents[2] / "spec" / "ccf" / "0.1.2"
 )
-DEFAULT_DRAFT_ROOT = (
-    Path(__file__).resolve().parents[2] / "spec" / "ccf" / "0.2.0"
-)
-DEFAULT_DRAFT_ROOT_ENV = "THOTH_CCF_DRAFT_ROOT"
 
 DEFAULT_PACKAGE_ROOT_ENV = "THOTH_CCF_PACKAGE_ROOT"
 DEFAULT_ERROR_LOG_ENV = "THOTH_CCF_DUALWRITE_ERROR_LOG"

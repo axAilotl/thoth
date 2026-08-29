@@ -203,6 +203,10 @@ def verify_capsule(
             raise CapsuleError(
                 f"activate stream exceeds recipient: {stream.path}"
             )
+        if stream.content_role == "submissions" and stream.handling != "activate":
+            raise CapsuleError(
+                f"submissions stream must use handling=activate: {stream.path}"
+            )
         if stream.content_role == "submissions" and stream.handling == "activate":
             for value in stream.values:
                 if not isinstance(value, dict):
@@ -285,9 +289,14 @@ def write_capsule(
     """Write a Capsule directory, filling stream digests from the bytes written."""
     root = Path(out_dir)
 
-    # Validate every stream path for containment and duplicates before creating
-    # the output directory so an invalid escape leaves a previously absent
-    # ``out_dir`` absent.
+    # Validate the input manifest and every stream path for containment and
+    # duplicates before creating the output directory so an invalid manifest or
+    # escape leaves a previously absent ``out_dir`` absent.
+    if schemas is not None:
+        try:
+            schemas.validate(SCHEMA_CAPSULE, manifest, what="input capsule manifest")
+        except CcfSchemaError as exc:
+            raise CapsuleError(str(exc)) from exc
     seen_paths: set[str] = set()
     for spec in manifest["streams"]:
         rel = spec["path"]
