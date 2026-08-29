@@ -14,9 +14,15 @@ from ccf.capsule import (
     Capsule,
     CapsuleError,
     SCHEMA_CAPSULE,
+    _SUBMISSION_SCHEMAS,
     load_capsule,
     submission_hashes_for,
     _resolve_package_path,
+)
+from ccf.downgrade_source import (
+    SourcePackageError,
+    load_verified_source_package,
+    source_compartment_subject,
 )
 from ccf.hashing import submission_hash
 from ccf.ids import generate_id, parse_id
@@ -290,6 +296,14 @@ def verify_downgrade_receipt(
                 "submission:urn:ccf:"
             ):
                 continue
+            if name == "source_inventory" and not subject.startswith("downgrade-source/"):
+                raise ExchangeError(
+                    f"downgrade source inventory references outside source package: {subject}"
+                )
+            if name == "export_inventory" and not subject.startswith("downgrade-export/"):
+                raise ExchangeError(
+                    f"downgrade export inventory references outside export package: {subject}"
+                )
             artifact_path = _secure_path(root, subject)
             artifact = artifact_path.read_bytes()
             if raw_digest(artifact) != entry["digest"]:
@@ -300,10 +314,16 @@ def verify_downgrade_receipt(
             (entry["category"], entry["subject"]): entry["digest"] for entry in entries
         }
 
-    # Prove the source inventory completely covers the physical source package
-    # tree. The source directory is required (not optional), and a physical
-    # proof cannot be hidden from both inventory and omissions.
+    # Prove the source inventory completely covers a valid downgrade source
+    # package. The source directory is required (not optional), must contain a
+    # real Verified archive identity/commit chain/members/producer batch, and a
+    # physical proof cannot be hidden from both inventory and omissions.
     source_dir = _load_source_dir(root)
+    try:
+        source_package = load_verified_source_package(source_dir, schemas=schemas)
+    except SourcePackageError as exc:
+        raise ExchangeError(str(exc)) from exc
+
     physical_source_inventory = {
         subject.removeprefix("downgrade-source/")
         for (category, subject) in inventories["source_inventory"]
@@ -319,17 +339,39 @@ def verify_downgrade_receipt(
             "downgrade source inventory does not exactly cover physical source package"
         )
 
+    for commit in source_package["commits"]:
+        subject = source_compartment_subject(commit["record_id"], "structural")
+        if ("compartment", subject) not in inventories["source_inventory"]:
+            raise ExchangeError(
+                f"downgrade source inventory omits commit compartment for {commit['record_id']}"
+            )
+
     # Bind the export inventory to the already verified export Capsule before
     # any subtraction/omission arithmetic: logical submission entries must
-    # exactly cover the exported submissions (ID + JCS hash), and any
-    # non-submission entries must resolve inside downgrade-export and match
-    # actual exported material.
+    # exactly cover the exported submissions (ID + JCS hash), the export must
+    # contain exactly one submission stream, and every exported assertion must
+    # be an exact source producer-batch submission.
     export_capsule = _load_export_capsule(
         root, receipt, layered=layered, schemas=schemas
     )
+    submission_streams = [
+        stream for stream in export_capsule.streams if stream.content_role == "submissions"
+    ]
+    if len(submission_streams) != 1:
+        raise ExchangeError(
+            "downgrade export Capsule must contain exactly one submission stream"
+        )
+    exported_submissions = [
+        value for value in submission_streams[0].values if isinstance(value, dict)
+    ]
+    if not exported_submissions:
+        raise ExchangeError("downgrade export submission stream is empty")
+    if export_capsule.manifest["root_record_id"] != exported_submissions[0]["id"]:
+        raise ExchangeError("downgrade export root is not its selected source assertion")
+
     expected_logical_export = {
         ("submission", f"submission:{submission['id']}"): submission_hash(submission)
-        for submission in export_capsule.submissions
+        for submission in exported_submissions
     }
     actual_logical_export = {
         key: digest
@@ -341,13 +383,59 @@ def verify_downgrade_receipt(
             "downgrade export inventory does not exactly cover exported submissions"
         )
 
+    batch_by_id = {
+        submission["id"]: submission
+        for submission in source_package["batch_submissions"]
+    }
+    for submission in exported_submissions:
+        batch_submission = batch_by_id.get(submission["id"])
+        if batch_submission is None or batch_submission != submission:
+            raise ExchangeError(
+                "downgrade Exchange assertions are not exact source batch submissions"
+            )
+        schema_id = _SUBMISSION_SCHEMAS.get(submission["submission_kind"])
+        if schema_id is None:
+            raise ExchangeError(f"unknown submission kind: {submission['submission_kind']!r}")
+        try:
+            schemas.validate(schema_id, submission, what=f"downgrade export submission {submission['id']}")
+        except Exception as exc:
+            raise ExchangeError(str(exc)) from exc
+        try:
+            requirement = layered.requirement_for_submission(submission)
+        except Exception as exc:
+            raise ExchangeError(str(exc)) from exc
+        if requirement["minimum_level"] != "ccf-exchange-v1":
+            raise ExchangeError(
+                f"downgrade export activates {submission['id']} above Exchange level"
+            )
+
+        header = source_package["headers"][submission["id"]]
+        structural_subject = source_compartment_subject(submission["id"], "structural")
+        if ("compartment", structural_subject) not in inventories["source_inventory"]:
+            raise ExchangeError(
+                f"downgrade source inventory omits structural compartment for {submission['id']}"
+            )
+        if header.get("semantic_commitment") is not None:
+            semantic_subject = source_compartment_subject(submission["id"], "semantic")
+            if ("compartment", semantic_subject) not in inventories["source_inventory"]:
+                raise ExchangeError(
+                    f"downgrade source inventory omits semantic compartment for {submission['id']}"
+                )
+
+        origin = submission.get("origin")
+        if origin is not None:
+            row = source_package["origin_index"].get(submission["id"])
+            if row is None or any(
+                row[field] != origin[field]
+                for field in ("source_id", "native_id", "revision")
+            ):
+                raise ExchangeError(
+                    f"downgrade source origin tuple mismatch for {submission['id']}"
+                )
+
     for (category, subject), digest in inventories["export_inventory"].items():
         if category == "submission":
             continue
-        if not subject.startswith("downgrade-export/"):
-            raise ExchangeError(
-                f"downgrade export inventory references outside export package: {subject}"
-            )
         artifact_path = _secure_path(root, subject)
         artifact = artifact_path.read_bytes()
         if raw_digest(artifact) != digest:

@@ -438,7 +438,7 @@ def test_downgrade_receipt_rejects_artifact_subject_escape(
     root, receipt = _mutated_downgrade_example(
         ccf_capsule_example, tmp_path, mutate
     )
-    with pytest.raises(ExchangeError, match="path is not canonical relative POSIX"):
+    with pytest.raises(ExchangeError, match="downgrade source inventory references outside source package"):
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
@@ -774,6 +774,230 @@ def test_downgrade_rejects_mismatched_logical_submission_hash(
     )
     with pytest.raises(
         ExchangeError, match="downgrade export inventory does not exactly cover exported submissions"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_empty_source_with_logical_only_inventory(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """An empty recreated downgrade-source directory plus a logical-only
+    source inventory must not support a lossless downgrade claim.
+    """
+    def mutate(receipt, root):
+        entries = [
+            entry
+            for entry in json.loads((root / "downgrade-source-inventory.json").read_text())
+            if entry["category"] == "submission"
+        ]
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-source-inventory.json").write_bytes(encoded)
+        receipt["source_inventory"]["digest"] = raw_digest(encoded)
+        shutil.rmtree(root / "downgrade-source")
+        (root / "downgrade-source").mkdir()
+        receipt["losslessness"] = "lossless"
+        receipt["omissions"] = []
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="downgrade source identity missing"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_source_inventory_subject_outside_package(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A non-submission source-inventory subject outside downgrade-source/
+    must be rejected before any file outside the source package is trusted.
+    """
+    def mutate(receipt, root):
+        entries = json.loads((root / "downgrade-source-inventory.json").read_text())
+        for entry in entries:
+            if entry["category"] == "journal_proof" and entry["subject"].endswith("source-identity.json"):
+                entry["subject"] = "standalone-identity.json"
+                break
+        shutil.copy(root / "downgrade-source" / "source-identity.json", root / "standalone-identity.json")
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-source-inventory.json").write_bytes(encoded)
+        receipt["source_inventory"]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade source inventory references outside source package"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_modified_export_submission_not_source_batch(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """An export submission modified in the export stream, with its inventory
+    hash updated to match, must still be rejected because it is not an exact
+    source producer-batch submission.
+    """
+    def mutate(receipt, root):
+        stream_path = root / "downgrade-export" / "submissions" / "records.ndjson"
+        lines = stream_path.read_text().splitlines()
+        submission = json.loads(lines[0])
+        submission["payload"]["name"] = "tampered"
+        modified_line = json.dumps(submission, separators=(",", ":"), ensure_ascii=False)
+        modified_data = (modified_line + "\n").encode("utf-8")
+        stream_path.write_bytes(modified_data)
+
+        manifest = json.loads((root / "downgrade-export" / "manifest.json").read_text())
+        for spec in manifest["streams"]:
+            if spec["path"] == "submissions/records.ndjson":
+                spec["digest"] = raw_digest(modified_data)
+                spec["byte_length"] = str(len(modified_data))
+        (root / "downgrade-export" / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+
+        entries = json.loads((root / "downgrade-export-inventory.json").read_text())
+        for entry in entries:
+            if entry["category"] == "submission":
+                entry["digest"] = submission_hash(submission)
+                break
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-export-inventory.json").write_bytes(encoded)
+        receipt["export_inventory"]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade Exchange assertions are not exact source batch submissions"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_invalid_source_identity(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A corrupted source-identity document must break the source package binding.
+    """
+    def mutate(receipt, root):
+        identity_path = root / "downgrade-source" / "source-identity.json"
+        identity = json.loads(identity_path.read_text())
+        identity["format"] = "ccf.verified-source-identity/evil"
+        identity_path.write_text(
+            json.dumps(identity, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        entries = json.loads((root / "downgrade-source-inventory.json").read_text())
+        for entry in entries:
+            if entry["subject"].endswith("source-identity.json"):
+                entry["digest"] = raw_digest(identity_path.read_bytes())
+                break
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-source-inventory.json").write_bytes(encoded)
+        receipt["source_inventory"]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="downgrade source identity format mismatch"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_invalid_source_commit_chain(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A corrupted source commit chain must break the source package binding.
+    """
+    def mutate(receipt, root):
+        commits_path = root / "downgrade-source" / "integrity" / "commits.ndjson"
+        lines = commits_path.read_text().splitlines()
+        first = json.loads(lines[0])
+        first["sequence"] = "2"
+        new_lines = [json.dumps(first)] + lines[1:]
+        modified_data = "\n".join(new_lines).encode("utf-8") + b"\n"
+        commits_path.write_bytes(modified_data)
+        entries = json.loads((root / "downgrade-source-inventory.json").read_text())
+        for entry in entries:
+            if entry["subject"].endswith("commits.ndjson"):
+                entry["digest"] = raw_digest(modified_data)
+                break
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-source-inventory.json").write_bytes(encoded)
+        receipt["source_inventory"]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="downgrade source commit chain invalid"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_invalid_source_producer_batch(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A corrupted selected producer batch must break the source package binding.
+    """
+    def mutate(receipt, root):
+        batch_path = next((root / "downgrade-source" / "producer-batches").glob("*.json"))
+        batch = json.loads(batch_path.read_text())
+        batch["format"] = "ccf.producer-batch/evil"
+        batch_path.write_text(
+            json.dumps(batch, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        entries = json.loads((root / "downgrade-source-inventory.json").read_text())
+        for entry in entries:
+            if entry["subject"].startswith("downgrade-source/producer-batches/"):
+                entry["digest"] = raw_digest(batch_path.read_bytes())
+                break
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-source-inventory.json").write_bytes(encoded)
+        receipt["source_inventory"]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="downgrade source producer batch"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_missing_exported_compartment(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A required structural compartment for an exported source submission must
+    be present in the source inventory; removing it from disk and inventory
+    must fail closed.
+    """
+    def mutate(receipt, root):
+        comp_subject = "downgrade-source/compartments/records/b7972dfb-99c3-4376-897f-3c9f2848138b.structural.json"
+        comp_path = root / comp_subject
+        comp_path.unlink()
+        entries = [
+            entry
+            for entry in json.loads((root / "downgrade-source-inventory.json").read_text())
+            if entry["subject"] != comp_subject
+        ]
+        encoded = json.dumps(entries, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+        (root / "downgrade-source-inventory.json").write_bytes(encoded)
+        receipt["source_inventory"]["digest"] = raw_digest(encoded)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade source inventory omits structural compartment"
     ):
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
