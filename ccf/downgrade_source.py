@@ -11,12 +11,27 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ccf.hashing import producer_batch_hash
 from ccf.ids import parse_id
 from ccf.schemas import CcfSchemaError, SchemaSet
 from ccf.sync.packio import PackReader, load_pack_objects
-from ccf.sync.verify import PackVerificationError, verify_commit_chain
+from ccf.sync.verify import PackVerificationError, verify_commit_chain, verify_pack_object
 
 SCHEMA_PRODUCER_BATCH = "urn:ccf:schema:0.1.2:sync.producer-batch"
+
+# Required physical files in a downgrade source package, mirroring the
+# vendored 0.2.0 oracle in spec/ccf/0.2.0/tools/validate-exchange.py.
+_REQUIRED_SOURCE_FILES = frozenset(
+    {
+        "source-identity.json",
+        "objects/records.ndjson",
+        "objects/links.ndjson",
+        "objects/blobs.ndjson",
+        "integrity/commits.ndjson",
+        "integrity/members.ndjson",
+        "origin-index.ndjson",
+    }
+)
 
 _SOURCE_IDENTITY_FIELDS = {
     "format",
@@ -91,6 +106,10 @@ def _load_producer_batch(source_dir: Path, schemas: SchemaSet) -> dict:
         raise SourcePackageError(
             f"downgrade source producer batch is not a valid producer batch: {exc}"
         ) from exc
+    _require(
+        producer_batch_hash(batch) == batch["batch_hash"],
+        "downgrade source producer batch_hash does not match recomputed batch hash",
+    )
     return batch
 
 
@@ -112,6 +131,11 @@ def load_verified_source_package(
       - ``batch_submissions``: flattened list of batch submissions
     """
     identity = _load_identity(source_dir)
+
+    for rel in _REQUIRED_SOURCE_FILES:
+        path = source_dir / rel
+        if not path.is_file():
+            raise SourcePackageError(f"downgrade source required file missing: {rel}")
 
     try:
         with PackReader(source_dir) as reader:
@@ -159,6 +183,34 @@ def load_verified_source_package(
         chain["signer_public_key"] == identity["trusted_genesis_signer_public_key"],
         "downgrade source chain signer does not match trusted genesis signer",
     )
+    _require(
+        chain["signer_key_id"] == identity["trusted_genesis_signer_key_id"],
+        "downgrade source chain signer_key_id does not match trusted genesis signer key id",
+    )
+
+    # Compartment availability is derived from the pack contents, never from
+    # manifest declarations. Objects missing a committed compartment are
+    # "unavailable" for the exchange seam; every present compartment is still
+    # commitment-checked against the journal-authenticated header.
+    unavailable_ids: set[str] = set()
+    for obj in contents.objects.values():
+        header = obj.header
+        if obj.structural is None:
+            unavailable_ids.add(obj.object_id)
+        elif header.get("semantic_commitment") is not None and obj.semantic is None:
+            unavailable_ids.add(obj.object_id)
+
+    for obj in contents.objects.values():
+        try:
+            verify_pack_object(
+                obj,
+                blob_data=contents.blob_data.get(obj.object_id),
+                unavailable_ids=unavailable_ids,
+            )
+        except PackVerificationError as exc:
+            raise SourcePackageError(
+                f"downgrade source object {obj.object_id} failed verification: {exc}"
+            ) from exc
 
     origin_index = {}
     origin_path = source_dir / "origin-index.ndjson"
@@ -193,6 +245,8 @@ def load_verified_source_package(
         "origin_index": origin_index,
         "batch": batch,
         "batch_submissions": batch_submissions,
+        "unavailable_ids": unavailable_ids,
+        "blob_data": contents.blob_data,
     }
 
 

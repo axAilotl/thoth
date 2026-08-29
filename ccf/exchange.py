@@ -14,7 +14,6 @@ from ccf.capsule import (
     Capsule,
     CapsuleError,
     SCHEMA_CAPSULE,
-    _SUBMISSION_SCHEMAS,
     load_capsule,
     submission_hashes_for,
     _resolve_package_path,
@@ -26,7 +25,8 @@ from ccf.downgrade_source import (
 )
 from ccf.hashing import submission_hash
 from ccf.ids import generate_id, parse_id
-from ccf.layered import LayeredRegistries, raw_digest
+from ccf.layered import LayeredError, LayeredRegistries, raw_digest
+from ccf.sync.verify import PackVerificationError, verify_pack_object
 from ccf.objects import now_timestamp
 from ccf.schemas import SchemaSet
 
@@ -346,11 +346,32 @@ def verify_downgrade_receipt(
                 f"downgrade source inventory omits commit compartment for {commit['record_id']}"
             )
 
+    # Every logical source submission entry must be an exact selected
+    # producer-batch submission (a subset is allowed because the fixture only
+    # inventories selected/exported assertions).
+    batch_by_id = {
+        submission["id"]: submission
+        for submission in source_package["batch_submissions"]
+    }
+    for (category, subject), digest in inventories["source_inventory"].items():
+        if category == "submission" and subject.startswith("submission:"):
+            submission_id = subject.removeprefix("submission:")
+            batch_submission = batch_by_id.get(submission_id)
+            if batch_submission is None:
+                raise ExchangeError(
+                    f"downgrade source inventory submission is not a selected batch submission: {submission_id}"
+                )
+            if submission_hash(batch_submission) != digest:
+                raise ExchangeError(
+                    f"downgrade source inventory submission hash mismatch: {submission_id}"
+                )
+
     # Bind the export inventory to the already verified export Capsule before
     # any subtraction/omission arithmetic: logical submission entries must
     # exactly cover the exported submissions (ID + JCS hash), the export must
     # contain exactly one submission stream, and every exported assertion must
-    # be an exact source producer-batch submission.
+    # be an exact source producer-batch submission bound to its canonical
+    # journal-authenticated object.
     export_capsule = _load_export_capsule(
         root, receipt, layered=layered, schemas=schemas
     )
@@ -361,9 +382,7 @@ def verify_downgrade_receipt(
         raise ExchangeError(
             "downgrade export Capsule must contain exactly one submission stream"
         )
-    exported_submissions = [
-        value for value in submission_streams[0].values if isinstance(value, dict)
-    ]
+    exported_submissions = submission_streams[0].values
     if not exported_submissions:
         raise ExchangeError("downgrade export submission stream is empty")
     if export_capsule.manifest["root_record_id"] != exported_submissions[0]["id"]:
@@ -383,30 +402,48 @@ def verify_downgrade_receipt(
             "downgrade export inventory does not exactly cover exported submissions"
         )
 
-    batch_by_id = {
-        submission["id"]: submission
-        for submission in source_package["batch_submissions"]
-    }
     for submission in exported_submissions:
         batch_submission = batch_by_id.get(submission["id"])
         if batch_submission is None or batch_submission != submission:
             raise ExchangeError(
                 "downgrade Exchange assertions are not exact source batch submissions"
             )
-        schema_id = _SUBMISSION_SCHEMAS.get(submission["submission_kind"])
-        if schema_id is None:
-            raise ExchangeError(f"unknown submission kind: {submission['submission_kind']!r}")
-        try:
-            schemas.validate(schema_id, submission, what=f"downgrade export submission {submission['id']}")
-        except Exception as exc:
-            raise ExchangeError(str(exc)) from exc
         try:
             requirement = layered.requirement_for_submission(submission)
-        except Exception as exc:
+        except LayeredError as exc:
             raise ExchangeError(str(exc)) from exc
         if requirement["minimum_level"] != "ccf-exchange-v1":
             raise ExchangeError(
                 f"downgrade export activates {submission['id']} above Exchange level"
+            )
+
+        object_id = submission["id"]
+        if object_id in source_package["unavailable_ids"]:
+            raise ExchangeError(
+                f"downgrade export submission is not fully available in source package: {object_id}"
+            )
+        source_obj = source_package["objects"][object_id]
+        try:
+            verify_pack_object(
+                source_obj,
+                blob_data=source_package["blob_data"].get(object_id),
+            )
+        except PackVerificationError as exc:
+            raise ExchangeError(
+                f"downgrade export submission source object verification failed: {exc}"
+            ) from exc
+
+        semantic_content = (source_obj.semantic or {}).get("content") or {}
+        producer_evidence = semantic_content.get("producer_evidence")
+        expected_evidence = {
+            "batch_id": source_package["batch"]["batch_id"],
+            "credential_id": source_package["batch"]["credential_id"],
+            "producer_sequence": source_package["batch"]["producer_sequence"],
+            "submission_hash": submission_hash(batch_submission),
+        }
+        if producer_evidence != expected_evidence:
+            raise ExchangeError(
+                f"downgrade export submission source object producer evidence mismatch: {object_id}"
             )
 
         header = source_package["headers"][submission["id"]]
