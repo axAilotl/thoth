@@ -632,3 +632,24 @@ def test_downgrade_receipt_rejects_missing_export_manifest(
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
+
+
+def test_downgrade_receipt_rejects_symlink_export_capsule(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A symlinked downgrade-export/ that points outside the capsule root must
+    be rejected by the containment primitive before any file is read outside.
+    """
+    def mutate(receipt, root):
+        external = tmp_path / "external-export"
+        shutil.copytree(root / "downgrade-export", external)
+        shutil.rmtree(root / "downgrade-export")
+        (root / "downgrade-export").symlink_to(external)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="path escapes root"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )

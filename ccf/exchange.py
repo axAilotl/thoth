@@ -51,10 +51,14 @@ def _kind_of(object_id: str) -> str:
     return parse_id(object_id).kind
 
 
-def _secure_path(root: Path, rel: str, *, must_exist: bool = True) -> Path:
+def _secure_path(
+    root: Path, rel: str, *, must_exist: bool = True, must_be_file: bool = True
+) -> Path:
     """Resolve ``rel`` under ``root`` and re-raise containment errors as ExchangeError."""
     try:
-        return _resolve_package_path(root, rel, must_exist=must_exist, must_be_file=True)
+        return _resolve_package_path(
+            root, rel, must_exist=must_exist, must_be_file=must_be_file
+        )
     except CapsuleError as exc:
         raise ExchangeError(str(exc)) from exc
 
@@ -176,13 +180,21 @@ def _load_export_capsule(
     schemas: SchemaSet,
 ) -> None:
     """Verify the receipt-bound export Capsule manifest and physical files."""
-    export_dir = root / "downgrade-export"
-    if not export_dir.is_dir():
+    export_dir = _secure_path(
+        root, "downgrade-export", must_exist=False, must_be_file=False
+    )
+    if not export_dir.exists():
         raise ExchangeError(
             "downgrade export capsule directory missing: downgrade-export"
         )
+    if not export_dir.is_dir():
+        raise ExchangeError(
+            "downgrade export capsule path is not a directory: downgrade-export"
+        )
 
-    manifest_path = export_dir / "manifest.json"
+    manifest_path = _secure_path(
+        export_dir, "manifest.json", must_exist=False, must_be_file=False
+    )
     if not manifest_path.is_file():
         raise ExchangeError(
             "downgrade export capsule manifest missing: downgrade-export/manifest.json"
