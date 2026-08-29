@@ -178,9 +178,15 @@ def _load_export_capsule(
     """Verify the receipt-bound export Capsule manifest and physical files."""
     export_dir = root / "downgrade-export"
     if not export_dir.is_dir():
-        return
+        raise ExchangeError(
+            "downgrade export capsule directory missing: downgrade-export"
+        )
 
-    manifest_path = _secure_path(export_dir, "manifest.json")
+    manifest_path = export_dir / "manifest.json"
+    if not manifest_path.is_file():
+        raise ExchangeError(
+            "downgrade export capsule manifest missing: downgrade-export/manifest.json"
+        )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     schemas.validate(SCHEMA_CAPSULE, manifest, what="downgrade export capsule manifest")
     layered.level(manifest["level"])

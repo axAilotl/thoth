@@ -407,7 +407,7 @@ def test_downgrade_receipt_rejects_inventory_path_escape(
     root, receipt = _mutated_downgrade_example(
         ccf_capsule_example, tmp_path, mutate
     )
-    with pytest.raises(ExchangeError, match="path is not normalized"):
+    with pytest.raises(ExchangeError, match="path is not canonical relative POSIX"):
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
@@ -438,7 +438,7 @@ def test_downgrade_receipt_rejects_artifact_subject_escape(
     root, receipt = _mutated_downgrade_example(
         ccf_capsule_example, tmp_path, mutate
     )
-    with pytest.raises(ExchangeError, match="path is not normalized"):
+    with pytest.raises(ExchangeError, match="path is not canonical relative POSIX"):
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
@@ -530,7 +530,8 @@ def test_write_capsule_rejects_escape_before_write(
     tmp_path, ccf_capsule_example, layered_schemas
 ):
     """write_capsule must validate stream paths before any filesystem write so
-    a ``../`` path cannot create a partial out-of-root file.
+    a ``../`` path cannot create a partial out-of-root file or the output
+    directory itself.
     """
     source = load_capsule(ccf_capsule_example, schemas=layered_schemas)
     manifest = dict(source.manifest)
@@ -550,12 +551,84 @@ def test_write_capsule_rejects_escape_before_write(
         }
     ]
     out = tmp_path / "escape-attempt"
-    out.mkdir()
     escaped = tmp_path / "escaped.ndjson"
-    with pytest.raises(CapsuleError, match="path is not normalized"):
+    with pytest.raises(CapsuleError, match="path is not canonical relative POSIX"):
         write_capsule(
             out,
             manifest=manifest,
             submission_streams={"../escaped.ndjson": []},
         )
     assert not escaped.exists()
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "../escaped.ndjson",
+        "a/./b.ndjson",
+        "a//b.ndjson",
+        "./a.ndjson",
+        "a/b/",
+        "/absolute.ndjson",
+    ],
+)
+def test_resolve_package_path_rejects_non_canonical_paths(bad_path, tmp_path):
+    from ccf.capsule import _resolve_package_path
+
+    root = tmp_path / "capsule"
+    root.mkdir()
+    with pytest.raises(CapsuleError, match="path is not canonical relative POSIX"):
+        _resolve_package_path(root, bad_path, must_exist=False, must_be_file=False)
+
+
+@pytest.mark.parametrize(
+    "good_path",
+    ["a.ndjson", "a/b.ndjson", "submissions/records.ndjson"],
+)
+def test_resolve_package_path_accepts_canonical_paths(good_path, tmp_path):
+    from ccf.capsule import _resolve_package_path
+
+    root = tmp_path / "capsule"
+    root.mkdir()
+    resolved = _resolve_package_path(
+        root, good_path, must_exist=False, must_be_file=False
+    )
+    assert resolved == root / good_path
+
+
+def test_downgrade_receipt_rejects_missing_export_capsule(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A downgrade receipt that declares export_pack_id must bind a physical
+    export Capsule; absence of downgrade-export/ must fail closed.
+    """
+    def mutate(receipt, root):
+        shutil.rmtree(root / "downgrade-export")
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade export capsule directory missing"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_receipt_rejects_missing_export_manifest(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    def mutate(receipt, root):
+        (root / "downgrade-export" / "manifest.json").unlink()
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade export capsule manifest missing"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )

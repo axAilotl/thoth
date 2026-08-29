@@ -95,6 +95,21 @@ class Capsule:
         return items
 
 
+def _is_canonical_relative_posix(rel: str) -> bool:
+    """True iff ``rel`` is a non-empty, relative, normalized POSIX path.
+
+    Rejects absolute paths, dot-dot traversal, empty segments (``a//b``),
+    and ``.`` segments (``a/./b``, ``./a``). Trailing slashes are also
+    rejected because they produce empty final segments.
+    """
+    if not rel or rel.startswith("/"):
+        return False
+    parts = rel.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        return False
+    return True
+
+
 def _resolve_package_path(
     root: Path,
     rel: str,
@@ -105,15 +120,12 @@ def _resolve_package_path(
     """Resolve ``rel`` under ``root`` with fail-closed containment.
 
     Rejects absolute paths, dot-dot traversal, and non-normalized paths
-    (empty parts or ``.`` parts). Resolves symlinks and proves the result
+    (empty or ``.`` segments). Resolves symlinks and proves the result
     stays inside ``root``. When ``must_exist`` is true the path must exist;
     when ``must_be_file`` is true it must be a regular file.
     """
-    if rel.startswith("/"):
-        raise CapsuleError(f"path is absolute: {rel!r}")
-    parts = Path(rel).parts
-    if not parts or any(part in {".", ".."} for part in parts):
-        raise CapsuleError(f"path is not normalized: {rel!r}")
+    if not _is_canonical_relative_posix(rel):
+        raise CapsuleError(f"path is not canonical relative POSIX: {rel!r}")
     resolved = (root / rel).resolve()
     root_resolved = root.resolve()
     if root_resolved not in resolved.parents and resolved != root_resolved:
@@ -272,11 +284,10 @@ def write_capsule(
 ) -> Capsule:
     """Write a Capsule directory, filling stream digests from the bytes written."""
     root = Path(out_dir)
-    root.mkdir(parents=True, exist_ok=True)
 
-    # Validate every stream path for containment and duplicates before any
-    # filesystem write so a malformed manifest cannot create partial out-of-root
-    # files (e.g. ``../escaped.ndjson``).
+    # Validate every stream path for containment and duplicates before creating
+    # the output directory so an invalid escape leaves a previously absent
+    # ``out_dir`` absent.
     seen_paths: set[str] = set()
     for spec in manifest["streams"]:
         rel = spec["path"]
@@ -293,6 +304,7 @@ def write_capsule(
         else:
             raise CapsuleError(f"write_capsule does not emit {spec['content_role']}")
 
+    root.mkdir(parents=True, exist_ok=True)
     streams = []
     for spec in manifest["streams"]:
         rel = spec["path"]
