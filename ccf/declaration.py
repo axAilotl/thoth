@@ -111,11 +111,22 @@ def load_thoth_declaration(
     base_root: str | Path,
     draft_root: str | Path,
     profiles: list[str] | None = None,
+    base_catalog_root: str | None = None,
 ) -> dict:
-    """Load pinned catalogs and emit Thoth's 0.2.0 declaration."""
+    """Load pinned catalogs and emit Thoth's 0.2.0 declaration.
+
+    When ``base_catalog_root`` is supplied, the loaded 0.1.2 catalog must
+    exactly equal it; this lets an opened archive publish only its genesis-
+    pinned root instead of whatever package root happens to be on disk.
+    """
     from ccf.catalog import LayeredCatalog
 
     catalog = LayeredCatalog.load(draft_root, base_root)
+    if base_catalog_root is not None and catalog.base_root != base_catalog_root:
+        raise LayeredError(
+            "declaration base catalog root mismatch: "
+            f"loaded {catalog.base_root} != pinned {base_catalog_root}"
+        )
     layered = LayeredRegistries.load(draft_root)
     schemas = SchemaSet.load_layered(base_root, draft_root)
     return build_thoth_declaration(

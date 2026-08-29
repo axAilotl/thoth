@@ -95,6 +95,36 @@ class Capsule:
         return items
 
 
+def _resolve_package_path(
+    root: Path,
+    rel: str,
+    *,
+    must_exist: bool = True,
+    must_be_file: bool = True,
+) -> Path:
+    """Resolve ``rel`` under ``root`` with fail-closed containment.
+
+    Rejects absolute paths, dot-dot traversal, and non-normalized paths
+    (empty parts or ``.`` parts). Resolves symlinks and proves the result
+    stays inside ``root``. When ``must_exist`` is true the path must exist;
+    when ``must_be_file`` is true it must be a regular file.
+    """
+    if rel.startswith("/"):
+        raise CapsuleError(f"path is absolute: {rel!r}")
+    parts = Path(rel).parts
+    if not parts or any(part in {".", ".."} for part in parts):
+        raise CapsuleError(f"path is not normalized: {rel!r}")
+    resolved = (root / rel).resolve()
+    root_resolved = root.resolve()
+    if root_resolved not in resolved.parents and resolved != root_resolved:
+        raise CapsuleError(f"path escapes root: {rel!r}")
+    if must_exist and not resolved.exists():
+        raise CapsuleError(f"path does not exist: {rel!r}")
+    if must_be_file and not resolved.is_file():
+        raise CapsuleError(f"path is not a file: {rel!r}")
+    return resolved
+
+
 def load_capsule(path: str | Path, *, schemas: SchemaSet | None = None) -> Capsule:
     """Load a Capsule directory and verify every stream digest and length."""
     root = Path(path)
@@ -117,13 +147,7 @@ def load_capsule(path: str | Path, *, schemas: SchemaSet | None = None) -> Capsu
     streams: list[CapsuleStream] = []
     for spec in manifest["streams"]:
         rel = spec["path"]
-        if rel.startswith("/") or any(part == ".." for part in Path(rel).parts):
-            raise CapsuleError(f"capsule stream path escapes root: {rel!r}")
-        stream_path = (root / rel).resolve()
-        if root.resolve() not in stream_path.parents and stream_path != root.resolve():
-            raise CapsuleError(f"capsule stream path escapes root: {rel!r}")
-        if not stream_path.is_file():
-            raise CapsuleError(f"capsule stream missing: {rel}")
+        stream_path = _resolve_package_path(root, rel)
         data = stream_path.read_bytes()
         if raw_digest(data) != spec["digest"]:
             raise CapsuleError(f"capsule stream digest mismatch: {rel}")
@@ -249,6 +273,26 @@ def write_capsule(
     """Write a Capsule directory, filling stream digests from the bytes written."""
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
+
+    # Validate every stream path for containment and duplicates before any
+    # filesystem write so a malformed manifest cannot create partial out-of-root
+    # files (e.g. ``../escaped.ndjson``).
+    seen_paths: set[str] = set()
+    for spec in manifest["streams"]:
+        rel = spec["path"]
+        if rel in seen_paths:
+            raise CapsuleError(f"duplicate capsule stream path: {rel!r}")
+        seen_paths.add(rel)
+        _resolve_package_path(root, rel, must_exist=False, must_be_file=False)
+        if spec["content_role"] == "submissions":
+            if rel not in submission_streams:
+                raise CapsuleError(f"missing submission stream values: {rel!r}")
+        elif spec["handling"] == "preserve_opaque":
+            if opaque_streams is None or rel not in opaque_streams:
+                raise CapsuleError(f"missing opaque stream bytes: {rel}")
+        else:
+            raise CapsuleError(f"write_capsule does not emit {spec['content_role']}")
+
     streams = []
     for spec in manifest["streams"]:
         rel = spec["path"]
@@ -257,13 +301,9 @@ def write_capsule(
             values = submission_streams[rel]
             data = _write_ndjson(path, values)
         elif spec["handling"] == "preserve_opaque":
-            if opaque_streams is None or rel not in opaque_streams:
-                raise CapsuleError(f"missing opaque stream bytes: {rel}")
             data = opaque_streams[rel]
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-        else:
-            raise CapsuleError(f"write_capsule does not emit {spec['content_role']}")
         filled = dict(spec)
         filled["digest"] = raw_digest(data)
         filled["byte_length"] = str(len(data))

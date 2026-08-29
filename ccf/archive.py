@@ -61,6 +61,7 @@ class Archive:
         clock=now_timestamp,
         salt_fn=None,
         package_root: str | Path | None = None,
+        semantic_catalog_root: str | None = None,
     ) -> None:
         if parse_id(archive_id).kind != "archive":
             raise ArchiveError(f"archive_id must be an archive URN: {archive_id!r}")
@@ -72,6 +73,7 @@ class Archive:
         self._signer = signer
         self.clock = clock
         self.package_root = Path(package_root) if package_root is not None else None
+        self.semantic_catalog_root = semantic_catalog_root or catalog.root
         from ccf.objects import new_salt
 
         self._salt_fn = salt_fn or new_salt
@@ -212,18 +214,34 @@ class Archive:
         clock=now_timestamp,
         salt_fn=None,
     ) -> "Archive":
-        """Open the single existing archive; fail closed if absent."""
+        """Open the single existing archive; fail closed if absent.
+
+        The loaded semantic catalog must exactly match the root pinned at
+        genesis. After a vendored authority revision, opening against the
+        current package without this check would let the archive advertise a
+        newer root while committing objects under the old pinned semantics.
+        """
         catalog = SemanticCatalog.load(package_root)
         registries = PinnedRegistries.load(package_root, catalog)
         schemas = SchemaSet.load(package_root)
         signer = load_signing_key(archive_key_path)
         with open_ccf_connection(settings) as conn:
-            row = conn.execute("SELECT archive_id FROM archive").fetchone()
+            row = conn.execute(
+                """
+                SELECT archive_id, semantic_catalog_root FROM archive
+                """
+            ).fetchone()
             if row is None:
                 raise ArchiveError("no CCF archive exists; run Archive.create first")
+            archive_id, semantic_catalog_root = row
+            if catalog.root != semantic_catalog_root:
+                raise ArchiveError(
+                    "semantic catalog root mismatch: "
+                    f"loaded {catalog.root} != pinned {semantic_catalog_root}"
+                )
         return cls(
             settings=settings,
-            archive_id=row[0],
+            archive_id=archive_id,
             catalog=catalog,
             registries=registries,
             schemas=schemas,
@@ -231,6 +249,7 @@ class Archive:
             clock=clock,
             salt_fn=salt_fn,
             package_root=package_root,
+            semantic_catalog_root=semantic_catalog_root,
         )
 
     # ------------------------------------------------------------------
@@ -671,11 +690,13 @@ class Archive:
         return load_thoth_declaration(
             base_root=self.package_root,
             draft_root=self.draft_root(),
+            base_catalog_root=self.semantic_catalog_root,
         )
 
     def preview_capsule(self, capsule_dir: str | Path) -> dict:
         """Validate a Capsule against this archive's declaration and emit pending uplift."""
         from ccf.capsule import load_capsule, verify_capsule
+        from ccf.catalog import LayeredCatalog
         from ccf.declaration import build_thoth_declaration
         from ccf.exchange import build_pending_uplift, verify_uplift_receipt
         from ccf.layered import LayeredRegistries
@@ -684,11 +705,17 @@ class Archive:
         if self.package_root is None:
             raise ArchiveError("archive has no package_root; cannot preview a Capsule")
         draft = self.draft_root()
+        catalog = LayeredCatalog.load(draft, self.package_root)
+        if catalog.base_root != self.semantic_catalog_root:
+            raise ArchiveError(
+                "preview catalog root mismatch: "
+                f"loaded {catalog.base_root} != pinned {self.semantic_catalog_root}"
+            )
         layered = LayeredRegistries.load(draft)
         schemas = SchemaSet.load_layered(self.package_root, draft)
         declaration = build_thoth_declaration(
             layered=layered,
-            catalog_roots=(self.catalog.root,),
+            catalog_roots=(catalog.base_root, catalog.root),
             schemas=schemas,
         )
         capsule = load_capsule(capsule_dir, schemas=schemas)

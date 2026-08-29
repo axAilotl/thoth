@@ -7,11 +7,13 @@ declaration, Capsule, receipt, and catalog-pin surfaces.
 from __future__ import annotations
 
 import json
+import shutil
+from pathlib import Path
 
 import pytest
 
 from ccf import CCF_LAYER, CCF_LEVEL, CCF_SPEC, CCF_VERSION
-from ccf.archive import DEFAULT_ACTIVE_PROFILES
+from ccf.archive import Archive, ArchiveError, DEFAULT_ACTIVE_PROFILES
 from ccf.catalog import LayeredCatalog, SemanticCatalog
 from ccf.capsule import CapsuleError, load_capsule, verify_capsule, write_capsule
 from ccf.declaration import (
@@ -27,7 +29,7 @@ from ccf.exchange import (
     verify_uplift_receipt,
 )
 from ccf.hashing import submission_hash
-from ccf.layered import LayeredError, LayeredRegistries
+from ccf.layered import LayeredError, LayeredRegistries, raw_digest
 from ccf.schemas import SchemaSet, is_ccf_uint64
 
 
@@ -336,3 +338,224 @@ def test_archive_declaration_and_capsule_preview(
         entry["producer_authentication"] == "absent"
         for entry in preview["uplift"]["objects"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for thoth-h0f.1 review blockers
+# ---------------------------------------------------------------------------
+
+
+def _copy_capsule_example(source: Path, dest: Path) -> None:
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(source, dest)
+
+
+def test_archive_open_rejects_mismatched_catalog_root(
+    ccf_settings, tmp_path, ccf_package_root, monkeypatch
+):
+    """An archive opened against a current package whose root differs from the
+    genesis-pinned root must fail closed instead of silently adopting the new
+    semantics.
+    """
+    from tests.ccf_helpers import make_rig
+
+    rig = make_rig(ccf_settings, tmp_path, ccf_package_root)
+    real_catalog = SemanticCatalog.load(ccf_package_root)
+    fake_catalog = SemanticCatalog(dict(real_catalog.document), entries_verified=True)
+    fake_catalog.root = "sha256:" + "0" * 64
+    monkeypatch.setattr(SemanticCatalog, "load", lambda package_root: fake_catalog)
+    with pytest.raises(ArchiveError, match="semantic catalog root mismatch"):
+        Archive.open(
+            ccf_settings,
+            package_root=ccf_package_root,
+            archive_key_path=rig.archive_key_path,
+        )
+
+
+def test_archive_declaration_uses_pinned_catalog_root(
+    ccf_settings, tmp_path, ccf_package_root
+):
+    """The implementation declaration must publish the archive's pinned
+    semantic-catalog root, not merely whatever root is on disk.
+    """
+    from tests.ccf_helpers import make_rig
+
+    rig = make_rig(ccf_settings, tmp_path, ccf_package_root)
+    declaration = rig.archive.implementation_declaration()
+    assert rig.archive.semantic_catalog_root in declaration["semantic_catalog_roots"]
+
+
+def _mutated_downgrade_example(source: Path, tmp_path: Path, mutate):
+    root = tmp_path / "mutated-downgrade"
+    _copy_capsule_example(source, root)
+    receipt = json.loads((root / "downgrade-receipt.json").read_text())
+    mutate(receipt, root)
+    (root / "downgrade-receipt.json").write_text(
+        json.dumps(receipt, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return root, receipt
+
+
+def test_downgrade_receipt_rejects_inventory_path_escape(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    def mutate(receipt, root):
+        receipt["source_inventory"]["path"] = "../evil-inventory.json"
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="path is not normalized"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_receipt_rejects_artifact_subject_escape(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    def mutate(receipt, root):
+        bad_subject = "../downgrade-source/source-identity.json"
+        for entry in receipt["omissions"]:
+            if entry["subject"].endswith("source-identity.json"):
+                entry["subject"] = bad_subject
+                break
+        entries = json.loads((root / "downgrade-source-inventory.json").read_text())
+        for entry in entries:
+            if entry["subject"].endswith("source-identity.json"):
+                entry["subject"] = bad_subject
+                break
+        modified = json.dumps(entries, indent=2, ensure_ascii=False) + "\n"
+        (root / "downgrade-source-inventory.json").write_text(
+            modified, encoding="utf-8"
+        )
+        receipt["source_inventory"]["digest"] = raw_digest(
+            modified.encode("utf-8")
+        )
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="path is not normalized"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_receipt_rejects_symlink_escape(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    def mutate(receipt, root):
+        target = tmp_path / "outside-secret.json"
+        target.write_text("{}\n", encoding="utf-8")
+        link = root / "symlink-inventory.json"
+        link.symlink_to(target)
+        receipt["source_inventory"]["path"] = "symlink-inventory.json"
+        receipt["source_inventory"]["digest"] = raw_digest(target.read_bytes())
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="path escapes root"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_receipt_rejects_directory_where_file_expected(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    def mutate(receipt, root):
+        inventory_path = root / "downgrade-source-inventory.json"
+        inventory_path.unlink()
+        inventory_path.mkdir()
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="path is not a file"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_receipt_rejects_hidden_source_file(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A physical proof hidden under downgrade-source/ must be caught by the
+    source-inventory coverage check; it cannot be omitted from both inventory
+    and receipt omissions.
+    """
+    def mutate(receipt, root):
+        (root / "downgrade-source" / "hidden-proof.json").write_text(
+            "{}", encoding="utf-8"
+        )
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="source inventory does not exactly cover"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_receipt_rejects_hidden_export_file(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A hidden file in the export Capsule must be caught by manifest/physical
+    coverage, not silently ignored.
+    """
+    def mutate(receipt, root):
+        (root / "downgrade-export" / "hidden-proof.json").write_text(
+            "{}", encoding="utf-8"
+        )
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="unmanifested or missing files"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_write_capsule_rejects_escape_before_write(
+    tmp_path, ccf_capsule_example, layered_schemas
+):
+    """write_capsule must validate stream paths before any filesystem write so
+    a ``../`` path cannot create a partial out-of-root file.
+    """
+    source = load_capsule(ccf_capsule_example, schemas=layered_schemas)
+    manifest = dict(source.manifest)
+    manifest["streams"] = [
+        {
+            "path": "../escaped.ndjson",
+            "content_role": "submissions",
+            "handling": "activate",
+            "media_type": "application/x-ndjson",
+            "activation_requirements": {
+                "minimum_level": "ccf-exchange-v1",
+                "capabilities": [],
+            },
+            "digest": "sha256:" + "0" * 64,
+            "byte_length": "0",
+            "required": True,
+        }
+    ]
+    out = tmp_path / "escape-attempt"
+    out.mkdir()
+    escaped = tmp_path / "escaped.ndjson"
+    with pytest.raises(CapsuleError, match="path is not normalized"):
+        write_capsule(
+            out,
+            manifest=manifest,
+            submission_streams={"../escaped.ndjson": []},
+        )
+    assert not escaped.exists()

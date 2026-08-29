@@ -10,7 +10,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ccf.capsule import Capsule, CapsuleError, submission_hashes_for
+from ccf.capsule import (
+    Capsule,
+    CapsuleError,
+    SCHEMA_CAPSULE,
+    submission_hashes_for,
+    _resolve_package_path,
+)
 from ccf.hashing import submission_hash
 from ccf.ids import generate_id, parse_id
 from ccf.layered import LayeredRegistries, raw_digest
@@ -43,6 +49,14 @@ class ExchangeError(ValueError):
 
 def _kind_of(object_id: str) -> str:
     return parse_id(object_id).kind
+
+
+def _secure_path(root: Path, rel: str, *, must_exist: bool = True) -> Path:
+    """Resolve ``rel`` under ``root`` and re-raise containment errors as ExchangeError."""
+    try:
+        return _resolve_package_path(root, rel, must_exist=must_exist, must_be_file=True)
+    except CapsuleError as exc:
+        raise ExchangeError(str(exc)) from exc
 
 
 def build_pending_uplift(
@@ -154,6 +168,60 @@ def load_inventory(path: Path, *, schemas: SchemaSet, what: str) -> list[dict]:
     return entries
 
 
+def _load_export_capsule(
+    root: Path,
+    receipt: dict,
+    *,
+    layered: LayeredRegistries,
+    schemas: SchemaSet,
+) -> None:
+    """Verify the receipt-bound export Capsule manifest and physical files."""
+    export_dir = root / "downgrade-export"
+    if not export_dir.is_dir():
+        return
+
+    manifest_path = _secure_path(export_dir, "manifest.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    schemas.validate(SCHEMA_CAPSULE, manifest, what="downgrade export capsule manifest")
+    layered.level(manifest["level"])
+    if manifest["pack_id"] != receipt["export_pack_id"]:
+        raise ExchangeError("downgrade export pack_id does not bind the receipt")
+    if manifest["level"] != receipt["target_level"]:
+        raise ExchangeError("downgrade export level does not match receipt")
+    if manifest["custody"]["losslessness"] != receipt["losslessness"]:
+        raise ExchangeError("downgrade export losslessness does not match receipt")
+    if manifest["custody"]["omissions"] != receipt["omissions"]:
+        raise ExchangeError("downgrade export omissions do not match receipt")
+
+    stream_paths = [stream["path"] for stream in manifest["streams"]]
+    if len(stream_paths) != len(set(stream_paths)):
+        raise ExchangeError("downgrade export capsule has duplicate stream paths")
+
+    expected_files = {"manifest.json", *stream_paths}
+    actual_files = {
+        path.relative_to(export_dir).as_posix()
+        for path in export_dir.rglob("*")
+        if path.is_file()
+    }
+    if expected_files != actual_files:
+        raise ExchangeError(
+            "downgrade export capsule has unmanifested or missing files"
+        )
+
+    for stream in manifest["streams"]:
+        rel = stream["path"]
+        stream_path = _secure_path(export_dir, rel)
+        content = stream_path.read_bytes()
+        if raw_digest(content) != stream["digest"]:
+            raise ExchangeError(
+                f"downgrade export stream digest mismatch: {rel}"
+            )
+        if str(len(content)) != stream["byte_length"]:
+            raise ExchangeError(
+                f"downgrade export stream byte_length mismatch: {rel}"
+            )
+
+
 def verify_downgrade_receipt(
     receipt: dict,
     *,
@@ -176,20 +244,22 @@ def verify_downgrade_receipt(
     inventories: dict[str, dict[tuple[str, str], str]] = {}
     for name in ("source_inventory", "export_inventory"):
         ref = receipt[name]
-        inventory_path = root / ref["path"]
+        inventory_path = _secure_path(root, ref["path"])
         content = inventory_path.read_bytes()
         if raw_digest(content) != ref["digest"]:
             raise ExchangeError(f"downgrade {name} digest mismatch")
         entries = load_inventory(inventory_path, schemas=schemas, what=f"downgrade {name}")
         for entry in entries:
-            if entry["category"] == "submission" and entry["subject"].startswith(
+            subject = entry["subject"]
+            if entry["category"] == "submission" and subject.startswith(
                 "submission:urn:ccf:"
             ):
                 continue
-            artifact = (root / entry["subject"]).read_bytes()
+            artifact_path = _secure_path(root, subject)
+            artifact = artifact_path.read_bytes()
             if raw_digest(artifact) != entry["digest"]:
                 raise ExchangeError(
-                    f"downgrade {name} artifact digest mismatch: {entry['subject']}"
+                    f"downgrade {name} artifact digest mismatch: {subject}"
                 )
         inventories[name] = {
             (entry["category"], entry["subject"]): entry["digest"] for entry in entries
@@ -210,8 +280,35 @@ def verify_downgrade_receipt(
         raise ExchangeError(
             "downgrade omissions are not the exact source/export inventory difference"
         )
+
+    # Prove the source inventory completely covers the physical source package
+    # tree, and the export Capsule manifest completely covers the physical
+    # export tree. A physical proof cannot be hidden from both inventory and
+    # omissions.
+    source_dir = root / "downgrade-source"
+    if source_dir.is_dir():
+        physical_inventory = {
+            subject.removeprefix("downgrade-source/")
+            for (category, subject) in inventories["source_inventory"]
+            if category != "submission" and subject.startswith("downgrade-source/")
+        }
+        actual_files = {
+            path.relative_to(source_dir).as_posix()
+            for path in source_dir.rglob("*")
+            if path.is_file()
+        }
+        if physical_inventory != actual_files:
+            raise ExchangeError(
+                "downgrade source inventory does not exactly cover physical source package"
+            )
+
+    _load_export_capsule(
+        root, receipt, layered=layered, schemas=schemas
+    )
+
     for item in receipt["preserved_opaque"]:
-        content = (root / item["path"]).read_bytes()
+        opaque_path = _secure_path(root, item["path"])
+        content = opaque_path.read_bytes()
         if raw_digest(content) != item["digest"]:
             raise ExchangeError(
                 f"downgrade opaque preservation digest mismatch: {item['path']}"
