@@ -734,6 +734,9 @@ class SemanticMemoryStore:
             evidence_tuple,
         )
         explicitly_confirmed = explicit_status == "confirmed"
+        # Decision: evidence-free semantic memory promotion remains fail-closed.
+        # explicit_confirmation or trusted_structured_input alone is not evidence;
+        # durable promoted facts must retain visible source evidence/provenance.
         if not evidence_tuple:
             reason = "missing_evidence"
             allowed = False

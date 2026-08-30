@@ -21,7 +21,7 @@ The problem it solves is not capture — it's that captured knowledge rots. Book
 ## Human-in-the-loop: nothing becomes durable knowledge without review
 
 - Malformed, oversized, or quarantined captures land in an **artifact review queue** with an append-only audit trail; operator actions (`retry`, `reject`, `mark_reviewed`) require an actor and a reason (`core/artifact_review_queue.py`).
-- Extracted "semantic memory" facts start as `proposed` and only reach the wiki after operator confirmation — and promotion additionally requires corroboration (default: ≥2 evidence items from ≥2 distinct sources) with every gate decision stored for audit (`core/semantic_memory_promotion.py`). The wiki compiler only reads `confirmed`/`promoted` facts.
+- Extracted "semantic memory" facts start as `proposed` and only reach the wiki after operator confirmation — and promotion additionally requires corroboration (default: ≥2 evidence items from ≥2 distinct sources) with every gate decision stored for audit (`core/semantic_memory_promotion.py`). Evidence-free promotion via explicit confirmation or trusted structured input alone is rejected; durable promoted facts must retain visible source evidence and provenance. The wiki compiler only reads `confirmed`/`promoted` facts.
 
 ## The three layers
 

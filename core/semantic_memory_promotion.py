@@ -102,7 +102,13 @@ def metadata_flag_enabled(metadata: Mapping[str, Any], keys: tuple[str, ...]) ->
 
 @dataclass(frozen=True)
 class SemanticMemoryPromotionPolicy:
-    """Configurable evidence gate for promoting semantic memory candidates."""
+    """Configurable evidence gate for promoting semantic memory candidates.
+
+    Evidence-free promotion is rejected. ``explicit_confirmation`` and
+    ``trusted_structured_input`` only qualify when at least one durable evidence
+    item is present; promoted facts must always retain visible source evidence
+    and provenance.
+    """
 
     min_evidence_count: int = 2
     min_distinct_sources: int = 2

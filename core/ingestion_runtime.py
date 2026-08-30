@@ -39,6 +39,16 @@ from .metadata_db import (
 from .path_layout import PathLayout, build_path_layout
 from .runtime_composition import validate_metadata_db_matches_layout
 from .prompt_security import prompt_security_requires_review
+from .transcript_enrichment import (
+    LocalTranscriptNormalizer,
+    ProcessingRequest,
+    TranscriptEnrichmentService,
+    apply_derivatives_to_artifact,
+)
+from .transcript_enrichment.request import (
+    current_processing_request,
+    processing_request_scope,
+)
 from .translation_companion import EnglishCompanionPublisher, TranslationCompanionResult
 from .wiki_updater import CompiledWikiUpdater
 
@@ -125,6 +135,7 @@ class KnowledgeArtifactRuntime:
         *,
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
+        transcript_enrichment_service: TranscriptEnrichmentService | None = None,
     ):
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
@@ -141,6 +152,7 @@ class KnowledgeArtifactRuntime:
             "last_error_at": None,
             "consecutive_failures": 0,
         }
+        self._transcript_enrichment_service = transcript_enrichment_service
 
     @property
     def pipeline(self):
@@ -176,6 +188,17 @@ class KnowledgeArtifactRuntime:
             self._canonical_identity_service = CanonicalIdentityService(self.db)
         return self._canonical_identity_service
 
+    @property
+    def transcript_enrichment_service(self) -> TranscriptEnrichmentService:
+        if self._transcript_enrichment_service is None:
+            self._transcript_enrichment_service = TranscriptEnrichmentService(
+                self.config,
+                layout=self.layout,
+                db=self.db,
+                normalizer=LocalTranscriptNormalizer(),
+            )
+        return self._transcript_enrichment_service
+
     def materialize_artifact(self, entry: IngestionQueueEntry) -> KnowledgeArtifact:
         """Convert a queue row into a typed artifact."""
         payload = _json_loads_maybe(entry.payload_json)
@@ -202,13 +225,15 @@ class KnowledgeArtifactRuntime:
                 f"Unsupported ingestion artifact type: {entry.artifact_type}"
             )
 
-        return artifact.apply_queue_context(
+        capabilities = _capabilities_from_queue(entry.capabilities_json)
+        artifact = artifact.apply_queue_context(
             queue_id=entry.artifact_id,
             queue_source=entry.source,
             queue_created_at=entry.created_at,
-            capabilities=_capabilities_from_queue(entry.capabilities_json),
+            capabilities=capabilities,
             payload=payload,
         )
+        return artifact
 
     def _sync_wiki_for_artifact(
         self,
@@ -336,6 +361,7 @@ class KnowledgeArtifactRuntime:
                 "or operator review"
             )
         try:
+            processing_request = self._extract_processing_request(entry)
             artifact = self.materialize_artifact(entry)
             if prompt_security_requires_review(artifact.normalized_metadata):
                 raise IngestionRuntimeError(
@@ -352,7 +378,8 @@ class KnowledgeArtifactRuntime:
         self.db.mark_ingestion_processing(entry.artifact_id)
 
         try:
-            result = await self.dispatch_artifact(artifact)
+            with processing_request_scope(processing_request):
+                result = await self.dispatch_artifact(artifact)
             if canonical_identity is not None:
                 result.details.setdefault("canonical_id", canonical_identity.canonical_id)
                 result.details.setdefault(
@@ -811,9 +838,24 @@ class KnowledgeArtifactRuntime:
         )
 
     async def _process_transcript_artifact(
-        self, artifact: TranscriptArtifact
+        self,
+        artifact: TranscriptArtifact,
     ) -> IngestionDispatchResult:
-        """Process a transcript artifact already normalized by a connector."""
+        """Process a transcript artifact through injected enrichment.
+
+        Produces normalized transcript and optional summary/classification
+        derivatives, caches them by exact source commitment plus processor
+        identities, indexes the full text, and links every derivative back to
+        the immutable source. AI outputs are only produced when requested and
+        a processor is injected; otherwise source-provided values are used.
+        """
+        request = current_processing_request()
+        service = self.transcript_enrichment_service
+        result = service.enrich(
+            artifact,
+            request=request,
+        )
+        apply_derivatives_to_artifact(artifact, result)
         return IngestionDispatchResult(
             artifact_id=artifact.id,
             artifact_type="transcript",
@@ -827,8 +869,25 @@ class KnowledgeArtifactRuntime:
                 "transcript_path": artifact.transcript_path,
                 "has_raw_transcript": bool(artifact.raw_transcript),
                 "has_processed_transcript": bool(artifact.processed_transcript),
+                "cache_hit": result.cache_hit,
+                "rerun_requested": result.rerun_requested,
+                "mode": result.mode.value,
+                "version": result.version,
+                "cache_key": result.cache_key,
+                "source_hash": result.source_hash,
+                "derivatives": result.derivative_paths(),
+                "indexed": result.indexed,
             },
         )
+
+    def _extract_processing_request(
+        self, entry: IngestionQueueEntry
+    ) -> ProcessingRequest:
+        """Parse the schema-validated processing_request from the queue payload."""
+        payload = _json_loads_maybe(entry.payload_json)
+        if not isinstance(payload, dict):
+            return ProcessingRequest.default()
+        return ProcessingRequest.from_payload(payload.get("processing_request"))
 
 
 _shared_runtime: KnowledgeArtifactRuntime | None = None
