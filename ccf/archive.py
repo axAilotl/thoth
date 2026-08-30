@@ -747,6 +747,93 @@ class Archive:
             "uplift": receipt,
         }
 
+    # ------------------------------------------------------------------
+    # Interoperability delivery seam (CCF 0.2.0 Capsule negotiation)
+    # ------------------------------------------------------------------
+
+    def negotiate_capsule(
+        self,
+        capsule_dir: str | Path,
+    ) -> dict:
+        """Negotiate CCF 0.2.0 protocol identity for a Capsule.
+
+        Returns the negotiated identity, including ``root_disposition``
+        (``current``, ``legacy_read``, ``legacy_refuse``, or
+        ``legacy_uplift``). This method does not mutate the archive.
+        """
+        from ccf.interop import negotiate_identity, _load_archive_declaration
+
+        if self.package_root is None:
+            raise ArchiveError(
+                "archive has no package_root; cannot negotiate Capsule identity"
+            )
+        _, declaration = _load_archive_declaration(self)
+        capsule = self._load_capsule(capsule_dir)
+        return negotiate_identity(capsule.manifest, declaration)
+
+    def import_capsule(
+        self,
+        capsule_dir: str | Path,
+        *,
+        legacy_root_policy: str = "refuse",
+        importer_tag: str | None = None,
+    ) -> dict:
+        """Evaluate a CCF 0.2.0 Capsule and return a disposition result.
+
+        ``legacy_root_policy`` controls behavior when the Capsule's semantic-
+        catalog root is not this archive's current root:
+
+        - ``refuse`` (default): fail closed.
+        - ``read``: preview only; no archive mutation.
+        - ``uplift``: fail closed; cross-root uplift requires a catalog-
+          transition Record.
+
+        This method does **not** admit Capsule submissions into the archive.
+        A Capsule is not a signed producer batch; unsigned Capsule material has
+        ``producer_authentication: absent`` in any returned uplift receipt.
+        """
+        from ccf.interop import import_capsule
+
+        if self.package_root is None:
+            raise ArchiveError(
+                "archive has no package_root; cannot evaluate a Capsule"
+            )
+        return import_capsule(
+            self,
+            capsule_dir,
+            legacy_root_policy=legacy_root_policy,
+            importer_tag=importer_tag,
+        )
+
+    def evaluate_capsule_compatibility(
+        self,
+        capsule_dir: str | Path,
+    ) -> dict:
+        """Return a structured compatibility report for a Capsule.
+
+        The report lists negotiated identity and any blockers. Because the
+        full Cissa↔Thoth pass is externally blocked, foreign Capsules will
+        report blockers such as ``cissa-root-mismatch``,
+        ``missing-authoritative-fixture``, and ``missing-carrier-contract``.
+        """
+        from ccf.interop import evaluate_compatibility
+
+        if self.package_root is None:
+            raise ArchiveError(
+                "archive has no package_root; cannot evaluate Capsule compatibility"
+            )
+        return evaluate_compatibility(self, capsule_dir)
+
+    def _load_capsule(self, capsule_dir: str | Path) -> object:
+        """Load a Capsule directory using the archive's layered schemas."""
+        from ccf.capsule import load_capsule
+        from ccf.layered import LayeredRegistries
+        from ccf.schemas import SchemaSet
+
+        draft = self.draft_root()
+        schemas = SchemaSet.load_layered(self.package_root, draft)
+        return load_capsule(capsule_dir, schemas=schemas)
+
 
 def _insert_commit_record(conn, archive_id: str, commit, committed_at: str) -> None:
     """Persist a commit Record's header and structural compartment."""
