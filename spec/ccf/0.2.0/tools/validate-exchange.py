@@ -31,6 +31,13 @@ def load_json(path: Path):
     return json.loads(path.read_text())
 
 
+def _is_canonical_relative_posix(rel: str) -> bool:
+    """True iff ``rel`` is a non-empty, relative, normalized POSIX path."""
+    if not rel or rel.startswith("/"):
+        return False
+    return all(part and part not in {".", ".."} for part in rel.split("/"))
+
+
 def _enumerate_tree(root: Path) -> set[str]:
     """Return every regular file under ``root`` as a relative POSIX path.
 
@@ -648,13 +655,20 @@ for name in ("source_inventory", "export_inventory"):
     ):
         raise SystemExit(f"downgrade {name} contains an invalid entry")
     for entry in entries:
-        if entry["category"] == "submission" and entry["subject"].startswith("submission:urn:ccf:"):
+        subject = entry["subject"]
+        if entry["category"] == "submission" and subject.startswith("submission:urn:ccf:"):
             continue
-        artifact = (capsule_root / entry["subject"]).read_bytes()
+        if not _is_canonical_relative_posix(subject):
+            raise SystemExit(f"downgrade {name} subject is not a canonical relative path: {subject}")
+        if name == "source_inventory" and not subject.startswith("downgrade-source/"):
+            raise SystemExit(f"downgrade source inventory references outside source package: {subject}")
+        if name == "export_inventory" and not subject.startswith("downgrade-export/"):
+            raise SystemExit(f"downgrade export inventory references outside export package: {subject}")
+        artifact = (capsule_root / subject).read_bytes()
         artifact_digest = "sha256:" + hashlib.sha256(artifact).hexdigest()
         if artifact_digest != entry["digest"]:
             raise SystemExit(
-                f'downgrade {name} artifact digest mismatch: {entry["subject"]}'
+                f'downgrade {name} artifact digest mismatch: {subject}'
             )
     keys = {(entry["category"], entry["subject"]) for entry in entries}
     if len(keys) != len(entries):

@@ -194,14 +194,8 @@ def _load_source_dir(root: Path) -> Path:
     return source_dir
 
 
-def _load_export_capsule(
-    root: Path,
-    receipt: dict,
-    *,
-    layered: LayeredRegistries,
-    schemas: SchemaSet,
-) -> Capsule:
-    """Verify the receipt-bound export Capsule manifest and physical files."""
+def _load_export_dir(root: Path) -> Path:
+    """Resolve and verify the contained downgrade-export directory."""
     export_dir = _secure_path(
         root, "downgrade-export", must_exist=False, must_be_file=False
     )
@@ -213,7 +207,24 @@ def _load_export_capsule(
         raise ExchangeError(
             "downgrade export capsule path is not a directory: downgrade-export"
         )
+    return export_dir
 
+
+def _load_export_capsule(
+    root: Path,
+    receipt: dict,
+    export_dir: Path,
+    actual_export_files: set[str],
+    *,
+    layered: LayeredRegistries,
+    schemas: SchemaSet,
+) -> Capsule:
+    """Verify the receipt-bound export Capsule manifest and physical files.
+
+    ``export_dir`` and ``actual_export_files`` must come from the secure
+    directory resolution and symlink-free tree preflight performed before any
+    direct read beneath the export tree.
+    """
     manifest_path = _secure_path(
         export_dir, "manifest.json", must_exist=False, must_be_file=False
     )
@@ -238,11 +249,7 @@ def _load_export_capsule(
         raise ExchangeError("downgrade export capsule has duplicate stream paths")
 
     expected_files = {"manifest.json", *stream_paths}
-    try:
-        actual_files = _enumerate_package_files(export_dir)
-    except CapsuleError as exc:
-        raise ExchangeError(f"downgrade export package tree invalid: {exc}") from exc
-    if expected_files != actual_files:
+    if expected_files != actual_export_files:
         raise ExchangeError(
             "downgrade export capsule has unmanifested or missing files"
         )
@@ -282,6 +289,21 @@ def verify_downgrade_receipt(
     if receipt["losslessness"] == "lossless" and receipt["omissions"]:
         raise ExchangeError("lossless downgrade enumerated omissions")
 
+    # Resolve the contained downgrade directories and preflight their trees
+    # before any direct read beneath them. This rejects symlinked
+    # integrity/, producer-batches/, manifest.json, etc. before bytes are
+    # trusted, even when the inventory does not directly reference the link.
+    source_dir = _load_source_dir(root)
+    export_dir = _load_export_dir(root)
+    try:
+        actual_source_files = _enumerate_package_files(source_dir)
+    except CapsuleError as exc:
+        raise ExchangeError(f"downgrade source package tree invalid: {exc}") from exc
+    try:
+        actual_export_files = _enumerate_package_files(export_dir)
+    except CapsuleError as exc:
+        raise ExchangeError(f"downgrade export package tree invalid: {exc}") from exc
+
     inventories: dict[str, dict[tuple[str, str], str]] = {}
     for name in ("source_inventory", "export_inventory"):
         ref = receipt[name]
@@ -318,7 +340,6 @@ def verify_downgrade_receipt(
     # package. The source directory is required (not optional), must contain a
     # real Verified archive identity/commit chain/members/producer batch, and a
     # physical proof cannot be hidden from both inventory and omissions.
-    source_dir = _load_source_dir(root)
     try:
         source_package = load_verified_source_package(source_dir, schemas=schemas)
     except SourcePackageError as exc:
@@ -329,10 +350,6 @@ def verify_downgrade_receipt(
         for (category, subject) in inventories["source_inventory"]
         if category != "submission" and subject.startswith("downgrade-source/")
     }
-    try:
-        actual_source_files = _enumerate_package_files(source_dir)
-    except CapsuleError as exc:
-        raise ExchangeError(f"downgrade source package tree invalid: {exc}") from exc
     if physical_source_inventory != actual_source_files:
         raise ExchangeError(
             "downgrade source inventory does not exactly cover physical source package"
@@ -372,7 +389,12 @@ def verify_downgrade_receipt(
     # be an exact source producer-batch submission bound to its canonical
     # journal-authenticated object.
     export_capsule = _load_export_capsule(
-        root, receipt, layered=layered, schemas=schemas
+        root,
+        receipt,
+        export_dir,
+        actual_export_files,
+        layered=layered,
+        schemas=schemas,
     )
     submission_streams = [
         stream for stream in export_capsule.streams if stream.content_role == "submissions"

@@ -465,7 +465,7 @@ def test_downgrade_receipt_rejects_symlink_escape(
     root, receipt = _mutated_downgrade_example(
         ccf_capsule_example, tmp_path, mutate
     )
-    with pytest.raises(ExchangeError, match="path escapes root"):
+    with pytest.raises(ExchangeError, match="path contains symlink component"):
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
@@ -754,7 +754,7 @@ def test_downgrade_rejects_symlink_source_directory(
     root, receipt = _mutated_downgrade_example(
         ccf_capsule_example, tmp_path, mutate
     )
-    with pytest.raises(ExchangeError, match="path escapes root"):
+    with pytest.raises(ExchangeError, match="path contains symlink component"):
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
@@ -1096,7 +1096,7 @@ def test_downgrade_receipt_rejects_symlink_export_capsule(
     root, receipt = _mutated_downgrade_example(
         ccf_capsule_example, tmp_path, mutate
     )
-    with pytest.raises(ExchangeError, match="path escapes root"):
+    with pytest.raises(ExchangeError, match="path contains symlink component"):
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
@@ -1469,22 +1469,6 @@ def test_downgrade_rejects_symlinked_source_integrity_and_batches(
         )
 
 
-def test_load_capsule_rejects_manifest_symlink_to_outside(
-    tmp_path, ccf_capsule_example, layered_schemas
-):
-    """A Capsule manifest.json that is a symlink to a file outside the Capsule
-    root must be rejected by containment before any bytes are trusted.
-    """
-    root = tmp_path / "symlink-manifest-capsule"
-    shutil.copytree(ccf_capsule_example, root)
-    external_manifest = tmp_path / "outside-manifest.json"
-    external_manifest.write_bytes((root / "manifest.json").read_bytes())
-    (root / "manifest.json").unlink()
-    (root / "manifest.json").symlink_to(external_manifest)
-    with pytest.raises(CapsuleError, match="path escapes root"):
-        load_capsule(root, schemas=layered_schemas)
-
-
 def test_load_verified_source_package_rejects_identity_symlink(
     ccf_capsule_example, layered_schemas, tmp_path
 ):
@@ -1550,3 +1534,60 @@ def test_load_capsule_rejects_manifest_symlink_to_outside(
     (root / "manifest.json").symlink_to(external_manifest)
     with pytest.raises(CapsuleError, match="package contains symlink"):
         load_capsule(root, schemas=layered_schemas)
+
+
+def test_downgrade_rejects_in_root_inventory_symlink(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """An inventory artifact path that is a symlink to another in-root file must
+    be rejected before the target file is read, even though the symlink target
+    stays inside the package.
+    """
+    def mutate(receipt, root):
+        source_dir = root / "downgrade-source"
+        target = source_dir / "source-identity.json"
+        link = source_dir / "symlinked-identity.json"
+        link.symlink_to(target)
+        entries = json.loads((root / "downgrade-source-inventory.json").read_text())
+        for entry in entries:
+            if entry["subject"].endswith("source-identity.json"):
+                entry["subject"] = "downgrade-source/symlinked-identity.json"
+                break
+        _rewrite_inventory(
+            root, "downgrade-source-inventory.json", entries, receipt, "source_inventory"
+        )
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade source package tree invalid|path contains symlink component"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_export_manifest_symlink_rejected_by_preflight(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A symlinked downgrade-export/manifest.json must be rejected by the export
+    tree preflight before any manifest bytes are read.
+    """
+    def mutate(receipt, root):
+        export_dir = root / "downgrade-export"
+        manifest_path = export_dir / "manifest.json"
+        manifest_copy = export_dir / "manifest-copy.json"
+        manifest_copy.write_bytes(manifest_path.read_bytes())
+        manifest_path.unlink()
+        manifest_path.symlink_to(manifest_copy)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(
+        ExchangeError, match="downgrade export package tree invalid"
+    ):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )

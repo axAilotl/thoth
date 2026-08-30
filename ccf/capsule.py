@@ -120,15 +120,29 @@ def _resolve_package_path(
 ) -> Path:
     """Resolve ``rel`` under ``root`` with fail-closed containment.
 
-    Rejects absolute paths, dot-dot traversal, and non-normalized paths
-    (empty or ``.`` segments). Resolves symlinks and proves the result
-    stays inside ``root``. When ``must_exist`` is true the path must exist;
-    when ``must_be_file`` is true it must be a regular file.
+    Rejects absolute paths, dot-dot traversal, non-normalized paths
+    (empty or ``.`` segments), and any symlink component in ``rel`` even
+    when the symlink target stays inside ``root``. Resolves the final path
+    and proves it stays inside ``root``. When ``must_exist`` is true the
+    path must exist; when ``must_be_file`` is true it must be a regular file.
     """
     if not _is_canonical_relative_posix(rel):
         raise CapsuleError(f"path is not canonical relative POSIX: {rel!r}")
-    resolved = (root / rel).resolve()
+
+    # Reject symlink components before resolution so a symlink that points
+    # inside the root is still refused (package policy is no symlinks).
     root_resolved = root.resolve()
+    current = root_resolved
+    for part in rel.split("/"):
+        current = current / part
+        if current.is_symlink():
+            raise CapsuleError(f"path contains symlink component: {rel!r}")
+        if not current.exists():
+            if must_exist:
+                raise CapsuleError(f"path does not exist: {rel!r}")
+            break
+
+    resolved = (root / rel).resolve()
     if root_resolved not in resolved.parents and resolved != root_resolved:
         raise CapsuleError(f"path escapes root: {rel!r}")
     if must_exist and not resolved.exists():
