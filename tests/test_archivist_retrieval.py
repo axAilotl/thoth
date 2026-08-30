@@ -8,6 +8,7 @@ from core.archivist_retrieval.models import (
     ArchivistCorpusDocument,
     ArchivistRetrievalPolicy,
 )
+from core.archivist_retrieval.inventory import sync_archivist_inventory
 from core.archivist_topics import ArchivistTopicDefinition
 from core.config import Config
 from core.metadata_db import FileMetadata, IngestionQueueEntry, MetadataDB
@@ -112,6 +113,58 @@ def test_archivist_inventory_reuses_unchanged_documents_between_runs(tmp_path: P
     assert len(first.candidates) == 1
     assert first.indexed_count == 1
     assert second.indexed_count == 0
+
+
+def test_archivist_inventory_extracts_searchable_pdf_content(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config, db = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    papers_dir = layout.vault_root / "papers"
+    papers_dir.mkdir(parents=True, exist_ok=True)
+    fixture = Path(__file__).parent / "fixtures" / "web_clipper" / "capture_attachment.pdf"
+    paper_path = papers_dir / "agent-systems-whitepaper.pdf"
+    paper_path.write_bytes(fixture.read_bytes())
+
+    calls: list[list[str]] = []
+
+    def fake_pdf_command(args, **_kwargs):
+        calls.append(list(args))
+        if args[0] == "pdfinfo":
+            return SimpleNamespace(
+                returncode=0,
+                stdout="Title: Agent Systems White Paper\n",
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout="Agent systems coordinate specialist workers at retrieval time.\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("core.pdf_text.subprocess.run", fake_pdf_command)
+
+    result = sync_archivist_inventory(
+        ("papers",),
+        exclude_root_specs=(),
+        config=config,
+        layout=layout,
+        db=db,
+    )
+
+    assert len(result.documents) == 1
+    document = result.documents[0]
+    assert document.path == paper_path
+    assert document.title == "Agent Systems White Paper"
+    assert document.content_text == (
+        "Agent systems coordinate specialist workers at retrieval time."
+    )
+    assert document.source_type == "paper"
+    assert document.file_type == "pdf"
+    assert document.tags == ("whitepaper",)
+    assert [call[0] for call in calls] == ["pdfinfo", "pdftotext"]
 
 
 def test_archivist_full_text_query_mode_searches_beyond_required_tags(tmp_path: Path):

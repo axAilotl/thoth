@@ -223,6 +223,76 @@ def test_materialize_artifact_supports_known_types(
         )
 
 
+def test_general_paper_artifact_uses_pdf_processor_in_papers_directory(
+    tmp_path: Path,
+    monkeypatch,
+    restore_runtime_config,
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    layout = build_path_layout(config)
+    db = MetadataDB(str(layout.database_path))
+    runtime = KnowledgeArtifactRuntime(config, layout=layout, db=db)
+    artifact = PaperArtifact(
+        id="semantic-scholar-123",
+        source_type="semantic_scholar",
+        title="General Paper Title",
+        pdf_url="https://papers.example.test/general-paper.pdf",
+    )
+    observed: dict[str, object] = {}
+
+    def fake_general_download(
+        processor,
+        url,
+        artifact_id,
+        resume,
+        *,
+        filename_prefix=None,
+        title_override=None,
+    ):
+        observed.update(
+            {
+                "directory": processor.pdfs_dir,
+                "url": url,
+                "artifact_id": artifact_id,
+                "resume": resume,
+                "filename_prefix": filename_prefix,
+                "title_override": title_override,
+            }
+        )
+        filename = "semantic-scholar-123-General Paper Title.pdf"
+        destination = processor.pdfs_dir / filename
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"%PDF-1.7\n%%EOF\n")
+        return SimpleNamespace(filename=filename, downloaded=True)
+
+    monkeypatch.setattr(
+        "processors.pdf_processor.PDFProcessor.download_document",
+        fake_general_download,
+    )
+    monkeypatch.setattr(
+        "processors.arxiv_processor_v2.ArXivProcessorV2.download_document",
+        lambda *_args, **_kwargs: pytest.fail(
+            "general paper must not use the arXiv processor"
+        ),
+    )
+
+    result = asyncio.run(runtime.dispatch_artifact(artifact))
+
+    assert result.status == "processed"
+    assert observed == {
+        "directory": layout.vault_root / "papers",
+        "url": artifact.pdf_url,
+        "artifact_id": artifact.id,
+        "resume": True,
+        "filename_prefix": artifact.id,
+        "title_override": artifact.title,
+    }
+    assert artifact.output_paths["pdf"] == (
+        "papers/semantic-scholar-123-General Paper Title.pdf"
+    )
+
+
 def test_materialized_artifacts_include_canonical_queue_contract(
     tmp_path: Path, monkeypatch, restore_runtime_config
 ):
