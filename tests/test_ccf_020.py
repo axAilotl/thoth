@@ -179,6 +179,18 @@ def test_unregistered_type_cannot_activate(layered):
         )
 
 
+def test_portable_blob_submission_resolves_to_manifest_semantics(layered):
+    requirement = layered.requirement_for_submission(
+        {
+            "submission_kind": "blob",
+            "id": "urn:ccf:blob:00000000-0000-4000-8000-000000000000",
+        }
+    )
+    assert requirement["resource_kind"] == "blob_type"
+    assert requirement["name"] == "blob.manifest"
+    assert requirement["minimum_level"] == "ccf-exchange-v1"
+
+
 def test_example_pending_uplift(ccf_capsule_example, layered, layered_schemas):
     capsule = load_capsule(ccf_capsule_example, schemas=layered_schemas)
     receipt = json.loads((ccf_capsule_example / "uplift-receipt.json").read_text())
