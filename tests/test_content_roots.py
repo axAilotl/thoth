@@ -559,7 +559,9 @@ def test_path_layout_fails_closed_when_raw_scope_outside_managed_root(
         build_path_layout(config, project_root=tmp_path)
 
 
-def test_watch_only_vault_with_separate_managed_raw_root(tmp_path: Path):
+def test_primary_watch_only_vault_fails_before_legacy_writers_can_mutate_it(
+    tmp_path: Path,
+):
     config.data = {}
     config.set("paths.vault_dir", str(tmp_path / "vault"))
     config.set("paths.raw_dir", str(tmp_path / "inbox" / "raw"))
@@ -584,12 +586,17 @@ def test_watch_only_vault_with_separate_managed_raw_root(tmp_path: Path):
         ],
     )
 
-    layout = build_path_layout(config, project_root=tmp_path)
-    path = write_connector_raw_json(
-        layout,
-        connector_name="test",
-        native_id="abc",
-        payload={"text": "hello"},
-    )
+    with pytest.raises(ContentRootError, match="vault scope path.*managed_inbox"):
+        build_path_layout(config, project_root=tmp_path)
 
-    assert path.is_relative_to(tmp_path / "inbox" / "raw")
+
+def test_credential_file_inside_content_root_fails_closed(tmp_path: Path):
+    config.data = {}
+    config.set("paths.vault_dir", str(tmp_path / "vault"))
+    config.set("paths.system_dir", ".thoth_system")
+    config.set("paths.cache_dir", "graphql_cache")
+    config.set("paths.cookies_file", str(tmp_path / "vault" / "cookies.json"))
+    config.set("database.path", "meta.db")
+
+    with pytest.raises(ContentRootError, match="operational path.*overlap"):
+        build_path_layout(config, project_root=tmp_path)

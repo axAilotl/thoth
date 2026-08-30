@@ -460,13 +460,12 @@ class ArchivistCompiler:
         if self.layout.content_root_policy is not None:
             root = self.layout.content_root_policy.root_containing(
                 scope_path,
-                ContentRootMode.WATCH_ONLY,
                 ContentRootMode.MANAGED_INBOX,
             )
             if root is None:
                 raise ArchivistCompilerError(
                     f"archivist candidate scope {candidate.scope!r} path "
-                    f"{scope_path} is not inside a readable content root"
+                    f"{scope_path} is not inside a managed content root"
                 )
             self.layout.content_root_policy.carrier_for(root)
         return scope_path / candidate.scope_relative_path

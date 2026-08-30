@@ -55,6 +55,7 @@ def _operational_paths_for_layout(
     download_tracking_file: Path,
     realtime_bookmarks_file: Path,
     log_file: Path,
+    configured_files: tuple[Path, ...] = (),
 ) -> tuple[Path, ...]:
     return (
         system_root,
@@ -63,6 +64,7 @@ def _operational_paths_for_layout(
         download_tracking_file.parent,
         realtime_bookmarks_file.parent,
         log_file.parent,
+        *configured_files,
     )
 
 
@@ -143,14 +145,14 @@ def _validate_scope_paths_in_content_roots(
 ) -> None:
     """Fail closed when legacy scope paths lack the required ownership mode.
 
-    Vault and library are readable source scopes, so they may be watch-only or
-    managed. Raw connector capture is mutable and must be managed-inbox.
+    Legacy runtime writers still target vault/raw/library directly, so those
+    primary scopes must remain managed until every writer uses a carrier.
+    Supplemental roots may be watch-only and are still enforced by adapters.
     """
-    readable_modes = (ContentRootMode.WATCH_ONLY, ContentRootMode.MANAGED_INBOX)
     for scope_name, scope_path, modes in (
-        ("vault", vault_root, readable_modes),
+        ("vault", vault_root, (ContentRootMode.MANAGED_INBOX,)),
         ("raw", raw_root, (ContentRootMode.MANAGED_INBOX,)),
-        ("library", library_root, readable_modes),
+        ("library", library_root, (ContentRootMode.MANAGED_INBOX,)),
     ):
         if policy.root_containing(scope_path, *modes) is None:
             mode_names = ", ".join(mode.value for mode in modes)
@@ -182,6 +184,12 @@ def _build_content_roots(
     else:
         roots = _default_content_roots(vault_root, wiki_root)
 
+    configured_files: list[Path] = []
+    for key in ("paths.cookies_file", "paths.bookmarks_file"):
+        raw_path = config.get(key)
+        if raw_path and str(raw_path).strip():
+            path = Path(str(raw_path))
+            configured_files.append(path if path.is_absolute() else project_root / path)
     operational_paths = _operational_paths_for_layout(
         system_root=system_root,
         cache_root=cache_root,
@@ -189,6 +197,7 @@ def _build_content_roots(
         download_tracking_file=download_tracking_file,
         realtime_bookmarks_file=realtime_bookmarks_file,
         log_file=log_file,
+        configured_files=tuple(configured_files),
     )
     policy = build_content_root_policy(
         roots,
