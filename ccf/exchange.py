@@ -211,7 +211,6 @@ def _load_export_dir(root: Path) -> Path:
 
 
 def _load_export_capsule(
-    root: Path,
     receipt: dict,
     export_dir: Path,
     actual_export_files: set[str],
@@ -389,7 +388,6 @@ def verify_downgrade_receipt(
     # be an exact source producer-batch submission bound to its canonical
     # journal-authenticated object.
     export_capsule = _load_export_capsule(
-        root,
         receipt,
         export_dir,
         actual_export_files,

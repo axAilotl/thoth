@@ -1560,9 +1560,7 @@ def test_downgrade_rejects_in_root_inventory_symlink(
     root, receipt = _mutated_downgrade_example(
         ccf_capsule_example, tmp_path, mutate
     )
-    with pytest.raises(
-        ExchangeError, match="downgrade source package tree invalid|path contains symlink component"
-    ):
+    with pytest.raises(ExchangeError, match="downgrade source package tree invalid"):
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
