@@ -14,6 +14,7 @@ from ccf.capsule import (
     Capsule,
     CapsuleError,
     SCHEMA_CAPSULE,
+    _enumerate_package_files,
     load_capsule,
     submission_hashes_for,
     _resolve_package_path,
@@ -237,11 +238,10 @@ def _load_export_capsule(
         raise ExchangeError("downgrade export capsule has duplicate stream paths")
 
     expected_files = {"manifest.json", *stream_paths}
-    actual_files = {
-        path.relative_to(export_dir).as_posix()
-        for path in export_dir.rglob("*")
-        if path.is_file()
-    }
+    try:
+        actual_files = _enumerate_package_files(export_dir)
+    except CapsuleError as exc:
+        raise ExchangeError(f"downgrade export package tree invalid: {exc}") from exc
     if expected_files != actual_files:
         raise ExchangeError(
             "downgrade export capsule has unmanifested or missing files"
@@ -329,11 +329,10 @@ def verify_downgrade_receipt(
         for (category, subject) in inventories["source_inventory"]
         if category != "submission" and subject.startswith("downgrade-source/")
     }
-    actual_source_files = {
-        path.relative_to(source_dir).as_posix()
-        for path in source_dir.rglob("*")
-        if path.is_file()
-    }
+    try:
+        actual_source_files = _enumerate_package_files(source_dir)
+    except CapsuleError as exc:
+        raise ExchangeError(f"downgrade source package tree invalid: {exc}") from exc
     if physical_source_inventory != actual_source_files:
         raise ExchangeError(
             "downgrade source inventory does not exactly cover physical source package"

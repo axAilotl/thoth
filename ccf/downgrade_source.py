@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ccf.capsule import CapsuleError, _enumerate_package_files
 from ccf.hashing import producer_batch_hash
 from ccf.ids import parse_id
 from ccf.schemas import CcfSchemaError, SchemaSet
@@ -136,6 +137,11 @@ def load_verified_source_package(
         path = source_dir / rel
         if not path.is_file():
             raise SourcePackageError(f"downgrade source required file missing: {rel}")
+
+    try:
+        _enumerate_package_files(source_dir)
+    except CapsuleError as exc:
+        raise SourcePackageError(f"downgrade source package tree invalid: {exc}") from exc
 
     try:
         with PackReader(source_dir) as reader:

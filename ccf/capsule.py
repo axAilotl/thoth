@@ -8,6 +8,7 @@ Mindpack remains the archive-oriented restore/merge container.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -137,12 +138,38 @@ def _resolve_package_path(
     return resolved
 
 
+def _enumerate_package_files(root: Path) -> set[str]:
+    """Return every regular file path under ``root`` as canonical relative POSIX.
+
+    Walks without following symlink directories and rejects every symlink
+    entry (file or directory) and every non-regular filesystem entry. This is
+    the safe tree inventory used to prove exact physical coverage of a
+    Capsule or downgrade source/export package.
+    """
+    root_resolved = root.resolve()
+    files: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(root_resolved, followlinks=False):
+        for name in dirnames + filenames:
+            full = Path(dirpath) / name
+            if full.is_symlink():
+                raise CapsuleError(
+                    f"package contains symlink: {full.relative_to(root_resolved).as_posix()}"
+                )
+            if full.is_dir():
+                continue
+            if not full.is_file():
+                raise CapsuleError(
+                    f"package contains non-regular entry: {full.relative_to(root_resolved).as_posix()}"
+                )
+            rel = full.relative_to(root_resolved).as_posix()
+            files.add(rel)
+    return files
+
+
 def load_capsule(path: str | Path, *, schemas: SchemaSet | None = None) -> Capsule:
     """Load a Capsule directory and verify every stream digest and length."""
     root = Path(path)
-    manifest_path = root / "manifest.json"
-    if not manifest_path.is_file():
-        raise CapsuleError(f"capsule manifest missing: {manifest_path}")
+    manifest_path = _resolve_package_path(root, "manifest.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if schemas is not None:
         try:

@@ -1096,7 +1096,7 @@ def test_downgrade_receipt_rejects_symlink_export_capsule(
 
 
 # ---------------------------------------------------------------------------
-# Additional regressions for orchestrator audit of e0b66ce
+# Downgrade source package binding and containment regressions
 # ---------------------------------------------------------------------------
 
 
@@ -1360,3 +1360,119 @@ def test_downgrade_rejects_tampered_member_chain(
         verify_downgrade_receipt(
             receipt, capsule_root=root, layered=layered, schemas=layered_schemas
         )
+
+
+# ---------------------------------------------------------------------------
+# Symlink containment regressions
+# ---------------------------------------------------------------------------
+
+
+def test_downgrade_rejects_nested_source_directory_symlink(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A nested directory symlink inside downgrade-source/ pointing outside the
+    Capsule must be rejected before any direct read follows it.
+    """
+    def mutate(receipt, root):
+        external = tmp_path / "outside-source"
+        external.mkdir()
+        (external / "hidden-proof.json").write_text("{}", encoding="utf-8")
+        link = root / "downgrade-source" / "hidden-dir"
+        link.symlink_to(external)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="downgrade source package tree invalid"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_nested_export_directory_symlink(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """A nested directory symlink inside downgrade-export/ pointing outside the
+    Capsule must be rejected by exact physical coverage, not ignored.
+    """
+    def mutate(receipt, root):
+        external = tmp_path / "outside-export"
+        external.mkdir()
+        (external / "stash.json").write_text("{}", encoding="utf-8")
+        link = root / "downgrade-export" / "stash"
+        link.symlink_to(external)
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="downgrade export package tree invalid"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_downgrade_rejects_symlinked_source_integrity_and_batches(
+    ccf_capsule_example, layered, layered_schemas, tmp_path
+):
+    """Moving integrity/ and producer-batches/ outside and replacing them with
+    symlinks defeats coverage if symlinks are followed. Coherently prune
+    inventories and omissions; verification must still reject the symlink tree
+    before PackReader reads outside bytes.
+    """
+    def mutate(receipt, root):
+        source_dir = root / "downgrade-source"
+        external = tmp_path / "outside-source-innards"
+        external.mkdir()
+
+        # Move the two directories outside and replace with symlinks.
+        for name in ("integrity", "producer-batches"):
+            src = source_dir / name
+            dst = external / name
+            src.rename(dst)
+            (source_dir / name).symlink_to(dst)
+
+        # Prune those entries from the source inventory and update the digest.
+        pruned_subjects = {
+            "downgrade-source/integrity/commits.ndjson",
+            "downgrade-source/integrity/members.ndjson",
+            "downgrade-source/producer-batches/98d352bf-7abb-4fdf-824c-3c93c4e55901.json",
+        }
+        entries = [
+            entry
+            for entry in json.loads((root / "downgrade-source-inventory.json").read_text())
+            if entry["subject"] not in pruned_subjects
+        ]
+        _rewrite_inventory(
+            root, "downgrade-source-inventory.json", entries, receipt, "source_inventory"
+        )
+
+        # Prune matching omissions so the receipt remains internally consistent.
+        receipt["omissions"] = [
+            entry
+            for entry in receipt["omissions"]
+            if entry["subject"] not in pruned_subjects
+        ]
+
+    root, receipt = _mutated_downgrade_example(
+        ccf_capsule_example, tmp_path, mutate
+    )
+    with pytest.raises(ExchangeError, match="downgrade source package tree invalid"):
+        verify_downgrade_receipt(
+            receipt, capsule_root=root, layered=layered, schemas=layered_schemas
+        )
+
+
+def test_load_capsule_rejects_manifest_symlink_to_outside(
+    tmp_path, ccf_capsule_example, layered_schemas
+):
+    """A Capsule manifest.json that is a symlink to a file outside the Capsule
+    root must be rejected by containment before any bytes are trusted.
+    """
+    root = tmp_path / "symlink-manifest-capsule"
+    shutil.copytree(ccf_capsule_example, root)
+    external_manifest = tmp_path / "outside-manifest.json"
+    external_manifest.write_bytes((root / "manifest.json").read_bytes())
+    (root / "manifest.json").unlink()
+    (root / "manifest.json").symlink_to(external_manifest)
+    with pytest.raises(CapsuleError, match="path escapes root"):
+        load_capsule(root, schemas=layered_schemas)

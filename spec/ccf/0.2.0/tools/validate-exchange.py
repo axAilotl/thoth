@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -28,6 +29,31 @@ def is_ccf_uint64(value) -> bool:
 
 def load_json(path: Path):
     return json.loads(path.read_text())
+
+
+def _enumerate_tree(root: Path) -> set[str]:
+    """Return every regular file under ``root`` as a relative POSIX path.
+
+    Rejects symlinks and non-regular entries at any depth, matching the
+    runtime fail-closed containment primitive.
+    """
+    root_resolved = root.resolve()
+    files: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(root_resolved, followlinks=False):
+        for name in dirnames + filenames:
+            full = Path(dirpath) / name
+            if full.is_symlink():
+                raise SystemExit(
+                    f"package contains symlink: {full.relative_to(root_resolved).as_posix()}"
+                )
+            if full.is_dir():
+                continue
+            if not full.is_file():
+                raise SystemExit(
+                    f"package contains non-regular entry: {full.relative_to(root_resolved).as_posix()}"
+                )
+            files.add(full.relative_to(root_resolved).as_posix())
+    return files
 
 
 schemas = {}
@@ -670,11 +696,7 @@ physical_source_inventory = {
     for category, subject in source_inventory
     if category != "submission" and subject.startswith("downgrade-source/")
 }
-actual_source_files = {
-    path.relative_to(downgrade_source).as_posix()
-    for path in downgrade_source.rglob("*")
-    if path.is_file()
-}
+actual_source_files = _enumerate_tree(downgrade_source)
 if physical_source_inventory != actual_source_files:
     raise SystemExit("downgrade source inventory is not the exact physical source package")
 
@@ -697,11 +719,7 @@ export_stream_paths = [stream["path"] for stream in export_streams]
 if len(export_stream_paths) != len(set(export_stream_paths)):
     raise SystemExit("downgrade export Capsule has duplicate stream paths")
 expected_export_files = {"manifest.json", *export_stream_paths}
-actual_export_files = {
-    path.relative_to(downgrade_export).as_posix()
-    for path in downgrade_export.rglob("*")
-    if path.is_file()
-}
+actual_export_files = _enumerate_tree(downgrade_export)
 if expected_export_files != actual_export_files:
     raise SystemExit("downgrade export Capsule has unmanifested or missing files")
 for stream in export_streams:
