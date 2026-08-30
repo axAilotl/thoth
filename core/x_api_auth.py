@@ -22,6 +22,7 @@ import httpx
 
 from .config import Config
 from .path_layout import build_path_layout
+from .sensitive_redaction import redact_sensitive_text
 
 X_API_AUTHORIZE_URL = "https://x.com/i/oauth2/authorize"
 X_API_TOKEN_URL = "https://api.x.com/2/oauth2/token"
@@ -48,6 +49,10 @@ class XApiAuthStateError(XApiAuthError, ValueError):
 
 class XApiTokenError(XApiAuthError):
     """Raised when token exchange or refresh fails."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        self.status_code = status_code
+        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -433,7 +438,8 @@ async def exchange_authorization_code(
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise XApiTokenError(
-                f"X API token exchange failed with status {response.status_code}"
+                f"X API token exchange failed with status {response.status_code}",
+                status_code=response.status_code,
             ) from exc
         payload = response.json()
 
@@ -446,8 +452,13 @@ async def refresh_x_api_tokens(
     auth_config: XApiAuthConfig,
     *,
     refresh_token: str,
+    client: httpx.AsyncClient | None = None,
 ) -> XApiTokenBundle:
-    """Refresh an existing token bundle."""
+    """Refresh an existing token bundle.
+
+    An optional ``client`` may be injected for testing or connection diagnostics;
+    when omitted a fresh ``httpx.AsyncClient`` is used.
+    """
     if not refresh_token or not refresh_token.strip():
         raise XApiTokenError("refresh_token is required to refresh X API tokens")
 
@@ -461,40 +472,60 @@ async def refresh_x_api_tokens(
         **_build_basic_auth_header(auth_config),
     }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(auth_config.token_url, data=data, headers=headers)
+    async def _perform_refresh(c: httpx.AsyncClient) -> XApiTokenBundle:
+        response = await c.post(auth_config.token_url, data=data, headers=headers)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise XApiTokenError(
-                f"X API token refresh failed with status {response.status_code}"
+                f"X API token refresh failed with status {response.status_code}",
+                status_code=response.status_code,
             ) from exc
         payload = response.json()
+        if not isinstance(payload, dict):
+            raise XApiTokenError("X API refresh response must be a JSON object")
+        return _parse_token_response(auth_config, payload, refresh_token=refresh_token)
 
-    if not isinstance(payload, dict):
-        raise XApiTokenError("X API refresh response must be a JSON object")
-    return _parse_token_response(auth_config, payload, refresh_token=refresh_token)
+    if client is not None:
+        return await _perform_refresh(client)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        return await _perform_refresh(client)
 
 
-async def fetch_current_x_user(auth_config: XApiAuthConfig, *, access_token: str) -> dict[str, Any]:
-    """Fetch the current authenticated X user."""
+async def fetch_current_x_user(
+    auth_config: XApiAuthConfig,
+    *,
+    access_token: str,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Fetch the current authenticated X user.
+
+    An optional ``client`` may be injected for testing or connection diagnostics;
+    when omitted a fresh ``httpx.AsyncClient`` is used.
+    """
     if not access_token or not access_token.strip():
         raise XApiTokenError("access_token is required to fetch the current user")
 
     headers = {"Authorization": f"Bearer {access_token.strip()}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(auth_config.me_url, headers=headers)
+
+    async def _perform_fetch(c: httpx.AsyncClient) -> dict[str, Any]:
+        response = await c.get(auth_config.me_url, headers=headers)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise XApiTokenError(
-                f"X API /2/users/me failed with status {response.status_code}"
+                f"X API /2/users/me failed with status {response.status_code}",
+                status_code=response.status_code,
             ) from exc
         payload = response.json()
+        if not isinstance(payload, dict):
+            raise XApiTokenError("X API user response must be a JSON object")
+        return payload
 
-    if not isinstance(payload, dict):
-        raise XApiTokenError("X API user response must be a JSON object")
-    return payload
+    if client is not None:
+        return await _perform_fetch(client)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        return await _perform_fetch(client)
 
 
 async def complete_x_api_auth(
@@ -554,6 +585,282 @@ def _token_is_expired(bundle: Mapping[str, Any]) -> bool:
         return _parse_iso_utc(str(expires_at)) <= _now_utc()
     except ValueError:
         return True
+
+
+def _collect_x_api_secrets(
+    auth_config: XApiAuthConfig | None,
+    bundle: Mapping[str, Any] | None,
+) -> list[str]:
+    """Return sensitive values that must be redacted from output/logs."""
+    secrets: list[str] = []
+    if auth_config is not None and auth_config.client_secret:
+        secrets.append(auth_config.client_secret)
+    if bundle is not None:
+        access_token = str(bundle.get("access_token") or "").strip()
+        if access_token:
+            secrets.append(access_token)
+        refresh_token = str(bundle.get("refresh_token") or "").strip()
+        if refresh_token:
+            secrets.append(refresh_token)
+    # Longest first so shorter secrets do not leave suffixes behind.
+    secrets.sort(key=len, reverse=True)
+    return secrets
+
+
+def redact_x_api_secrets(
+    text: str | None,
+    *,
+    auth_config: XApiAuthConfig | None = None,
+    bundle: Mapping[str, Any] | None = None,
+) -> str:
+    """Redact access tokens, refresh tokens, client secrets, and auth headers."""
+    original = text or ""
+    redacted = redact_sensitive_text(original).redacted_text
+    for secret in _collect_x_api_secrets(auth_config, bundle):
+        redacted = redacted.replace(secret, "[[REDACTED]]")
+    return redacted
+
+
+def _inspect_client_metadata(config: Config) -> dict[str, Any]:
+    """Inspect raw config for required X OAuth client metadata fields."""
+    x_api_config = config.get("sources.x_api", {}) or {}
+    if not isinstance(x_api_config, dict):
+        return {
+            "configured": False,
+            "enabled": False,
+            "required_fields": ["client_id", "redirect_uri", "scopes"],
+            "configured_fields": {},
+            "missing_fields": ["sources.x_api must be an object"],
+        }
+
+    required_fields = ["client_id", "redirect_uri", "scopes"]
+    configured_fields: dict[str, bool] = {}
+    missing_fields: list[str] = []
+
+    for field in required_fields:
+        value = x_api_config.get(field)
+        if field == "scopes":
+            if isinstance(value, str):
+                has_value = bool(value.strip())
+            elif isinstance(value, (list, tuple)):
+                has_value = bool(value)
+            else:
+                has_value = False
+        else:
+            has_value = isinstance(value, str) and bool(value.strip())
+        configured_fields[field] = has_value
+        if not has_value:
+            missing_fields.append(field)
+
+    return {
+        "configured": not missing_fields,
+        "enabled": bool(x_api_config.get("enabled", False)),
+        "required_fields": required_fields,
+        "configured_fields": configured_fields,
+        "missing_fields": missing_fields,
+    }
+
+
+def _build_refresh_behavior(auth_config: XApiAuthConfig) -> dict[str, Any]:
+    """Describe refresh support and requirements."""
+    offline_access_present = "offline.access" in auth_config.scopes
+    return {
+        "supported": offline_access_present,
+        "requires": (
+            "offline.access scope and a stored refresh token; client_secret_env "
+            "is optional for the public-client PKCE flow"
+        ),
+        "client_secret_configured": auth_config.client_secret is not None,
+        "client_type": (
+            "confidential" if auth_config.client_secret is not None else "public_pkce"
+        ),
+        "offline_access_scope_required": "offline.access",
+        "offline_access_present": offline_access_present,
+    }
+
+
+def _build_token_summary(bundle: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return non-secret token status summary."""
+    if not bundle:
+        return {
+            "present": False,
+            "expired": None,
+            "refreshable": False,
+        }
+    refresh_token = str(bundle.get("refresh_token") or "").strip()
+    return {
+        "present": True,
+        "expired": _token_is_expired(bundle),
+        "refreshable": bool(refresh_token),
+    }
+
+
+def _build_diagnostic(
+    *,
+    status: str,
+    error: str | None,
+    config: Config,
+    auth_config: XApiAuthConfig | None,
+    bundle: Mapping[str, Any] | None,
+    refreshed: bool = False,
+    user: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a redacted, operator-safe diagnostic payload."""
+    client_metadata = _inspect_client_metadata(config)
+    if auth_config is not None:
+        client_metadata["client_id"] = auth_config.client_id
+        client_metadata["redirect_uri"] = auth_config.redirect_uri
+        client_metadata["scopes"] = list(auth_config.scopes)
+        refresh_behavior = _build_refresh_behavior(auth_config)
+    else:
+        refresh_behavior = {
+            "supported": False,
+            "requires": (
+                "offline.access scope and a stored refresh token; client_secret_env "
+                "is optional for the public-client PKCE flow"
+            ),
+            "client_secret_configured": False,
+            "client_type": None,
+            "offline_access_scope_required": "offline.access",
+            "offline_access_present": False,
+        }
+
+    redacted_error = redact_x_api_secrets(error, auth_config=auth_config, bundle=bundle)
+    redacted = redacted_error != (error or "")
+
+    return {
+        "status": status,
+        "connected": status == "ok",
+        "client_metadata": client_metadata,
+        "refresh_behavior": refresh_behavior,
+        "token": _build_token_summary(bundle),
+        "refreshed": refreshed,
+        "user": dict(user) if user is not None else None,
+        "error": redacted_error,
+        "redacted": redacted,
+    }
+
+
+async def test_x_api_connection(
+    config: Config,
+    *,
+    layout=None,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Run an operator-safe X OAuth connection diagnostic.
+
+    No secrets are written to the returned payload. All network calls use the
+    optional injected ``client`` so tests can mock the X API without live traffic.
+    """
+    resolved_layout = layout or build_path_layout(config)
+
+    # Phase 1: required client metadata.
+    try:
+        auth_config = resolve_x_api_auth_config(config)
+    except XApiAuthConfigError as exc:
+        return _build_diagnostic(
+            status="config_error",
+            error=str(exc),
+            config=config,
+            auth_config=None,
+            bundle=None,
+        )
+
+    # Phase 2: stored user tokens.
+    try:
+        bundle = load_x_api_token_bundle(resolved_layout)
+    except (XApiAuthError, OSError, ValueError) as exc:
+        return _build_diagnostic(
+            status="token_error",
+            error=str(exc),
+            config=config,
+            auth_config=auth_config,
+            bundle=None,
+        )
+    if not bundle:
+        return _build_diagnostic(
+            status="token_missing",
+            error="No stored X API token bundle was found",
+            config=config,
+            auth_config=auth_config,
+            bundle=None,
+        )
+
+    # Phase 3: expiration and refresh.
+    refreshed = False
+    if _token_is_expired(bundle):
+        refresh_token = str(bundle.get("refresh_token") or "").strip()
+        if not refresh_token:
+            return _build_diagnostic(
+                status="token_expired",
+                error="Stored X API token bundle is expired and lacks a refresh token",
+                config=config,
+                auth_config=auth_config,
+                bundle=bundle,
+            )
+        try:
+            refreshed_bundle = await refresh_x_api_tokens(
+                auth_config,
+                refresh_token=refresh_token,
+                client=client,
+            )
+            bundle = refreshed_bundle.to_dict()
+            # Refresh-token rotation can invalidate the stored token. Persist the
+            # replacement before the connectivity probe so diagnostics never leave
+            # the operator with an unusable credential bundle.
+            bundle = store_x_api_token_bundle(resolved_layout, bundle)
+            refreshed = True
+        except XApiTokenError as exc:
+            return _build_diagnostic(
+                status="refresh_failed",
+                error=str(exc),
+                config=config,
+                auth_config=auth_config,
+                bundle=bundle,
+                refreshed=False,
+            )
+
+    # Phase 4: validate connectivity with /2/users/me.
+    access_token = str(bundle.get("access_token") or "").strip()
+    if not access_token:
+        return _build_diagnostic(
+            status="token_error",
+            error="Stored X API token bundle is missing access_token",
+            config=config,
+            auth_config=auth_config,
+            bundle=bundle,
+            refreshed=refreshed,
+        )
+
+    try:
+        user_payload = await fetch_current_x_user(
+            auth_config,
+            access_token=access_token,
+            client=client,
+        )
+    except XApiTokenError as exc:
+        return _build_diagnostic(
+            status=(
+                "token_invalid"
+                if exc.status_code in {401, 403}
+                else "connection_error"
+            ),
+            error=str(exc),
+            config=config,
+            auth_config=auth_config,
+            bundle=bundle,
+            refreshed=refreshed,
+        )
+
+    return _build_diagnostic(
+        status="ok",
+        error=None,
+        config=config,
+        auth_config=auth_config,
+        bundle=bundle,
+        refreshed=refreshed,
+        user=user_payload,
+    )
 
 
 def summarize_x_api_auth(layout) -> dict[str, Any]:

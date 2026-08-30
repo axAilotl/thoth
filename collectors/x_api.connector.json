@@ -6,7 +6,7 @@
     "x_api"
   ],
   "display_name": "X API Bookmarks",
-  "description": "Backfill X/Twitter bookmarks into the bookmark queue.",
+  "description": "Backfill X/Twitter bookmarks into the bookmark queue. Required OAuth client metadata: sources.x_api.client_id, sources.x_api.redirect_uri, and sources.x_api.scopes (must include bookmark.read, tweet.read, users.read, and offline.access). Refresh requires offline.access and a stored refresh token; client_secret_env is optional for public-client PKCE.",
   "artifact_types": [
     "tweet"
   ],

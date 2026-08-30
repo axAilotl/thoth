@@ -39,6 +39,7 @@ from core import (
     WikiLintRunner,
     WikiQueryRunner,
     legacy_artifact_lint_report_payload,
+    test_x_api_connection,
 )
 from core.archivist_benchmark import benchmark_archivist_topics
 from core.capture_event_store import CaptureEventStore
@@ -2716,6 +2717,57 @@ async def cmd_x_api_sync(args):
         print("   Stopped at the first already-seen bookmark")
 
 
+async def cmd_x_api_test(args):
+    """Test X API OAuth configuration and stored tokens without exposing secrets."""
+    result = await test_x_api_connection(config, layout=build_path_layout(config))
+
+    if getattr(args, "json", False):
+        _print_json(result)
+        return
+
+    status = result["status"]
+    connected = result["connected"]
+    print(f"{'✅' if connected else '❌'} X API connection test: {status}")
+
+    meta = result["client_metadata"]
+    print(f"   Client metadata configured: {meta.get('configured', False)}")
+    if meta.get("missing_fields"):
+        print(f"   Missing required fields: {', '.join(meta['missing_fields'])}")
+    if meta.get("client_id"):
+        print(f"   client_id: {meta['client_id']}")
+    if meta.get("redirect_uri"):
+        print(f"   redirect_uri: {meta['redirect_uri']}")
+    if meta.get("scopes"):
+        print(f"   scopes: {' '.join(meta['scopes'])}")
+
+    refresh = result["refresh_behavior"]
+    print(f"   Refresh supported: {refresh['supported']}")
+    if not refresh["supported"]:
+        print(f"   Refresh requires: {refresh['requires']}")
+
+    token = result["token"]
+    print(f"   Token present: {token['present']}")
+    if token["present"]:
+        print(f"   Token expired: {token['expired']}")
+        print(f"   Token refreshable: {token['refreshable']}")
+    print(f"   Token refreshed during test: {result['refreshed']}")
+
+    user = result.get("user")
+    if user:
+        if isinstance(user, dict) and "data" in user and isinstance(user["data"], dict):
+            username = user["data"].get("username") or "unknown"
+        elif isinstance(user, dict):
+            username = user.get("username") or "unknown"
+        else:
+            username = "unknown"
+        print(f"   Authenticated user: @{username}")
+
+    if result.get("error"):
+        print(f"   Error: {result['error']}")
+    if result.get("redacted"):
+        print("   (sensitive values were redacted from this output)")
+
+
 async def cmd_migrate_filenames(args):
     """Filename migration command"""
     from core.filename_utils import get_filename_migrator
@@ -2782,6 +2834,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  %(prog)s x-api-test                  # Test X API OAuth config and tokens
   %(prog)s x-api-sync                  # Backfill bookmarks from the X API
   %(prog)s process --limit 100         # Process first 100 bookmarks to markdown
   %(prog)s update-videos               # Update existing content with video links
@@ -3512,6 +3565,17 @@ Examples:
         help="Ignore the stored sync checkpoint and restart from the newest page",
     )
 
+    # X API connection test command
+    x_api_test_parser = subparsers.add_parser(
+        "x-api-test",
+        help="Test X API OAuth config and stored tokens safely",
+    )
+    x_api_test_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the diagnostic result as JSON",
+    )
+
     # Web Clipper command
     web_clipper_parser = subparsers.add_parser(
         "web-clipper",
@@ -3997,6 +4061,7 @@ Examples:
         "memory",
         "query",
         "research",
+        "x-api-test",
     }
 
     # Validate configuration (allow offline-safe commands even if invalid)
@@ -4020,6 +4085,7 @@ Examples:
             "arxiv",
             "social",
             "x-api-sync",
+            "x-api-test",
             "web-clipper",
             "connectors",
             "research",
@@ -4046,6 +4112,7 @@ Examples:
         "memory",
         "query",
         "research",
+        "x-api-test",
     }
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
@@ -4102,6 +4169,8 @@ Examples:
             asyncio.run(cmd_social(args))
         elif args.command == "x-api-sync":
             asyncio.run(cmd_x_api_sync(args))
+        elif args.command == "x-api-test":
+            asyncio.run(cmd_x_api_test(args))
         elif args.command == "web-clipper":
             asyncio.run(cmd_web_clipper(args))
         elif args.command == "connectors":
