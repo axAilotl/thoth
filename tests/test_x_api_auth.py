@@ -703,3 +703,42 @@ def test_test_x_api_connection_redacts_secrets_in_output(tmp_path: Path, monkeyp
     assert "leaked-client-secret" not in result_text
     assert "[[REDACTED]]" in result["error"]
     assert result["redacted"] is True
+
+
+def test_test_x_api_connection_redacts_provider_response_secrets(tmp_path: Path):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "stored-access",
+            "refresh_token": "stored-refresh",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "obtained_at": datetime.now(timezone.utc).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+    client = FakeAsyncClient(
+        get_response=FakeResponse(
+            200,
+            {
+                "data": {"id": "42", "username": "thoth"},
+                "access_token": "provider-secret",
+                "note": "echoed provider-secret",
+            },
+        )
+    )
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=layout, client=client)
+    )
+
+    assert result["status"] == "ok"
+    assert result["user"]["access_token"] == "[[REDACTED]]"
+    assert "provider-secret" not in str(result)
+    assert result["redacted"] is True

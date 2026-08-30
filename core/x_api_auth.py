@@ -621,6 +621,65 @@ def redact_x_api_secrets(
     return redacted
 
 
+_X_API_SECRET_KEYS = {
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "authorization",
+    "authorization_header",
+}
+
+
+def _redact_x_api_structured_value(
+    value: Any,
+    *,
+    auth_config: XApiAuthConfig | None,
+    bundle: Mapping[str, Any] | None,
+) -> Any:
+    """Redact secret-bearing keys and known secret values in provider payloads."""
+    provider_secrets: list[str] = []
+
+    def collect(candidate: Any) -> None:
+        if isinstance(candidate, Mapping):
+            for key, nested in candidate.items():
+                normalized_key = str(key).strip().lower().replace("-", "_")
+                if normalized_key in _X_API_SECRET_KEYS and isinstance(nested, str):
+                    if nested.strip():
+                        provider_secrets.append(nested.strip())
+                collect(nested)
+        elif isinstance(candidate, (list, tuple)):
+            for nested in candidate:
+                collect(nested)
+
+    collect(value)
+
+    def redact(candidate: Any) -> Any:
+        if isinstance(candidate, Mapping):
+            result: dict[str, Any] = {}
+            for key, nested in candidate.items():
+                normalized_key = str(key).strip().lower().replace("-", "_")
+                result[str(key)] = (
+                    "[[REDACTED]]"
+                    if normalized_key in _X_API_SECRET_KEYS
+                    else redact(nested)
+                )
+            return result
+        if isinstance(candidate, (list, tuple)):
+            return [redact(nested) for nested in candidate]
+        if isinstance(candidate, str):
+            redacted = redact_x_api_secrets(
+                candidate,
+                auth_config=auth_config,
+                bundle=bundle,
+            )
+            for secret in provider_secrets:
+                redacted = redacted.replace(secret, "[[REDACTED]]")
+            return redacted
+        return candidate
+
+    return redact(value)
+
+
 def _inspect_client_metadata(config: Config) -> dict[str, Any]:
     """Inspect raw config for required X OAuth client metadata fields."""
     x_api_config = config.get("sources.x_api", {}) or {}
@@ -726,7 +785,16 @@ def _build_diagnostic(
         }
 
     redacted_error = redact_x_api_secrets(error, auth_config=auth_config, bundle=bundle)
-    redacted = redacted_error != (error or "")
+    safe_user = (
+        _redact_x_api_structured_value(
+            user,
+            auth_config=auth_config,
+            bundle=bundle,
+        )
+        if user is not None
+        else None
+    )
+    redacted = redacted_error != (error or "") or safe_user != user
 
     return {
         "status": status,
@@ -735,7 +803,7 @@ def _build_diagnostic(
         "refresh_behavior": refresh_behavior,
         "token": _build_token_summary(bundle),
         "refreshed": refreshed,
-        "user": dict(user) if user is not None else None,
+        "user": safe_user,
         "error": redacted_error,
         "redacted": redacted,
     }
