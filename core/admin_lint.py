@@ -33,12 +33,14 @@ def admin_lint_report_path(
     *,
     project_root: Path,
     lint_kind: str,
+    layout = None,
 ) -> Path:
     """Return the persisted JSON report path for a lint kind."""
     normalized_kind = _normalize_lint_kind(lint_kind)
     _runtime_config, layout = _runtime_config_and_layout(
         config_data,
         project_root=project_root,
+        layout=layout,
     )
     report_dir = layout.system_root / "admin_lint"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -50,22 +52,25 @@ def run_admin_lint(
     *,
     project_root: Path,
     lint_kind: str,
+    layout = None,
+    db: MetadataDB | None = None,
 ) -> dict[str, Any]:
     """Run an operator lint check and persist its JSON report."""
     normalized_kind = _normalize_lint_kind(lint_kind)
-    runtime_config, layout = _runtime_config_and_layout(
+    runtime_config, resolved_layout = _runtime_config_and_layout(
         config_data,
         project_root=project_root,
+        layout=layout,
     )
     contract = build_wiki_contract(runtime_config, project_root=project_root)
     if normalized_kind == "okf":
         report = OKFLintRunner(
             runtime_config,
-            layout=layout,
+            layout=resolved_layout,
             contract=contract,
         ).lint()
         return _persist_admin_lint_report(
-            layout,
+            resolved_layout,
             normalized_kind,
             _okf_lint_payload(report),
         )
@@ -79,42 +84,43 @@ def run_admin_lint(
                 event_store = CaptureEventStore(
                     conn,
                     schema=settings.schema,
-                    raw_roots=[layout.raw_root],
+                    raw_roots=[resolved_layout.raw_root],
                 )
                 report = WikiLintRunner(
                     runtime_config,
-                    layout=layout,
+                    layout=resolved_layout,
                     contract=contract,
                     event_store=event_store,
                 ).lint()
         else:
             report = WikiLintRunner(
                 runtime_config,
-                layout=layout,
+                layout=resolved_layout,
                 contract=contract,
             ).lint()
         return _persist_admin_lint_report(
-            layout,
+            resolved_layout,
             normalized_kind,
             _wiki_lint_payload(report),
         )
     if normalized_kind == "legacy-artifacts":
         report = LegacyArtifactLintRunner(
             runtime_config,
-            layout=layout,
+            layout=resolved_layout,
             contract=contract,
         ).lint()
         return _persist_admin_lint_report(
-            layout,
+            resolved_layout,
             normalized_kind,
             _legacy_artifact_lint_payload(report),
         )
 
-    summary = MetadataDB(str(layout.database_path)).get_ingestion_security_summary(
-        limit=100
-    )
+    from .metadata_db import get_metadata_db
+
+    metadata_db = db or get_metadata_db()
+    summary = metadata_db.get_ingestion_security_summary(limit=100)
     return _persist_admin_lint_report(
-        layout,
+        resolved_layout,
         normalized_kind,
         _security_lint_payload(summary),
     )
@@ -124,11 +130,14 @@ def _runtime_config_and_layout(
     config_data: dict[str, Any],
     *,
     project_root: Path,
+    layout = None,
 ):
     runtime_config = Config()
     runtime_config.data = config_data
-    layout = build_path_layout(runtime_config, project_root=project_root)
-    return runtime_config, layout
+    resolved_layout = layout or build_path_layout(
+        runtime_config, project_root=project_root
+    )
+    return runtime_config, resolved_layout
 
 
 def _normalize_lint_kind(lint_kind: str) -> str:

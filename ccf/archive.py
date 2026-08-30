@@ -698,17 +698,15 @@ class Archive:
             profiles=self.active_profiles,
         )
 
-    def preview_capsule(self, capsule_dir: str | Path) -> dict:
-        """Validate a Capsule against this archive's declaration and emit pending uplift."""
-        from ccf.capsule import load_capsule, verify_capsule
+    def _load_declaration_resources(
+        self,
+    ) -> tuple[dict, "LayeredRegistries", "SchemaSet"]:
+        """Load the 0.2.0 declaration plus the layered registries and schemas."""
         from ccf.catalog import LayeredCatalog
         from ccf.declaration import build_thoth_declaration
-        from ccf.exchange import build_pending_uplift, verify_uplift_receipt
         from ccf.layered import LayeredRegistries
         from ccf.schemas import SchemaSet
 
-        if self.package_root is None:
-            raise ArchiveError("archive has no package_root; cannot preview a Capsule")
         draft = self.draft_root()
         catalog = LayeredCatalog.load(draft, self.package_root)
         if catalog.base_root != self.semantic_catalog_root:
@@ -724,28 +722,141 @@ class Archive:
             schemas=schemas,
             profiles=self.active_profiles,
         )
-        capsule = load_capsule(capsule_dir, schemas=schemas)
-        verify_capsule(
-            capsule,
+        return declaration, layered, schemas
+
+    def interop_context(self) -> "InteropContext":
+        """Public typed context for interoperability operations on this archive.
+
+        Loads the 0.2.0 declaration plus layered registries and schemas once,
+        shared by preview_capsule, inspect_capsule, and compatibility checks.
+        All catalog/layer/schema failures are converted to ArchiveError.
+        """
+        import json
+
+        from ccf.catalog import CatalogError
+        from ccf.interop import InteropContext
+        from ccf.layered import LayeredError
+        from ccf.schemas import CcfSchemaError
+
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot build interop context")
+        try:
+            declaration, layered, schemas = self._load_declaration_resources()
+        except (
+            CatalogError,
+            LayeredError,
+            CcfSchemaError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            OSError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as exc:
+            raise ArchiveError(str(exc)) from exc
+        return InteropContext(
+            declaration=declaration,
             layered=layered,
             schemas=schemas,
-            recipient_level=declaration["level"],
-            recipient_capabilities=declaration["capabilities"],
+            archive_id=self.archive_id,
+            clock=self.clock,
         )
-        receipt = build_pending_uplift(
-            capsule,
-            destination_level=declaration["level"],
-            destination_archive_id=self.archive_id,
-            created_at=self.clock(),
-        )
-        verify_uplift_receipt(
-            receipt, capsule=capsule, layered=layered, schemas=schemas
-        )
-        return {
-            "declaration": declaration,
-            "capsule": capsule.manifest,
-            "uplift": receipt,
-        }
+
+    def preview_capsule(self, capsule_dir: str | Path) -> dict:
+        """Validate a Capsule against this archive's declaration and emit pending uplift."""
+        from ccf.interop import InteropError, preview_capsule
+
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot preview a Capsule")
+        try:
+            return preview_capsule(self.interop_context(), capsule_dir)
+        except InteropError as exc:
+            raise ArchiveError(str(exc)) from exc
+
+    # ------------------------------------------------------------------
+    # Interoperability delivery seam (CCF 0.2.0 Capsule negotiation)
+    # ------------------------------------------------------------------
+
+    def negotiate_capsule(self, capsule_dir: str | Path) -> dict:
+        """Negotiate CCF 0.2.0 protocol identity for a Capsule.
+
+        Returns identity facts only (``root`` is ``current``, ``legacy``, or
+        ``unknown``). The caller selects policy for legacy roots. This method
+        does not mutate the archive.
+        """
+        from ccf.interop import InteropError, load_capsule_integrity, negotiate_identity
+
+        if self.package_root is None:
+            raise ArchiveError(
+                "archive has no package_root; cannot negotiate Capsule identity"
+            )
+        try:
+            capsule = load_capsule_integrity(capsule_dir)
+            return negotiate_identity(capsule.manifest, self.interop_context().declaration)
+        except InteropError as exc:
+            raise ArchiveError(str(exc)) from exc
+
+    def inspect_capsule(
+        self,
+        capsule_dir: str | Path,
+        *,
+        policy: str = "refuse",
+    ) -> dict:
+        """Inspect a CCF 0.2.0 Capsule and return a negotiation/preview result.
+
+        ``policy`` controls behavior for known legacy roots:
+
+        - ``refuse`` (default): fail closed.
+        - ``read``: integrity-verified inert preview; no archive mutation, no
+          current-layered-schema verification, and no uplift receipt.
+        - ``uplift``: pending verified uplift receipt only; preserves IDs and
+          marks producer authentication absent.
+
+        This method does **not** admit Capsule submissions into the archive.
+        """
+        from ccf.interop import InteropError, inspect_capsule, load_capsule_integrity
+
+        if self.package_root is None:
+            raise ArchiveError(
+                "archive has no package_root; cannot inspect a Capsule"
+            )
+        if policy not in {"refuse", "read", "uplift"}:
+            raise ArchiveError(f"unknown Capsule inspect policy: {policy!r}")
+        try:
+            capsule = load_capsule_integrity(capsule_dir)
+            return inspect_capsule(self.interop_context(), capsule, policy=policy)
+        except InteropError as exc:
+            raise ArchiveError(str(exc)) from exc
+
+    def evaluate_capsule_compatibility(
+        self,
+        capsule_dir: str | Path,
+    ) -> dict:
+        """Return a structured compatibility report for a Capsule.
+
+        Reports only blockers that actually apply to this Capsule. A valid
+        current-root local Capsule with no external dependencies can pass.
+        Cross-repo Cissa gaps are exposed by ``cross_repo_conformance_status``,
+        not duplicated here. This method never raises for corrupted Capsule input.
+        """
+        from ccf.interop_compat import evaluate_compatibility
+
+        if self.package_root is None:
+            raise ArchiveError(
+                "archive has no package_root; cannot evaluate Capsule compatibility"
+            )
+        return evaluate_compatibility(self.interop_context(), capsule_dir)
+
+    @staticmethod
+    def cross_repo_conformance_status() -> dict:
+        """Explicit cross-repo/status report for Cissa conformance gaps.
+
+        This is not a per-Capsule result; it documents why a true bidirectional
+        Cissa↔Thoth pass remains blocked regardless of any local Capsule.
+        """
+        from ccf.interop_compat import cross_repo_conformance_status
+
+        return cross_repo_conformance_status()
 
 
 def _insert_commit_record(conn, archive_id: str, commit, committed_at: str) -> None:

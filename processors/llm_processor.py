@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from core.data_models import Tweet, ProcessingStats
 from core.config import config
+from core.llm_cache import get_llm_cache
 from core.llm_interface import LLMInterface
 from core.pipeline_registry import PipelineStage, pipeline_registry, register_pipeline_stages
 
@@ -374,24 +375,23 @@ class LLMProcessor:
             if not content:
                 return []
             
-            from core.llm_cache import llm_cache
             route = self.llm_interface.resolve_task_route('tags')
             if not route:
                 return []
             provider, model_id, _ = route
             cache_id = f"{provider}:{model_id}"
 
-            cached_result = llm_cache.get(content, 'tags', cache_id)
+            cached_result = get_llm_cache().get(content, 'tags', cache_id)
             if cached_result:
                 logger.debug(f"Using cached tags for tweet {tweet.id}")
                 return cached_result.get('tags', [])
-            
+
             # Generate new tags
             tags = await self.llm_interface.generate_tags(content)
             logger.debug(f"Generated {len(tags)} tags for tweet {tweet.id}")
-            
+
             # Cache the result
-            llm_cache.set(content, 'tags', {'tags': tags}, cache_id)
+            get_llm_cache().set(content, 'tags', {'tags': tags}, cache_id)
             # Persist to DB
             try:
                 from core.metadata_db import get_metadata_db
@@ -419,24 +419,23 @@ class LLMProcessor:
                 return ""
             
             # Check cache first
-            from core.llm_cache import llm_cache
             route = self.llm_interface.resolve_task_route('summary')
             if not route:
                 return ""
             provider, model_id, _ = route
             cache_id = f"{provider}:{model_id}"
 
-            cached_result = llm_cache.get(content, 'tweet_summary', cache_id)
+            cached_result = get_llm_cache().get(content, 'tweet_summary', cache_id)
             if cached_result:
                 logger.debug(f"Using cached summary for tweet {tweet.id}")
                 return cached_result.get('summary', '')
-            
+
             # Generate new summary
             summary = await self.llm_interface.summarize_content(content, "text")
             logger.debug(f"Generated summary for tweet {tweet.id}")
-            
+
             # Cache the result
-            llm_cache.set(content, 'tweet_summary', {'summary': summary}, cache_id)
+            get_llm_cache().set(content, 'tweet_summary', {'summary': summary}, cache_id)
             # Persist to DB
             try:
                 from core.metadata_db import get_metadata_db
@@ -539,18 +538,17 @@ class LLMProcessor:
                         logger.debug(f"Processing alt text for {media_item.filename}")
                         
                         # Check cache first (use filename as content key since it's based on file)
-                        from core.llm_cache import llm_cache
-                        cached_result = llm_cache.get(media_item.filename, 'alt_text', cache_id)
+                        cached_result = get_llm_cache().get(media_item.filename, 'alt_text', cache_id)
                         if cached_result:
                             alt_text = cached_result.get('alt_text', '')
                             logger.debug(f"Using cached alt text for {media_item.filename}")
                         else:
                             # Generate new alt text
                             alt_text = await self.llm_interface.generate_alt_text(str(media_path))
-                            
+
                             # Cache the result if valid
                             if alt_text and not alt_text.startswith("Alt text"):
-                                llm_cache.set(media_item.filename, 'alt_text', {'alt_text': alt_text}, cache_id)
+                                get_llm_cache().set(media_item.filename, 'alt_text', {'alt_text': alt_text}, cache_id)
                                 # Persist alt text cache to DB (content hash based on filename)
                                 try:
                                     from core.metadata_db import get_metadata_db

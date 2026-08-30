@@ -56,6 +56,7 @@ from processors.huggingface_likes_processor import HuggingFaceLikesProcessor
 from processors.youtube_processor import YouTubeProcessor
 from processors.transcription_processor import TranscriptionProcessor
 from core.download_tracker import get_download_tracker
+from core.runtime_composition import resolve_runtime_database
 
 
 logger = logging.getLogger(__name__)
@@ -2108,12 +2109,47 @@ def cmd_artifacts(args):
                 args.artifact_id,
                 **_artifact_review_kwargs(args),
             )
+        elif args.artifacts_action == "approve":
+            payload = service.approve_artifact_classification(
+                args.artifact_id,
+                actor=args.actor,
+                reason=args.reason,
+            )
+        elif args.artifacts_action == "correct":
+            payload = service.correct_artifact_classification(
+                args.artifact_id,
+                projection_id=args.projection_id,
+                actor=args.actor,
+                reason=args.reason,
+            )
+        elif args.artifacts_action == "figure-out":
+            payload = service.propose_classification_policy(
+                actor=args.actor,
+                reason=args.reason,
+            )
+        elif args.artifacts_action == "activate-policy":
+            payload = service.activate_classification_policy(
+                args.revision_id,
+                actor=args.actor,
+                reason=args.reason,
+            )
+        elif args.artifacts_action == "rollback-policy":
+            payload = service.rollback_classification_policy(
+                actor=args.actor,
+                reason=args.reason,
+            )
         else:
             raise ValueError("Unknown artifacts action")
     except (AgentSurfaceError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
-    if getattr(args, "json", False) or args.artifacts_action in {"get", "provenance"}:
+    if getattr(args, "json", False) or args.artifacts_action in {
+        "get",
+        "provenance",
+        "figure-out",
+        "activate-policy",
+        "rollback-policy",
+    }:
         _print_json(payload)
         return
 
@@ -2121,6 +2157,13 @@ def cmd_artifacts(args):
         queue = payload["queue"]
         print(
             f"{queue['artifact_type']}:{queue['artifact_id']} -> {queue['status']}"
+        )
+        return
+
+    if args.artifacts_action in {"approve", "correct"}:
+        print(
+            f"{payload['artifact_id']} -> {payload['status']} "
+            f"projection={payload.get('projection_id') or '-'}"
         )
         return
 
@@ -3129,6 +3172,41 @@ Examples:
         )
         action_parser.add_argument("--json", action="store_true")
 
+    for action_name, action_help in (
+        ("approve", "Approve a proposed artifact classification"),
+        ("correct", "Correct an artifact classification"),
+    ):
+        action_parser = artifacts_subparsers.add_parser(
+            action_name,
+            help=action_help,
+        )
+        action_parser.add_argument("artifact_id")
+        if action_name == "correct":
+            action_parser.add_argument("projection_id")
+        action_parser.add_argument("--actor", required=True)
+        action_parser.add_argument("--reason", required=True)
+        action_parser.add_argument("--json", action="store_true")
+
+    for action_name, action_help in (
+        ("figure-out", "Propose a learned classification policy revision"),
+        ("rollback-policy", "Roll back the active classification policy"),
+    ):
+        action_parser = artifacts_subparsers.add_parser(
+            action_name,
+            help=action_help,
+        )
+        action_parser.add_argument("--actor", required=True)
+        action_parser.add_argument("--reason", required=True)
+        action_parser.add_argument("--json", action="store_true")
+    activate_policy_parser = artifacts_subparsers.add_parser(
+        "activate-policy",
+        help="Activate an evaluated classification policy revision",
+    )
+    activate_policy_parser.add_argument("revision_id")
+    activate_policy_parser.add_argument("--actor", required=True)
+    activate_policy_parser.add_argument("--reason", required=True)
+    activate_policy_parser.add_argument("--json", action="store_true")
+
     ingest_parser = subparsers.add_parser(
         "ingest",
         help="Stable ingestion command group",
@@ -3939,6 +4017,10 @@ Examples:
     }
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
+
+    # Resolve and register the canonical metadata database once per CLI run.
+    # Subcommands use get_metadata_db() or receive the same instance explicitly.
+    resolve_runtime_database(config)
 
     # Run command
     try:

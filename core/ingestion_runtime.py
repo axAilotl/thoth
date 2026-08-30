@@ -12,6 +12,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping
 
 from .artifacts import (
@@ -23,6 +24,11 @@ from .artifacts import (
     TweetArtifact,
     VideoArtifact,
     WebClipperArtifact,
+)
+from .artifact_classification import (
+    ArtifactClassifier,
+    ClassificationResult,
+    RoutingAction,
 )
 from .bounded_workers import map_bounded, resolve_worker_concurrency
 from .bookmark_contract import normalize_bookmark_payload, validate_tweet_id
@@ -36,7 +42,18 @@ from .metadata_db import (
     get_metadata_db,
 )
 from .path_layout import PathLayout, build_path_layout
+from .runtime_composition import validate_metadata_db_matches_layout
 from .prompt_security import prompt_security_requires_review
+from .transcript_enrichment import (
+    LocalTranscriptNormalizer,
+    ProcessingRequest,
+    TranscriptEnrichmentService,
+    apply_derivatives_to_artifact,
+)
+from .transcript_enrichment.request import (
+    current_processing_request,
+    processing_request_scope,
+)
 from .translation_companion import EnglishCompanionPublisher, TranslationCompanionResult
 from .wiki_updater import CompiledWikiUpdater
 
@@ -49,6 +66,16 @@ class IngestionRuntimeError(RuntimeError):
 
 class UnsupportedArtifactTypeError(IngestionRuntimeError, ValueError):
     """Raised when a queue entry declares an unsupported artifact type."""
+
+
+class ClassificationReviewRequired(IngestionRuntimeError):
+    """Raised when an artifact needs human review before routing."""
+
+    def __init__(self, classification: "ClassificationResult") -> None:
+        self.classification = classification
+        super().__init__(
+            f"artifact classification review required: {classification.reasons[0]}"
+        )
 
 
 @dataclass(frozen=True)
@@ -102,6 +129,8 @@ def _reviewable_artifact_error(exc: Exception) -> bool:
 
 
 def _review_category_for_error(exc: Exception) -> str:
+    if isinstance(exc, ClassificationReviewRequired):
+        return "classification"
     message = str(exc).lower()
     if "invalid json" in message or "decode" in message:
         return "malformed_payload"
@@ -123,15 +152,24 @@ class KnowledgeArtifactRuntime:
         *,
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
+        transcript_enrichment_service: TranscriptEnrichmentService | None = None,
     ):
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
-        self.layout.ensure_directories()
         self.db = db or get_metadata_db()
+        validate_metadata_db_matches_layout(self.db, self.layout)
+        self.layout.ensure_directories()
         self._pipeline = None
         self._wiki_updater = None
         self._companion_publisher = None
         self._canonical_identity_service = None
+        self._worker_health: dict[str, Any] = {
+            "healthy": True,
+            "last_error": None,
+            "last_error_at": None,
+            "consecutive_failures": 0,
+        }
+        self._transcript_enrichment_service = transcript_enrichment_service
 
     @property
     def pipeline(self):
@@ -167,6 +205,17 @@ class KnowledgeArtifactRuntime:
             self._canonical_identity_service = CanonicalIdentityService(self.db)
         return self._canonical_identity_service
 
+    @property
+    def transcript_enrichment_service(self) -> TranscriptEnrichmentService:
+        if self._transcript_enrichment_service is None:
+            self._transcript_enrichment_service = TranscriptEnrichmentService(
+                self.config,
+                layout=self.layout,
+                db=self.db,
+                normalizer=LocalTranscriptNormalizer(),
+            )
+        return self._transcript_enrichment_service
+
     def materialize_artifact(self, entry: IngestionQueueEntry) -> KnowledgeArtifact:
         """Convert a queue row into a typed artifact."""
         payload = _json_loads_maybe(entry.payload_json)
@@ -193,13 +242,15 @@ class KnowledgeArtifactRuntime:
                 f"Unsupported ingestion artifact type: {entry.artifact_type}"
             )
 
-        return artifact.apply_queue_context(
+        capabilities = _capabilities_from_queue(entry.capabilities_json)
+        artifact = artifact.apply_queue_context(
             queue_id=entry.artifact_id,
             queue_source=entry.source,
             queue_created_at=entry.created_at,
-            capabilities=_capabilities_from_queue(entry.capabilities_json),
+            capabilities=capabilities,
             payload=payload,
         )
+        return artifact
 
     def _sync_wiki_for_artifact(
         self,
@@ -258,7 +309,11 @@ class KnowledgeArtifactRuntime:
         poll_interval_seconds: float = 5.0,
         batch_size: int = 25,
     ) -> None:
-        """Poll the ingestion queue until shutdown."""
+        """Poll the ingestion queue until shutdown.
+
+        Queue read and processing failures are recorded in ``worker_health`` so
+        they surface as unhealthy work instead of being mistaken for idle time.
+        """
         while not shutdown_event.is_set():
             try:
                 results = await self.process_pending_ingestions_once(
@@ -266,23 +321,45 @@ class KnowledgeArtifactRuntime:
                     concurrency=self._ingestion_worker_concurrency(),
                     cancel_event=shutdown_event,
                 )
-                if not results:
-                    await asyncio.wait_for(
-                        shutdown_event.wait(), timeout=poll_interval_seconds
-                    )
+                # Any successful poll (including an empty queue) recovers health.
+                self._record_worker_success()
+                if results:
                     continue
+                await asyncio.wait_for(
+                    shutdown_event.wait(), timeout=poll_interval_seconds
+                )
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.error("Ingestion worker iteration failed: %s", exc)
+                self._record_worker_failure(exc)
                 try:
                     await asyncio.wait_for(
                         shutdown_event.wait(), timeout=poll_interval_seconds
                     )
                 except asyncio.TimeoutError:
                     continue
+
+    def _record_worker_failure(self, exc: Exception) -> None:
+        """Update health state after a failed worker iteration."""
+        self._worker_health["healthy"] = False
+        self._worker_health["last_error"] = f"{exc.__class__.__name__}: {exc}"
+        self._worker_health["last_error_at"] = _now_iso()
+        self._worker_health["consecutive_failures"] += 1
+
+    def _record_worker_success(self) -> None:
+        """Reset health state after a successful worker iteration."""
+        self._worker_health["healthy"] = True
+        self._worker_health["last_error"] = None
+        self._worker_health["last_error_at"] = None
+        self._worker_health["consecutive_failures"] = 0
+
+    @property
+    def worker_health(self) -> dict[str, Any]:
+        """Return the current worker health snapshot."""
+        return dict(self._worker_health)
 
     def _ingestion_worker_concurrency(self) -> int:
         return resolve_worker_concurrency(
@@ -301,29 +378,48 @@ class KnowledgeArtifactRuntime:
                 "or operator review"
             )
         try:
+            processing_request = self._extract_processing_request(entry)
             artifact = self.materialize_artifact(entry)
             if prompt_security_requires_review(artifact.normalized_metadata):
                 raise IngestionRuntimeError(
                     f"Ingestion artifact {entry.artifact_id} requires security review"
                 )
+            classification = self._classify_artifact(
+                artifact,
+                artifact_type=entry.artifact_type,
+            )
+            if classification is not None and classification.action == RoutingAction.REVIEW:
+                raise ClassificationReviewRequired(classification)
             canonical_identity = self._canonicalize_artifact(
                 artifact,
                 artifact_type=entry.artifact_type,
             )
         except Exception as exc:
             if _reviewable_artifact_error(exc):
-                return self._route_entry_to_review(entry, exc, stage="materialize")
+                classification = getattr(exc, "classification", None)
+                return self._route_entry_to_review(
+                    entry,
+                    exc,
+                    stage="classification" if classification else "materialize",
+                    classification=classification,
+                )
             raise
         self.db.mark_ingestion_processing(entry.artifact_id)
 
         try:
-            result = await self.dispatch_artifact(artifact)
+            with processing_request_scope(processing_request):
+                result = await self.dispatch_artifact(artifact)
             if canonical_identity is not None:
                 result.details.setdefault("canonical_id", canonical_identity.canonical_id)
                 result.details.setdefault(
                     "canonical_entity_type",
                     canonical_identity.entity_type,
                 )
+            if classification is not None:
+                result.details.setdefault(
+                    "routing_projection_id", classification.projection_id
+                )
+                self._record_auto_route(entry, classification)
             self._sync_wiki_for_artifact(
                 artifact,
                 dispatch_details=result.details,
@@ -354,29 +450,90 @@ class KnowledgeArtifactRuntime:
         exc: Exception,
         *,
         stage: str,
+        classification: ClassificationResult | None = None,
     ) -> IngestionDispatchResult:
         error = f"artifact review required: {exc}"
+        metadata: dict[str, Any] = {"stage": stage}
+        if classification is not None:
+            metadata = classification.to_review_event()
+            metadata["stage"] = stage
         updated = self.db.mark_ingestion_review_required(
             entry.artifact_id,
             category=_review_category_for_error(exc),
             reason=str(exc),
             error=error,
             error_type=exc.__class__.__name__,
-            metadata={"stage": stage},
+            metadata=metadata,
         )
         status = updated.status if updated else "needs_review"
+        details: dict[str, Any] = {
+            "review_required": True,
+            "stage": stage,
+            "error": str(exc),
+            "error_type": exc.__class__.__name__,
+        }
+        if classification is not None:
+            details["classification"] = classification.to_review_event()
         return IngestionDispatchResult(
             artifact_id=entry.artifact_id,
             artifact_type=entry.artifact_type,
             source=entry.source,
             status=status,
             processed_at=_now_iso(),
-            details={
-                "review_required": True,
-                "stage": stage,
-                "error": str(exc),
-                "error_type": exc.__class__.__name__,
+            details=details,
+        )
+
+    def _classify_artifact(
+        self,
+        artifact: KnowledgeArtifact,
+        *,
+        artifact_type: str,
+    ) -> ClassificationResult | None:
+        """Classify an artifact when the classification feature is enabled."""
+        if not self.config.get("classification.enabled", False):
+            return None
+        from .classification_review import ClassificationReviewService
+
+        review_service = ClassificationReviewService(self.db, config=self.config)
+        policy = review_service.get_active_policy()
+        classifier = ArtifactClassifier(policy)
+        classification = classifier.classify(artifact, artifact_type=artifact_type)
+        resolution = review_service.operator_resolution(artifact.id, policy=policy)
+        if resolution is None:
+            return classification
+        projection_id = resolution.actual_projection_id
+        return ClassificationResult(
+            artifact_id=classification.artifact_id,
+            artifact_type=classification.artifact_type,
+            source=classification.source,
+            projection_id=projection_id,
+            confidence=1.0,
+            reasons=("durable operator routing decision",),
+            evidence={
+                "features": classification.evidence.get("features", {}),
+                "decision_id": resolution.decision_id,
+                "operator_resolved": True,
             },
+            alternatives=(),
+            action=RoutingAction.ROUTE,
+        )
+
+    def _record_auto_route(
+        self,
+        entry: IngestionQueueEntry,
+        classification: ClassificationResult,
+    ) -> None:
+        if classification.action != RoutingAction.ROUTE:
+            return
+        if classification.evidence.get("operator_resolved"):
+            return
+        from .classification_review import ClassificationReviewService
+
+        ClassificationReviewService(self.db, config=self.config).record_auto_route(
+            artifact_id=entry.artifact_id,
+            artifact_type=entry.artifact_type,
+            source=entry.source,
+            classification=classification,
         )
 
     def _canonicalize_artifact(
@@ -776,9 +933,24 @@ class KnowledgeArtifactRuntime:
         )
 
     async def _process_transcript_artifact(
-        self, artifact: TranscriptArtifact
+        self,
+        artifact: TranscriptArtifact,
     ) -> IngestionDispatchResult:
-        """Process a transcript artifact already normalized by a connector."""
+        """Process a transcript artifact through injected enrichment.
+
+        Produces normalized transcript and optional summary/classification
+        derivatives, caches them by exact source commitment plus processor
+        identities, indexes the full text, and links every derivative back to
+        the immutable source. AI outputs are only produced when requested and
+        a processor is injected; otherwise source-provided values are used.
+        """
+        request = current_processing_request()
+        service = self.transcript_enrichment_service
+        result = service.enrich(
+            artifact,
+            request=request,
+        )
+        apply_derivatives_to_artifact(artifact, result)
         return IngestionDispatchResult(
             artifact_id=artifact.id,
             artifact_type="transcript",
@@ -792,11 +964,52 @@ class KnowledgeArtifactRuntime:
                 "transcript_path": artifact.transcript_path,
                 "has_raw_transcript": bool(artifact.raw_transcript),
                 "has_processed_transcript": bool(artifact.processed_transcript),
+                "cache_hit": result.cache_hit,
+                "rerun_requested": result.rerun_requested,
+                "mode": result.mode.value,
+                "version": result.version,
+                "cache_key": result.cache_key,
+                "source_hash": result.source_hash,
+                "derivatives": result.derivative_paths(),
+                "indexed": result.indexed,
             },
         )
 
+    def _extract_processing_request(
+        self, entry: IngestionQueueEntry
+    ) -> ProcessingRequest:
+        """Parse the schema-validated processing_request from the queue payload."""
+        payload = _json_loads_maybe(entry.payload_json)
+        if not isinstance(payload, dict):
+            return ProcessingRequest.default()
+        return ProcessingRequest.from_payload(payload.get("processing_request"))
+
 
 _shared_runtime: KnowledgeArtifactRuntime | None = None
+
+
+def clear_knowledge_artifact_runtime() -> None:
+    """Release the process-global knowledge runtime during composition teardown."""
+    global _shared_runtime
+    _shared_runtime = None
+
+
+def _runtime_configs_compatible(
+    existing: KnowledgeArtifactRuntime,
+    runtime_config: Config | None,
+    layout: PathLayout | None,
+    db: MetadataDB | None,
+) -> bool:
+    """Check whether explicit arguments point at the same runtime as the singleton."""
+    if db is not None and db is not existing.db:
+        return False
+    if runtime_config is not None and runtime_config is not existing.config:
+        if runtime_config.data != existing.config.data:
+            return False
+    if layout is not None and layout is not existing.layout:
+        if layout != existing.layout:
+            return False
+    return True
 
 
 def get_knowledge_artifact_runtime(
@@ -805,15 +1018,45 @@ def get_knowledge_artifact_runtime(
     layout: PathLayout | None = None,
     db: MetadataDB | None = None,
 ) -> KnowledgeArtifactRuntime:
-    """Return the singleton runtime used by CLI and API entrypoints."""
+    """Return the singleton runtime used by CLI and API entrypoints.
+
+    The first call may provide explicit configuration, layout, and database.
+    Subsequent calls must use the same instance (no arguments) or match the
+    existing singleton exactly; mismatched arguments raise a hard failure so
+    workers and API endpoints never silently use a different runtime.
+    """
     global _shared_runtime
-    if (
-        _shared_runtime is None
-        or runtime_config is not None
-        or layout is not None
-        or db is not None
-    ):
+    if _shared_runtime is None:
         _shared_runtime = KnowledgeArtifactRuntime(
             runtime_config or config, layout=layout, db=db
         )
+        return _shared_runtime
+
+    if runtime_config is None and layout is None and db is None:
+        return _shared_runtime
+
+    if not _runtime_configs_compatible(_shared_runtime, runtime_config, layout, db):
+        raise RuntimeError(
+            "Mismatched knowledge artifact runtime requested: "
+            f"existing db={_shared_runtime.db.db_path}, "
+            f"requested layout db={layout.database_path if layout else None}"
+        )
     return _shared_runtime
+
+
+def get_knowledge_artifact_runtime_health() -> dict[str, Any]:
+    """Return the singleton runtime's worker health.
+
+    An uninitialized runtime is explicitly unhealthy so callers cannot mistake
+    "not yet started" for "healthy".
+    """
+    if _shared_runtime is None:
+        return {
+            "healthy": False,
+            "state": "uninitialized",
+            "reason": "Knowledge artifact runtime has not been initialized",
+            "last_error": None,
+            "last_error_at": None,
+            "consecutive_failures": 0,
+        }
+    return _shared_runtime.worker_health

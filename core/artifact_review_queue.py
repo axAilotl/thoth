@@ -59,6 +59,24 @@ class ArtifactReviewQueueService:
         metadata: Mapping[str, Any] | None = None,
     ) -> IngestionQueueEntry:
         entry = self._get_entry(artifact_id)
+        from .classification_review import (
+            ClassificationReviewError,
+            ClassificationReviewService,
+        )
+
+        classification = ClassificationReviewService(self.db, config=self.config)
+        if classification.is_review_item(artifact_id):
+            try:
+                classification.approve(
+                    artifact_id,
+                    actor=actor,
+                    reason=reason,
+                )
+            except ClassificationReviewError as exc:
+                raise ArtifactReviewQueueError(str(exc)) from exc
+            updated = self._get_entry(artifact_id)
+            self._mirror_review_decision(updated, action="classification_approved")
+            return updated
         if _entry_has_prompt_security_review(entry):
             approved = self.db.approve_ingestion_security_override(
                 artifact_id,
@@ -86,6 +104,24 @@ class ArtifactReviewQueueService:
         reason: str,
         metadata: Mapping[str, Any] | None = None,
     ) -> IngestionQueueEntry:
+        from .classification_review import (
+            ClassificationReviewError,
+            ClassificationReviewService,
+        )
+
+        classification = ClassificationReviewService(self.db, config=self.config)
+        if classification.is_review_item(artifact_id):
+            try:
+                classification.reject(
+                    artifact_id,
+                    actor=actor,
+                    reason=reason,
+                )
+            except ClassificationReviewError as exc:
+                raise ArtifactReviewQueueError(str(exc)) from exc
+            updated = self._get_entry(artifact_id)
+            self._mirror_review_decision(updated, action="classification_rejected")
+            return updated
         updated = self.db.reject_ingestion_review(
             artifact_id,
             actor=actor,
@@ -105,6 +141,14 @@ class ArtifactReviewQueueService:
         reason: str,
         metadata: Mapping[str, Any] | None = None,
     ) -> IngestionQueueEntry:
+        from .classification_review import ClassificationReviewService
+
+        classification = ClassificationReviewService(self.db, config=self.config)
+        if classification.is_review_item(artifact_id):
+            raise ArtifactReviewQueueError(
+                "Classification items require approve, correct, or reject; "
+                "mark-reviewed would bypass routing decision provenance"
+            )
         updated = self.db.mark_ingestion_reviewed(
             artifact_id,
             actor=actor,

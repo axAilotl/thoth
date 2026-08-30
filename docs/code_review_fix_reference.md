@@ -403,8 +403,9 @@ Success criteria:
 - YouTube canonicalization uses exact host or dot-boundary matching.
 - Timestamp producers and parsers agree on timezone semantics.
 - Query API response compatibility is restored or versioned.
-- Evidence-free promotion is either surfaced with explicit provenance or
-  rejected before promotion.
+- Evidence-free promotion is rejected before promotion. Explicit confirmation or
+  trusted structured input alone is not sufficient; durable promoted facts must
+  retain visible source evidence and provenance.
 
 ## Performance Hot Paths
 

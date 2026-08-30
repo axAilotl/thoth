@@ -5,6 +5,8 @@ import pytest
 from core.archivist_compiler import ArchivistCompileResult
 from core.archivist_runtime import resolve_archivist_sync_config, run_archivist_topics
 from core.config import Config
+from core.metadata_db import MetadataDB
+from core.path_layout import build_path_layout
 
 
 def make_config(tmp_path: Path) -> Config:
@@ -64,9 +66,13 @@ async def test_run_archivist_topics_returns_serialized_summary(tmp_path: Path, m
 
     monkeypatch.setattr("core.archivist_runtime.ArchivistCompiler", FakeCompiler)
 
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
     payload = await run_archivist_topics(
         config,
         project_root=tmp_path,
+        layout=layout,
+        db=db,
         topic_ids=["companion-ai"],
         force=True,
         dry_run=False,

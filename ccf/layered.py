@@ -180,7 +180,15 @@ class LayeredRegistries:
         }.get(kind)
         if resource_kind is None:
             raise LayeredError(f"submission missing kind: {kind!r}")
-        return self.requirement_for(resource_kind, submission["type"], 1)
+        # Portable Blob submissions do not carry a ``type`` field. The 0.1.2
+        # admission path canonically resolves every submitted Blob to the
+        # default blob.manifest registry entry; governed suppression Blobs are
+        # constructed internally and never arrive through this submission
+        # schema.
+        name = "blob.manifest" if kind == "blob" else submission.get("type")
+        if not isinstance(name, str):
+            raise LayeredError(f"{kind} submission missing type")
+        return self.requirement_for(resource_kind, name, 1)
 
     def features_fit_level(self, level_id: str, feature_ids: list[str] | tuple[str, ...]) -> None:
         rank = self.level_rank(level_id)
@@ -223,4 +231,3 @@ class LayeredRegistries:
 
 def load_layered(draft_root: str | Path) -> LayeredRegistries:
     return LayeredRegistries.load(draft_root)
-

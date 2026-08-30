@@ -23,7 +23,6 @@ from .artifact_review_policy import (
     structural_review_for_ingestion as _ingestion_structural_review,
 )
 from .config import config
-from .path_layout import build_path_layout
 from .prompt_security import (
     THOTH_REDACTION_METADATA_KEY,
     THOTH_SECURITY_AUDIT_KEY,
@@ -758,17 +757,18 @@ class ResearchPaperEdge:
 
 
 class MetadataDB:
-    """SQLite metadata database with WAL mode and connection pooling"""
-    
-    def __init__(self, db_path: str = None):
-        if db_path:
-            self.db_path = Path(db_path)
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            path_layout = build_path_layout(config)
-            self.db_path = path_layout.database_path
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+    """SQLite metadata database with WAL mode and connection pooling.
+
+    Construction is explicit: callers must provide a resolved ``db_path``.
+    Importing this module must not create files or directories.
+    """
+
+    def __init__(self, db_path: str):
+        if not db_path or not str(db_path).strip():
+            raise ValueError("db_path is required")
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
         self._initialized = False
         self._setup_database()
     
@@ -924,6 +924,59 @@ class MetadataDB:
             )
         """)
         self._ensure_ingestion_queue_statuses(conn)
+
+        # Versioned, person-scoped artifact routing policy and decision data.
+        # MetadataDB owns this schema so constructing a service never performs
+        # an implicit migration through a private connection.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS routing_policy_revisions (
+                revision_id TEXT PRIMARY KEY,
+                version INTEGER NOT NULL UNIQUE,
+                status TEXT NOT NULL CHECK (
+                    status IN ('proposed', 'active', 'rolled_back', 'superseded')
+                ),
+                actor TEXT,
+                reason TEXT,
+                policy_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL DEFAULT '{}',
+                previous_revision_id TEXT,
+                created_at TEXT NOT NULL,
+                activated_at TEXT,
+                provenance_json TEXT NOT NULL DEFAULT '{}'
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS routing_decisions (
+                decision_id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                revision_id TEXT,
+                proposed_projection_id TEXT,
+                actual_projection_id TEXT,
+                action TEXT NOT NULL CHECK (
+                    action IN ('approve', 'reject', 'correct', 'figure_out', 'auto_route')
+                ),
+                actor TEXT,
+                reason TEXT,
+                features_json TEXT NOT NULL DEFAULT '{}',
+                alternatives_json TEXT NOT NULL DEFAULT '[]',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_routing_decisions_artifact
+            ON routing_decisions(artifact_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_routing_decisions_revision
+            ON routing_decisions(revision_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_routing_decisions_created
+            ON routing_decisions(created_at)
+        """)
 
         # Canonical identity tables for duplicate detection across connectors.
         conn.execute("""
@@ -3320,37 +3373,37 @@ class MetadataDB:
             return []
 
     def get_unprocessed_bookmarks(self, limit: Optional[int] = None) -> List[BookmarkQueueEntry]:
-        """Return bookmarks that are not processed (pending or failed)."""
-        try:
-            with self._get_connection() as conn:
-                query = (
-                    "SELECT * FROM bookmark_queue WHERE status IN ('pending', 'processing', 'failed') "
-                    "ORDER BY captured_at"
+        """Return bookmarks that are not processed (pending or failed).
+
+        Database errors propagate so callers do not mistake a failed read for
+        an empty queue.
+        """
+        with self._get_connection() as conn:
+            query = (
+                "SELECT * FROM bookmark_queue WHERE status IN ('pending', 'processing', 'failed') "
+                "ORDER BY captured_at"
+            )
+            params: List[Any] = []
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [
+                BookmarkQueueEntry(
+                    tweet_id=row['tweet_id'],
+                    source=row['source'],
+                    captured_at=row['captured_at'],
+                    status=row['status'],
+                    attempts=row['attempts'],
+                    last_error=row['last_error'],
+                    last_attempt_at=row['last_attempt_at'],
+                    processed_at=row['processed_at'],
+                    payload_json=row['payload_json'],
+                    next_attempt_at=row['next_attempt_at'],
+                    processed_with_graphql=bool(row['processed_with_graphql'])
                 )
-                params: List[Any] = []
-                if limit:
-                    query += " LIMIT ?"
-                    params.append(limit)
-                rows = conn.execute(query, tuple(params)).fetchall()
-                return [
-                    BookmarkQueueEntry(
-                        tweet_id=row['tweet_id'],
-                        source=row['source'],
-                        captured_at=row['captured_at'],
-                        status=row['status'],
-                        attempts=row['attempts'],
-                        last_error=row['last_error'],
-                        last_attempt_at=row['last_attempt_at'],
-                        processed_at=row['processed_at'],
-                        payload_json=row['payload_json'],
-                        next_attempt_at=row['next_attempt_at'],
-                        processed_with_graphql=bool(row['processed_with_graphql'])
-                    )
-                    for row in rows
-                ]
-        except Exception as e:
-            logger.error(f"Failed to list unprocessed bookmarks: {e}")
-            return []
+                for row in rows
+            ]
 
     def get_bookmark_statuses(self, tweet_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """Return status metadata for provided tweet IDs."""
@@ -4387,6 +4440,113 @@ class MetadataDB:
             metadata=metadata,
         )
 
+    def apply_classification_review_decision(
+        self,
+        decision: Any,
+        *,
+        transition_action: str,
+        status: str,
+        actor: str,
+        reason: str,
+    ) -> IngestionQueueEntry:
+        """Atomically record a routing decision and requeue/close its artifact."""
+        clean_actor = str(actor or "").strip()
+        clean_reason = str(reason or "").strip()
+        if status not in {"pending", "rejected"}:
+            raise ValueError(f"Unsupported classification target status: {status}")
+        if not clean_actor or not clean_reason:
+            raise ValueError("Classification decisions require actor and reason")
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM ingestion_queue WHERE artifact_id = ?",
+                (decision.artifact_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Artifact not found: {decision.artifact_id}")
+
+            review_json = _append_ingestion_review_event(
+                row["review_json"],
+                action=transition_action,
+                actor=clean_actor,
+                previous_status=row["status"],
+                status=status,
+                category="classification",
+                reason=clean_reason,
+                error=row["last_error"],
+                error_type=None,
+                metadata={
+                    "resolved_projection_id": decision.actual_projection_id,
+                    "decision_id": decision.decision_id,
+                },
+            )
+            alternatives_json = json.dumps(
+                {
+                    "alternatives": [
+                        {
+                            "projection_id": alt.projection_id,
+                            "confidence": alt.confidence,
+                            "rule_id": alt.rule_id,
+                        }
+                        for alt in decision.alternatives
+                    ]
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            conn.execute(
+                """
+                INSERT INTO routing_decisions (
+                    decision_id, artifact_id, artifact_type, source,
+                    revision_id, proposed_projection_id, actual_projection_id,
+                    action, actor, reason, features_json, alternatives_json,
+                    confidence, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision.decision_id,
+                    decision.artifact_id,
+                    decision.artifact_type,
+                    decision.source,
+                    decision.revision_id,
+                    decision.proposed_projection_id,
+                    decision.actual_projection_id,
+                    decision.action,
+                    decision.actor,
+                    decision.reason,
+                    json.dumps(
+                        dict(decision.features),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    alternatives_json,
+                    decision.confidence,
+                    decision.created_at,
+                ),
+            )
+            next_attempt_at = _now_iso() if status == "pending" else None
+            updated = conn.execute(
+                """
+                UPDATE ingestion_queue
+                SET status = ?, attempts = 0, last_error = NULL,
+                    next_attempt_at = ?, processed_at = NULL, review_json = ?
+                WHERE artifact_id = ?
+                """,
+                (status, next_attempt_at, review_json, decision.artifact_id),
+            )
+            if (updated.rowcount or 0) != 1:
+                raise RuntimeError(
+                    f"failed to transition classification review for "
+                    f"{decision.artifact_id}"
+                )
+
+        entry = self.get_ingestion_entry(decision.artifact_id)
+        if entry is None:
+            raise RuntimeError(
+                f"classification review disappeared: {decision.artifact_id}"
+            )
+        return entry
+
     def reject_ingestion_review(
         self,
         artifact_id: str,
@@ -4422,6 +4582,27 @@ class MetadataDB:
             reason=reason,
             metadata=metadata,
         )
+
+    def update_ingestion_payload_json(
+        self,
+        artifact_id: str,
+        payload_json: str,
+    ) -> Optional[IngestionQueueEntry]:
+        """Replace the queue payload JSON for an existing ingestion row."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE ingestion_queue
+                    SET payload_json = ?
+                    WHERE artifact_id = ?
+                    """,
+                    (payload_json, artifact_id),
+                )
+            return self.get_ingestion_entry(artifact_id)
+        except Exception as e:
+            logger.error(f"Failed to update ingestion payload {artifact_id}: {e}")
+            return None
 
     def approve_ingestion_security_override(
         self,
@@ -4565,40 +4746,40 @@ class MetadataDB:
             return None
 
     def get_pending_ingestions(self, limit: Optional[int] = None) -> List[IngestionQueueEntry]:
-        """Return ingestions ready for processing (status pending and due)."""
-        try:
-            with self._get_connection() as conn:
-                query = (
-                    "SELECT * FROM ingestion_queue "
-                    "WHERE status='pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?) "
-                    "ORDER BY priority DESC, created_at ASC"
+        """Return ingestions ready for processing (status pending and due).
+
+        Database errors propagate so the worker does not treat a failed read as
+        an idle queue.
+        """
+        with self._get_connection() as conn:
+            query = (
+                "SELECT * FROM ingestion_queue "
+                "WHERE status='pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?) "
+                "ORDER BY priority DESC, created_at ASC"
+            )
+            params: List[Any] = [_now_iso()]
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [
+                IngestionQueueEntry(
+                    artifact_id=row['artifact_id'],
+                    artifact_type=row['artifact_type'],
+                    source=row['source'],
+                    payload_json=row['payload_json'],
+                    priority=row['priority'],
+                    status=row['status'],
+                    attempts=row['attempts'],
+                    last_error=row['last_error'],
+                    next_attempt_at=row['next_attempt_at'],
+                    created_at=row['created_at'],
+                    processed_at=row['processed_at'],
+                    capabilities_json=row['capabilities_json'],
+                    review_json=_row_get(row, "review_json"),
                 )
-                params: List[Any] = [_now_iso()]
-                if limit:
-                    query += " LIMIT ?"
-                    params.append(limit)
-                rows = conn.execute(query, tuple(params)).fetchall()
-                return [
-                    IngestionQueueEntry(
-                        artifact_id=row['artifact_id'],
-                        artifact_type=row['artifact_type'],
-                        source=row['source'],
-                        payload_json=row['payload_json'],
-                        priority=row['priority'],
-                        status=row['status'],
-                        attempts=row['attempts'],
-                        last_error=row['last_error'],
-                        next_attempt_at=row['next_attempt_at'],
-                        created_at=row['created_at'],
-                        processed_at=row['processed_at'],
-                        capabilities_json=row['capabilities_json'],
-                        review_json=_row_get(row, "review_json"),
-                    )
-                    for row in rows
-                ]
-        except Exception as e:
-            logger.error(f"Failed to list pending ingestions: {e}")
-            return []
+                for row in rows
+            ]
 
     def list_ingestion_entries(
         self,
@@ -5565,10 +5746,43 @@ class MetadataDB:
             return 0
 
 
-# Global metadata database instance
-metadata_db = MetadataDB()
+# Global metadata database instance. Populated explicitly by the application
+# composition root; importing this module does not initialize it.
+_metadata_db_instance: MetadataDB | None = None
+
+
+def set_metadata_db(db: MetadataDB) -> None:
+    """Register the runtime metadata database instance.
+
+    The composition root (API/CLI/worker startup) calls this once so that
+    shared helpers can use get_metadata_db() without carrying the instance
+    through every call site.
+    """
+    global _metadata_db_instance
+    if db is None:
+        raise ValueError("metadata database instance is required")
+    _metadata_db_instance = db
 
 
 def get_metadata_db() -> MetadataDB:
-    """Get the global metadata database instance"""
-    return metadata_db
+    """Return the globally registered metadata database instance.
+
+    Raises RuntimeError if the composition root has not registered a database.
+    This keeps the runtime fail-closed instead of silently creating a database
+    at an unspecified path.
+    """
+    if _metadata_db_instance is None:
+        raise RuntimeError(
+            "No metadata database has been registered. "
+            "Call set_metadata_db() from the application composition root first."
+        )
+    return _metadata_db_instance
+
+
+def clear_metadata_db() -> None:
+    """Clear the globally registered metadata database instance.
+
+    This is intended for isolated tests. Production code should not call it.
+    """
+    global _metadata_db_instance
+    _metadata_db_instance = None

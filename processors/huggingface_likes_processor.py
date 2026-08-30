@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from core.data_models import ProcessingStats
 from core.config import config
 from core.llm_interface import LLMInterface
-from core.metadata_db import MetadataDB
+from core.metadata_db import MetadataDB, get_metadata_db
 from core.non_live_state import (
     get_known_readme_filename,
     record_readme_probe_outcome,
@@ -145,7 +145,7 @@ class HuggingFaceLikesProcessor:
         self.vault_path = Path(vault_path or config.get('vault_dir', 'knowledge_vault'))
         self.stars_dir = self.vault_path / 'stars'
         self.repos_dir = self.vault_path / 'repos'
-        self.metadata_db = metadata_db or MetadataDB()
+        self.metadata_db = metadata_db or get_metadata_db()
         resolved_cache_dir = cache_dir
         if resolved_cache_dir is None:
             resolved_cache_dir = build_path_layout(config).system_root / 'huggingface_hub'

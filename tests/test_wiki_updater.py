@@ -318,7 +318,7 @@ async def test_bookmark_runtime_does_not_create_compiled_tweet_pages(
 ):
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
-    runtime = KnowledgeArtifactRuntime()
+    runtime = KnowledgeArtifactRuntime(db=MetadataDB(str(build_path_layout(config).database_path)))
 
     async def fake_process_tweets_pipeline(*args, **kwargs):
         return SimpleNamespace(processed_tweets=1)
@@ -387,7 +387,8 @@ def test_ingestion_runtime_updates_wiki_after_dispatch(
 ):
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
-    db = MetadataDB()
+    layout = build_path_layout(config)
+    db = MetadataDB(str(layout.database_path))
     runtime = KnowledgeArtifactRuntime(db=db)
 
     entry = IngestionQueueEntry(

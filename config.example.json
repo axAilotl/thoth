@@ -518,7 +518,7 @@
   },
   "database": {
     "enabled": true,
-    "path": ".thoth_system/meta.db",
+    "path": "meta.db",
     "wal_mode": true,
     "auto_vacuum": true,
     "capture_event_store": {
@@ -575,6 +575,20 @@
         "trusted_structured_input"
       ]
     }
+  },
+  "classification": {
+    "enabled": false,
+    "confidence_threshold": 0.85,
+    "min_support": 3,
+    "min_precision": 0.8,
+    "held_out_fraction": 0.2,
+    "projections": [
+      {
+        "projection_id": "default",
+        "name": "Default routing"
+      }
+    ],
+    "rules": []
   },
   "youtube": {
     "enable_embeddings": true,

@@ -378,7 +378,7 @@ def test_admin_status_endpoint_returns_dashboard(monkeypatch):
     monkeypatch.setattr(
         thoth_api,
         "build_admin_status_dashboard",
-        lambda config_data, *, project_root: {
+        lambda config_data, *, project_root, layout=None, db=None: {
             "status": "ok",
             "source_health": {"total": 0},
             "errors": [],

@@ -15,7 +15,7 @@ from core.chunking import TextChunk, chunk_text
 from core.config import config
 from core.connector_budgets import ConnectorBudgetError, start_connector_budget_run
 from core.llm_interface import LLMInterface
-from core.llm_cache import llm_cache
+from core.llm_cache import get_llm_cache
 from core.llm_validation import (
     LLMJSONField,
     LLMOutputValidationError,
@@ -229,7 +229,7 @@ class TranscriptLLMProcessor:
 
         try:
             # Try cache first
-            cached = llm_cache.get(transcript_text, 'transcript_fmt', cache_provider)
+            cached = get_llm_cache().get(transcript_text, 'transcript_fmt', cache_provider)
             cached = self._validate_cached_chunk_payload(
                 cached,
                 source="LLM cache",
@@ -309,7 +309,7 @@ class TranscriptLLMProcessor:
 
                     # Cache formatted chunk
                     try:
-                        llm_cache.set(transcript_text, 'transcript_fmt', result, cache_provider)
+                        get_llm_cache().set(transcript_text, 'transcript_fmt', result, cache_provider)
                     except Exception:
                         pass
 

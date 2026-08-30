@@ -8,8 +8,10 @@ import thoth_api
 from core.agent_response import AGENT_QUERY_RESPONSE_TYPE
 from core.artifacts import RepositoryArtifact
 from core.config import Config
+from core.ingestion_runtime import get_knowledge_artifact_runtime
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
+from core.runtime_composition import reset_runtime_database
 from core.wiki_updater import CompiledWikiUpdater
 
 
@@ -31,6 +33,9 @@ def test_query_wiki_api_uses_agent_safe_response_model(tmp_path: Path, monkeypat
     async def noop_async(*args, **kwargs):
         return None
 
+    reset_runtime_database()
+    monkeypatch.chdir(tmp_path)
+
     config = _config(tmp_path)
     base_config_path = tmp_path / "config.example.json"
     base_config_path.write_text(json.dumps(config.data), encoding="utf-8")
@@ -46,6 +51,8 @@ def test_query_wiki_api_uses_agent_safe_response_model(tmp_path: Path, monkeypat
     monkeypatch.setattr(thoth_api, "load_pending_bookmarks_from_db", noop_async)
     monkeypatch.setattr(thoth_api, "resolve_x_api_sync_config", lambda: None)
     thoth_api._shutdown_event = asyncio.Event()
+
+    thoth_api.config.data = config.data
 
     layout = build_path_layout(config, project_root=tmp_path)
     db = MetadataDB(str(layout.database_path))

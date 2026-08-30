@@ -16,8 +16,8 @@ from .connector_registry import (
     validate_allowed_side_effects,
     validate_manifest_outputs,
 )
-from .metadata_db import MetadataDB
-from .path_layout import build_path_layout
+from .metadata_db import MetadataDB, get_metadata_db
+from .path_layout import PathLayout, build_path_layout
 
 
 class ConfigLike(Protocol):
@@ -50,7 +50,12 @@ def _summarize_layout(config: ConfigLike, *, project_root: Path) -> dict[str, An
     }
 
 
-def _summarize_archivist(config: ConfigLike, *, project_root: Path) -> dict[str, Any]:
+def _summarize_archivist(
+    config: ConfigLike,
+    *,
+    project_root: Path,
+    db: MetadataDB,
+) -> dict[str, Any]:
     registry_path = resolve_archivist_topics_path(config, project_root=project_root)
     explicit_path = bool(str(config.get("paths.archivist_topics_file", "") or "").strip())
     summary: dict[str, Any] = {
@@ -84,9 +89,7 @@ def _summarize_archivist(config: ConfigLike, *, project_root: Path) -> dict[str,
     summary["topic_count"] = len(registry.topics)
     summary["topics"] = sorted(topic.id for topic in registry.topics)
     try:
-        layout = build_path_layout(config, project_root=project_root)
-        if layout.database_path.exists():
-            summary["corpus"] = MetadataDB(str(layout.database_path)).get_archivist_corpus_stats()
+        summary["corpus"] = db.get_archivist_corpus_stats()
     except Exception as exc:
         summary["corpus_error"] = str(exc)
     return summary
@@ -619,6 +622,7 @@ def _summarize_security(
     providers_summary: dict[str, Any],
     connectors_summary: dict[str, Any],
     pi_skills_summary: dict[str, Any],
+    db: MetadataDB,
 ) -> dict[str, Any]:
     connector_auth = []
     for connector in connectors_summary.get("connectors", []):
@@ -666,7 +670,7 @@ def _summarize_security(
             "sensitive_redaction": "available",
             "configured_prompt_groups": prompt_groups,
         },
-        "dashboard": _summarize_security_dashboard(layout_summary),
+        "dashboard": _summarize_security_dashboard(layout_summary, db=db),
         "safety_modes": sorted(safety_modes),
         "allowed_side_effects": sorted(side_effects),
     }
@@ -701,7 +705,11 @@ def _empty_security_dashboard(
     }
 
 
-def _summarize_security_dashboard(layout_summary: dict[str, Any]) -> dict[str, Any]:
+def _summarize_security_dashboard(
+    layout_summary: dict[str, Any],
+    *,
+    db: MetadataDB,
+) -> dict[str, Any]:
     database_path = str(layout_summary.get("database_path") or "").strip()
     if not database_path:
         return _empty_security_dashboard()
@@ -709,7 +717,7 @@ def _summarize_security_dashboard(layout_summary: dict[str, Any]) -> dict[str, A
     if not db_path.exists():
         return _empty_security_dashboard(database_path=database_path, exists=False)
     try:
-        summary = MetadataDB(str(db_path)).get_ingestion_security_summary(limit=25)
+        summary = db.get_ingestion_security_summary(limit=25)
     except Exception as exc:
         return {
             **_empty_security_dashboard(database_path=database_path, exists=True),
@@ -805,6 +813,7 @@ def _summarize_grouped_config(
     connectors_summary: dict[str, Any],
     web_clipper_summary: dict[str, Any],
     pi_skills_summary: dict[str, Any],
+    db: MetadataDB,
 ) -> dict[str, Any]:
     providers_summary = _summarize_providers(config)
     automation_summary = _summarize_automation(config)
@@ -824,6 +833,7 @@ def _summarize_grouped_config(
         providers_summary=providers_summary,
         connectors_summary=connectors_summary,
         pi_skills_summary=pi_skills_summary,
+        db=db,
     )
     return {
         "overview": _summarize_overview(
@@ -865,11 +875,17 @@ def build_settings_runtime_summary(
     config_data: dict[str, Any],
     *,
     project_root: Path,
+    layout: PathLayout | None = None,
+    db: MetadataDB | None = None,
 ) -> dict[str, Any]:
     """Return resolved, non-secret runtime state for the settings page."""
     config = _as_config(config_data)
+    resolved_layout = layout or build_path_layout(config, project_root=project_root)
+    metadata_db = db or get_metadata_db()
     layout_summary = _summarize_layout(config, project_root=project_root)
-    archivist_summary = _summarize_archivist(config, project_root=project_root)
+    archivist_summary = _summarize_archivist(
+        config, project_root=project_root, db=metadata_db
+    )
     web_clipper_summary = _summarize_web_clipper(config, project_root=project_root)
     connectors_summary = _summarize_connectors(config, project_root=project_root)
     pi_skills_summary = _summarize_pi_skills(config, project_root=project_root)
@@ -886,5 +902,6 @@ def build_settings_runtime_summary(
             connectors_summary=connectors_summary,
             web_clipper_summary=web_clipper_summary,
             pi_skills_summary=pi_skills_summary,
+            db=metadata_db,
         ),
     }

@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
+from core.config import Config
 from core.metadata_db import IngestionQueueEntry, MetadataDB
+from core.path_layout import build_path_layout
 from core.settings_summary import build_settings_runtime_summary
 
 
@@ -92,7 +94,13 @@ topics:
         encoding="utf-8",
     )
 
-    summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
+    cfg = Config()
+    cfg.data = config_data
+    layout = build_path_layout(cfg, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    summary = build_settings_runtime_summary(
+        config_data, project_root=tmp_path, layout=layout, db=db
+    )
 
     assert summary["layout"]["wiki_root"] == str(tmp_path / "wiki")
     assert summary["layout"]["system_root"] == str(tmp_path / ".thoth_system")
@@ -180,6 +188,7 @@ topics:
         "9/10 sources enabled",
         "1 Pi skills configured",
         "2 archivist topics loaded",
+        "0 security findings across 0 artifacts",
     ]
     assert any(
         item.startswith("github missing auth:")
@@ -203,7 +212,13 @@ def test_settings_summary_surfaces_archivist_and_web_clipper_errors(tmp_path: Pa
     config_data["paths"]["archivist_topics_file"] = "topics/missing.yaml"
     config_data["sources"]["web_clipper"]["note_dirs"] = [str(tmp_path / "outside")]
 
-    summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
+    cfg = Config()
+    cfg.data = config_data
+    layout = build_path_layout(cfg, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    summary = build_settings_runtime_summary(
+        config_data, project_root=tmp_path, layout=layout, db=db
+    )
 
     assert "Archivist topic registry file not found" in summary["archivist"]["error"]
     assert "must stay inside the vault root" in summary["web_clipper"]["error"]
@@ -213,7 +228,13 @@ def test_settings_summary_hides_web_clipper_watch_dirs_when_disabled(tmp_path: P
     config_data = make_config_data(tmp_path)
     config_data["sources"]["web_clipper"]["enabled"] = False
 
-    summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
+    cfg = Config()
+    cfg.data = config_data
+    layout = build_path_layout(cfg, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    summary = build_settings_runtime_summary(
+        config_data, project_root=tmp_path, layout=layout, db=db
+    )
 
     assert summary["web_clipper"]["configured"] is True
     assert summary["web_clipper"]["watch_dirs"] == [
@@ -232,7 +253,13 @@ def test_settings_summary_reports_invalid_pi_skill_manifest(tmp_path: Path):
     config_data = make_config_data(tmp_path)
     config_data["sources"]["pi_skills"]["skills"][0].pop("allowed_side_effects")
 
-    summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
+    cfg = Config()
+    cfg.data = config_data
+    layout = build_path_layout(cfg, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    summary = build_settings_runtime_summary(
+        config_data, project_root=tmp_path, layout=layout, db=db
+    )
 
     assert summary["groups"]["sources_and_skills"]["skills"]["total"] == 0
     assert (
@@ -283,7 +310,13 @@ def test_settings_summary_reports_sanitized_security_dashboard(tmp_path: Path):
         )
     )
 
-    summary = build_settings_runtime_summary(config_data, project_root=tmp_path)
+    cfg = Config()
+    cfg.data = config_data
+    layout = build_path_layout(cfg, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    summary = build_settings_runtime_summary(
+        config_data, project_root=tmp_path, layout=layout, db=db
+    )
     dashboard = summary["groups"]["security"]["dashboard"]
 
     assert dashboard["exists"] is True
