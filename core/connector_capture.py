@@ -18,7 +18,8 @@ from .capture_lifecycle import CaptureLifecycleResult, CaptureLifecycleService
 from .ccf_dualwrite import dual_write_requested
 from .config import Config, config
 from .metadata_db import MetadataDB, get_metadata_db
-from .content_roots import ContentRootMode
+from .content_root_adapters import ContentAdapterError
+from .content_roots import ContentRoot, ContentRootMode
 from .path_layout import PathLayout, build_path_layout
 from .postgres import open_postgres_connection, resolve_postgres_settings
 from .postgres_migrations import apply_postgres_migrations
@@ -190,41 +191,46 @@ class ConnectorCaptureQueue:
             )
 
 
-def _raw_root_inside_managed_inbox(layout: PathLayout) -> Path | None:
-    """Return layout.raw_root when it is contained by a managed-inbox root."""
-    if layout.content_root_policy is None:
-        return None
+def _resolve_connector_raw_root(layout: PathLayout) -> tuple[ContentRoot, str]:
+    """Return the managed-inbox root containing ``layout.raw_root`` and its
+    relative prefix under that root (e.g., ``raw``).
+    """
+    policy = layout.content_root_policy
+    if policy is None:
+        raise ContentAdapterError(
+            "content root policy is required to resolve connector raw root"
+        )
     raw_resolved = layout.raw_root.resolve()
-    for root in layout.content_root_policy.roots_by_mode(ContentRootMode.MANAGED_INBOX):
+    for root in policy.roots_by_mode(ContentRootMode.MANAGED_INBOX):
+        root_resolved = root.base_path.resolve()
         try:
-            raw_resolved.relative_to(root.base_path.resolve())
-            return layout.raw_root
+            prefix = raw_resolved.relative_to(root_resolved).as_posix()
         except ValueError:
             continue
-    return None
+        return root, prefix
+    raise ContentAdapterError(
+        f"configured raw root {layout.raw_root} is not inside a writable "
+        f"managed-inbox content root"
+    )
 
 
 def connector_raw_roots(layout: PathLayout) -> tuple[Path, ...]:
     """Roots under which connectors may record immutable raw references.
 
-    When the legacy raw root sits inside a behavior-owned managed-inbox root,
-    that concrete raw directory is preserved so existing capture paths remain
-    valid. Otherwise, any managed-inbox/projection-output/external root is
-    eligible.
+    Only managed-inbox roots are eligible.  A declared policy with no writable
+    managed inbox fails closed instead of falling back to legacy paths.
     """
-    if layout.content_root_policy is not None:
-        raw_inbox = _raw_root_inside_managed_inbox(layout)
-        if raw_inbox is not None:
-            return (raw_inbox,)
-        return tuple(
-            root.base_path
-            for root in layout.content_root_policy.roots_by_mode(
-                ContentRootMode.MANAGED_INBOX,
-                ContentRootMode.PROJECTION_OUTPUT,
-                ContentRootMode.EXTERNAL,
-            )
+    policy = layout.content_root_policy
+    if policy is None:
+        raise ContentAdapterError(
+            "content root policy is required for connector raw roots"
         )
-    return (layout.raw_root, layout.library_root, layout.vault_root)
+    managed = policy.roots_by_mode(ContentRootMode.MANAGED_INBOX)
+    if not managed:
+        raise ContentAdapterError(
+            "no managed-inbox content root configured for connector raw roots"
+        )
+    return tuple(root.base_path for root in managed)
 
 
 def _raw_path_for_stores(lifecycle, runtime_config, raw_path):
@@ -241,23 +247,6 @@ def _raw_path_for_stores(lifecycle, runtime_config, raw_path):
     return None
 
 
-def _select_connector_raw_root(layout: PathLayout) -> Path:
-    """Choose the root under which connector raw JSON should be written."""
-    if layout.content_root_policy is not None:
-        raw_inbox = _raw_root_inside_managed_inbox(layout)
-        if raw_inbox is not None:
-            return raw_inbox
-        managed = layout.content_root_policy.roots_by_mode(ContentRootMode.MANAGED_INBOX)
-        if managed:
-            return managed[0].base_path
-        projection = layout.content_root_policy.roots_by_mode(
-            ContentRootMode.PROJECTION_OUTPUT
-        )
-        if projection:
-            return projection[0].base_path
-    return layout.raw_root
-
-
 def write_connector_raw_json(
     layout: PathLayout,
     *,
@@ -267,24 +256,35 @@ def write_connector_raw_json(
     subdir: str | None = None,
     captured_at: str | None = None,
 ) -> Path:
-    """Persist immutable connector source JSON under the configured raw root."""
-    root = _select_connector_raw_root(layout).resolve()
-    directory = root / _safe_raw_path_part(connector_name)
+    """Persist immutable connector source JSON through the content carrier.
+
+    Writes are routed to the managed-inbox content root that contains the
+    configured raw root, enforcing mode, traversal, symlink, and atomic-write
+    guarantees through ``ContentCarrier.write_artifact``.
+    """
+    policy = layout.content_root_policy
+    if policy is None:
+        raise ContentAdapterError(
+            "content root policy is required to write connector raw JSON"
+        )
+
+    root, raw_prefix = _resolve_connector_raw_root(layout)
+    carrier = policy.carrier_for(root)
+
+    safe_connector = _safe_raw_path_part(connector_name)
+    directory_parts = [raw_prefix, safe_connector] if raw_prefix else [safe_connector]
     if subdir:
-        directory = directory / _safe_raw_path_part(subdir)
-    directory.mkdir(parents=True, exist_ok=True)
+        directory_parts.append(_safe_raw_path_part(subdir))
+    directory_relpath = "/".join(directory_parts)
 
     payload_digest = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode(
             "utf-8"
         )
     ).hexdigest()[:12]
-    raw_path = directory / f"{_safe_raw_path_part(native_id)}-{payload_digest}.json"
-    resolved_path = raw_path.resolve()
-    try:
-        resolved_path.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(f"raw connector path escaped configured raw root: {raw_path}") from exc
+    artifact_relpath = (
+        f"{directory_relpath}/{_safe_raw_path_part(native_id)}-{payload_digest}.json"
+    )
 
     envelope = {
         "connector": connector_name,
@@ -293,17 +293,23 @@ def write_connector_raw_json(
         "payload": payload,
     }
     content = json.dumps(envelope, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-    if not raw_path.exists():
-        raw_path.write_text(content, encoding="utf-8")
-        return raw_path
+    content_bytes = content.encode("utf-8")
 
-    # Idempotent: verify the existing file has identical content.
-    existing = raw_path.read_text(encoding="utf-8")
-    if existing != content:
+    # Idempotent: reuse the existing artifact only when content is identical.
+    existing = next(carrier.list_artifacts(root, prefix=artifact_relpath), None)
+    if existing is not None:
+        if carrier.read_artifact(existing) == content_bytes:
+            return Path(existing.locator)
         raise ValueError(
-            f"raw connector file already exists with different content: {raw_path}"
+            f"raw connector file already exists with different content: {artifact_relpath}"
         )
-    return raw_path
+
+    handle = carrier.write_artifact(root, artifact_relpath, content_bytes)
+    if not isinstance(handle.locator, Path):
+        raise ContentAdapterError(
+            f"filesystem-backed raw write produced non-path locator: {handle.locator!r}"
+        )
+    return Path(handle.locator)
 
 
 def _safe_raw_path_part(value: str) -> str:

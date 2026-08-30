@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Protocol, runtime_checkable
+from typing import Any, Iterable, Iterator, Mapping, Protocol, runtime_checkable
 
 
 class ContentRootMode(str, Enum):
@@ -115,7 +115,10 @@ class ContentRootPolicy:
     """Validated collection of content roots and their carriers."""
 
     roots: tuple[ContentRoot, ...]
-    carriers: Mapping[str, ContentCarrier]
+    # Carrier instances are runtime wiring derived from the roots.  Excluding
+    # them from equality keeps independently-built layouts for the same config
+    # semantically equal (the runtime singleton guard compares PathLayout).
+    carriers: Mapping[str, ContentCarrier] = field(compare=False, repr=False)
 
     def root_by_id(self, root_id: str) -> ContentRoot:
         for root in self.roots:
@@ -134,6 +137,26 @@ class ContentRootPolicy:
             )
         return carrier
 
+    def root_containing(
+        self,
+        path: Path,
+        *modes: ContentRootMode,
+    ) -> ContentRoot | None:
+        """Return the configured root that contains ``path`` (or equals it).
+
+        If ``modes`` are provided, only roots with one of those modes are
+        considered.  Returns ``None`` when no matching root contains the path.
+        """
+        resolved = path.resolve()
+        for root in self.roots:
+            if modes and root.mode not in modes:
+                continue
+            try:
+                resolved.relative_to(root.base_path.resolve())
+            except ValueError:
+                continue
+            return root
+        return None
 
 def _is_subpath(candidate: Path, parent: Path) -> bool:
     """Return True when ``candidate`` is equal to or inside ``parent``.

@@ -6,6 +6,7 @@ from typing import Any, Mapping, Protocol
 
 from .content_roots import (
     ContentRoot,
+    ContentRootError,
     ContentRootMode,
     ContentRootPolicy,
     build_content_root_policy,
@@ -133,6 +134,32 @@ class PathLayout:
         return self.content_root_policy.roots_by_mode(*modes)
 
 
+def _validate_scope_paths_in_content_roots(
+    policy: ContentRootPolicy,
+    *,
+    vault_root: Path,
+    raw_root: Path,
+    library_root: Path,
+) -> None:
+    """Fail closed when legacy scope paths lack the required ownership mode.
+
+    Vault and library are readable source scopes, so they may be watch-only or
+    managed. Raw connector capture is mutable and must be managed-inbox.
+    """
+    readable_modes = (ContentRootMode.WATCH_ONLY, ContentRootMode.MANAGED_INBOX)
+    for scope_name, scope_path, modes in (
+        ("vault", vault_root, readable_modes),
+        ("raw", raw_root, (ContentRootMode.MANAGED_INBOX,)),
+        ("library", library_root, readable_modes),
+    ):
+        if policy.root_containing(scope_path, *modes) is None:
+            mode_names = ", ".join(mode.value for mode in modes)
+            raise ContentRootError(
+                f"{scope_name} scope path {scope_path} is not inside a "
+                f"content root with required mode ({mode_names})"
+            )
+
+
 def _build_content_roots(
     config: ConfigLike,
     *,
@@ -232,6 +259,14 @@ def build_path_layout(config: ConfigLike, *, project_root: Path | None = None) -
         realtime_bookmarks_file=realtime_bookmarks_file,
         log_file=log_file,
     )
+
+    if content_root_policy is not None:
+        _validate_scope_paths_in_content_roots(
+            content_root_policy,
+            vault_root=vault_root,
+            raw_root=raw_root,
+            library_root=library_root,
+        )
 
     return PathLayout(
         vault_root=vault_root,

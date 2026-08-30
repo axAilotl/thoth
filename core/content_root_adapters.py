@@ -355,11 +355,14 @@ class InMemoryContentAdapter:
 
 
 def default_content_carriers() -> Mapping[str, ContentCarrier]:
-    """Return the built-in carrier registry."""
+    """Return the built-in carrier registry.
+
+    Test-only adapters are intentionally excluded from production registration;
+    they must be supplied directly by tests when needed.
+    """
     return {
         FilesystemContentAdapter.name: FilesystemContentAdapter(),
         ObsidianContentAdapter.name: ObsidianContentAdapter(),
-        InMemoryContentAdapter.name: InMemoryContentAdapter(),
     }
 
 

@@ -358,7 +358,7 @@
           },
           "adapter": {
             "type": "string",
-            "enum": ["filesystem", "obsidian", "memory"]
+            "enum": ["filesystem", "obsidian"]
           },
           "path": { "type": "string", "minLength": 1 },
           "tags": {

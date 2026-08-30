@@ -436,30 +436,40 @@ class ArchivistCompiler:
                 lines.append(f"  - Retrieval: `{', '.join(candidate.retrieval_sources)}`")
         return lines
 
-    def _absolute_path_for_candidate(self, candidate: ArchivistCandidate) -> Path:
-        """Resolve a candidate's scope-relative path through content roots.
-
-        When a content-root policy is present, all legacy scopes (vault, raw,
-        library) resolve against the managed-inbox root because raw and library
-        are sub-paths of the vault. Without a policy, legacy PathLayout paths
-        are used as an explicit fallback.
-        """
-        normalized = self._normalized_source_path(candidate)
-        if self.layout.content_root_policy is not None:
-            managed = self.layout.content_root_policy.roots_by_mode(
-                ContentRootMode.MANAGED_INBOX
-            )
-            if managed:
-                return managed[0].base_path / normalized
+    def _scope_path_for_candidate(self, candidate: ArchivistCandidate) -> Path:
+        """Return the configured scope base path for a candidate."""
         if candidate.scope == "vault":
-            return self.layout.vault_root / candidate.scope_relative_path
+            return self.layout.vault_root
         if candidate.scope == "raw":
-            return self.layout.raw_root / candidate.scope_relative_path
+            return self.layout.raw_root
         if candidate.scope == "library":
-            return self.layout.library_root / candidate.scope_relative_path
+            return self.layout.library_root
         raise ArchivistCompilerError(
             f"Unsupported archivist candidate scope: {candidate.scope}"
         )
+
+    def _absolute_path_for_candidate(self, candidate: ArchivistCandidate) -> Path:
+        """Resolve a candidate's scope-relative path through content roots.
+
+        When a content-root policy is present, the candidate's scope path
+        (vault/raw/library) must be contained by a managed-inbox root.  The
+        legacy ``managed[0]`` assumption and silent fallbacks are removed in
+        favor of explicit containment validation.
+        """
+        scope_path = self._scope_path_for_candidate(candidate)
+        if self.layout.content_root_policy is not None:
+            root = self.layout.content_root_policy.root_containing(
+                scope_path,
+                ContentRootMode.WATCH_ONLY,
+                ContentRootMode.MANAGED_INBOX,
+            )
+            if root is None:
+                raise ArchivistCompilerError(
+                    f"archivist candidate scope {candidate.scope!r} path "
+                    f"{scope_path} is not inside a readable content root"
+                )
+            self.layout.content_root_policy.carrier_for(root)
+        return scope_path / candidate.scope_relative_path
 
     def _source_paths_for_candidates(
         self,

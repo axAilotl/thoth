@@ -64,7 +64,7 @@ def memory_adapter() -> InMemoryContentAdapter:
     return InMemoryContentAdapter()
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def restore_runtime_config():
     original = deepcopy(config.data)
     yield
@@ -368,6 +368,12 @@ def test_path_layout_loads_configured_content_roots(tmp_path: Path):
         "content_roots",
         [
             {
+                "id": "vault",
+                "mode": "managed_inbox",
+                "adapter": "filesystem",
+                "path": str(tmp_path / "vault"),
+            },
+            {
                 "id": "notes",
                 "mode": "managed_inbox",
                 "adapter": "obsidian",
@@ -403,7 +409,7 @@ def test_path_layout_fails_when_operational_path_overlaps_content_root(
         build_path_layout(config, project_root=tmp_path)
 
 
-def test_connector_raw_roots_uses_content_roots(tmp_path: Path):
+def test_connector_raw_roots_uses_managed_inbox_content_roots(tmp_path: Path):
     config.data = {}
     config.set("paths.vault_dir", str(tmp_path / "vault"))
     config.set("paths.system_dir", ".thoth_system")
@@ -412,6 +418,12 @@ def test_connector_raw_roots_uses_content_roots(tmp_path: Path):
     config.set(
         "content_roots",
         [
+            {
+                "id": "vault",
+                "mode": "managed_inbox",
+                "adapter": "filesystem",
+                "path": str(tmp_path / "vault"),
+            },
             {
                 "id": "inbox",
                 "mode": "managed_inbox",
@@ -429,8 +441,9 @@ def test_connector_raw_roots_uses_content_roots(tmp_path: Path):
 
     layout = build_path_layout(config, project_root=tmp_path)
     roots = connector_raw_roots(layout)
+    assert tmp_path / "vault" in roots
     assert tmp_path / "inbox" in roots
-    assert tmp_path / "wiki" in roots
+    assert tmp_path / "wiki" not in roots
 
 
 def test_write_connector_raw_json_is_idempotent(tmp_path: Path):
@@ -442,6 +455,12 @@ def test_write_connector_raw_json_is_idempotent(tmp_path: Path):
     config.set(
         "content_roots",
         [
+            {
+                "id": "vault",
+                "mode": "managed_inbox",
+                "adapter": "filesystem",
+                "path": str(tmp_path / "vault"),
+            },
             {
                 "id": "inbox",
                 "mode": "managed_inbox",
@@ -514,3 +533,63 @@ def test_content_roots_from_config_builds_tuple(tmp_path: Path):
     assert len(roots) == 1
     assert roots[0].root_id == "vault"
     assert roots[0].mode == ContentRootMode.MANAGED_INBOX
+
+
+def test_path_layout_fails_closed_when_raw_scope_outside_managed_root(
+    tmp_path: Path,
+):
+    config.data = {}
+    config.set("paths.vault_dir", str(tmp_path / "vault"))
+    config.set("paths.system_dir", ".thoth_system")
+    config.set("paths.cache_dir", "graphql_cache")
+    config.set("database.path", "meta.db")
+    config.set("paths.raw_dir", str(tmp_path / "outside"))
+    config.set(
+        "content_roots",
+        [
+            {
+                "id": "vault",
+                "mode": "managed_inbox",
+                "adapter": "filesystem",
+                "path": str(tmp_path / "vault"),
+            },
+        ],
+    )
+    with pytest.raises(ContentRootError, match="raw scope path.*not inside"):
+        build_path_layout(config, project_root=tmp_path)
+
+
+def test_watch_only_vault_with_separate_managed_raw_root(tmp_path: Path):
+    config.data = {}
+    config.set("paths.vault_dir", str(tmp_path / "vault"))
+    config.set("paths.raw_dir", str(tmp_path / "inbox" / "raw"))
+    config.set("paths.system_dir", ".thoth_system")
+    config.set("paths.cache_dir", "graphql_cache")
+    config.set("database.path", "meta.db")
+    config.set(
+        "content_roots",
+        [
+            {
+                "id": "vault",
+                "mode": "watch_only",
+                "adapter": "obsidian",
+                "path": str(tmp_path / "vault"),
+            },
+            {
+                "id": "inbox",
+                "mode": "managed_inbox",
+                "adapter": "filesystem",
+                "path": str(tmp_path / "inbox"),
+            },
+        ],
+    )
+
+    layout = build_path_layout(config, project_root=tmp_path)
+    path = write_connector_raw_json(
+        layout,
+        connector_name="test",
+        native_id="abc",
+        payload={"text": "hello"},
+    )
+
+    assert path.is_relative_to(tmp_path / "inbox" / "raw")
