@@ -121,6 +121,22 @@ Use `python thoth.py --help` for the full command list and `python thoth.py <com
 | `migrate-filenames` | Normalize legacy filenames. | `--dry-run`, `--analyze` |
 | `migrate-frontmatter` | Upgrade legacy frontmatter. | `--dry-run` |
 
+### Standalone read-only surfaces
+
+| Command | Purpose | Typical flags |
+| --- | --- | --- |
+| `thoth_keeper.py` | Supervised local read-only keeper profile for agent queries over the archivist corpus. | `--db`, `--roots`, `--query-timeout-ms`, `--max-passage-chars` |
+
+`thoth_keeper.py` opens the SQLite metadata database in URI read-only mode (`mode=ro`), queries the `archivist_corpus_documents` / `archivist_corpus_fts` schema directly, and exposes only the read-only MCP tools `keeper_readiness` and `keeper_query`. It does not construct a `MetadataDB`, run migrations, start ingestion, load providers or connectors, access the network, or expose mutating tools.
+
+Example:
+
+```bash
+python thoth_keeper.py \
+  --db ./.thoth_system/meta.db \
+  --roots vault/transcripts,raw/cissa
+```
+
 ## Common Commands
 
 Check state:
