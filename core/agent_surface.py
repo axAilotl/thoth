@@ -19,7 +19,7 @@ from .agent_context import (
     capture_event_trust_state,
     hybrid_hit_citations,
 )
-from .agent_response import build_agent_query_response
+from .agent_response import build_agent_plan_response, build_agent_query_response
 from .artifact_review_queue import (
     ArtifactReviewQueueError,
     ArtifactReviewQueueService,
@@ -590,6 +590,170 @@ class AgentSurfaceService:
             connector_name,
             execute=execute,
             options=options,
+        )
+
+    def plan_web_clipper(self) -> dict[str, Any]:
+        """Return a read-only plan for the Web Clipper ingestion surface."""
+        from collectors.web_clipper_collector import (
+            WebClipperCollector,
+            WebClipperSourceError,
+        )
+        from collectors.web_clipper_layout import build_web_clipper_contract
+        from collectors.web_clipper_parser import WebClipperParseError
+
+        issues: list[str] = []
+        records: list[Any] = []
+        watch_dirs: list[Path] = []
+        try:
+            contract = build_web_clipper_contract(self.config, layout=self.layout)
+        except ValueError as exc:
+            issues.append(str(exc))
+        else:
+            watch_dirs = list(contract.watch_dirs)
+            if self.config.get("sources.web_clipper.enabled", True) is False:
+                issues.append("sources.web_clipper.enabled is false")
+            else:
+                try:
+                    collector = WebClipperCollector(
+                        self.config,
+                        layout=self.layout,
+                        contract=contract,
+                        db=self.db,
+                    )
+                    records = collector.plan()
+                except (WebClipperSourceError, WebClipperParseError) as exc:
+                    issues.append(str(exc))
+
+        return build_agent_plan_response(
+            surface="web-clipper",
+            plan={
+                "ready": not issues,
+                "issues": issues,
+                "source_directories": [str(path) for path in watch_dirs],
+                "mutation": {
+                    "will_index_files": False,
+                    "will_queue_notes": False,
+                    "will_stage_attachments": False,
+                    "will_publish_english_companions": False,
+                },
+                "counts": {
+                    "source_directories": len(watch_dirs),
+                    "files": len(records),
+                    "new_or_changed": sum(
+                        1 for record in records if record.is_new_or_changed
+                    ),
+                    "would_queue_notes": sum(
+                        1 for record in records if getattr(record, "would_queue", False)
+                    ),
+                    "would_stage_attachments": sum(
+                        1 for record in records if getattr(record, "would_stage", False)
+                    ),
+                    "by_file_type": _counts_by(records, "file_type"),
+                },
+                "records": [
+                    _serialize_web_clipper_record(record) for record in records
+                ],
+            },
+        )
+
+    def plan_ingest_queue(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Return a read-only plan for the generalized ingestion queue."""
+        entries = self.db.get_pending_ingestions(limit=limit)
+        return build_agent_plan_response(
+            surface="ingest-queue",
+            plan={
+                "ready": True,
+                "issues": [],
+                "limit": limit,
+                "mutation": {
+                    "will_mark_processing": False,
+                    "will_dispatch_artifacts": False,
+                    "will_update_wiki": False,
+                    "will_update_queue_status": False,
+                },
+                "counts": {
+                    "pending": len(entries),
+                    "by_artifact_type": _counts_by(entries, "artifact_type"),
+                    "by_source": _counts_by(entries, "source"),
+                },
+                "entries": [self._serialize_ingestion_entry(entry) for entry in entries],
+            },
+        )
+
+    def plan_x_api_sync(
+        self,
+        *,
+        max_results: int,
+        max_pages: int | None,
+        resume_from_checkpoint: bool,
+    ) -> dict[str, Any]:
+        """Return a read-only plan for the X API bookmark backfill surface."""
+        from .x_api_auth import X_API_REQUIRED_SCOPES, X_API_TOKEN_FILENAME
+
+        x_api_config = self.config.get("sources.x_api", {}) or {}
+        if not isinstance(x_api_config, dict):
+            x_api_config = {}
+
+        scopes = [str(scope) for scope in x_api_config.get("scopes", []) or []]
+        normalized_scopes = {scope.strip() for scope in scopes if scope.strip()}
+        required_scopes = set(X_API_REQUIRED_SCOPES)
+        missing_scopes = sorted(required_scopes.difference(normalized_scopes))
+        client_id_configured = bool(
+            str(x_api_config.get("client_id") or "").strip()
+        )
+        redirect_uri_configured = bool(
+            str(x_api_config.get("redirect_uri") or "").strip()
+        )
+        enabled = bool(x_api_config.get("enabled", False))
+
+        issues: list[str] = []
+        if not enabled:
+            issues.append("sources.x_api.enabled is false")
+        if not client_id_configured:
+            issues.append("sources.x_api.client_id is not configured")
+        if not redirect_uri_configured:
+            issues.append("sources.x_api.redirect_uri is not configured")
+        if missing_scopes:
+            issues.append(
+                "sources.x_api.scopes is missing: " + ", ".join(missing_scopes)
+            )
+
+        token_path = self.layout.auth_root / X_API_TOKEN_FILENAME
+        checkpoint_path = self.layout.auth_root / "x_api_bookmark_sync_checkpoint.json"
+        if not token_path.exists():
+            issues.append("Stored X API token bundle is missing")
+
+        return build_agent_plan_response(
+            surface="x-api-sync",
+            plan={
+                "ready": not issues,
+                "issues": issues,
+                "parameters": {
+                    "max_results": max_results,
+                    "max_pages": max_pages,
+                    "resume_from_checkpoint": resume_from_checkpoint,
+                    "process_immediately": True,
+                },
+                "mutation": {
+                    "will_contact_x_api": False,
+                    "will_enqueue_bookmarks": False,
+                    "will_process_bookmarks": False,
+                    "will_update_checkpoint": False,
+                },
+                "auth": {
+                    "enabled": enabled,
+                    "client_id_configured": client_id_configured,
+                    "redirect_uri_configured": redirect_uri_configured,
+                    "scopes": scopes,
+                    "missing_required_scopes": missing_scopes,
+                    "token_bundle_present": token_path.exists(),
+                    "checkpoint_present": checkpoint_path.exists(),
+                },
+            },
         )
 
     def run_connector(
@@ -1295,6 +1459,44 @@ def _connector_artifact_outputs(
 
     visit(result)
     return list(outputs.values())
+
+
+def _counts_by(records: list[Any], attr_name: str) -> dict[str, int]:
+    from collections import Counter
+
+    return dict(
+        sorted(
+            Counter(str(getattr(record, attr_name, "")) for record in records).items()
+        )
+    )
+
+
+def _serialize_web_clipper_record(record: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "path": str(record.path),
+        "root": str(record.root),
+        "source_id": record.source_id,
+        "file_type": record.file_type,
+        "size_bytes": record.size_bytes,
+        "sha256": record.sha256,
+        "updated_at": record.updated_at,
+        "is_new_or_changed": record.is_new_or_changed,
+        "would_queue": getattr(record, "would_queue", False),
+        "would_stage": getattr(record, "would_stage", False),
+    }
+    managed_path = getattr(record, "managed_path", None)
+    if managed_path is not None:
+        payload["managed_path"] = str(managed_path)
+    artifact = getattr(record, "artifact", None)
+    if artifact is not None:
+        payload["artifact"] = {
+            "id": getattr(artifact, "id", ""),
+            "source_type": getattr(artifact, "source_type", ""),
+            "file_type": getattr(artifact, "file_type", ""),
+            "title": getattr(artifact, "title", ""),
+            "source_url": getattr(artifact, "source_url", None),
+        }
+    return payload
 
 
 def serialize_agent_payload(value: Any) -> Any:
