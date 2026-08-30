@@ -7,19 +7,23 @@ connectors, providers, or background processing.
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import sys
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import thoth_api
 from core import config
 from core.config import Config
 from core.ingestion_runtime import (
     IngestionDispatchResult,
     KnowledgeArtifactRuntime,
+    clear_knowledge_artifact_runtime,
     get_knowledge_artifact_runtime,
     get_knowledge_artifact_runtime_health,
 )
@@ -41,8 +45,10 @@ def restore_runtime_config():
 @pytest.fixture(autouse=True)
 def reset_global_db():
     reset_runtime_database()
+    clear_knowledge_artifact_runtime()
     yield
     reset_runtime_database()
+    clear_knowledge_artifact_runtime()
 
 
 def _configure_runtime_paths(tmp_path: Path) -> None:
@@ -518,3 +524,194 @@ async def test_api_shutdown_tears_down_runtime_when_background_task_failed(
         get_metadata_db()
     assert get_knowledge_artifact_runtime_health()["state"] == "uninitialized"
     assert thoth_api._background_task is None
+
+
+def test_save_bookmark_writes_to_temp_path(
+    tmp_path: Path, monkeypatch, restore_runtime_config, reset_global_db
+):
+    """save_bookmark must write to the configured realtime bookmarks file."""
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_paths(tmp_path)
+
+    is_new, saved = thoth_api.save_bookmark(
+        {"tweet_id": "1234567890", "source": "test"}
+    )
+
+    assert is_new is True
+    bookmarks_file = thoth_api.get_realtime_bookmarks_file()
+    assert bookmarks_file.exists()
+    assert bookmarks_file == tmp_path / ".thoth_system" / "realtime_bookmarks.json"
+    data = json.loads(bookmarks_file.read_text(encoding="utf-8"))
+    assert len(data) == 1
+    assert data[0]["tweet_id"] == "1234567890"
+
+
+@pytest.mark.anyio
+async def test_mutate_realtime_bookmarks_mark_processed(
+    tmp_path: Path, monkeypatch, restore_runtime_config, reset_global_db
+):
+    """mutate_realtime_bookmarks must persist processed flag changes."""
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_paths(tmp_path)
+
+    thoth_api.save_bookmark({"tweet_id": "1234567890", "source": "test"})
+
+    def mark_processed(bookmarks):
+        for entry in bookmarks:
+            if entry.get("tweet_id") == "1234567890":
+                if not entry.get("processed"):
+                    entry["processed"] = True
+                    return True, None
+        return False, None
+
+    await thoth_api.mutate_realtime_bookmarks(mark_processed)
+
+    bookmarks = thoth_api.load_realtime_bookmarks()
+    assert bookmarks[0]["processed"] is True
+
+
+@pytest.mark.anyio
+async def test_ingest_bookmark_capture_persists_to_temp_paths(
+    tmp_path: Path, monkeypatch, restore_runtime_config, reset_global_db
+):
+    """ingest_bookmark_capture must write the queue entry and realtime bookmark."""
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_paths(tmp_path)
+
+    layout = build_path_layout(config)
+    db = resolve_runtime_database(config, layout=layout)
+    get_knowledge_artifact_runtime(config, layout=layout, db=db)
+
+    await thoth_api.ingest_bookmark_capture(
+        {"tweet_id": "1234567890", "source": "test"},
+        process_immediately=False,
+        queue_bookmark=True,
+        reset_processed=True,
+    )
+
+    entry = db.get_bookmark_entry("1234567890")
+    assert entry is not None
+    assert entry.status == "pending"
+    bookmarks = thoth_api.load_realtime_bookmarks()
+    assert any(b["tweet_id"] == "1234567890" for b in bookmarks)
+
+
+def test_resolve_runtime_database_rejects_legacy_doubled_database(
+    tmp_path: Path, monkeypatch, restore_runtime_config, reset_global_db
+):
+    """A legacy doubled-path database must not be silently reused or abandoned."""
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_paths(tmp_path)
+
+    layout = build_path_layout(config)
+    legacy_path = layout.system_root / layout.system_root.name / "meta.db"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_bytes(b"")
+
+    assert not layout.database_path.exists()
+    with pytest.raises(RuntimeError, match="Legacy metadata database found"):
+        resolve_runtime_database(config, layout=layout)
+
+
+def test_resolve_runtime_database_allows_absent_legacy(
+    tmp_path: Path, monkeypatch, restore_runtime_config, reset_global_db
+):
+    """When no legacy database exists, the composition root creates the canonical DB."""
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_paths(tmp_path)
+
+    layout = build_path_layout(config)
+    legacy_path = layout.system_root / layout.system_root.name / "meta.db"
+    assert not legacy_path.exists()
+    assert not layout.database_path.exists()
+
+    db = resolve_runtime_database(config, layout=layout)
+
+    assert db is get_metadata_db()
+    assert layout.database_path.exists()
+    assert not legacy_path.exists()
+
+
+def test_validate_metadata_db_matches_layout_fails_before_directory_creation(
+    tmp_path: Path, monkeypatch, restore_runtime_config, reset_global_db
+):
+    """A mismatched DB/layout must fail before any directories are created."""
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_paths(tmp_path)
+
+    layout = build_path_layout(config)
+    other_layout = build_path_layout(config, project_root=tmp_path / "other")
+    other_db = MetadataDB(str(other_layout.database_path))
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        KnowledgeArtifactRuntime(config, layout=layout, db=other_db)
+
+    assert not layout.system_root.exists()
+
+
+def test_open_api_capture_surface_uses_registered_runtime(
+    tmp_path: Path, monkeypatch, restore_runtime_config, reset_global_db
+):
+    """open_api_capture_surface must pass the exact registered runtime layout/db."""
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_paths(tmp_path)
+
+    layout = build_path_layout(config)
+    db = resolve_runtime_database(config, layout=layout)
+    runtime = get_knowledge_artifact_runtime(config, layout=layout, db=db)
+
+    captured = {}
+
+    @contextmanager
+    def fake_open_capture_surface(runtime_config, *, layout, db):
+        captured["layout"] = layout
+        captured["db"] = db
+        yield type("FakeSurface", (), {"list_sources": lambda self: []})()
+
+    monkeypatch.setattr(thoth_api, "open_capture_surface", fake_open_capture_surface)
+
+    with thoth_api.open_api_capture_surface() as surface:
+        surface.list_sources()
+
+    assert captured["layout"] is runtime.layout
+    assert captured["db"] is runtime.db
+
+
+def test_agent_surface_endpoints_use_registered_runtime(
+    tmp_path: Path, monkeypatch, restore_runtime_config, reset_global_db
+):
+    """AgentSurfaceService endpoints must receive the registered runtime layout/db."""
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_paths(tmp_path)
+
+    import thoth_api
+
+    _patch_background_tasks(monkeypatch, thoth_api)
+    awaitable = thoth_api.startup_event()
+    if asyncio.iscoroutine(awaitable):
+        asyncio.run(awaitable)
+
+    runtime = get_knowledge_artifact_runtime()
+    captured = {}
+
+    class FakeAgentSurfaceService:
+        def __init__(self, runtime_config, *, layout, db, event_store=None):
+            captured["layout"] = layout
+            captured["db"] = db
+
+        def list_connector_runs(self, **kwargs):
+            return {"runs": [], "checkpoints": [], "total": 0}
+
+    monkeypatch.setattr(thoth_api, "AgentSurfaceService", FakeAgentSurfaceService)
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(thoth_api.app) as client:
+        response = client.get("/api/connectors/runs")
+
+    assert response.status_code == 200
+    assert captured["layout"] is runtime.layout
+    assert captured["db"] is runtime.db
+
+    if thoth_api._shutdown_event is not None:
+        thoth_api._shutdown_event.set()

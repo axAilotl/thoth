@@ -645,9 +645,12 @@ async def run_archivist_compilation(
 ):
     """Run archivist topic compilation with shared locking."""
     async with archivist_trigger_lock:
+        runtime = get_knowledge_artifact_runtime()
         return await run_archivist_topics(
             load_runtime_settings(),
             project_root=BASE_CONFIG_PATH.parent,
+            layout=runtime.layout,
+            db=runtime.db,
             topic_ids=topic_ids,
             force=force,
             dry_run=dry_run,
@@ -870,7 +873,9 @@ async def mutate_realtime_bookmarks(
         bookmarks = load_realtime_bookmarks()
         dirty, result = mutator(bookmarks)
         if dirty:
-            with open(REALTIME_BOOKMARKS_FILE, "w", encoding="utf-8") as f:
+            realtime_bookmarks_file = get_realtime_bookmarks_file()
+            realtime_bookmarks_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(realtime_bookmarks_file, "w", encoding="utf-8") as f:
                 json.dump(bookmarks, f, indent=2, ensure_ascii=False)
         return result
 
@@ -915,7 +920,9 @@ def save_bookmark(bookmark_data: dict) -> Tuple[bool, dict]:
 
         bookmarks.append(bookmark_data_to_save)
 
-        with open(REALTIME_BOOKMARKS_FILE, "w", encoding="utf-8") as f:
+        realtime_bookmarks_file = get_realtime_bookmarks_file()
+        realtime_bookmarks_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(realtime_bookmarks_file, "w", encoding="utf-8") as f:
             json.dump(bookmarks, f, indent=2, ensure_ascii=False)
 
         logger.info(f"Saved bookmark for tweet {bookmark_data['tweet_id']}")
@@ -945,7 +952,9 @@ def save_bookmark(bookmark_data: dict) -> Tuple[bool, dict]:
         updated = True
 
     if updated:
-        with open(REALTIME_BOOKMARKS_FILE, "w", encoding="utf-8") as f:
+        realtime_bookmarks_file = get_realtime_bookmarks_file()
+        realtime_bookmarks_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(realtime_bookmarks_file, "w", encoding="utf-8") as f:
             json.dump(bookmarks, f, indent=2, ensure_ascii=False)
 
     existing_payload.pop("graphql_response", None)
@@ -1004,8 +1013,8 @@ async def process_bookmark_async(bookmark_data: dict):
                 return False, None
 
             await mutate_realtime_bookmarks(mark_processed)
-        except Exception as exc:
-            logger.debug(f"Failed to update processed flag for {tweet_id}: {exc}")
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.warning(f"Failed to update processed flag for {tweet_id}: {exc}")
 
     except ValueError as exc:
         logger.error(f"Invalid bookmark payload: {exc}")
@@ -1059,9 +1068,12 @@ async def get_settings():
     """Get current configuration (API keys are masked)"""
     try:
         config_data = load_runtime_settings()
+        runtime = get_knowledge_artifact_runtime()
         runtime_summary = build_settings_runtime_summary(
             config_data,
             project_root=BASE_CONFIG_PATH.parent,
+            layout=runtime.layout,
+            db=runtime.db,
         )
 
         # Check which env vars are set (masked)
@@ -1096,9 +1108,12 @@ async def get_settings():
 async def get_admin_status():
     """Return operational capture/compile health dashboard data."""
     try:
+        runtime = get_knowledge_artifact_runtime()
         return build_admin_status_dashboard(
             load_runtime_settings(),
             project_root=BASE_CONFIG_PATH.parent,
+            layout=runtime.layout,
+            db=runtime.db,
         )
     except Exception as e:
         logger.error(f"Error loading admin status dashboard: {e}")
@@ -1109,10 +1124,13 @@ async def get_admin_status():
 async def run_settings_lint(lint_kind: str):
     """Run an operator lint action and persist a downloadable JSON report."""
     try:
+        runtime = get_knowledge_artifact_runtime()
         return run_admin_lint(
             load_runtime_settings(),
             project_root=BASE_CONFIG_PATH.parent,
             lint_kind=lint_kind,
+            layout=runtime.layout,
+            db=runtime.db,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1131,10 +1149,12 @@ async def download_settings_lint(lint_kind: str):
             detail="lint kind must be one of: legacy-artifacts, okf, wiki, security",
         )
     try:
+        runtime = get_knowledge_artifact_runtime()
         report_path = admin_lint_report_path(
             load_runtime_settings(),
             project_root=BASE_CONFIG_PATH.parent,
             lint_kind=normalized_kind,
+            layout=runtime.layout,
         )
     except Exception as e:
         logger.error(f"Error resolving {normalized_kind} lint report: {e}")
@@ -1208,13 +1228,11 @@ async def update_env_vars(env_updates: Dict[str, str]):
 
 def open_api_capture_surface():
     """Open the capture event surface using API runtime configuration."""
-    runtime_config = Config()
-    runtime_config.data = load_runtime_settings()
-    layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+    runtime = get_knowledge_artifact_runtime()
     return open_capture_surface(
-        runtime_config,
-        layout=layout,
-        db=get_metadata_db(),
+        runtime.config,
+        layout=runtime.layout,
+        db=runtime.db,
     )
 
 
@@ -1507,13 +1525,11 @@ def list_connectors_endpoint():
 def run_connector_endpoint(connector_name: str, request: ConnectorRunRequest):
     """Plan or execute a connector through the shared agent surface."""
     try:
-        runtime_config = Config()
-        runtime_config.data = load_runtime_settings()
-        layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+        runtime = get_knowledge_artifact_runtime()
         service = AgentSurfaceService(
-            runtime_config,
-            layout=layout,
-            db=get_metadata_db(),
+            runtime.config,
+            layout=runtime.layout,
+            db=runtime.db,
         )
         return service.run_connector(
             connector_name,
@@ -1535,13 +1551,11 @@ def list_connector_runs_endpoint(
 ):
     """Return connector run history and checkpoint state."""
     try:
-        runtime_config = Config()
-        runtime_config.data = load_runtime_settings()
-        layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+        runtime = get_knowledge_artifact_runtime()
         service = AgentSurfaceService(
-            runtime_config,
-            layout=layout,
-            db=get_metadata_db(),
+            runtime.config,
+            layout=runtime.layout,
+            db=runtime.db,
         )
         return service.list_connector_runs(
             connector_name=connector_name,
@@ -1559,9 +1573,12 @@ def list_connector_runs_endpoint(
 async def get_archivist_registry():
     """Return the raw and parsed archivist registry for the settings UI."""
     try:
+        runtime = get_knowledge_artifact_runtime()
         return build_archivist_admin_payload(
             load_runtime_settings(),
             project_root=BASE_CONFIG_PATH.parent,
+            layout=runtime.layout,
+            db=runtime.db,
         )
     except Exception as e:
         logger.error(f"Error loading archivist registry: {e}")
@@ -1572,10 +1589,13 @@ async def get_archivist_registry():
 async def update_archivist_registry(payload: ArchivistRegistryUpdateRequest):
     """Validate and persist the archivist topic registry."""
     try:
+        runtime = get_knowledge_artifact_runtime()
         result = save_archivist_registry_text(
             load_runtime_settings(),
             project_root=BASE_CONFIG_PATH.parent,
             content=payload.content,
+            layout=runtime.layout,
+            db=runtime.db,
         )
         return {"status": "ok", **result}
     except (ArchivistAdminError, ValueError) as e:
@@ -1590,11 +1610,14 @@ async def update_archivist_registry(payload: ArchivistRegistryUpdateRequest):
 async def force_archivist_topic(topic_id: str, payload: ArchivistForceRequest):
     """Queue a manual force request for an archivist topic."""
     try:
+        runtime = get_knowledge_artifact_runtime()
         return queue_archivist_topic_force(
             load_runtime_settings(),
             project_root=BASE_CONFIG_PATH.parent,
             topic_id=topic_id,
             reason=payload.reason,
+            layout=runtime.layout,
+            db=runtime.db,
         )
     except (ArchivistAdminError, ValueError) as e:
         logger.error(f"Error queueing archivist force for {topic_id}: {e}")
@@ -1643,10 +1666,13 @@ async def run_archivist_topic_now(topic_id: str, payload: ArchivistRunRequest):
 async def clear_archivist_topic_force_endpoint(topic_id: str):
     """Clear a queued manual force request for an archivist topic."""
     try:
+        runtime = get_knowledge_artifact_runtime()
         return clear_archivist_topic_force_request(
             load_runtime_settings(),
             project_root=BASE_CONFIG_PATH.parent,
             topic_id=topic_id,
+            layout=runtime.layout,
+            db=runtime.db,
         )
     except (ArchivistAdminError, ValueError) as e:
         logger.error(f"Error clearing archivist force for {topic_id}: {e}")
@@ -2076,13 +2102,11 @@ def query_wiki_endpoint(
 ):
     """Search Thoth knowledge surfaces using the shared agent-safe response."""
     try:
-        runtime_config = Config()
-        runtime_config.data = load_runtime_settings()
-        layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
+        runtime = get_knowledge_artifact_runtime()
         service = AgentSurfaceService(
-            runtime_config,
-            layout=layout,
-            db=get_metadata_db(),
+            runtime.config,
+            layout=runtime.layout,
+            db=runtime.db,
         )
         return service.query_wiki(
             query,

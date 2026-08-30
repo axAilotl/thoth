@@ -15,6 +15,38 @@ from .metadata_db import MetadataDB, get_metadata_db, set_metadata_db
 from .path_layout import PathLayout, build_path_layout
 
 
+class RuntimeCompositionError(RuntimeError):
+    """Raised when runtime composition invariants are violated."""
+
+
+def validate_metadata_db_matches_layout(db: MetadataDB, layout: PathLayout) -> None:
+    """Prove that ``db`` points at the database path declared by ``layout``.
+
+    The comparison uses resolved canonical paths so symlinks or relative
+    segments cannot hide a mismatch. This validation must run before any
+    ``ensure_directories`` or other filesystem mutation.
+    """
+    if not isinstance(db, MetadataDB):
+        return
+    db_path = Path(db.db_path).resolve()
+    layout_path = Path(layout.database_path).resolve()
+    if db_path != layout_path:
+        raise RuntimeCompositionError(
+            f"Metadata database path {db_path} does not match "
+            f"runtime layout database path {layout_path}"
+        )
+
+
+def _legacy_doubled_database_path(layout: PathLayout) -> Path:
+    """Return the known legacy doubled-path location for the metadata DB.
+
+    Older defaults accidentally nested the system directory, producing paths
+    such as ``.thoth_system/.thoth_system/meta.db``. This is only a diagnostic
+    helper; Thoth never creates or migrates the legacy location automatically.
+    """
+    return (layout.system_root / layout.system_root.name / layout.database_path.name).resolve()
+
+
 def resolve_runtime_database(
     config_obj: Config,
     *,
@@ -41,11 +73,19 @@ def resolve_runtime_database(
     if existing is not None:
         existing_path = Path(existing.db_path).resolve()
         if existing_path != requested_path:
-            raise RuntimeError(
+            raise RuntimeCompositionError(
                 f"Refusing to reuse metadata database at {existing.db_path} "
                 f"for requested path {requested_layout.database_path}"
             )
         return existing
+
+    legacy_path = _legacy_doubled_database_path(requested_layout)
+    if not requested_path.exists() and legacy_path.exists():
+        raise RuntimeCompositionError(
+            f"Legacy metadata database found at {legacy_path}, but the configured "
+            f"database is {requested_path}. Move or rename the legacy file "
+            f"(or update database.path to point at it) before starting Thoth."
+        )
 
     db = MetadataDB(str(requested_layout.database_path))
     set_metadata_db(db)

@@ -37,6 +37,7 @@ from .metadata_db import (
     get_metadata_db,
 )
 from .path_layout import PathLayout, build_path_layout
+from .runtime_composition import validate_metadata_db_matches_layout
 from .prompt_security import prompt_security_requires_review
 from .translation_companion import EnglishCompanionPublisher, TranslationCompanionResult
 from .wiki_updater import CompiledWikiUpdater
@@ -128,14 +129,7 @@ class KnowledgeArtifactRuntime:
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
-        if isinstance(self.db, MetadataDB):
-            resolved_db_path = Path(self.db.db_path).resolve()
-            resolved_layout_path = Path(self.layout.database_path).resolve()
-            if resolved_db_path != resolved_layout_path:
-                raise IngestionRuntimeError(
-                    f"Metadata database path {resolved_db_path} does not match "
-                    f"runtime layout database path {resolved_layout_path}"
-                )
+        validate_metadata_db_matches_layout(self.db, self.layout)
         self.layout.ensure_directories()
         self._pipeline = None
         self._wiki_updater = None

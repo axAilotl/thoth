@@ -49,6 +49,7 @@ from .metadata_db import (
     get_metadata_db,
 )
 from .path_layout import PathLayout, build_path_layout
+from .runtime_composition import validate_metadata_db_matches_layout
 from .prompt_security import (
     THOTH_REDACTION_METADATA_KEY,
     THOTH_SECURITY_AUDIT_KEY,
@@ -81,6 +82,7 @@ class AgentSurfaceService:
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
+        validate_metadata_db_matches_layout(self.db, self.layout)
         self.event_store = event_store
 
     def query_wiki(
