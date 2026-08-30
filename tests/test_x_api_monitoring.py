@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
+import thoth_api
 from core.config import Config
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
@@ -164,3 +166,25 @@ def test_monitoring_webhook_ignores_unmonitored_account(tmp_path: Path, monkeypa
         "tweet_id": "222",
     }
     assert db.get_ingestion_entry("222") is None
+
+
+def test_monitoring_webhook_endpoint_passes_auth_header(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_capture(config, payload, *, webhook_secret):
+        captured.update(payload=payload, webhook_secret=webhook_secret)
+        return {"status": "accepted", "tweet_id": "123"}
+
+    monkeypatch.setattr(thoth_api, "capture_x_api_monitoring_webhook", fake_capture)
+    response = TestClient(thoth_api.app).post(
+        "/api/x-api/monitoring/webhook",
+        headers={"X-Thoth-Webhook-Secret": "route-secret"},
+        json={"tweet_id": "123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "accepted", "tweet_id": "123"}
+    assert captured == {
+        "payload": {"tweet_id": "123"},
+        "webhook_secret": "route-secret",
+    }

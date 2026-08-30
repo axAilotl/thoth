@@ -41,6 +41,7 @@ from core import (
     XApiAuthStateError,
     XApiBookmarkSyncConfigError,
     XApiBookmarkSyncStateError,
+    X_API_MONITOR_SECRET_HEADER,
     XApiMonitoringAuthError,
     XApiMonitoringConfigError,
     XApiMonitoringPayloadError,
