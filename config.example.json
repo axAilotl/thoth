@@ -690,7 +690,12 @@
         "tweet.read",
         "users.read",
         "offline.access"
-      ]
+      ],
+      "monitoring": {
+        "enabled": false,
+        "accounts": [],
+        "webhook_secret_env": "THOTH_X_MONITOR_WEBHOOK_SECRET"
+      }
     },
     "youtube": {
       "enabled": true,

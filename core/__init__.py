@@ -120,6 +120,15 @@ from .x_api_bookmark_sync import (
     store_x_api_bookmark_sync_checkpoint,
     sync_x_api_bookmarks,
 )
+from .x_api_monitoring import (
+    X_API_MONITOR_SECRET_HEADER,
+    XApiMonitoringAuthError,
+    XApiMonitoringConfigError,
+    XApiMonitoringPayloadError,
+    capture_x_api_monitoring_webhook,
+    normalize_x_api_monitoring_payload,
+    resolve_x_api_monitoring_config,
+)
 from .wiki_contract import (
     WikiContract,
     WikiPageSpec,
@@ -294,6 +303,13 @@ __all__ = [
     'run_x_api_bookmark_backfill',
     'store_x_api_bookmark_sync_checkpoint',
     'sync_x_api_bookmarks',
+    'X_API_MONITOR_SECRET_HEADER',
+    'XApiMonitoringAuthError',
+    'XApiMonitoringConfigError',
+    'XApiMonitoringPayloadError',
+    'capture_x_api_monitoring_webhook',
+    'normalize_x_api_monitoring_payload',
+    'resolve_x_api_monitoring_config',
     'WikiContract',
     'WikiPageSpec',
     'build_wiki_contract',

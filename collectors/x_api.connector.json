@@ -25,6 +25,7 @@
     "sources.x_api.client_id",
     "sources.x_api.redirect_uri",
     "sources.x_api.scopes",
+    "sources.x_api.monitoring",
     "automation.x_api_sync"
   ],
   "auth": [
