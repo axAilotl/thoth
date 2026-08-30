@@ -4,8 +4,24 @@ Tests for ArXiv collection and metadata parsing.
 
 from types import SimpleNamespace
 
+import pytest
+
 from collectors.arxiv_collector import ArXivCollector
+from core.config import config
 from processors.arxiv_processor_v2 import ArXivProcessorV2
+
+
+_config_get = config.get
+
+
+@pytest.fixture(autouse=True)
+def _disable_metadata_db(monkeypatch):
+    """Keep ArXiv processor tests from touching the unregistered metadata DB."""
+    monkeypatch.setattr(
+        config,
+        "get",
+        lambda key, default=None: False if key == "database.enabled" else _config_get(key, default),
+    )
 
 
 class FakeDB:
@@ -189,3 +205,150 @@ def test_arxiv_processor_parses_entry_metadata_not_feed_metadata(tmp_path):
         "authors": ["Alice", "Bob"],
         "categories": ["cs.AI", "cs.LG"],
     }
+
+
+
+def test_arxiv_processor_renames_legacy_query_title_filename(tmp_path):
+    processor = ArXivProcessorV2(output_dir=str(tmp_path))
+    legacy_path = (
+        tmp_path
+        / "papers"
+        / "2512.08296-arxiv-query-search-query-amp-id-list-2512-08296-amp-start-0-amp-max-results-10.pdf"
+    )
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_bytes(b"%PDF-1.4 legacy")
+
+    processor._fetch_arxiv_metadata = lambda *args, **kwargs: None
+    processor._extract_title_from_pdf = (
+        lambda path: "Towards a Science of Scaling Agent Systems"
+    )
+    download_attempts = []
+    processor._download_file = lambda *args, **kwargs: download_attempts.append(args) or True
+
+    paper = processor.download_document(
+        "https://arxiv.org/abs/2512.08296",
+        "tweet-1",
+        resume=True,
+    )
+
+    expected_name = "2512.08296-towards-a-science-of-scaling-agent-systems.pdf"
+    expected_path = tmp_path / "papers" / expected_name
+    assert paper is not None
+    assert paper.filename == expected_name
+    assert paper.downloaded is True
+    assert expected_path.exists()
+    assert not legacy_path.exists()
+    assert download_attempts == []
+
+
+def test_arxiv_processor_renames_legacy_id_pdf_filename(tmp_path):
+    processor = ArXivProcessorV2(output_dir=str(tmp_path))
+    legacy_path = tmp_path / "papers" / "2512.08296.pdf"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_bytes(b"%PDF-1.4 legacy")
+
+    processor._fetch_arxiv_metadata = lambda *args, **kwargs: {
+        "title": "Metadata Title",
+        "abstract": "",
+        "authors": [],
+        "categories": [],
+    }
+    download_attempts = []
+    processor._download_file = lambda *args, **kwargs: download_attempts.append(args) or True
+
+    paper = processor.download_document(
+        "https://arxiv.org/abs/2512.08296",
+        "tweet-1",
+        resume=True,
+    )
+
+    expected_name = "2512.08296-metadata-title.pdf"
+    expected_path = tmp_path / "papers" / expected_name
+    assert paper is not None
+    assert paper.title == "Metadata Title"
+    assert paper.filename == expected_name
+    assert paper.downloaded is True
+    assert expected_path.exists()
+    assert not legacy_path.exists()
+    assert download_attempts == []
+
+
+def test_arxiv_processor_fresh_download_uses_metadata_title_not_pdf_fallback(tmp_path):
+    processor = ArXivProcessorV2(output_dir=str(tmp_path))
+    processor._fetch_arxiv_metadata = lambda *args, **kwargs: {
+        "title": "Metadata Title",
+        "abstract": "",
+        "authors": [],
+        "categories": [],
+    }
+    processor._extract_title_from_pdf = lambda path: "PDF Title"
+
+    def fake_download(url, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4 fresh")
+        return True
+
+    processor._download_file = fake_download
+
+    paper = processor.download_document(
+        "https://arxiv.org/abs/2604.12345",
+        "tweet-2",
+        resume=False,
+    )
+
+    expected_name = "2604.12345-metadata-title.pdf"
+    assert paper is not None
+    assert paper.title == "Metadata Title"
+    assert paper.filename == expected_name
+    assert (tmp_path / "papers" / expected_name).exists()
+
+
+def test_arxiv_processor_ignores_query_title_metadata(tmp_path):
+    processor = ArXivProcessorV2(output_dir=str(tmp_path))
+    processor._fetch_arxiv_metadata = lambda *args, **kwargs: {
+        "title": "arxiv query: id_list=2604.12345",
+        "abstract": "",
+        "authors": [],
+        "categories": [],
+    }
+
+    def fake_download(url, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4 fresh")
+        return True
+
+    processor._download_file = fake_download
+
+    paper = processor.download_document(
+        "https://arxiv.org/abs/2604.12345",
+        "tweet-3",
+        resume=False,
+    )
+
+    expected_name = "2604.12345-arxiv-paper-2604-12345.pdf"
+    assert paper is not None
+    assert paper.title == "ArXiv Paper 2604.12345"
+    assert paper.filename == expected_name
+
+
+def test_arxiv_processor_resolves_title_from_local_pdf_when_metadata_missing(tmp_path):
+    processor = ArXivProcessorV2(output_dir=str(tmp_path))
+    legacy_path = tmp_path / "papers" / "2512.08296.pdf"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_bytes(b"%PDF-1.4 legacy")
+
+    processor._fetch_arxiv_metadata = lambda *args, **kwargs: None
+    processor._extract_title_from_pdf = (
+        lambda path: "Title from Local PDF"
+    )
+    processor._download_file = lambda *args, **kwargs: True
+
+    paper = processor.download_document(
+        "https://arxiv.org/abs/2512.08296",
+        "tweet-4",
+        resume=True,
+    )
+
+    assert paper is not None
+    assert paper.title == "Title from Local PDF"
+    assert paper.filename == "2512.08296-title-from-local-pdf.pdf"
