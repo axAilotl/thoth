@@ -41,6 +41,10 @@ from core import (
     XApiAuthStateError,
     XApiBookmarkSyncConfigError,
     XApiBookmarkSyncStateError,
+    X_API_MONITOR_SECRET_HEADER,
+    XApiMonitoringAuthError,
+    XApiMonitoringConfigError,
+    XApiMonitoringPayloadError,
     XApiTokenError,
     fetch_current_x_user,
     normalize_bookmark_payload,
@@ -58,6 +62,7 @@ from core import (
     ensure_wiki_scaffold,
     load_connector_registry,
     run_x_api_bookmark_backfill,
+    capture_x_api_monitoring_webhook,
     queue_archivist_topic_force,
     resolve_archivist_sync_config as resolve_archivist_runtime_config,
     run_archivist_topics,
@@ -1870,6 +1875,29 @@ async def trigger_x_api_bookmark_sync(request: XApiBackfillRequest):
     except Exception as exc:
         logger.error(f"Unexpected X API bookmark sync error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/x-api/monitoring/webhook")
+async def receive_x_api_monitoring_webhook(
+    request: Request,
+    payload: Dict[str, Any],
+):
+    """Authenticate and queue one monitored-account X webhook event."""
+    try:
+        return capture_x_api_monitoring_webhook(
+            config,
+            payload,
+            webhook_secret=request.headers.get(X_API_MONITOR_SECRET_HEADER),
+        )
+    except XApiMonitoringAuthError:
+        logger.warning("Rejected X monitoring webhook with invalid credentials")
+        raise HTTPException(status_code=401, detail="Invalid webhook credentials")
+    except (XApiMonitoringConfigError, XApiMonitoringPayloadError, ValueError) as exc:
+        logger.error(f"Rejected X monitoring webhook: {exc}")
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Unexpected X monitoring webhook error: {exc}")
+        raise HTTPException(status_code=500, detail="X monitoring capture failed")
 
 
 class ProviderModelsRequest(BaseModel):
