@@ -157,6 +157,14 @@ class ArXivProcessorV2(DocumentProcessor):
                         legacy_route_path.rename(pdf_path)
                         paper.downloaded = True
                         logger.info(f"Renamed legacy ArXiv file {legacy_route_path.name} -> {filename}")
+                        # Rename the old index row before upserting the canonical path.
+                        # Reversing this order collides with the path primary key and
+                        # leaves the stale legacy row behind.
+                        self._rename_db_file_entry(
+                            old_path=legacy_route_path,
+                            new_path=pdf_path,
+                            tweet_id=tweet_id,
+                        )
                         # Upsert DB for renamed file
                         try:
                             if config.get('database.enabled', False):
@@ -186,12 +194,6 @@ class ArXivProcessorV2(DocumentProcessor):
                     except Exception as e:
                         logger.warning(f"Failed to rename legacy ArXiv file {legacy_route_path.name}: {e}")
                         paper.downloaded = False
-                    else:
-                        self._rename_db_file_entry(
-                            old_path=legacy_route_path,
-                            new_path=pdf_path,
-                            tweet_id=tweet_id,
-                        )
                 if not paper.downloaded:
                     success = self._download_file(paper.pdf_url, pdf_path)
                     paper.downloaded = success

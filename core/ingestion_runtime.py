@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 from .artifacts import (
     KnowledgeArtifact,
@@ -693,6 +694,7 @@ class KnowledgeArtifactRuntime:
     ) -> IngestionDispatchResult:
         """Process a paper artifact by downloading and indexing the PDF."""
         from processors.arxiv_processor_v2 import ArXivProcessorV2
+        from processors.pdf_processor import PDFProcessor
         from core.research_graph import (
             ResearchGraphService,
             build_research_metadata_provider,
@@ -722,13 +724,29 @@ class KnowledgeArtifactRuntime:
                         "research_graph": graph_result,
                     },
                 )
-        processor = ArXivProcessorV2(output_dir=str(self.layout.vault_root))
+        pdf_host = (urlparse(artifact.pdf_url).hostname or "").lower()
+        is_arxiv = artifact.source_type.lower() == "arxiv" or (
+            pdf_host == "arxiv.org" or pdf_host.endswith(".arxiv.org")
+        )
+        download_kwargs: dict[str, Any] = {}
+        if is_arxiv:
+            processor = ArXivProcessorV2(output_dir=str(self.layout.vault_root))
+        else:
+            processor = PDFProcessor(
+                output_dir=str(self.layout.vault_root),
+                target_dir_name="papers",
+            )
+            download_kwargs = {
+                "filename_prefix": artifact.id,
+                "title_override": artifact.title or None,
+            }
         try:
             document = await asyncio.to_thread(
                 processor.download_document,
                 artifact.pdf_url,
                 artifact.id,
                 True,
+                **download_kwargs,
             )
         except Exception as exc:
             if artifact.source_type == "research_graph":
