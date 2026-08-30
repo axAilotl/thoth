@@ -59,6 +59,8 @@ from core import (
     store_x_api_token_bundle,
     summarize_x_api_auth,
     load_x_api_token_bundle,
+    test_x_api_connection,
+    redact_x_api_secrets,
     ensure_wiki_scaffold,
     load_connector_registry,
     run_x_api_bookmark_backfill,
@@ -2916,6 +2918,24 @@ async def background_processor():
             await asyncio.sleep(0.1)
 
     logger.info("Background processor stopped")
+
+
+
+@app.post("/api/x-api/test-connection")
+async def test_x_api_connection_endpoint():
+    """Run an operator-safe X OAuth connection and config diagnostic."""
+    try:
+        layout = build_path_layout(config)
+        result = await test_x_api_connection(config, layout=layout)
+        return result
+    except (XApiAuthConfigError, XApiTokenError, ValueError) as exc:
+        detail = redact_x_api_secrets(str(exc))
+        logger.error(f"X API connection test failed: {detail}")
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as exc:
+        detail = redact_x_api_secrets(str(exc))
+        logger.error(f"Unexpected X API connection test error: {detail}")
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @app.on_event("startup")
