@@ -18,6 +18,7 @@ from .archivist_topics import (
     load_archivist_topic_registry,
 )
 from .config import Config
+from .content_roots import ContentRootMode
 from .llm_interface import LLMInterface
 from .metadata_db import MetadataDB, get_metadata_db
 from .path_layout import PathLayout, build_path_layout
@@ -436,6 +437,20 @@ class ArchivistCompiler:
         return lines
 
     def _absolute_path_for_candidate(self, candidate: ArchivistCandidate) -> Path:
+        """Resolve a candidate's scope-relative path through content roots.
+
+        When a content-root policy is present, all legacy scopes (vault, raw,
+        library) resolve against the managed-inbox root because raw and library
+        are sub-paths of the vault. Without a policy, legacy PathLayout paths
+        are used as an explicit fallback.
+        """
+        normalized = self._normalized_source_path(candidate)
+        if self.layout.content_root_policy is not None:
+            managed = self.layout.content_root_policy.roots_by_mode(
+                ContentRootMode.MANAGED_INBOX
+            )
+            if managed:
+                return managed[0].base_path / normalized
         if candidate.scope == "vault":
             return self.layout.vault_root / candidate.scope_relative_path
         if candidate.scope == "raw":

@@ -18,6 +18,7 @@ from .capture_lifecycle import CaptureLifecycleResult, CaptureLifecycleService
 from .ccf_dualwrite import dual_write_requested
 from .config import Config, config
 from .metadata_db import MetadataDB, get_metadata_db
+from .content_roots import ContentRootMode
 from .path_layout import PathLayout, build_path_layout
 from .postgres import open_postgres_connection, resolve_postgres_settings
 from .postgres_migrations import apply_postgres_migrations
@@ -189,8 +190,40 @@ class ConnectorCaptureQueue:
             )
 
 
+def _raw_root_inside_managed_inbox(layout: PathLayout) -> Path | None:
+    """Return layout.raw_root when it is contained by a managed-inbox root."""
+    if layout.content_root_policy is None:
+        return None
+    raw_resolved = layout.raw_root.resolve()
+    for root in layout.content_root_policy.roots_by_mode(ContentRootMode.MANAGED_INBOX):
+        try:
+            raw_resolved.relative_to(root.base_path.resolve())
+            return layout.raw_root
+        except ValueError:
+            continue
+    return None
+
+
 def connector_raw_roots(layout: PathLayout) -> tuple[Path, ...]:
-    """Roots under which connectors may record immutable raw references."""
+    """Roots under which connectors may record immutable raw references.
+
+    When the legacy raw root sits inside a behavior-owned managed-inbox root,
+    that concrete raw directory is preserved so existing capture paths remain
+    valid. Otherwise, any managed-inbox/projection-output/external root is
+    eligible.
+    """
+    if layout.content_root_policy is not None:
+        raw_inbox = _raw_root_inside_managed_inbox(layout)
+        if raw_inbox is not None:
+            return (raw_inbox,)
+        return tuple(
+            root.base_path
+            for root in layout.content_root_policy.roots_by_mode(
+                ContentRootMode.MANAGED_INBOX,
+                ContentRootMode.PROJECTION_OUTPUT,
+                ContentRootMode.EXTERNAL,
+            )
+        )
     return (layout.raw_root, layout.library_root, layout.vault_root)
 
 
@@ -208,6 +241,23 @@ def _raw_path_for_stores(lifecycle, runtime_config, raw_path):
     return None
 
 
+def _select_connector_raw_root(layout: PathLayout) -> Path:
+    """Choose the root under which connector raw JSON should be written."""
+    if layout.content_root_policy is not None:
+        raw_inbox = _raw_root_inside_managed_inbox(layout)
+        if raw_inbox is not None:
+            return raw_inbox
+        managed = layout.content_root_policy.roots_by_mode(ContentRootMode.MANAGED_INBOX)
+        if managed:
+            return managed[0].base_path
+        projection = layout.content_root_policy.roots_by_mode(
+            ContentRootMode.PROJECTION_OUTPUT
+        )
+        if projection:
+            return projection[0].base_path
+    return layout.raw_root
+
+
 def write_connector_raw_json(
     layout: PathLayout,
     *,
@@ -218,7 +268,7 @@ def write_connector_raw_json(
     captured_at: str | None = None,
 ) -> Path:
     """Persist immutable connector source JSON under the configured raw root."""
-    root = layout.raw_root.resolve()
+    root = _select_connector_raw_root(layout).resolve()
     directory = root / _safe_raw_path_part(connector_name)
     if subdir:
         directory = directory / _safe_raw_path_part(subdir)
@@ -242,10 +292,16 @@ def write_connector_raw_json(
         "captured_at": captured_at or datetime.now().isoformat(),
         "payload": payload,
     }
+    content = json.dumps(envelope, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     if not raw_path.exists():
-        raw_path.write_text(
-            json.dumps(envelope, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
+        raw_path.write_text(content, encoding="utf-8")
+        return raw_path
+
+    # Idempotent: verify the existing file has identical content.
+    existing = raw_path.read_text(encoding="utf-8")
+    if existing != content:
+        raise ValueError(
+            f"raw connector file already exists with different content: {raw_path}"
         )
     return raw_path
 

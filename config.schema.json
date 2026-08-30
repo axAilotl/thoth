@@ -340,6 +340,37 @@
       "type": "object",
       "additionalProperties": true
     },
+    "content_roots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "watch_only",
+              "managed_inbox",
+              "projection_output",
+              "protected",
+              "external"
+            ]
+          },
+          "adapter": {
+            "type": "string",
+            "enum": ["filesystem", "obsidian", "memory"]
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "metadata": { "type": "object" }
+        },
+        "required": ["id", "mode", "adapter", "path"],
+        "additionalProperties": false
+      }
+    },
     "paths": {
       "type": "object",
       "properties": {
