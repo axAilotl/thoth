@@ -94,7 +94,7 @@ class WebClipperCollector:
         self.layout = layout or build_path_layout(config)
         self.contract = contract or build_web_clipper_contract(config, layout=self.layout)
         self.db = db or get_metadata_db()
-        self.asset_publisher = StagedAssetPublisher(config, layout=self.layout)
+        self._asset_publisher: StagedAssetPublisher | None = None
         self.capture_queue = ConnectorCaptureQueue(
             config,
             layout=self.layout,
@@ -272,7 +272,7 @@ class WebClipperCollector:
         )
         if should_stage:
             try:
-                self.asset_publisher.publish_file(
+                self._get_asset_publisher().publish_file(
                     path,
                     managed_path,
                     asset_type=attachment_asset_type,
@@ -285,6 +285,14 @@ class WebClipperCollector:
                 ) from exc
 
         return self._attachment_record(scanned, managed_path=managed_path)
+
+    def _get_asset_publisher(self) -> StagedAssetPublisher:
+        if self._asset_publisher is None:
+            self._asset_publisher = StagedAssetPublisher(
+                self.config,
+                layout=self.layout,
+            )
+        return self._asset_publisher
 
     def _plan_note_file(
         self,

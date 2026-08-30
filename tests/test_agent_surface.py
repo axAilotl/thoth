@@ -878,3 +878,27 @@ def test_web_clipper_plan_does_not_swallow_unexpected_errors(
     service = AgentSurfaceService(config, layout=layout, db=db)
     with pytest.raises(RuntimeError, match="unexpected scan failure"):
         service.plan_web_clipper()
+
+
+def test_web_clipper_plan_does_not_create_runtime_directories(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("sources.web_clipper.enabled", True)
+    config.set("sources.web_clipper.note_dirs", ["Clippings"])
+    config.set("sources.web_clipper.attachment_dirs", ["clipper-assets"])
+    layout = build_path_layout(config, project_root=tmp_path)
+    (layout.vault_root / "Clippings").mkdir(parents=True)
+    (layout.vault_root / "clipper-assets").mkdir(parents=True)
+    db = MetadataDB(str(layout.database_path))
+    before = {
+        path.relative_to(tmp_path)
+        for path in tmp_path.rglob("*")
+    }
+
+    payload = AgentSurfaceService(config, layout=layout, db=db).plan_web_clipper()
+
+    after = {
+        path.relative_to(tmp_path)
+        for path in tmp_path.rglob("*")
+    }
+    assert payload["plan"]["ready"] is True
+    assert after == before
