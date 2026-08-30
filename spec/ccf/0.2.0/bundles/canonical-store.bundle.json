@@ -1,0 +1,107 @@
+{
+  "format": "ccf.bundle-manifest/0.2.0",
+  "status": "working-draft",
+  "id": "ccf-canonical-store-bundle-v1",
+  "kind": "level",
+  "provides": "ccf-canonical-store-v1",
+  "depends_on": [
+    "ccf-exchange-bundle-v1"
+  ],
+  "artifacts": [
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/common/compartment-envelope.schema.json",
+      "digest": "sha256:0259e801278c8ad427663e279b30740be10d59cdaea8067b56c6e4bca42debed"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-header.schema.json",
+      "digest": "sha256:6bedea855fcdaecef27483675ed773bf124e909a36e9b8736c341de50028841e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-semantic-content.schema.json",
+      "digest": "sha256:996a7da1035bf96f1b1c5c42394a314f9052cd8fdd413891e12f5212da54ce74"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-semantic.schema.json",
+      "digest": "sha256:4cccea12f1b12c21e664156c62b7186ba7f421d2614778593a9b9eac3706be82"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-structural-content.schema.json",
+      "digest": "sha256:00965cc8ed0147375d72057f61c0dcf73496277a61f055b6e204edc5bef565a2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/blob-structural.schema.json",
+      "digest": "sha256:23258bf17c118d1360a283b3f0c75de09627bf50a1278a1e086181d1cb0237e0"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-header.schema.json",
+      "digest": "sha256:3ba217fa71e93c82e82cbe5399c46d80163f8c60a7810a543f484c5b5f1d27b1"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-semantic-content.schema.json",
+      "digest": "sha256:6035f3ed17dd4a4638f038ee72b89ada62ff0fafe5bf036eca7d224273a59fa8"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-semantic.schema.json",
+      "digest": "sha256:5dc4c851c61f1b5641f8fd2dc29e864f7045330234d98209f720efee620f972f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-structural-content.schema.json",
+      "digest": "sha256:6efaaef6cdb4e0a95e9bd2fef5de8abb693f0d49df6ab214199c75c2a2dfda88"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/link-structural.schema.json",
+      "digest": "sha256:a97603a73b31d686b1af6ea3c738f5513b6e2bdccd30cca8c8fa10d77a7f408f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-header.schema.json",
+      "digest": "sha256:cf3c170123caea3c8eec618f9594c4f0c441361fbf734910720453220ee89476"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-semantic-content.schema.json",
+      "digest": "sha256:916e9d2075dbe0ebec75d3a3a735d56359e054c54fb2d2ccf54d883ff01738f0"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-semantic.schema.json",
+      "digest": "sha256:d5b55e19a711df0d97862ee5db7541f3e5835eac339396e798569797d34cae4e"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-structural-content.schema.json",
+      "digest": "sha256:2654e16cb58b1713b68f06da0db7ea1114011e8e73dfb0aa6bfb8f3d920cedaa"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/objects/record-structural.schema.json",
+      "digest": "sha256:b5cd04d15eba7cfc0f40aaebaa2b2178526a6f807d85afbf1375b30aaf5a7d40"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/admission.schema.json",
+      "digest": "sha256:76c424d1062c8160688f1592102f71f38c4db31424905e2fdb8418e8461692ce"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/batch-result.schema.json",
+      "digest": "sha256:be0000fcc2c0c5acd6d30c1b5a41f0fbeafbdc0024926d683f8e29d16ef9c4f6"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/operational/body-storage.schema.json",
+      "digest": "sha256:25ebd4d6fe302babd4ca05fcd7c3ef203a6c9dee726f9b0ae005244938c29c78"
+    }
+  ]
+}

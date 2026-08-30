@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:registries.capability-registry",
+  "title": "CCF Capability Registry",
+  "type": "object",
+  "properties": {
+    "registry": {"const": "ccf.capabilities/0.2.0"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+          "status": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/status"},
+          "minimum_level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+          "conformance_suite": {
+            "oneOf": [
+              {"type": "string", "pattern": "^check-capability-[a-z0-9-]+$"},
+              {"type": "null"}
+            ]
+          },
+          "description": {"type": "string", "minLength": 1},
+          "depends_on": {
+            "type": "array",
+            "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+            "uniqueItems": true
+          },
+          "security_claims": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id", "status", "minimum_level", "conformance_suite", "description", "depends_on",
+          "security_claims", "exclusions"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["registry", "entries"],
+  "additionalProperties": false
+}

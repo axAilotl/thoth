@@ -1,0 +1,32 @@
+{
+  "format": "ccf.bundle-manifest/0.2.0",
+  "status": "working-draft",
+  "id": "ccf-work-pack-bundle-v1",
+  "kind": "semantic_pack",
+  "provides": "ccf-work-pack-v1",
+  "depends_on": [
+    "ccf-exchange-bundle-v1"
+  ],
+  "artifacts": [
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/work/constraint.schema.json",
+      "digest": "sha256:c38ea3916b91d536fb6214b8eaf343c5ea3f883cebf6a17339cbed6ee39ebb9d"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/work/decision.schema.json",
+      "digest": "sha256:80ff02360a2f2e6e8dd3e6a60217bbf9456dda8e9ee349040f72a2957677d996"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/work/project.schema.json",
+      "digest": "sha256:5f48cbb4955945b02633ba2bf65215fc15e171229239e92728771ac814b28fb8"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/work/task.schema.json",
+      "digest": "sha256:6c71f271083899ff0f30d241137908844624a8dd80bf9efdd02f962ab351f9c9"
+    }
+  ]
+}

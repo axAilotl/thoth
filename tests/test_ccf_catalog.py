@@ -8,7 +8,7 @@ import pytest
 
 from ccf.catalog import CatalogError, SemanticCatalog, compute_catalog_root
 
-EXPECTED_ROOT = "sha256:447aa218156d0b33861090c5931bee78bc4a59300e94feacbcf89eb9d35dbc10"
+EXPECTED_ROOT = "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8"
 
 
 @pytest.fixture(scope="module")
@@ -39,7 +39,7 @@ def test_pinned_digest_lookups(catalog):
     )
     assert (
         catalog.registry_digest("ccf.types/0.1.2")
-        == "sha256:6b1296d6c9f98fe5ff67c47569af7223de532e5a70b1aafc04176b93ee8d51a3"
+        == "sha256:859d51076665a5996d2922003695c8f8c49ee3a0f509ea22bf29a2744ff6e8ca"
     )
 
 

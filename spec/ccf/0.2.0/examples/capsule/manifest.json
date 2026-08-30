@@ -1,0 +1,107 @@
+{
+  "format": "ccf.capsule/0.2.0",
+  "pack_id": "urn:ccf:pack:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "created_at": "2026-08-24T12:03:00.000Z",
+  "level": "ccf-exchange-v1",
+  "capabilities": [],
+  "root_record_id": "urn:ccf:record:11111111-1111-4111-8111-111111111111",
+  "membership_link_types": [
+    "ccf.part_of"
+  ],
+  "custody": {
+    "completeness": "partial",
+    "losslessness": "lossless",
+    "omissions": []
+  },
+  "catalog_dependencies": [
+    {
+      "kind": "semantic_catalog",
+      "identifier": "ccf.semantic-catalog/0.1.2",
+      "digest": "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8",
+      "required": true
+    },
+    {
+      "kind": "registry",
+      "identifier": "ccf.types/0.1.2",
+      "digest": "sha256:859d51076665a5996d2922003695c8f8c49ee3a0f509ea22bf29a2744ff6e8ca",
+      "required": true
+    },
+    {
+      "kind": "registry",
+      "identifier": "ccf.links/0.1.2",
+      "digest": "sha256:c5e5ed3dfa4d2ef907aa2c4a0bd68324334be36d36a270c740c78366c729a309",
+      "required": true
+    }
+  ],
+  "streams": [
+    {
+      "path": "submissions/records.ndjson",
+      "media_type": "application/x-ndjson",
+      "content_role": "submissions",
+      "handling": "activate",
+      "activation_requirements": {
+        "minimum_level": "ccf-exchange-v1",
+        "capabilities": []
+      },
+      "digest": "sha256:0f840e09442ab277532138e14a22792521c56f549ef1308c974799bea81ffe20",
+      "byte_length": "2190",
+      "required": true
+    },
+    {
+      "path": "submissions/links.ndjson",
+      "media_type": "application/x-ndjson",
+      "content_role": "submissions",
+      "handling": "activate",
+      "activation_requirements": {
+        "minimum_level": "ccf-exchange-v1",
+        "capabilities": []
+      },
+      "digest": "sha256:a9bc142c6a834afdcd0920832cb1e604e8af63d740cbf24bb60f54549416b5f1",
+      "byte_length": "1244",
+      "required": true
+    },
+    {
+      "path": "opaque/governance-material.ndjson",
+      "media_type": "application/x-ndjson",
+      "content_role": "opaque",
+      "handling": "preserve_opaque",
+      "activation_requirements": {
+        "minimum_level": "ccf-governed-archive-v1",
+        "capabilities": []
+      },
+      "digest": "sha256:b3050e3bd03052621a671e2f870347ceb107694a6a0d5dae0cac973d0c7b1802",
+      "byte_length": "1154",
+      "required": true
+    }
+  ],
+  "dependencies": [
+    {
+      "object_id": "urn:ccf:blob:66666666-6666-4666-8666-666666666666",
+      "availability": "external",
+      "reason": "Large source diagram remains in the originating content store.",
+      "locator": "https://example.invalid/cissa/source-diagram",
+      "source_custody_proof": null,
+      "unavailability_lineage_id": null
+    },
+    {
+      "object_id": "urn:ccf:record:77777777-7777-4777-8777-777777777777",
+      "availability": "withheld",
+      "reason": "Private meeting note is outside the selected transfer scope.",
+      "locator": null,
+      "source_custody_proof": "source-pack:withheld:77777777",
+      "unavailability_lineage_id": null
+    },
+    {
+      "object_id": "urn:ccf:record:88888888-8888-4888-8888-888888888888",
+      "availability": "erased",
+      "reason": "A superseded credential note was erased before export.",
+      "locator": null,
+      "source_custody_proof": "source-pack:erased:88888888",
+      "unavailability_lineage_id": "urn:ccf:record:99999999-9999-4999-8999-999999999999"
+    }
+  ],
+  "proofs": [],
+  "extensions": {
+    "org.example.transfer_label": "Project Cissa Hardware Capsule"
+  }
+}

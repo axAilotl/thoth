@@ -1,0 +1,78 @@
+{
+  "format": "ccf.canonical-store-operations/0.2.0",
+  "fixture": "examples/capsule",
+  "cases": [
+    {
+      "id": "completed-capsule-uplift",
+      "source_level": "ccf-exchange-v1",
+      "destination_level": "ccf-canonical-store-v1",
+      "destination_archive_id": "urn:ccf:archive:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "resolution_profile": "ccf-canonical-uplift-vector-v1",
+      "objects": [
+        {
+          "id": "urn:ccf:record:11111111-1111-4111-8111-111111111111",
+          "structural_salt": "44bIiw7JQdQMeEtV7fIrcxvPVk8dEcuK949gzGL931E",
+          "semantic_salt": "R3J_QAQFFQdGiUPR8RZgfjA00cmxo92SQYfnH_0Ya2Y",
+          "submission_hash": "sha256:d22b63a855e0a2d6919c0884e50def65a23dcbfa1886ea510b5311f9bd62a02a",
+          "object_hash": "sha256:259960b7547e3181695d0a2b86a60a574f2a2a31a1d82920a2b4328ded285c19",
+          "structural_commitment": "sha256:7bb7da6e3044bc5e75dbc252de2bbe7c8ff837a23adf3808fcbdc338da025104",
+          "semantic_commitment": "sha256:f788d3308d01b9c13f10e7e92a4023bcd27cfcd2386d11d92a4e87c4ce012a55"
+        },
+        {
+          "id": "urn:ccf:record:22222222-2222-4222-8222-222222222222",
+          "structural_salt": "saIHOJMSit5IhFpShZT0Kmk3WZxyzSmUm0BzEEtsj4g",
+          "semantic_salt": "YJuib5cWpgGdExzvRTXO2AXlz5IF_ri4aYA3aT_1UTk",
+          "submission_hash": "sha256:06b2f34206dd053b64751f507d11e98ce20225bec93d916602245d39b0e20a88",
+          "object_hash": "sha256:9a0832998432c75756966cb15cbfbd84461027eb041361dfd96c6d674b786aef",
+          "structural_commitment": "sha256:3e27a904f636ed314e751e53a2dff1c9f8e96e68060dc26001dc966e3b59d309",
+          "semantic_commitment": "sha256:04e9a3266828bfb68921fca24641b39e6cabaded64c7935031b2e5eb6e7e8635"
+        },
+        {
+          "id": "urn:ccf:record:33333333-3333-4333-8333-333333333333",
+          "structural_salt": "dUUHlv3tgzQfaAt5LsKLeXzry_WhWOJy0z_RU34pQNI",
+          "semantic_salt": "Lr32Q9CxXzDCii6Ln8w846C3agT2fOBEuJiGDVH3YhM",
+          "submission_hash": "sha256:5d7bb83a000b668637d18bea6bba86e399b0c372aa91fbbb35f9734150af1b83",
+          "object_hash": "sha256:b0b3e1181acc8e89872f401a3e7f327c941445c509af6452fc94c0279b6858c2",
+          "structural_commitment": "sha256:488609f5b682055118df767d065fad213ba96634a086763c1e453c75f375a3a6",
+          "semantic_commitment": "sha256:c970409ba9711cb1d760116905f0ff918787d5d4b7ced7d36deca1680b06d524"
+        },
+        {
+          "id": "urn:ccf:link:44444444-4444-4444-8444-444444444444",
+          "structural_salt": "LvysRINceRfax3M56ejuTnT5F7C_ZWbSW-VajyrrWCM",
+          "semantic_salt": "AALIcCMyxHKqwnTP95tIdRYO0ygrrhX_sOfHY11JQtU",
+          "submission_hash": "sha256:388d9656e52c5d47e66e9d17d653f4f4fd796b2cacd45ca3fd43e0814140cbbe",
+          "object_hash": "sha256:0447a669b2de116384b1a26f5e4e6da62fff14b32627eb6018a24231f4d76bfb",
+          "structural_commitment": "sha256:5abcb348a10ee4410046028d089b048e556294da093ad6e03eeb65ebe6a4c473",
+          "semantic_commitment": "sha256:e1e265ba8081fb314a662dd7634a62bf900098a7b1dc8ad9e2c70089df0e7cd6"
+        },
+        {
+          "id": "urn:ccf:link:55555555-5555-4555-8555-555555555555",
+          "structural_salt": "xgT2rlTHrZUUzZXYPZ3JbeZ2PndGnAiJQ3SwF7a3DxA",
+          "semantic_salt": "21OQPxcRt6f61hJm4O7TZXpeTnZjLQs3nwI-JffhRJo",
+          "submission_hash": "sha256:183ee196f1a6c422253623298705076d205500cd882aec6ff5e7f2ceae51cf46",
+          "object_hash": "sha256:c0c332c06b7ae2e8497c47474c39c8c750cef837463b9eb22f349ad479df0cdc",
+          "structural_commitment": "sha256:43b631c5567da5db28897cc9b60fd8219933deb0946157830e8a4f89748aceb4",
+          "semantic_commitment": "sha256:9b26ba271a700b2b6c69d55691a66a03e3323686e80b1a1df7a4b13bc0d082b8"
+        }
+      ]
+    },
+    {
+      "id": "duplicate-capsule",
+      "first_disposition": "admitted",
+      "second_disposition": "existing",
+      "expected_object_count": 5,
+      "expected_origin_count": 2
+    },
+    {
+      "id": "same-origin-revision-conflict",
+      "mutation": "change-first-payload-field",
+      "expected": "origin_revision_conflict"
+    },
+    {
+      "id": "atomic-conflict-rollback",
+      "new_id": "urn:ccf:record:abababab-abab-4bab-8bab-abababababab",
+      "new_native_id": "atomic/new",
+      "expected": "rejected_without_object_or_origin_writes"
+    }
+  ]
+}

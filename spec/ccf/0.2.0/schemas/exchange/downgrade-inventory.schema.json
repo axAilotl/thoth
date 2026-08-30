@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:exchange.downgrade-inventory",
+  "title": "CCF Downgrade Inventory",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "category": {
+        "enum": [
+          "submission",
+          "journal_proof",
+          "policy_state",
+          "lineage_state",
+          "compartment",
+          "blob_content",
+          "unknown_extension",
+          "registry",
+          "schema",
+          "other"
+        ]
+      },
+      "subject": {
+        "type": "string",
+        "minLength": 1
+      },
+      "digest": {
+        "$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"
+      }
+    },
+    "required": ["category", "subject", "digest"],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,320 @@
+{
+  "format": "ccf.bundle-manifest/0.2.0",
+  "status": "working-draft",
+  "id": "ccf-exchange-bundle-v1",
+  "kind": "level",
+  "provides": "ccf-exchange-v1",
+  "depends_on": [],
+  "artifacts": [
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "CCF-0.2.0-DRAFT.md",
+      "digest": "sha256:fbf0cea8608fd9ed2a81842d94d422dd555f808fcb6664adbda7da07418e71fc"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "README.md",
+      "digest": "sha256:48940974515a2da83187535ac0d86c9ab3c41ef5a2cdc74f77c74900da8b4c55"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "examples/capsule/manifest.json",
+      "digest": "sha256:5dbbc4df8b4e54782c2663ef217288e2e4b2138f8036545eb9a30bee52c99615"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "examples/capsule/opaque/governance-material.ndjson",
+      "digest": "sha256:b3050e3bd03052621a671e2f870347ceb107694a6a0d5dae0cac973d0c7b1802"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "examples/capsule/submissions/links.ndjson",
+      "digest": "sha256:a9bc142c6a834afdcd0920832cb1e604e8af63d740cbf24bb60f54549416b5f1"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "examples/capsule/submissions/records.ndjson",
+      "digest": "sha256:0f840e09442ab277532138e14a22792521c56f549ef1308c974799bea81ffe20"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "registries/README.md",
+      "digest": "sha256:a3aa4c6f7e7aff77b4edadcdd1770a492b4430b1e3b8d98bb2553678626cf0a7"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "registries/capabilities.registry.json",
+      "digest": "sha256:dd2a2be53672514058d2a5ec5eec51f8d86e7f55c78702dd7116411c8f0e9939"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "registries/compatibility-rules.registry.json",
+      "digest": "sha256:788c7646cd65c8446123868d443b4e2b2d136d65e1075bb84f7083ca5356619a"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "registries/legacy-profile-mappings.registry.json",
+      "digest": "sha256:2b33d4cf10c252393338d64ce57fd95bc37917432718d0a0bae84f2e8be62523"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "registries/levels.registry.json",
+      "digest": "sha256:b5aa01604127e16fe122a675f9c2382bbcdf8b75ac2397327a32883d19729028"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "registries/roles.registry.json",
+      "digest": "sha256:2f8af965444508e0da6ae9ca4b57c66d3ef939229a728ba6796d1906a2db9e34"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "registries/semantic-packs.registry.json",
+      "digest": "sha256:8fdaf11168146202e660f335f4d33b5e313f1df2ed13d87fa7123dc65e192434"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "registries/semantic-requirements.registry.json",
+      "digest": "sha256:b465814cae2f9382b277467749c4a91e8de5ec32be11364dffac8cf48473e4b4"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/README.md",
+      "digest": "sha256:fbc0d4eb01f53f89f96ff053a6ee01ee2599acd8b4d53fa5af6e6a18da987b91"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/catalog.json",
+      "digest": "sha256:67b29e02dc4615d9807b9a771483d0e780c73d7196e259400b344d2537b7c7f7"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/common/defs.schema.json",
+      "digest": "sha256:5d7e0fb01d557276aa4acdd14750a32e7933ecf583bb2745ec7f7b438badd308"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/declarations/bundle-manifest.schema.json",
+      "digest": "sha256:753c8614a7b588beced1950379871a4540238cce483e5384c0856aa0c1649277"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/declarations/implementation.schema.json",
+      "digest": "sha256:5e4c7abb97c6233d02452588876dfe897f8a3c133a0e59f54ae76fe4c8631ad0"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/exchange/capsule-manifest.schema.json",
+      "digest": "sha256:678494aaea6f822b499965bbc1f0e471aa3587ed4832c6528ce4a755db5ff426"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/exchange/downgrade-inventory.schema.json",
+      "digest": "sha256:4381a31b20ac699f6b1761b664fd9633885d6f47fa1ae2bf06779a0c693bcbce"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/exchange/downgrade-receipt.schema.json",
+      "digest": "sha256:e415e3fb7e4776734ac0ae09eff46e274113c906605113bf87487d7e9d63bfde"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/exchange/uplift-receipt.schema.json",
+      "digest": "sha256:4da08ccbe90486e09841f5d61e7cb1471edcb9c1a066e6c0ddb6be1632a3f2e1"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/registries/capability-registry.schema.json",
+      "digest": "sha256:8604a62aa06baba3c68910f5f66adf23dcb80e6e4cfb4e1b844575b3f545bb0e"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/registries/compatibility-rule-registry.schema.json",
+      "digest": "sha256:6f57465530909ffbecea3be077922a6efb771740eaa3d55cc461b6e3713e130e"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/registries/legacy-profile-mapping-registry.schema.json",
+      "digest": "sha256:9fcf910126c65b443a0b6226179ad5b1d56bc81f7e2cd8ad9c7095dd9bae6939"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/registries/level-registry.schema.json",
+      "digest": "sha256:4db21ae2acae942d9f7f6320e28297dbd27cf40baefbc9fd2835c15959805951"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/registries/role-registry.schema.json",
+      "digest": "sha256:0b7cdc062b3dd7c609c5adc6e2f666160af31379018857d7ce9a3207fb4a8b84"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/registries/semantic-pack-registry.schema.json",
+      "digest": "sha256:c11746f72bb7fac52d6ff4a7ed3ca32c913a9e38af9e5409846202f2337120fe"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "schemas/registries/semantic-requirements-registry.schema.json",
+      "digest": "sha256:4a068f24d6f345c7fbbc7d38abc098c3c9d78cd124e85216d982d7b8bb76c59a"
+    },
+    {
+      "source_package": "ccf-0.2.0",
+      "path": "semantic-catalog.json",
+      "digest": "sha256:843e5b235983cd73a942aa1893a8c690bcb65223c8758fb0685d5c92c75d3a31"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/admission-authority-classes.registry.json",
+      "digest": "sha256:75ef84796ccd3f5a0bea7a653eef181d51bf13e7ef79bfbf6f1bccc806a30ad7"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/authority-bases.registry.json",
+      "digest": "sha256:2226c4471008d82151283e5ba2e9935f1e34901f00d1bb14b87c0e3f72292147"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/blobs.registry.json",
+      "digest": "sha256:c90364ed52bb6b56ba6241e2d305adcd6436c43098419ccf669ab4a9006d78bd"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/data-classes.registry.json",
+      "digest": "sha256:c6bfa65016c82cdf9f89b3d29a85f48005971a12ede681473bf34fd8cf35ff30"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/hash-profiles.registry.json",
+      "digest": "sha256:81e061648a4e6470e64ace25132ba89c3688bf0177937dad38e4049833d443a2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/links.registry.json",
+      "digest": "sha256:39f9790315cceeee1375b757326be02a284c22f8b9d128fc4bb47752f836ad64"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/policy-evaluators.registry.json",
+      "digest": "sha256:df18fb28c30d8a15cf8135223be993b1984fa45485c8abd0ef20fc07f35df85b"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/predicates.registry.json",
+      "digest": "sha256:ea79379a18da7c6f4d2f1d3e459e9479af567018937069e9afeaa879e261249a"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/profiles.registry.json",
+      "digest": "sha256:1b58e75d099659ab943d7386073b414468d5bc8493010c82fb66e6c024c98974"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/retention-profiles.registry.json",
+      "digest": "sha256:e3822f8300c8fc077a5d6ff2ee27f97e90837177ce31510f8cd2f9be648df914"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/signature-profiles.registry.json",
+      "digest": "sha256:8c0b7afc36232b168751b972df0b3d7ea6fa6e042e93b16bf5c28ede32956efb"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/state-machines.registry.json",
+      "digest": "sha256:b84006d474aa291c14c44b042ef97d96f1c72337e7eafabc8dabe1ce54d2a9eb"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/suppression-profiles.registry.json",
+      "digest": "sha256:7cad896457d5abbb0b5176e577f1ca78e2419ce479472dddf4e5a10e40c3a0f5"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "registries/types.registry.json",
+      "digest": "sha256:a362ea5db2f5d6a3dcf2dcddc99f4395c9c71583921e7b050027cfb36a5c4d16"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/common/defs.schema.json",
+      "digest": "sha256:2b9eb486d2ec408489f5777a7cac85c240dd83d02a2adbcdad825aeae2a7792c"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/person.schema.json",
+      "digest": "sha256:ad15e41a07e7ab2733a065ad8e41ba47898d1913903d635d051bda96c398c542"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/runtime.schema.json",
+      "digest": "sha256:d1a46adb5a84b049700555a7b48ae71215070a2b0ac1d951f23d72af2d544e87"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/session.schema.json",
+      "digest": "sha256:3ceaa3a7335783dd62c6ab86a070650e4ace1192e53e5b37833777b78bcf68c2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/core/source.schema.json",
+      "digest": "sha256:b69b8ee27098f0fa983ef92b328ede69c938eb4fd17686e7f13c9834afd2e2a0"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/experience/artifact.schema.json",
+      "digest": "sha256:293c7eea1e1edb80b556e1cdd1fb142e44522f73b8003a3ffe3a26ea9b73dc35"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/experience/event.schema.json",
+      "digest": "sha256:bb73d3b53cc792527c7d73d59b50a33d5c7cce62e833aaae9ac1565288bedd25"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/experience/observation.schema.json",
+      "digest": "sha256:bfb0f27651eab3aff157be3a60345943ce2c013c2e4e417274501e49515945eb"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/experience/utterance.schema.json",
+      "digest": "sha256:41c9bc7ab1f8f86571a43da80db0528b1550f8cce70ddca785950ec65f9454b2"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/process/run.schema.json",
+      "digest": "sha256:63752cda1e820d91d5c7ba652d224d13c8a54da182ab6b99563de0d8904f47f1"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/security/finding.schema.json",
+      "digest": "sha256:c291bcfeeb7599cd774d1b8aca13e7b4b112c13b40ffeddc3a8e1ae8cef788be"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/semantic/assertion.schema.json",
+      "digest": "sha256:19fc56a7f484847f620242e75386d8628c615de263d929e5a2332fd5d16fd25b"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/semantic/concept.schema.json",
+      "digest": "sha256:d07371098f0b2ba9dc28eca46933e5ac303662b662c4165431923ec8ed5d0831"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/payloads/semantic/entity.schema.json",
+      "digest": "sha256:eeaeff2413dbf9e4940a87f2728f93a2b05b301c65cfca6df3565e1b70d806dc"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/submissions/blob-submission.schema.json",
+      "digest": "sha256:95dd9a0bb19559f67fdd3a908faf2a0b0bafc0cf7fd6b80018ff8032d555fa1f"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/submissions/link-submission.schema.json",
+      "digest": "sha256:c915be3506c956d347d380b8df91d19f43842bc0d0baed892c7bc66c296951bd"
+    },
+    {
+      "source_package": "ccf-0.1.2",
+      "path": "schemas/submissions/record-submission.schema.json",
+      "digest": "sha256:e7fa250d9798d7c8254888f986db09d39d73d5ac722967610a8b67b99dbc5af2"
+    }
+  ]
+}

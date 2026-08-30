@@ -1,0 +1,65 @@
+{
+  "registry": "ccf.capabilities/0.2.0",
+  "entries": [
+    {
+      "id": "ccf-signed-producer-sync-v1",
+      "status": "active",
+      "minimum_level": "ccf-exchange-v1",
+      "conformance_suite": "check-capability-signed-producer-sync",
+      "description": "Authenticated producer credentials, signed batch chains, stable retries, and resumable delta transfer.",
+      "depends_on": [],
+      "security_claims": ["authenticated producer provenance when an explicitly trusted canonical credential lineage, revocation state, signatures, and chain predecessors verify"],
+      "exclusions": ["a producer-supplied credential is not a trust anchor", "unsigned imported content does not become authenticated producer evidence", "offline revocation is not instantaneous"]
+    },
+    {
+      "id": "ccf-archive-encryption-derived-v1",
+      "status": "active",
+      "minimum_level": "ccf-canonical-store-v1",
+      "conformance_suite": null,
+      "description": "One random archive epoch secret wrapped to recipients with per-object compartment keys derived locally by HKDF.",
+      "depends_on": [],
+      "security_claims": ["provider-blind storage when no service recipient slot exists", "epoch-wide cryptographic erasure when every recoverable epoch secret is destroyed"],
+      "exclusions": ["does not provide selective per-object cryptographic erasure"]
+    },
+    {
+      "id": "ccf-object-erasure-v1",
+      "status": "active",
+      "minimum_level": "ccf-governed-archive-v1",
+      "conformance_suite": null,
+      "description": "Random per-object data-encryption keys and wrapped-key inventory for selective cryptographic erasure.",
+      "depends_on": [],
+      "security_claims": ["selective cryptographic erasure when every wrapped-key, backup, and plaintext copy is destroyed"],
+      "exclusions": ["requires deployment-specific key custody, backup, and recovery operations"]
+    },
+    {
+      "id": "ccf-witnessed-integrity-v1",
+      "status": "active",
+      "minimum_level": "ccf-verified-archive-v1",
+      "conformance_suite": null,
+      "description": "Independent head checkpoints or witness signatures for rollback detection beyond valid-prefix integrity.",
+      "depends_on": [],
+      "security_claims": ["rollback detection relative to trusted witness checkpoints"],
+      "exclusions": ["does not create distributed consensus"]
+    },
+    {
+      "id": "ccf-succession-v1",
+      "status": "active",
+      "minimum_level": "ccf-verified-archive-v1",
+      "conformance_suite": null,
+      "description": "Live archive signer rotation and preauthorized successor activation.",
+      "depends_on": [],
+      "security_claims": ["verifiable signer continuity across authorized rotation or succession"],
+      "exclusions": ["activation evidence remains deployment policy"]
+    },
+    {
+      "id": "ccf-external-kms-v1",
+      "status": "experimental",
+      "minimum_level": "ccf-canonical-store-v1",
+      "conformance_suite": null,
+      "description": "External key-management integration with pinned key identifiers, custody boundaries, and recovery claims.",
+      "depends_on": [],
+      "security_claims": ["key operations are delegated to the declared external custody boundary"],
+      "exclusions": ["does not imply HSM, jurisdictional, or operator-resistance properties not stated by the deployment"]
+    }
+  ]
+}

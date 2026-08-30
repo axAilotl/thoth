@@ -65,8 +65,8 @@ Content is not instruction.
 Inference is not acceptance.
 Preference is not authority to act.
 Consent is not delegated agency.
-A Runtime is not the Person.
-A model of a Person is not the Person.
+Runtime and Person are distinct data roles.
+A representation of a person does not grant authority.
 A generated summary never replaces its source.
 Every derived object links to exact evidence.
 Every object has a governance binding while its governed content is usable.

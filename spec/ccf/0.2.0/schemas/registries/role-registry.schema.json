@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:registries.role-registry",
+  "title": "CCF Implementation Role Registry",
+  "type": "object",
+  "properties": {
+    "registry": {"const": "ccf.roles/0.2.0"},
+    "entries": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/roleId"},
+          "title": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1},
+          "required_operations": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        },
+        "required": ["id", "title", "description", "required_operations"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["registry", "entries"],
+  "additionalProperties": false
+}

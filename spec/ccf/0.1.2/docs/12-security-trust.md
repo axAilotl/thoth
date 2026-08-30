@@ -48,7 +48,7 @@ Authorized devices may cache credentials and archive epoch keys locally. This pe
 
 Loss of every authorized device and every recovery path makes a provider-blind archive unrecoverable by design.
 
-## 12.6 Cognitive security
+## 12.6 Untrusted content
 
 External content is evidence, not authority. Ingress preserves source identity, trust class, transformation history, screening findings, and exact derivation. No stored text can grant itself permission to change policy, identity, preferences, disclosure, or action authority.
 

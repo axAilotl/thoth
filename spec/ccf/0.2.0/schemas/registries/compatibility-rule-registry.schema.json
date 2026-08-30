@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:registries.compatibility-rule-registry",
+  "title": "CCF Layer Compatibility Rules",
+  "type": "object",
+  "properties": {
+    "registry": {"const": "ccf.compatibility-rules/0.2.0"},
+    "entries": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "pattern": "^CCF-COMPAT-[1-6]$"},
+          "title": {"type": "string", "minLength": 1},
+          "requirement": {"type": "string", "minLength": 1}
+        },
+        "required": ["id", "title", "requirement"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["registry", "entries"],
+  "additionalProperties": false
+}

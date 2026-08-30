@@ -1,0 +1,108 @@
+{
+  "registry": "ccf.levels/0.2.0",
+  "entries": [
+    {
+      "id": "ccf-exchange-v1",
+      "rank": 1,
+      "title": "Exchange",
+      "description": "Semantic interchange using stable portable IDs, schema-valid submissions, explicit references, provenance, and lossless unknown preservation.",
+      "depends_on": null,
+      "accepts_levels": ["ccf-exchange-v1"],
+      "required_machinery": [
+        "stable Record, Link, and Blob IDs generated before transfer",
+        "schema-valid submissions with provenance and explicit references",
+        "unknown objects, fields, and semantics preserved inertly or refused",
+        "scoped Capsule exchange with dependency and losslessness reporting"
+      ],
+      "claim": "Another application can understand and ingest the transferred assertions without silently changing their identity or meaning.",
+      "exclusions": [
+        "does not claim canonical bytes, commitments, or portable object hashes",
+        "does not claim producer authenticity merely because provenance is present",
+        "does not claim archive-history integrity"
+      ],
+      "required_suites": ["check-exchange"]
+    },
+    {
+      "id": "ccf-canonical-store-v1",
+      "rank": 2,
+      "title": "Canonical Store",
+      "description": "Canonical portable objects with split compartments, JCS, commitments, hashes, local atomic storage, origin idempotency, and exact availability states.",
+      "depends_on": "ccf-exchange-v1",
+      "accepts_levels": ["ccf-exchange-v1", "ccf-canonical-store-v1"],
+      "required_machinery": [
+        "all Exchange requirements",
+        "ccf-jcs-sha256-v2 canonicalization and hash vectors",
+        "structural and semantic compartments with random salts and commitments",
+        "portable object hashes independent of archive admission coordinates",
+        "atomic local storage and exact origin idempotency",
+        "distinct present, withheld, erased, and external availability states"
+      ],
+      "claim": "The same portable canonical object has the same commitments and object hash everywhere.",
+      "exclusions": [
+        "does not claim signed archive history",
+        "does not claim rollback detection or newest-head freshness",
+        "does not require policy evaluation or bitemporal lineages"
+      ],
+      "required_suites": ["check-exchange", "check-canonical"]
+    },
+    {
+      "id": "ccf-verified-archive-v1",
+      "rank": 3,
+      "title": "Verified Archive",
+      "description": "Signed genesis and commit history, Merkle membership, catalog pinning, verifiable import/export, restore, and foreign merge.",
+      "depends_on": "ccf-canonical-store-v1",
+      "accepts_levels": [
+        "ccf-exchange-v1",
+        "ccf-canonical-store-v1",
+        "ccf-verified-archive-v1"
+      ],
+      "required_machinery": [
+        "all Canonical Store requirements",
+        "signed genesis and append-only commit journal",
+        "Merkle membership and admission correspondence",
+        "semantic-catalog pinning",
+        "mindpack restore and foreign merge with custody proofs"
+      ],
+      "claim": "The archive has valid-prefix integrity and its presented history has not been mutated.",
+      "exclusions": [
+        "does not claim the presented head is newest without an independent witness",
+        "does not require producer signing unless the signed-producer-sync capability is declared",
+        "does not claim reproducible governance decisions"
+      ],
+      "required_suites": ["check-exchange", "check-canonical", "check-verified"]
+    },
+    {
+      "id": "ccf-governed-archive-v1",
+      "rank": 4,
+      "title": "Governed Archive",
+      "description": "Reproducible policy, bitemporal lineages, generation fences, erasure and suppression, consequential receipts, and projection rebuild behavior.",
+      "depends_on": "ccf-verified-archive-v1",
+      "accepts_levels": [
+        "ccf-exchange-v1",
+        "ccf-canonical-store-v1",
+        "ccf-verified-archive-v1",
+        "ccf-governed-archive-v1"
+      ],
+      "required_machinery": [
+        "all Verified Archive requirements",
+        "pinned policy evaluator and consequential decision receipts",
+        "bitemporal compare-and-swap state lineages",
+        "generation fences and pending-state liveness",
+        "erasure, suppression, and non-resurrection behavior",
+        "destructive projection deletion and canonical rebuild conformance"
+      ],
+      "claim": "Policy, erasure, and consequential decisions are reproducible at a pinned archive state.",
+      "exclusions": [
+        "deletion assurance is limited to separately declared encryption and erasure capabilities",
+        "operator resistance is not implied without a deployment-specific security capability",
+        "newest-head freshness is not implied without witnessed integrity"
+      ],
+      "required_suites": [
+        "check-exchange",
+        "check-canonical",
+        "check-verified",
+        "check-governed"
+      ]
+    }
+  ]
+}

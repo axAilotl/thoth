@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:declarations.bundle-manifest",
+  "title": "CCF Distribution Bundle Manifest",
+  "type": "object",
+  "properties": {
+    "format": {"const": "ccf.bundle-manifest/0.2.0"},
+    "status": {"const": "working-draft"},
+    "id": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+    "kind": {"enum": ["level", "capability", "semantic_pack"]},
+    "provides": {"type": "string", "minLength": 1},
+    "depends_on": {
+      "type": "array",
+      "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+      "uniqueItems": true
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_package": {"enum": ["ccf-0.1.2", "ccf-0.2.0"]},
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+          },
+          "digest": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"}
+        },
+        "required": ["source_package", "path", "digest"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["format", "status", "id", "kind", "provides", "depends_on", "artifacts"],
+  "additionalProperties": false
+}

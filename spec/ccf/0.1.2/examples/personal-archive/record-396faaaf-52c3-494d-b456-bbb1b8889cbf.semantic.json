@@ -1,0 +1,88 @@
+{
+  "format": "ccf.record-semantic/0.1.2",
+  "salt": "X19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX18",
+  "content": {
+    "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+    "perspective_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+    "recorded_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+    "recorded_at": "2026-08-11T21:42:19.200Z",
+    "claimed": {
+      "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+      "perspective_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+      "privacy": {
+        "data_subjects": [
+          {
+            "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+            "role": "speaker",
+            "identity_state_at_write": "verified"
+          }
+        ],
+        "data_classes": [
+          "derived_profile"
+        ],
+        "consent_refs": [],
+        "legal_basis_refs": [],
+        "subject_coverage": "complete"
+      },
+      "authority": {
+        "basis": "machine_inference",
+        "asserted_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+        "accepted_by": null
+      },
+      "policy_hint": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "extensions": {}
+    },
+    "privacy": {
+      "data_subjects": [
+        {
+          "person_id": "urn:ccf:record:908e42a4-f136-458f-8cf9-7597922fab21",
+          "role": "speaker",
+          "identity_state_at_write": "verified"
+        }
+      ],
+      "data_classes": [
+        "derived_profile"
+      ],
+      "consent_refs": [],
+      "legal_basis_refs": [],
+      "subject_coverage": "complete"
+    },
+    "policy_ref": {
+      "lineage_id": "urn:ccf:lineage:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "head_id_at_write": "urn:ccf:record:03e09d92-b68b-467d-b3c9-18a15be891be",
+      "policy_object_hash": "sha256:6291e538838914ffe6991504bc00ca896c4eb53af3cc6e6ee4e3effdaeb3f03b",
+      "evaluator_profile": "ccf-deny-overrides-v1",
+      "semantic_catalog_root": "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8"
+    },
+    "authority": {
+      "basis": "machine_inference",
+      "asserted_by": "urn:ccf:record:682d6151-5dd6-42d8-874c-895c3a501f09",
+      "accepted_by": null
+    },
+    "producer_evidence": {
+      "batch_id": "urn:ccf:batch:98d352bf-7abb-4fdf-824c-3c93c4e55901",
+      "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
+      "producer_sequence": "1",
+      "submission_hash": "sha256:494b3554da1457b811edd9d2b416ce5032f320614cde02ce32e6bdeda7bdcf8c"
+    },
+    "payload": {
+      "target": {
+        "value": "portable personal notes and recordings",
+        "datatype": "string"
+      },
+      "stance": "prefer",
+      "strength": 0.9,
+      "context": {
+        "domain": "personal knowledge management"
+      },
+      "rationale": "Explicitly stated as a portability preference.",
+      "extensions": {}
+    },
+    "extensions": {},
+    "epistemic": {
+      "confidence": 0.83,
+      "method": "preference-extractor-v1",
+      "calibration_profile": "example-v1"
+    }
+  }
+}

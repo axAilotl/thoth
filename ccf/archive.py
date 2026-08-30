@@ -61,6 +61,8 @@ class Archive:
         clock=now_timestamp,
         salt_fn=None,
         package_root: str | Path | None = None,
+        semantic_catalog_root: str | None = None,
+        active_profiles: list[str] | None = None,
     ) -> None:
         if parse_id(archive_id).kind != "archive":
             raise ArchiveError(f"archive_id must be an archive URN: {archive_id!r}")
@@ -72,6 +74,8 @@ class Archive:
         self._signer = signer
         self.clock = clock
         self.package_root = Path(package_root) if package_root is not None else None
+        self.semantic_catalog_root = semantic_catalog_root or catalog.root
+        self.active_profiles = list(active_profiles or DEFAULT_ACTIVE_PROFILES)
         from ccf.objects import new_salt
 
         self._salt_fn = salt_fn or new_salt
@@ -119,6 +123,7 @@ class Archive:
             clock=clock,
             salt_fn=salt_fn,
             package_root=package_root,
+            active_profiles=profiles,
         )
         from ccf.journal import build_commit_record
 
@@ -212,18 +217,34 @@ class Archive:
         clock=now_timestamp,
         salt_fn=None,
     ) -> "Archive":
-        """Open the single existing archive; fail closed if absent."""
+        """Open the single existing archive; fail closed if absent.
+
+        The loaded semantic catalog must exactly match the root pinned at
+        genesis. After a vendored authority revision, opening against the
+        current package without this check would let the archive advertise a
+        newer root while committing objects under the old pinned semantics.
+        """
         catalog = SemanticCatalog.load(package_root)
         registries = PinnedRegistries.load(package_root, catalog)
         schemas = SchemaSet.load(package_root)
         signer = load_signing_key(archive_key_path)
         with open_ccf_connection(settings) as conn:
-            row = conn.execute("SELECT archive_id FROM archive").fetchone()
+            row = conn.execute(
+                """
+                SELECT archive_id, semantic_catalog_root, active_profiles FROM archive
+                """
+            ).fetchone()
             if row is None:
                 raise ArchiveError("no CCF archive exists; run Archive.create first")
+            archive_id, semantic_catalog_root, active_profiles = row
+            if catalog.root != semantic_catalog_root:
+                raise ArchiveError(
+                    "semantic catalog root mismatch: "
+                    f"loaded {catalog.root} != pinned {semantic_catalog_root}"
+                )
         return cls(
             settings=settings,
-            archive_id=row[0],
+            archive_id=archive_id,
             catalog=catalog,
             registries=registries,
             schemas=schemas,
@@ -231,6 +252,8 @@ class Archive:
             clock=clock,
             salt_fn=salt_fn,
             package_root=package_root,
+            semantic_catalog_root=semantic_catalog_root,
+            active_profiles=list(active_profiles),
         )
 
     # ------------------------------------------------------------------
@@ -655,6 +678,74 @@ class Archive:
                     ),
                 }
             return result
+
+    def draft_root(self) -> Path:
+        """Sibling 0.2.0 draft package next to the frozen 0.1.2 root."""
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot resolve 0.2.0 draft")
+        return self.package_root.parent / "0.2.0"
+
+    def implementation_declaration(self) -> dict:
+        """Publish Thoth's 0.2.0 layered-conformance declaration."""
+        from ccf.declaration import load_thoth_declaration
+
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot declare conformance")
+        return load_thoth_declaration(
+            base_root=self.package_root,
+            draft_root=self.draft_root(),
+            base_catalog_root=self.semantic_catalog_root,
+            profiles=self.active_profiles,
+        )
+
+    def preview_capsule(self, capsule_dir: str | Path) -> dict:
+        """Validate a Capsule against this archive's declaration and emit pending uplift."""
+        from ccf.capsule import load_capsule, verify_capsule
+        from ccf.catalog import LayeredCatalog
+        from ccf.declaration import build_thoth_declaration
+        from ccf.exchange import build_pending_uplift, verify_uplift_receipt
+        from ccf.layered import LayeredRegistries
+        from ccf.schemas import SchemaSet
+
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot preview a Capsule")
+        draft = self.draft_root()
+        catalog = LayeredCatalog.load(draft, self.package_root)
+        if catalog.base_root != self.semantic_catalog_root:
+            raise ArchiveError(
+                "preview catalog root mismatch: "
+                f"loaded {catalog.base_root} != pinned {self.semantic_catalog_root}"
+            )
+        layered = LayeredRegistries.load(draft)
+        schemas = SchemaSet.load_layered(self.package_root, draft)
+        declaration = build_thoth_declaration(
+            layered=layered,
+            catalog_roots=(catalog.base_root, catalog.root),
+            schemas=schemas,
+            profiles=self.active_profiles,
+        )
+        capsule = load_capsule(capsule_dir, schemas=schemas)
+        verify_capsule(
+            capsule,
+            layered=layered,
+            schemas=schemas,
+            recipient_level=declaration["level"],
+            recipient_capabilities=declaration["capabilities"],
+        )
+        receipt = build_pending_uplift(
+            capsule,
+            destination_level=declaration["level"],
+            destination_archive_id=self.archive_id,
+            created_at=self.clock(),
+        )
+        verify_uplift_receipt(
+            receipt, capsule=capsule, layered=layered, schemas=schemas
+        )
+        return {
+            "declaration": declaration,
+            "capsule": capsule.manifest,
+            "uplift": receipt,
+        }
 
 
 def _insert_commit_record(conn, archive_id: str, commit, committed_at: str) -> None:

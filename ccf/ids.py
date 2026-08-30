@@ -16,7 +16,8 @@ import re
 import uuid
 from dataclasses import dataclass
 
-#: Portable ID kinds defined by CCF 0.1.2 (spec section 2.1).
+#: Portable ID kinds. ``receipt`` is the 0.2.0 transport identifier for
+#: uplift/downgrade receipts; the rest are the 0.1.2 portable kinds.
 ID_KINDS: frozenset[str] = frozenset(
     {
         "record",
@@ -28,6 +29,7 @@ ID_KINDS: frozenset[str] = frozenset(
         "credential",
         "batch",
         "pack",
+        "receipt",
     }
 )
 

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:registries.legacy-profile-mapping-registry",
+  "title": "CCF 0.1.2 Profile Compatibility Mappings",
+  "type": "object",
+  "properties": {
+    "registry": {"const": "ccf.legacy-profile-mappings/0.2.0"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "legacy_profile": {"type": "string", "minLength": 1},
+          "level": {
+            "oneOf": [
+              {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+              {"type": "null"}
+            ]
+          },
+          "capability": {
+            "oneOf": [
+              {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+              {"type": "null"}
+            ]
+          },
+          "semantic_pack": {
+            "oneOf": [
+              {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/capabilityId"},
+              {"type": "null"}
+            ]
+          },
+          "notes": {"type": "string", "minLength": 1}
+        },
+        "required": ["legacy_profile", "level", "capability", "semantic_pack", "notes"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["registry", "entries"],
+  "additionalProperties": false
+}

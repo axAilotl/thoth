@@ -58,6 +58,10 @@ class SemanticCatalog:
         }
         self.entries_verified = entries_verified
 
+    @property
+    def document(self) -> dict:
+        return dict(self._document)
+
     @classmethod
     def load(cls, package_root: str | Path) -> "SemanticCatalog":
         """Load and fully verify the catalog under a CCF package root.
@@ -139,3 +143,47 @@ class SemanticCatalog:
     @property
     def registries(self) -> dict[str, CatalogEntry]:
         return dict(self._registries)
+
+
+class LayeredCatalog:
+    """0.2.0 draft catalog pinned to the exact 0.1.2 semantic-catalog root."""
+
+    def __init__(self, draft: SemanticCatalog, base: SemanticCatalog) -> None:
+        if draft.format != "ccf.semantic-catalog/0.2.0":
+            raise CatalogError(
+                f"expected ccf.semantic-catalog/0.2.0, got {draft.format!r}"
+            )
+        if draft.version != "0.2.0":
+            raise CatalogError(f"expected draft version 0.2.0, got {draft.version!r}")
+        pins = draft.document.get("base_catalogs") or []
+        if not pins:
+            raise CatalogError("0.2.0 catalog missing base_catalogs pin")
+        pin = pins[0]
+        if pin.get("version") != base.version or pin.get("root") != base.root:
+            raise CatalogError(
+                "0.2.0 draft does not pin the exact 0.1.2 semantic catalog: "
+                f"declared {pin!r}, base {base.version} {base.root}"
+            )
+        portable = draft.document.get("portable_object_formats") or []
+        if "ccf/0.1.2" not in portable:
+            raise CatalogError(
+                "0.2.0 catalog must declare portable format ccf/0.1.2"
+            )
+        self.draft = draft
+        self.base = base
+
+    @classmethod
+    def load(cls, draft_root: str | Path, base_root: str | Path) -> "LayeredCatalog":
+        """Load and cross-pin the 0.2.0 draft against the frozen 0.1.2 catalog."""
+        return cls(
+            SemanticCatalog.load(draft_root),
+            SemanticCatalog.load(base_root),
+        )
+
+    @property
+    def root(self) -> str:
+        return self.draft.root
+
+    @property
+    def base_root(self) -> str:
+        return self.base.root

@@ -762,7 +762,7 @@
       "semantic_schema_id": "urn:ccf:schema:0.1.2:payload.security.finding",
       "structural_schema_id": null,
       "status": "active",
-      "description": "Security or cognitive-content finding",
+      "description": "Security or content-safety finding",
       "profile": "ccf-core-0.1.2",
       "retention_profile": "erasable",
       "default_type_visibility": "sealed",

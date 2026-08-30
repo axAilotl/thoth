@@ -1,12 +1,22 @@
 # CCF integration (dual-write) — developer guide
 
-Status: implemented on branch `ccf-0.1.2`; **legacy stores remain authoritative**.
+Status: implemented on `main` as **CCF 0.2.0 Governed Archive** over frozen
+**CCF 0.1.2** portable objects. **Legacy stores remain authoritative**.
 CCF (Continuity Core Format) is the canonical record/link/blob store thoth is
-migrating to. The normative spec is vendored at `spec/ccf/0.1.2/`; implementation
+migrating to. The normative 0.1.2 package is vendored at `spec/ccf/0.1.2/`;
+the 0.2.0 layered-conformance draft is at `spec/ccf/0.2.0/`. Implementation
 state per checklist section is annotated in
 `spec/ccf/0.1.2/THOTH-IMPLEMENTATION-CHECKLIST.md`.
 
-This document covers the thoth-side wiring. It reflects `ccf-0.1.2` @ `eb5ded4`.
+Thoth publishes `ccf.implementation-declaration/0.2.0` as
+`ccf-governed-archive-v1` with roles `preserver`, `producer`, `processor`,
+`importer-exporter`, `archive`, and `policy-evaluator`. Claimed capabilities
+are only those implied by the 0.1.2 active profiles (`ccf-signed-producer-sync-v1`,
+`ccf-continuity-pack-v1`). Encryption, cryptographic object-erasure,
+witnessing, and succession stay undeclared. Scoped exchange uses CCF Capsule;
+archive restore/merge stays on mindpack.
+
+This document covers the thoth-side wiring.
 
 ## How it works today
 

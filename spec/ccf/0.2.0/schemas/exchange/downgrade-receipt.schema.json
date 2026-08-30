@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:exchange.downgrade-receipt",
+  "title": "CCF Downgrade Receipt",
+  "type": "object",
+  "properties": {
+    "format": {"const": "ccf.downgrade-receipt/0.2.0"},
+    "receipt_id": {"type": "string", "pattern": "^urn:ccf:receipt:[0-9a-f-]{36}$"},
+    "export_pack_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/packUrn"},
+    "source_level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+    "target_level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+    "created_at": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"},
+    "losslessness": {"enum": ["lossless", "lossy"]},
+    "source_inventory": {
+      "type": "object",
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"}
+      },
+      "required": ["path", "digest"],
+      "additionalProperties": false
+    },
+    "export_inventory": {
+      "type": "object",
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"}
+      },
+      "required": ["path", "digest"],
+      "additionalProperties": false
+    },
+    "omissions": {
+      "type": "array",
+      "items": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/omission"}
+    },
+    "preserved_opaque": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "digest": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"},
+          "reason": {"type": "string", "minLength": 1}
+        },
+        "required": ["path", "digest", "reason"],
+        "additionalProperties": false
+      }
+    },
+    "extensions": {"type": "object"}
+  },
+  "required": [
+    "format", "receipt_id", "export_pack_id", "source_level", "target_level",
+    "created_at", "losslessness", "source_inventory", "export_inventory",
+    "omissions", "preserved_opaque", "extensions"
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"losslessness": {"const": "lossless"}}, "required": ["losslessness"]},
+      "then": {"properties": {"omissions": {"maxItems": 0}}}
+    },
+    {
+      "if": {"properties": {"losslessness": {"const": "lossy"}}, "required": ["losslessness"]},
+      "then": {"properties": {"omissions": {"minItems": 1}}}
+    }
+  ],
+  "additionalProperties": false
+}

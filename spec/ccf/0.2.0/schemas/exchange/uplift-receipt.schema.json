@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ccf:schema:0.2.0:exchange.uplift-receipt",
+  "title": "CCF Uplift Receipt",
+  "type": "object",
+  "properties": {
+    "format": {"const": "ccf.uplift-receipt/0.2.0"},
+    "receipt_id": {"type": "string", "pattern": "^urn:ccf:receipt:[0-9a-f-]{36}$"},
+    "source_pack_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/packUrn"},
+    "source_level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+    "destination_level": {"$ref": "urn:ccf:schema:0.2.0:common.defs#/$defs/levelId"},
+    "destination_archive_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/archiveUrn"},
+    "created_at": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/timestamp"},
+    "status": {"enum": ["accepted", "partially_accepted", "pending", "rejected", "conflict"]},
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "object_kind": {"enum": ["record", "link", "blob"]},
+          "source_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"},
+          "source_submission_hash": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"},
+          "canonical_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"},
+          "object_hash": {
+            "oneOf": [
+              {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"},
+              {"type": "null"}
+            ]
+          },
+          "disposition": {"enum": ["admitted", "existing", "pending", "rejected", "conflict"]},
+          "producer_authentication": {
+            "enum": ["absent", "preserved_unsigned", "verified", "rejected"]
+          },
+          "producer_proof": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "profile": {"const": "ccf-signed-producer-sync-v1"},
+                  "credential_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/credentialUrn"},
+                  "batch_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/batchUrn"},
+                  "proof_digest": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"}
+                },
+                "required": ["profile", "credential_id", "batch_id", "proof_digest"],
+                "additionalProperties": false
+              },
+              {"type": "null"}
+            ]
+          },
+          "archive_resolution": {"type": "object"}
+        },
+        "required": [
+          "object_kind", "source_id", "source_submission_hash", "canonical_id",
+          "object_hash", "disposition", "producer_authentication", "producer_proof",
+          "archive_resolution"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {"disposition": {"enum": ["admitted", "existing"]}},
+              "required": ["disposition"]
+            },
+            "then": {
+              "properties": {
+                "object_hash": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/digest"}
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {"disposition": {"enum": ["pending", "rejected", "conflict"]}},
+              "required": ["disposition"]
+            },
+            "then": {"properties": {"object_hash": {"type": "null"}}}
+          },
+          {
+            "if": {
+              "properties": {"producer_authentication": {"const": "verified"}},
+              "required": ["producer_authentication"]
+            },
+            "then": {"properties": {"producer_proof": {"type": "object"}}}
+          },
+          {
+            "if": {
+              "properties": {"producer_authentication": {"const": "absent"}},
+              "required": ["producer_authentication"]
+            },
+            "then": {"properties": {"producer_proof": {"type": "null"}}}
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "object_id": {"$ref": "urn:ccf:schema:0.1.2:common.defs#/$defs/objectUrn"},
+          "code": {"type": "string", "minLength": 1},
+          "detail": {"type": "string", "minLength": 1}
+        },
+        "required": ["object_id", "code", "detail"],
+        "additionalProperties": false
+      }
+    },
+    "extensions": {"type": "object"}
+  },
+  "required": [
+    "format", "receipt_id", "source_pack_id", "source_level", "destination_level",
+    "destination_archive_id", "created_at", "status", "objects", "conflicts", "extensions"
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "accepted"}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "objects": {
+            "minItems": 1,
+            "items": {"properties": {"disposition": {"enum": ["admitted", "existing"]}}}
+          },
+          "conflicts": {"maxItems": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "pending"}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "objects": {
+            "minItems": 1,
+            "items": {"properties": {"disposition": {"const": "pending"}}}
+          },
+          "conflicts": {"maxItems": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "partially_accepted"}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "objects": {
+            "minItems": 2,
+            "items": {
+              "properties": {
+                "disposition": {"enum": ["admitted", "existing", "rejected", "conflict"]}
+              }
+            },
+            "allOf": [
+              {"contains": {"properties": {"disposition": {"enum": ["admitted", "existing"]}}}},
+              {"contains": {"properties": {"disposition": {"enum": ["rejected", "conflict"]}}}}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "rejected"}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "objects": {
+            "minItems": 1,
+            "items": {"properties": {"disposition": {"const": "rejected"}}}
+          },
+          "conflicts": {"maxItems": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "conflict"}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "objects": {
+            "minItems": 1,
+            "items": {"properties": {"disposition": {"enum": ["existing", "conflict"]}}},
+            "contains": {"properties": {"disposition": {"const": "conflict"}}}
+          },
+          "conflicts": {"minItems": 1}
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,32 @@
+{
+  "registry": "ccf.semantic-packs/0.2.0",
+  "entries": [
+    {
+      "id": "ccf-continuity-pack-v1",
+      "status": "active",
+      "minimum_level": "ccf-exchange-v1",
+      "conformance_suite": "check-semantic-pack-continuity",
+      "description": "Episodes, preferences, values, goals, commitments, boundaries, and relationships.",
+      "namespaces": ["continuity"],
+      "required_capabilities": []
+    },
+    {
+      "id": "ccf-work-pack-v1",
+      "status": "active",
+      "minimum_level": "ccf-exchange-v1",
+      "conformance_suite": "check-semantic-pack-work",
+      "description": "Projects, tasks, decisions, constraints, and work predicates.",
+      "namespaces": ["work", "ccf.work"],
+      "required_capabilities": []
+    },
+    {
+      "id": "ccf-agent-pack-v1",
+      "status": "active",
+      "minimum_level": "ccf-exchange-v1",
+      "conformance_suite": "check-semantic-pack-agent",
+      "description": "Framework-neutral agent runs, findings, handoffs, proposals, and receipts.",
+      "namespaces": ["agent"],
+      "required_capabilities": []
+    }
+  ]
+}

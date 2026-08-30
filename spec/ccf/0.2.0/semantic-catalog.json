@@ -1,0 +1,124 @@
+{
+  "format": "ccf.semantic-catalog/0.2.0",
+  "version": "0.2.0",
+  "status": "working-draft",
+  "portable_object_formats": [
+    "ccf/0.1.2"
+  ],
+  "base_catalogs": [
+    {
+      "version": "0.1.2",
+      "root": "sha256:992490912d2faffc1084d43041bd228d64265671ffa36840b30f62c0d1fea9e8"
+    }
+  ],
+  "schemas": [
+    {
+      "id": "urn:ccf:schema:0.2.0:common.defs",
+      "path": "schemas/common/defs.schema.json",
+      "digest": "sha256:9edfd3c8ed5a954c3107c1e3bbb98e0bf15f345b831980427934a3241eb1c7be"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:declarations.bundle-manifest",
+      "path": "schemas/declarations/bundle-manifest.schema.json",
+      "digest": "sha256:dcf144b4454b70d432ece5b2ba5832f8dca5d1a099cebc96ad0b1e1958d2e93f"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:declarations.implementation",
+      "path": "schemas/declarations/implementation.schema.json",
+      "digest": "sha256:7dce31e38983db4203fc8738be7ca21a5fe341fe321de38c60c1d5b2dbdf7912"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:exchange.capsule-manifest",
+      "path": "schemas/exchange/capsule-manifest.schema.json",
+      "digest": "sha256:4be8ee986739cb89ab0eb6c77cf1c77398233da5f5024e2a5b5846ea5fa81413"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:exchange.downgrade-inventory",
+      "path": "schemas/exchange/downgrade-inventory.schema.json",
+      "digest": "sha256:91fc02265b271154c2cf93e235ea401609c0a0491e8e6256fb372537405792d4"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:exchange.downgrade-receipt",
+      "path": "schemas/exchange/downgrade-receipt.schema.json",
+      "digest": "sha256:1e722632b93d23885058d45e9f78b655457e13f8dbf3b9fc2c5ce2808a96fd5e"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:exchange.uplift-receipt",
+      "path": "schemas/exchange/uplift-receipt.schema.json",
+      "digest": "sha256:60d74f77ebf4484df55d9c6a026c6ba347b15274cfaad411c53dc015a7946235"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:registries.capability-registry",
+      "path": "schemas/registries/capability-registry.schema.json",
+      "digest": "sha256:5797eedbea405fac9aeb1d98a4f52bc81e64f81a1412615a905aa2deaed7eb35"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:registries.compatibility-rule-registry",
+      "path": "schemas/registries/compatibility-rule-registry.schema.json",
+      "digest": "sha256:6fdb518bc570d74288ff6509eff60c0135cf2ae54fcf9fe027d7d5068a33830f"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:registries.legacy-profile-mapping-registry",
+      "path": "schemas/registries/legacy-profile-mapping-registry.schema.json",
+      "digest": "sha256:3e356d1cc64999dbc8743cba1b11e30f8be5c4732a77582b8f9c486b0cf2989a"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:registries.level-registry",
+      "path": "schemas/registries/level-registry.schema.json",
+      "digest": "sha256:f398e21dbb801f242922783c0c0eee4b7225f7b13653f9766c8ed7888b43e754"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:registries.role-registry",
+      "path": "schemas/registries/role-registry.schema.json",
+      "digest": "sha256:9e4677b275205f56b47193fa9934fd42f602215ab12c9e167d33896dbe861e1f"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:registries.semantic-pack-registry",
+      "path": "schemas/registries/semantic-pack-registry.schema.json",
+      "digest": "sha256:8d71d2aa0665eb8c3f13fcab26803789279415dcd86308d17261380f20749bfa"
+    },
+    {
+      "id": "urn:ccf:schema:0.2.0:registries.semantic-requirements-registry",
+      "path": "schemas/registries/semantic-requirements-registry.schema.json",
+      "digest": "sha256:86f287ddfce6263a4fd34717c46bacd08eeaba491c4ff46c2558463bc183046c"
+    }
+  ],
+  "registries": [
+    {
+      "name": "ccf.capabilities/0.2.0",
+      "path": "registries/capabilities.registry.json",
+      "digest": "sha256:6eb2912cd00a0bdcfc0096ce663a44c9f56565e1dfe93e0464f663a1d7187d68"
+    },
+    {
+      "name": "ccf.compatibility-rules/0.2.0",
+      "path": "registries/compatibility-rules.registry.json",
+      "digest": "sha256:98c151e8cd87d71c00fc29a0e5b6d1a303d761b5cd01203390c309bc23a4bf76"
+    },
+    {
+      "name": "ccf.legacy-profile-mappings/0.2.0",
+      "path": "registries/legacy-profile-mappings.registry.json",
+      "digest": "sha256:69f15819f9e040ecef3d0a8abd34b0b20bf5478a4bc53aa5387de3bba6e90628"
+    },
+    {
+      "name": "ccf.levels/0.2.0",
+      "path": "registries/levels.registry.json",
+      "digest": "sha256:c4f2519d22e2e77b39fed5f3e3978e8609b0e2a6141213768526962563dd523c"
+    },
+    {
+      "name": "ccf.roles/0.2.0",
+      "path": "registries/roles.registry.json",
+      "digest": "sha256:a801b03cc4197adc9d5ccfb56e82a5996244acda7e754bb3bd94255a3f3d5c73"
+    },
+    {
+      "name": "ccf.semantic-packs/0.2.0",
+      "path": "registries/semantic-packs.registry.json",
+      "digest": "sha256:d8f61955a1fab1853893d3e4c24c1bfcc154484e2ba10a86c6fc52af41d60ae7"
+    },
+    {
+      "name": "ccf.semantic-requirements/0.2.0",
+      "path": "registries/semantic-requirements.registry.json",
+      "digest": "sha256:441de48a9469bc6379de50fd90800a5508e6ec18d4f23780147d179b676674d9"
+    }
+  ],
+  "root": "sha256:3fe9e54b016be93307be17479177eb666372e60d46b51f1b1d7cf9ba351abdc5"
+}

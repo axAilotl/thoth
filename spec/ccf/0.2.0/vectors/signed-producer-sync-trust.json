@@ -1,0 +1,20 @@
+{
+  "format": "ccf.signed-producer-sync-trust/0.2.0",
+  "credential_id": "urn:ccf:credential:6d4a95ba-bed6-450b-b907-b9e7f0816353",
+  "lineage_id": "urn:ccf:lineage:3be84214-4656-452c-8c72-496822d081d8",
+  "issuer_key_id": "urn:ccf:key:8fdb04d3-e326-4f8d-9a9c-626ea7337521",
+  "issue_record_id": "urn:ccf:record:405c475b-1c4c-4e05-b978-28246bb3a5fa",
+  "issue_object_hash": "sha256:7f08f57e56c0a776ea1b10abe2260d7500b0c382c831a08f633cf0166b4e6f1d",
+  "current_head_record_id": "urn:ccf:record:649042b4-1519-4dfb-8de9-9dffb167de34",
+  "current_head_object_hash": "sha256:588c3252f8265098eeadef78427b3d6259b3f9b3f3d6ebb07831931f186d2b6e",
+  "lineage_records": [
+    {
+      "record_id": "urn:ccf:record:405c475b-1c4c-4e05-b978-28246bb3a5fa",
+      "object_hash": "sha256:7f08f57e56c0a776ea1b10abe2260d7500b0c382c831a08f633cf0166b4e6f1d"
+    },
+    {
+      "record_id": "urn:ccf:record:649042b4-1519-4dfb-8de9-9dffb167de34",
+      "object_hash": "sha256:588c3252f8265098eeadef78427b3d6259b3f9b3f3d6ebb07831931f186d2b6e"
+    }
+  ]
+}

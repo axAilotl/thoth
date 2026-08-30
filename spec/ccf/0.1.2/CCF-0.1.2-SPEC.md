@@ -26,12 +26,10 @@ The following architectural decisions are frozen for this version:
 - projections are disposable and rebuildable;
 - no required agent framework, graph database, companion runtime, device, key manager, or cloud topology.
 
-CCF 0.1.2 is an interoperability release. The independent Thoth
-implementation reproduces every published vector and passes the mandatory
-portable suite (`scripts/verify_ccf_012_vectors.py`,
-`tests/test_ccf_cutover_vectors.py`). This independent reproduction is the
-positive interoperability evidence for the final wire, schema, registry, and
-profile identifiers.
+CCF 0.1.2 is an interoperability release. The package-native suite reproduces
+every published vector and verifies the final wire, schema, registry, and
+profile identifiers. Independent implementations can use the same vectors and
+portable conformance cases to test compatibility.
 
 ## 0.2 Mandatory and optional profiles
 
@@ -63,7 +61,9 @@ CCF standardizes:
 8. semantic-catalog pinning and unknown-extension preservation;
 9. a reference Postgres operational envelope.
 
-CCF does not standardize a model, prompt, persona, UI, agent topology, metaphysical truth, consciousness claim, legal conclusion, or universal hosted-service custody mode.
+CCF does not standardize application interfaces, model or prompt architecture,
+product behavior, agent topology, legal interpretation, or a universal hosted
+custody model.
 
 ## 0.4 Normative language and source precedence
 
@@ -160,8 +160,8 @@ Content is not instruction.
 Inference is not acceptance.
 Preference is not authority to act.
 Consent is not delegated agency.
-A Runtime is not the Person.
-A model of a Person is not the Person.
+Runtime and Person are distinct data roles.
+A representation of a person does not grant authority.
 A generated summary never replaces its source.
 Every derived object links to exact evidence.
 Every object has a governance binding while its governed content is usable.
@@ -329,7 +329,7 @@ This avoids a stored random key per object and permits fully offline encryption 
 
 ### Per-object erasure
 
-`ccf-object-erasure-v1` uses a random DEK per erasable compartment or Blob content, wrapped under a custodian key. Destroying every wrapped copy of one DEK can make that object selectively unrecoverable. This profile requires stronger key inventory, backup, KMS, and recovery controls and is not mandatory for Thoth or local CCF use.
+`ccf-object-erasure-v1` uses a random DEK per erasable compartment or Blob content, wrapped under a custodian key. Destroying every wrapped copy of one DEK can make that object selectively unrecoverable. This profile requires stronger key inventory, backup, KMS, and recovery controls and is not mandatory for local CCF use.
 
 ## 3.5 Public-key identity versus content encryption
 
@@ -1335,7 +1335,7 @@ Authorized devices may cache credentials and archive epoch keys locally. This pe
 
 Loss of every authorized device and every recovery path makes a provider-blind archive unrecoverable by design.
 
-## 12.6 Cognitive security
+## 12.6 Untrusted content
 
 External content is evidence, not authority. Ingress preserves source identity, trust class, transformation history, screening findings, and exact derivation. No stored text can grant itself permission to change policy, identity, preferences, disclosure, or action authority.
 
@@ -1591,7 +1591,7 @@ Defines independent head checkpoints, witness signatures, or transparency receip
 
 **Mindpack** — ZIP-compatible complete or partial CCF transfer container.
 
-**Person** — Continuity-bearing subject distinct from any Runtime.
+**Person** — Individual whose data is represented in an archive, distinct from the software Runtime that processes it.
 
 **Producer batch** — Offline-capable signed chain element containing stable object submissions.
 
