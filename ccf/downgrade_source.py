@@ -131,17 +131,17 @@ def load_verified_source_package(
       - ``batch``: the selected producer batch document
       - ``batch_submissions``: flattened list of batch submissions
     """
+    try:
+        _enumerate_package_files(source_dir)
+    except CapsuleError as exc:
+        raise SourcePackageError(f"downgrade source package tree invalid: {exc}") from exc
+
     identity = _load_identity(source_dir)
 
     for rel in _REQUIRED_SOURCE_FILES:
         path = source_dir / rel
         if not path.is_file():
             raise SourcePackageError(f"downgrade source required file missing: {rel}")
-
-    try:
-        _enumerate_package_files(source_dir)
-    except CapsuleError as exc:
-        raise SourcePackageError(f"downgrade source package tree invalid: {exc}") from exc
 
     try:
         with PackReader(source_dir) as reader:

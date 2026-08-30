@@ -15,7 +15,14 @@ import pytest
 from ccf import CCF_LAYER, CCF_LEVEL, CCF_SPEC, CCF_VERSION
 from ccf.archive import Archive, ArchiveError, DEFAULT_ACTIVE_PROFILES
 from ccf.catalog import LayeredCatalog, SemanticCatalog
-from ccf.capsule import CapsuleError, load_capsule, verify_capsule, write_capsule
+from ccf.capsule import (
+    CapsuleError,
+    _enumerate_package_files,
+    load_capsule,
+    verify_capsule,
+    write_capsule,
+)
+from ccf.downgrade_source import SourcePackageError, load_verified_source_package
 from ccf.declaration import (
     THOTH_IMPLEMENTATION,
     THOTH_ROLES,
@@ -1475,4 +1482,71 @@ def test_load_capsule_rejects_manifest_symlink_to_outside(
     (root / "manifest.json").unlink()
     (root / "manifest.json").symlink_to(external_manifest)
     with pytest.raises(CapsuleError, match="path escapes root"):
+        load_capsule(root, schemas=layered_schemas)
+
+
+def test_load_verified_source_package_rejects_identity_symlink(
+    ccf_capsule_example, layered_schemas, tmp_path
+):
+    """A symlinked source-identity.json must be rejected before any direct read,
+    even when the symlink target is a valid file inside the same package.
+    """
+    source_dir = tmp_path / "symlink-identity-source"
+    shutil.copytree(ccf_capsule_example / "downgrade-source", source_dir)
+    identity_path = source_dir / "source-identity.json"
+    in_root_copy = source_dir / "identity-copy.json"
+    in_root_copy.write_bytes(identity_path.read_bytes())
+    identity_path.unlink()
+    identity_path.symlink_to(in_root_copy)
+    with pytest.raises(SourcePackageError, match="downgrade source package tree invalid"):
+        load_verified_source_package(source_dir, schemas=layered_schemas)
+
+
+def test_enumerate_package_files_fails_closed_on_walk_error(tmp_path, monkeypatch):
+    """A filesystem traversal error must surface as a CapsuleError, not be
+    swallowed by os.walk's default silent behavior.
+    """
+    root = tmp_path / "walk-error-root"
+    root.mkdir()
+    (root / "file.txt").write_text("ok", encoding="utf-8")
+
+    def broken_walk(*args, **kwargs):
+        if kwargs.get("onerror"):
+            kwargs["onerror"](OSError("simulated scandir failure"))
+        return []
+
+    monkeypatch.setattr("os.walk", broken_walk)
+    with pytest.raises(CapsuleError, match="package tree traversal failed"):
+        _enumerate_package_files(root)
+
+
+def test_load_capsule_rejects_manifest_symlink_to_inside_target(
+    tmp_path, ccf_capsule_example, layered_schemas
+):
+    """A Capsule manifest.json symlink pointing to a file inside the same root
+    must still be rejected: the package policy is no symlinks.
+    """
+    root = tmp_path / "symlink-manifest-inside-capsule"
+    shutil.copytree(ccf_capsule_example, root)
+    manifest_copy = root / "manifest-copy.json"
+    manifest_copy.write_bytes((root / "manifest.json").read_bytes())
+    (root / "manifest.json").unlink()
+    (root / "manifest.json").symlink_to(manifest_copy)
+    with pytest.raises(CapsuleError, match="package contains symlink"):
+        load_capsule(root, schemas=layered_schemas)
+
+
+def test_load_capsule_rejects_manifest_symlink_to_outside(
+    tmp_path, ccf_capsule_example, layered_schemas
+):
+    """A Capsule manifest.json that is a symlink to a file outside the Capsule
+    root must be rejected before any bytes are trusted.
+    """
+    root = tmp_path / "symlink-manifest-capsule"
+    shutil.copytree(ccf_capsule_example, root)
+    external_manifest = tmp_path / "outside-manifest.json"
+    external_manifest.write_bytes((root / "manifest.json").read_bytes())
+    (root / "manifest.json").unlink()
+    (root / "manifest.json").symlink_to(external_manifest)
+    with pytest.raises(CapsuleError, match="package contains symlink"):
         load_capsule(root, schemas=layered_schemas)

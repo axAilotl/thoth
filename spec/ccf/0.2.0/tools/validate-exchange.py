@@ -37,9 +37,15 @@ def _enumerate_tree(root: Path) -> set[str]:
     Rejects symlinks and non-regular entries at any depth, matching the
     runtime fail-closed containment primitive.
     """
+
+    def _on_walk_error(exc: OSError) -> None:
+        raise SystemExit(f"package tree traversal failed: {exc}") from exc
+
     root_resolved = root.resolve()
     files: set[str] = set()
-    for dirpath, dirnames, filenames in os.walk(root_resolved, followlinks=False):
+    for dirpath, dirnames, filenames in os.walk(
+        root_resolved, followlinks=False, onerror=_on_walk_error
+    ):
         for name in dirnames + filenames:
             full = Path(dirpath) / name
             if full.is_symlink():
@@ -611,6 +617,14 @@ inventory_categories = {
     "schema",
     "other",
 }
+# Preflight the downgrade package trees before any direct read beneath them.
+# This rejects symlinked directories (integrity/, producer-batches/, etc.) and
+# non-regular entries that would otherwise be followed by direct reads.
+downgrade_source = capsule_root / "downgrade-source"
+downgrade_export = capsule_root / "downgrade-export"
+actual_source_files = _enumerate_tree(downgrade_source)
+actual_export_files = _enumerate_tree(downgrade_export)
+
 for name in ("source_inventory", "export_inventory"):
     inventory_ref = downgrade[name]
     inventory_path = capsule_root / inventory_ref["path"]
@@ -674,8 +688,6 @@ for item in downgrade["preserved_opaque"]:
 # The selected downgrade source is a real 0.1.2 Verified fixture. Its journal
 # members and producer batch must resolve to the exact portable objects included
 # in the pinned source inventory; unrelated valid proofs are not sufficient.
-downgrade_source = capsule_root / "downgrade-source"
-downgrade_export = capsule_root / "downgrade-export"
 source_identity = load_json(downgrade_source / "source-identity.json")
 expected_identity_fields = {
     "format",
@@ -696,7 +708,6 @@ physical_source_inventory = {
     for category, subject in source_inventory
     if category != "submission" and subject.startswith("downgrade-source/")
 }
-actual_source_files = _enumerate_tree(downgrade_source)
 if physical_source_inventory != actual_source_files:
     raise SystemExit("downgrade source inventory is not the exact physical source package")
 
@@ -719,7 +730,6 @@ export_stream_paths = [stream["path"] for stream in export_streams]
 if len(export_stream_paths) != len(set(export_stream_paths)):
     raise SystemExit("downgrade export Capsule has duplicate stream paths")
 expected_export_files = {"manifest.json", *export_stream_paths}
-actual_export_files = _enumerate_tree(downgrade_export)
 if expected_export_files != actual_export_files:
     raise SystemExit("downgrade export Capsule has unmanifested or missing files")
 for stream in export_streams:

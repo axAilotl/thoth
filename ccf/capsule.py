@@ -146,9 +146,15 @@ def _enumerate_package_files(root: Path) -> set[str]:
     the safe tree inventory used to prove exact physical coverage of a
     Capsule or downgrade source/export package.
     """
+
+    def _on_walk_error(exc: OSError) -> None:
+        raise CapsuleError(f"package tree traversal failed: {exc}") from exc
+
     root_resolved = root.resolve()
     files: set[str] = set()
-    for dirpath, dirnames, filenames in os.walk(root_resolved, followlinks=False):
+    for dirpath, dirnames, filenames in os.walk(
+        root_resolved, followlinks=False, onerror=_on_walk_error
+    ):
         for name in dirnames + filenames:
             full = Path(dirpath) / name
             if full.is_symlink():
@@ -169,6 +175,7 @@ def _enumerate_package_files(root: Path) -> set[str]:
 def load_capsule(path: str | Path, *, schemas: SchemaSet | None = None) -> Capsule:
     """Load a Capsule directory and verify every stream digest and length."""
     root = Path(path)
+    _enumerate_package_files(root)
     manifest_path = _resolve_package_path(root, "manifest.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if schemas is not None:
