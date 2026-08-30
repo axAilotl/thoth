@@ -1766,6 +1766,14 @@ def cmd_connectors(args):
             "starred": getattr(args, "starred", None),
             "timeout_seconds": getattr(args, "timeout_seconds", None),
             "archive_video": getattr(args, "archive_video", None),
+            "archive_max_duration_seconds": getattr(
+                args, "archive_max_duration_seconds", None
+            ),
+            "archive_max_file_size_bytes": getattr(
+                args, "archive_max_file_size_bytes", None
+            ),
+            "archive_format": getattr(args, "archive_format", None),
+            "archive_timeout_seconds": getattr(args, "archive_timeout_seconds", None),
             "no_resume": getattr(args, "no_resume", False),
         }
         service = AgentSurfaceService(
@@ -3729,6 +3737,30 @@ Examples:
         action="store_true",
         default=None,
         help="Archive video files when the connector supports archival",
+    )
+    connectors_run_parser.add_argument(
+        "--archive-max-duration-seconds",
+        type=float,
+        default=None,
+        help="Maximum video duration (seconds) to archive via yt-dlp",
+    )
+    connectors_run_parser.add_argument(
+        "--archive-max-file-size-bytes",
+        type=int,
+        default=None,
+        help="Maximum archived file size (bytes) to keep",
+    )
+    connectors_run_parser.add_argument(
+        "--archive-format",
+        type=str,
+        default=None,
+        help="yt-dlp format selector (e.g. 'best[height<=720]')",
+    )
+    connectors_run_parser.add_argument(
+        "--archive-timeout-seconds",
+        type=float,
+        default=None,
+        help="Per-video yt-dlp archival timeout in seconds",
     )
     connectors_run_parser.add_argument(
         "--no-resume",

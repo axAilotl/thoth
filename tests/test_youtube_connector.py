@@ -1,5 +1,8 @@
 import asyncio
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 from collectors.youtube_connector import YouTubeConnector
 from core.config import Config
@@ -184,7 +187,7 @@ def test_youtube_connector_video_archival_is_config_gated(tmp_path: Path, monkey
     processor = FakeYouTubeProcessor(layout.vault_root / "transcripts")
     connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
 
-    def archive_should_not_run(_source_url: str, _video_id: str) -> Path:
+    def archive_should_not_run(_source_url: str, _video_id: str, **kwargs) -> Path:
         raise AssertionError("archive should not run without config or CLI opt-in")
 
     monkeypatch.setattr(connector, "_archive_video", archive_should_not_run)
@@ -195,7 +198,7 @@ def test_youtube_connector_video_archival_is_config_gated(tmp_path: Path, monkey
 
     archive_root = layout.library_root / "youtube" / "videos"
 
-    def fake_archive(_source_url: str, video_id: str) -> Path:
+    def fake_archive(_source_url: str, video_id: str, **kwargs) -> Path:
         archive_root.mkdir(parents=True, exist_ok=True)
         archive_path = archive_root / f"{video_id}.mp4"
         archive_path.write_text("video", encoding="utf-8")
@@ -240,3 +243,206 @@ def test_youtube_processor_metadata_fallback_uses_blank_timestamp(
     assert video is not None
     assert video.published_at == ""
     assert list((tmp_path / "vault" / "transcripts").glob("youtube_fallback1_*.md"))
+
+
+def test_youtube_connector_archive_success_via_subprocess(tmp_path: Path, monkeypatch):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    processor = FakeYouTubeProcessor(layout.vault_root / "transcripts")
+    connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
+    config.set("sources.youtube.archive_video", True)
+    archive_root = layout.library_root / "youtube" / "videos"
+
+    def fake_subprocess_run(cmd, **kwargs):
+        archive_root.mkdir(parents=True, exist_ok=True)
+        output_template = cmd[cmd.index("-o") + 1]
+        # output_template ends in '.%(ext)s'; write a matching file.
+        video_id = "sub123"
+        archive_path = archive_root / f"{video_id}.mp4"
+        archive_path.write_text("video bytes", encoding="utf-8")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    result = asyncio.run(connector.collect(urls=["https://youtu.be/sub123"]))
+
+    record = result.records[0]
+    assert record.archive_path == archive_root / "sub123.mp4"
+    assert record.archive_status == "archived"
+    assert record.archive_error is None
+    assert record.transcript_artifact_id is not None
+    assert db.get_ingestion_entry("yt_transcript_sub123") is not None
+    assert db.get_ingestion_entry("yt_video_sub123") is not None
+
+
+def test_youtube_connector_archive_timeout_preserves_transcript(
+    tmp_path: Path, monkeypatch
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    processor = FakeYouTubeProcessor(layout.vault_root / "transcripts")
+    connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
+    config.set("sources.youtube.archive_video", True)
+    config.set("sources.youtube.archive_timeout_seconds", 0.01)
+
+    def fake_subprocess_run(cmd, **kwargs):
+        assert kwargs.get("timeout") == 0.01
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    result = asyncio.run(connector.collect(urls=["https://youtu.be/timeout123"]))
+
+    record = result.records[0]
+    assert record.archive_path is None
+    assert record.archive_status == "timeout"
+    assert "timed out" in (record.archive_error or "").lower()
+    assert record.transcript_artifact_id is not None
+    assert db.get_ingestion_entry("yt_transcript_timeout123") is not None
+    assert db.get_ingestion_entry("yt_video_timeout123") is not None
+
+
+def test_youtube_connector_archive_over_size_preserves_transcript(
+    tmp_path: Path, monkeypatch
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    processor = FakeYouTubeProcessor(layout.vault_root / "transcripts")
+    connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
+    config.set("sources.youtube.archive_video", True)
+    config.set("sources.youtube.archive_max_file_size_bytes", 5)
+    archive_root = layout.library_root / "youtube" / "videos"
+
+    def fake_subprocess_run(cmd, **kwargs):
+        archive_root.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_root / "oversized123.mp4"
+        archive_path.write_bytes(b"this file is way too large")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    result = asyncio.run(connector.collect(urls=["https://youtu.be/oversized123"]))
+
+    record = result.records[0]
+    assert record.archive_path is None
+    assert record.archive_status == "over_size"
+    assert "exceeds" in (record.archive_error or "").lower()
+    assert not (archive_root / "oversized123.mp4").exists()
+    assert record.transcript_artifact_id is not None
+    assert db.get_ingestion_entry("yt_transcript_oversized123") is not None
+
+
+def test_youtube_connector_archive_over_duration_preserves_transcript(
+    tmp_path: Path, monkeypatch
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+
+    class LongFakeYouTubeProcessor(FakeYouTubeProcessor):
+        async def process_video(self, video_id, **kwargs):
+            video, metrics = await super().process_video(video_id, **kwargs)
+            video.duration = "PT10M"
+            return video, metrics
+
+    processor = LongFakeYouTubeProcessor(layout.vault_root / "transcripts")
+    connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
+    config.set("sources.youtube.archive_video", True)
+    config.set("sources.youtube.archive_max_duration_seconds", 300)
+
+    subprocess_calls: list[Any] = []
+
+    def fake_subprocess_run(cmd, **kwargs):
+        subprocess_calls.append((cmd, kwargs))
+        archive_root = layout.library_root / "youtube" / "videos"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_root / "long123.mp4"
+        archive_path.write_text("video", encoding="utf-8")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    result = asyncio.run(connector.collect(urls=["https://youtu.be/long123"]))
+
+    record = result.records[0]
+    assert record.archive_path is None
+    assert record.archive_status == "over_duration"
+    assert "duration" in (record.archive_error or "").lower()
+    assert not subprocess_calls
+    assert record.transcript_artifact_id is not None
+    assert db.get_ingestion_entry("yt_transcript_long123") is not None
+
+
+def test_youtube_connector_archive_missing_ytdlp_fails_closed(
+    tmp_path: Path, monkeypatch
+):
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    processor = FakeYouTubeProcessor(layout.vault_root / "transcripts")
+    connector = YouTubeConnector(config, layout=layout, db=db, processor=processor)
+    config.set("sources.youtube.archive_video", True)
+
+    def fake_subprocess_run(cmd, **kwargs):
+        raise FileNotFoundError("yt-dlp not found")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    result = asyncio.run(connector.collect(urls=["https://youtu.be/missing123"]))
+
+    record = result.records[0]
+    assert record.archive_path is None
+    assert record.archive_status == "error"
+    assert "yt-dlp" in (record.archive_error or "").lower()
+    assert record.transcript_artifact_id is not None
+    assert db.get_ingestion_entry("yt_transcript_missing123") is not None
+
+
+def test_youtube_connector_archive_bounds_from_cli_options(
+    tmp_path: Path, monkeypatch
+):
+    from core.agent_surface import AgentSurfaceService
+
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+
+    calls: dict[str, Any] = {}
+
+    class SpyYouTubeConnector:
+        def __init__(self, runtime_config, *, layout, db):
+            pass
+
+        async def collect(self, **kwargs):
+            calls.update(kwargs)
+            return SimpleNamespace(
+                to_dict=lambda: {"records": [], "budget": {}, "errors": []}
+            )
+
+    monkeypatch.setattr(
+        "collectors.youtube_connector.YouTubeConnector", SpyYouTubeConnector
+    )
+
+    service = AgentSurfaceService(config, layout=layout, db=db)
+    result = service.run_connector(
+        "youtube",
+        execute=True,
+        options={
+            "urls": "https://youtu.be/cli123",
+            "archive_video": "true",
+            "archive_max_duration_seconds": "600",
+            "archive_max_file_size_bytes": "104857600",
+            "archive_format": "best[height<=720]",
+            "archive_timeout_seconds": "120",
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert calls["archive_video"] is True
+    assert calls["archive_max_duration_seconds"] == 600.0
+    assert calls["archive_max_file_size_bytes"] == 104857600
+    assert calls["archive_format"] == "best[height<=720]"
+    assert calls["archive_timeout_seconds"] == 120.0
