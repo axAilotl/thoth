@@ -26,13 +26,11 @@ from ccf.admission import (
     load_archive,
     lock_archive_head,
 )
-from ccf.capsule import CapsuleError
 from ccf.catalog import SemanticCatalog
 from ccf.db import CcfPostgresSettings, migrate_ccf_store, open_ccf_connection
 from ccf.ids import generate_id, parse_id
 from ccf.journal import verify_chain
 from ccf.keys import load_signing_key
-from ccf.layered import LayeredError
 from ccf.objects import now_timestamp, validate_timestamp
 from ccf.registry import PinnedRegistries
 from ccf.schemas import SchemaSet
@@ -700,12 +698,10 @@ class Archive:
             profiles=self.active_profiles,
         )
 
-    def _load_declaration_resources(self) -> tuple[dict, object, object]:
-        """Load the 0.2.0 declaration plus the layered registries and schemas.
-
-        Shared by preview_capsule and inspect_capsule so current-root inspection
-        does not repeatedly load the same layered artifacts.
-        """
+    def _load_declaration_resources(
+        self,
+    ) -> tuple[dict, "LayeredRegistries", "SchemaSet"]:
+        """Load the 0.2.0 declaration plus the layered registries and schemas."""
         from ccf.catalog import LayeredCatalog
         from ccf.declaration import build_thoth_declaration
         from ccf.layered import LayeredRegistries
@@ -728,36 +724,54 @@ class Archive:
         )
         return declaration, layered, schemas
 
+    def interop_context(self) -> "InteropContext":
+        """Public typed context for interoperability operations on this archive.
+
+        Loads the 0.2.0 declaration plus layered registries and schemas once,
+        shared by preview_capsule, inspect_capsule, and compatibility checks.
+        All catalog/layer/schema failures are converted to ArchiveError.
+        """
+        import json
+
+        from ccf.catalog import CatalogError
+        from ccf.interop import InteropContext
+        from ccf.layered import LayeredError
+        from ccf.schemas import CcfSchemaError
+
+        if self.package_root is None:
+            raise ArchiveError("archive has no package_root; cannot build interop context")
+        try:
+            declaration, layered, schemas = self._load_declaration_resources()
+        except (
+            CatalogError,
+            LayeredError,
+            CcfSchemaError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            OSError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as exc:
+            raise ArchiveError(str(exc)) from exc
+        return InteropContext(
+            declaration=declaration,
+            layered=layered,
+            schemas=schemas,
+            archive_id=self.archive_id,
+            clock=self.clock,
+        )
+
     def preview_capsule(self, capsule_dir: str | Path) -> dict:
         """Validate a Capsule against this archive's declaration and emit pending uplift."""
-        from ccf.capsule import load_capsule, verify_capsule
-        from ccf.exchange import build_pending_uplift, verify_uplift_receipt
+        from ccf.interop import InteropError, preview_capsule
 
         if self.package_root is None:
             raise ArchiveError("archive has no package_root; cannot preview a Capsule")
-        declaration, layered, schemas = self._load_declaration_resources()
-        capsule = load_capsule(capsule_dir, schemas=schemas)
-        verify_capsule(
-            capsule,
-            layered=layered,
-            schemas=schemas,
-            recipient_level=declaration["level"],
-            recipient_capabilities=declaration["capabilities"],
-        )
-        receipt = build_pending_uplift(
-            capsule,
-            destination_level=declaration["level"],
-            destination_archive_id=self.archive_id,
-            created_at=self.clock(),
-        )
-        verify_uplift_receipt(
-            receipt, capsule=capsule, layered=layered, schemas=schemas
-        )
-        return {
-            "declaration": declaration,
-            "capsule": capsule.manifest,
-            "uplift": receipt,
-        }
+        try:
+            return preview_capsule(self.interop_context(), capsule_dir)
+        except InteropError as exc:
+            raise ArchiveError(str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Interoperability delivery seam (CCF 0.2.0 Capsule negotiation)
@@ -770,44 +784,37 @@ class Archive:
         ``unknown``). The caller selects policy for legacy roots. This method
         does not mutate the archive.
         """
-        from ccf.interop import load_capsule_integrity, negotiate_identity
+        from ccf.interop import InteropError, load_capsule_integrity, negotiate_identity
 
         if self.package_root is None:
             raise ArchiveError(
                 "archive has no package_root; cannot negotiate Capsule identity"
             )
-        capsule = load_capsule_integrity(capsule_dir)
-        declaration = self.implementation_declaration()
-        return negotiate_identity(capsule.manifest, declaration)
+        try:
+            capsule = load_capsule_integrity(capsule_dir)
+            return negotiate_identity(capsule.manifest, self.interop_context().declaration)
+        except InteropError as exc:
+            raise ArchiveError(str(exc)) from exc
 
     def inspect_capsule(
         self,
         capsule_dir: str | Path,
         *,
         policy: str = "refuse",
-        importer_tag: str | None = None,
     ) -> dict:
         """Inspect a CCF 0.2.0 Capsule and return a negotiation/preview result.
 
         ``policy`` controls behavior for known legacy roots:
 
         - ``refuse`` (default): fail closed.
-        - ``read``: integrity-verified inert preview; no archive mutation and
-          no current-layered-schema verification.
-        - ``uplift``: pending uplift receipt only; preserves IDs and marks
-          producer authentication absent. Cross-root uplift still requires a
-          catalog-transition Record for canonical admission.
+        - ``read``: integrity-verified inert preview; no archive mutation, no
+          current-layered-schema verification, and no uplift receipt.
+        - ``uplift``: pending verified uplift receipt only; preserves IDs and
+          marks producer authentication absent.
 
         This method does **not** admit Capsule submissions into the archive.
         """
-        from ccf.interop import (
-            CISSA_LEGACY_ROOT,
-            InteropError,
-            build_pending_uplift_receipt,
-            external_carrier_dependencies,
-            load_capsule_integrity,
-            negotiate_identity,
-        )
+        from ccf.interop import InteropError, inspect_capsule, load_capsule_integrity
 
         if self.package_root is None:
             raise ArchiveError(
@@ -815,84 +822,11 @@ class Archive:
             )
         if policy not in {"refuse", "read", "uplift"}:
             raise ArchiveError(f"unknown Capsule inspect policy: {policy!r}")
-
         try:
             capsule = load_capsule_integrity(capsule_dir)
+            return inspect_capsule(self.interop_context(), capsule, policy=policy)
         except InteropError as exc:
             raise ArchiveError(str(exc)) from exc
-        declaration, layered, schemas = self._load_declaration_resources()
-        identity = negotiate_identity(capsule.manifest, declaration)
-
-        if identity["root"] == "current":
-            from ccf.capsule import load_capsule, verify_capsule
-            from ccf.exchange import build_pending_uplift, verify_uplift_receipt
-
-            capsule = load_capsule(capsule_dir, schemas=schemas)
-            verify_capsule(
-                capsule,
-                layered=layered,
-                schemas=schemas,
-                recipient_level=declaration["level"],
-                recipient_capabilities=declaration["capabilities"],
-            )
-            receipt = build_pending_uplift(
-                capsule,
-                destination_level=declaration["level"],
-                destination_archive_id=self.archive_id,
-                created_at=self.clock(),
-            )
-            verify_uplift_receipt(
-                receipt, capsule=capsule, layered=layered, schemas=schemas
-            )
-            result = {
-                "status": "preview",
-                "disposition": "current",
-                "identity": identity,
-                "uplift": receipt,
-                "capsule": capsule.manifest,
-            }
-        elif identity["root"] == "legacy":
-            if policy == "refuse":
-                raise ArchiveError(
-                    f"capsule catalog root {identity['catalog_root']} is a known "
-                    "legacy root; policy is refuse"
-                )
-            receipt = build_pending_uplift_receipt(
-                capsule, self.archive_id, declaration["level"]
-            )
-            if policy == "read":
-                result = {
-                    "status": "preview",
-                    "disposition": "legacy_read",
-                    "identity": identity,
-                    "uplift": receipt,
-                    "capsule": capsule.manifest,
-                }
-            else:  # policy == "uplift"
-                result = {
-                    "status": "pending_uplift",
-                    "disposition": "legacy_uplift",
-                    "identity": identity,
-                    "uplift": receipt,
-                    "capsule": capsule.manifest,
-                }
-        else:
-            raise ArchiveError(
-                f"capsule catalog root {identity['catalog_root']} is not "
-                "recognized; refusing unknown root"
-            )
-
-        result["external_carrier_dependencies"] = external_carrier_dependencies(
-            capsule.manifest
-        )
-        result["cross_repo_blocker"] = (
-            "cissa-root-mismatch"
-            if identity["catalog_root"] == CISSA_LEGACY_ROOT
-            else None
-        )
-        if importer_tag is not None:
-            result["importer_tag"] = importer_tag
-        return result
 
     def evaluate_capsule_compatibility(
         self,
@@ -903,100 +837,15 @@ class Archive:
         Reports only blockers that actually apply to this Capsule. A valid
         current-root local Capsule with no external dependencies can pass.
         Cross-repo Cissa gaps are exposed by ``cross_repo_conformance_status``,
-        not duplicated here.
+        not duplicated here. This method never raises for corrupted Capsule input.
         """
-        from ccf.interop import (
-            CISSA_LEGACY_ROOT,
-            InteropError,
-            external_carrier_dependencies,
-            load_capsule_integrity,
-            negotiate_identity,
-        )
+        from ccf.interop_compat import evaluate_compatibility
 
         if self.package_root is None:
             raise ArchiveError(
                 "archive has no package_root; cannot evaluate Capsule compatibility"
             )
-
-        try:
-            capsule = load_capsule_integrity(capsule_dir)
-        except InteropError as exc:
-            raise ArchiveError(str(exc)) from exc
-        declaration, layered, schemas = self._load_declaration_resources()
-        identity = negotiate_identity(capsule.manifest, declaration)
-        blockers: list[dict] = []
-
-        if external_carrier_dependencies(capsule.manifest):
-            blockers.append(
-                {
-                    "type": "missing-carrier-contract",
-                    "category": "transport",
-                    "description": (
-                        "Capsule declares external dependencies with locators; "
-                        "the cissa-99d.3 carrier contract is required to fetch "
-                        "and verify them"
-                    ),
-                    "external_contract": "cissa-99d.3",
-                }
-            )
-
-        if identity["root"] == "current":
-            from ccf.capsule import load_capsule, verify_capsule
-
-            try:
-                capsule = load_capsule(capsule_dir, schemas=schemas)
-                verify_capsule(
-                    capsule,
-                    layered=layered,
-                    schemas=schemas,
-                    recipient_level=declaration["level"],
-                    recipient_capabilities=declaration["capabilities"],
-                )
-            except (ArchiveError, CapsuleError, LayeredError) as exc:
-                blockers.append(
-                    {
-                        "type": "capsule-verification-failed",
-                        "category": "conformance",
-                        "message": str(exc),
-                        "note": "Capsule does not verify against this archive's declaration",
-                    }
-                )
-        elif identity["root"] == "legacy":
-            if identity["catalog_root"] == CISSA_LEGACY_ROOT:
-                blockers.append(
-                    {
-                        "type": "cissa-root-mismatch",
-                        "category": "authority",
-                        "description": (
-                            "Capsule uses Cissa's legacy pre-reconciliation root"
-                        ),
-                        "external_contract": "cissa-99d.2",
-                    }
-                )
-            blockers.append(
-                {
-                    "type": "root-not-current",
-                    "category": "authority",
-                    "catalog_root": identity["catalog_root"],
-                    "note": "Capsule root is a known legacy root, not the archive's current root",
-                }
-            )
-        else:
-            blockers.append(
-                {
-                    "type": "unknown-root",
-                    "category": "authority",
-                    "catalog_root": identity["catalog_root"],
-                    "note": "Capsule root is neither current nor a known legacy root",
-                }
-            )
-
-        return {
-            "identity": identity,
-            "blockers": blockers,
-            "pass": len(blockers) == 0,
-            "archive_id": self.archive_id,
-        }
+        return evaluate_compatibility(self.interop_context(), capsule_dir)
 
     @staticmethod
     def cross_repo_conformance_status() -> dict:
@@ -1005,7 +854,7 @@ class Archive:
         This is not a per-Capsule result; it documents why a true bidirectional
         Cissa↔Thoth pass remains blocked regardless of any local Capsule.
         """
-        from ccf.interop import cross_repo_conformance_status
+        from ccf.interop_compat import cross_repo_conformance_status
 
         return cross_repo_conformance_status()
 
