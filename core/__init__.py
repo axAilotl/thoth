@@ -109,6 +109,7 @@ from .x_api_auth import (
     store_x_api_token_bundle,
     summarize_x_api_auth,
 )
+from .x_api_diagnostics import redact_x_api_secrets, test_x_api_connection
 from .x_api_bookmark_sync import (
     XApiBookmarkSyncConfig,
     XApiBookmarkSyncConfigError,
@@ -119,6 +120,15 @@ from .x_api_bookmark_sync import (
     run_x_api_bookmark_backfill,
     store_x_api_bookmark_sync_checkpoint,
     sync_x_api_bookmarks,
+)
+from .x_api_monitoring import (
+    X_API_MONITOR_SECRET_HEADER,
+    XApiMonitoringAuthError,
+    XApiMonitoringConfigError,
+    XApiMonitoringPayloadError,
+    capture_x_api_monitoring_webhook,
+    normalize_x_api_monitoring_payload,
+    resolve_x_api_monitoring_config,
 )
 from .wiki_contract import (
     WikiContract,
@@ -280,11 +290,13 @@ __all__ = [
     'generate_pkce_pair',
     'load_pending_x_api_auth',
     'load_x_api_token_bundle',
+    'redact_x_api_secrets',
     'refresh_x_api_tokens',
     'resolve_x_api_auth_config',
     'start_x_api_auth',
     'store_x_api_token_bundle',
     'summarize_x_api_auth',
+    'test_x_api_connection',
     'XApiBookmarkSyncConfig',
     'XApiBookmarkSyncConfigError',
     'XApiBookmarkSyncError',
@@ -294,6 +306,13 @@ __all__ = [
     'run_x_api_bookmark_backfill',
     'store_x_api_bookmark_sync_checkpoint',
     'sync_x_api_bookmarks',
+    'X_API_MONITOR_SECRET_HEADER',
+    'XApiMonitoringAuthError',
+    'XApiMonitoringConfigError',
+    'XApiMonitoringPayloadError',
+    'capture_x_api_monitoring_webhook',
+    'normalize_x_api_monitoring_payload',
+    'resolve_x_api_monitoring_config',
     'WikiContract',
     'WikiPageSpec',
     'build_wiki_contract',

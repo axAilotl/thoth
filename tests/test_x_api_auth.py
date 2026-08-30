@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -11,6 +12,7 @@ from core.config import Config
 from core.path_layout import build_path_layout
 from core.x_api_auth import (
     XApiAuthConfig,
+    XApiTokenError,
     build_authorize_url,
     complete_x_api_auth,
     generate_pkce_pair,
@@ -21,6 +23,10 @@ from core.x_api_auth import (
     start_x_api_auth,
     store_x_api_token_bundle,
     summarize_x_api_auth,
+)
+from core.x_api_diagnostics import (
+    redact_x_api_secrets,
+    test_x_api_connection as run_x_api_connection_test,
 )
 
 
@@ -287,6 +293,59 @@ def test_x_api_status_route_flattens_nested_user(
     assert payload["user"]["username"] == "thoth"
 
 
+def test_x_api_test_connection_endpoint_returns_redacted_diagnostic(
+    tmp_path: Path,
+    restore_thoth_config,
+    monkeypatch,
+):
+    config = make_config(tmp_path)
+    thoth_api.config.data = deepcopy(config.data)
+    monkeypatch.setattr(
+        thoth_api,
+        "build_path_layout",
+        lambda cfg: build_path_layout(cfg, project_root=tmp_path),
+    )
+    layout = build_path_layout(config, project_root=tmp_path)
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "access-123",
+            "refresh_token": "refresh-123",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "obtained_at": datetime.now(timezone.utc).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+
+    import core.x_api_auth as x_api_auth
+
+    fake_http_client = FakeAsyncClient(
+        get_response=FakeResponse(
+            200,
+            {"data": {"id": "42", "username": "thoth", "name": "Thoth"}},
+        )
+    )
+    monkeypatch.setattr(
+        x_api_auth.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: fake_http_client,
+    )
+
+    with TestClient(thoth_api.app) as client:
+        response = client.post("/api/x-api/test-connection")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["connected"] is True
+    assert payload["client_metadata"]["configured"] is True
+    assert payload["token"]["present"] is True
+
+
 def test_x_api_callback_returns_html_for_browser_requests(
     tmp_path: Path,
     restore_thoth_config,
@@ -344,3 +403,348 @@ def test_x_api_callback_returns_html_for_browser_requests(
     assert "thoth:x-api-auth-complete" in body
     assert "@thoth" in body
     assert "x_api_auth" in body
+
+
+
+def test_test_x_api_connection_valid_config_and_token(tmp_path: Path):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "access-123",
+            "refresh_token": "refresh-123",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "obtained_at": datetime.now(timezone.utc).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+
+    client = FakeAsyncClient(
+        get_response=FakeResponse(
+            200,
+            {
+                "data": {
+                    "id": "42",
+                    "username": "thoth",
+                    "name": "Thoth",
+                }
+            },
+        )
+    )
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=layout, client=client)
+    )
+
+    assert result["status"] == "ok"
+    assert result["connected"] is True
+    assert result["refreshed"] is False
+    assert result["token"]["present"] is True
+    assert result["token"]["expired"] is False
+    assert result["token"]["refreshable"] is True
+    assert result["user"]["data"]["username"] == "thoth"
+    assert result["client_metadata"]["configured"] is True
+    assert result["client_metadata"]["missing_fields"] == []
+    assert result["client_metadata"]["scopes"] == [
+        "bookmark.read",
+        "tweet.read",
+        "users.read",
+        "offline.access",
+    ]
+    assert result["refresh_behavior"]["offline_access_present"] is True
+    assert result["refresh_behavior"]["supported"] is True
+    assert result["refresh_behavior"]["client_type"] == "public_pkce"
+
+
+def test_test_x_api_connection_missing_client_metadata(tmp_path: Path):
+    config = make_config(tmp_path)
+    config.set("sources.x_api.client_id", "")
+    config.set("sources.x_api.redirect_uri", "")
+    config.set("sources.x_api.scopes", [])
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=build_path_layout(config, project_root=tmp_path))
+    )
+
+    assert result["status"] == "config_error"
+    assert result["connected"] is False
+    assert result["client_metadata"]["configured"] is False
+    assert set(result["client_metadata"]["missing_fields"]) == {
+        "client_id",
+        "redirect_uri",
+        "scopes",
+    }
+    assert result["token"]["present"] is False
+    assert result["refresh_behavior"]["supported"] is False
+
+
+def test_test_x_api_connection_expired_token_without_refresh(tmp_path: Path):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "access-123",
+            "refresh_token": "",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "obtained_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=layout)
+    )
+
+    assert result["status"] == "token_expired"
+    assert result["connected"] is False
+    assert result["token"]["present"] is True
+    assert result["token"]["expired"] is True
+    assert result["token"]["refreshable"] is False
+
+
+def test_test_x_api_connection_refresh_success(tmp_path: Path):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "access-old",
+            "refresh_token": "refresh-original",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "obtained_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+
+    client = FakeAsyncClient(
+        post_response=FakeResponse(
+            200,
+            {
+                "access_token": "access-refreshed",
+                "refresh_token": "refresh-refreshed",
+                "token_type": "bearer",
+                "expires_in": 7200,
+                "scope": "bookmark.read tweet.read users.read offline.access",
+            },
+        ),
+        get_response=FakeResponse(
+            200,
+            {
+                "data": {
+                    "id": "42",
+                    "username": "thoth",
+                    "name": "Thoth",
+                }
+            },
+        ),
+    )
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=layout, client=client)
+    )
+
+    assert result["status"] == "ok"
+    assert result["connected"] is True
+    assert result["refreshed"] is True
+    assert result["token"]["present"] is True
+    assert result["token"]["expired"] is False
+    assert result["token"]["refreshable"] is True
+    assert result["user"]["data"]["username"] == "thoth"
+    assert len(client.requests) == 2
+    assert client.requests[0][0] == "post"
+    assert client.requests[1][0] == "get"
+    stored = load_x_api_token_bundle(layout)
+    assert stored["access_token"] == "access-refreshed"
+    assert stored["refresh_token"] == "refresh-refreshed"
+
+
+def test_test_x_api_connection_refresh_failure(tmp_path: Path):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "access-old",
+            "refresh_token": "refresh-original",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "obtained_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+
+    client = FakeAsyncClient(
+        post_response=FakeResponse(
+            401,
+            {"error": "invalid_request", "error_description": "refresh token revoked"},
+        )
+    )
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=layout, client=client)
+    )
+
+    assert result["status"] == "refresh_failed"
+    assert result["connected"] is False
+    assert result["refreshed"] is False
+    assert "refresh failed" in result["error"].lower()
+
+
+def test_test_x_api_connection_distinguishes_invalid_user_token(tmp_path: Path):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "invalid-access",
+            "refresh_token": "refresh-token",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "obtained_at": datetime.now(timezone.utc).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+    client = FakeAsyncClient(get_response=FakeResponse(401, {"error": "unauthorized"}))
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=layout, client=client)
+    )
+
+    assert result["status"] == "token_invalid"
+    assert result["connected"] is False
+    assert result["token"]["present"] is True
+
+
+def test_redact_x_api_secrets_removes_tokens_and_secrets():
+    auth_config = XApiAuthConfig(
+        client_id="client-123",
+        redirect_uri="http://127.0.0.1/callback",
+        scopes=("bookmark.read",),
+        client_secret="super-secret-client-secret",
+    )
+    bundle = {
+        "access_token": "access-token-value",
+        "refresh_token": "refresh-token-value",
+    }
+    raw = (
+        "Authorization: Bearer access-token-value, "
+        "refresh=refresh-token-value, "
+        "client_secret=super-secret-client-secret"
+    )
+    redacted = redact_x_api_secrets(raw, auth_config=auth_config, bundle=bundle)
+    assert "access-token-value" not in redacted
+    assert "refresh-token-value" not in redacted
+    assert "super-secret-client-secret" not in redacted
+    assert "[[REDACTED" in redacted or "[[REDACTED]]" in redacted
+
+
+def test_test_x_api_connection_redacts_secrets_in_output(tmp_path: Path, monkeypatch):
+    from core import x_api_diagnostics as x_api_diagnostics_module
+
+    config = make_config(tmp_path)
+    config.set("sources.x_api.client_secret_env", "X_API_CLIENT_SECRET")
+    monkeypatch.setenv("X_API_CLIENT_SECRET", "leaked-client-secret")
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "leaked-access-token",
+            "refresh_token": "leaked-refresh-token",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "obtained_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+
+    async def fake_refresh_with_secret(*args, **kwargs):
+        raise XApiTokenError(
+            "refresh failed for token leaked-access-token "
+            "with secret leaked-client-secret"
+        )
+
+    monkeypatch.setattr(
+        x_api_diagnostics_module,
+        "refresh_x_api_tokens",
+        fake_refresh_with_secret,
+    )
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=layout)
+    )
+
+    assert result["status"] == "refresh_failed"
+    result_text = str(result)
+    assert "leaked-access-token" not in result_text
+    assert "leaked-refresh-token" not in result_text
+    assert "leaked-client-secret" not in result_text
+    assert "[[REDACTED]]" in result["error"]
+    assert result["redacted"] is True
+
+
+def test_test_x_api_connection_redacts_provider_response_secrets(tmp_path: Path):
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    store_x_api_token_bundle(
+        layout,
+        {
+            "version": 1,
+            "access_token": "stored-access",
+            "refresh_token": "stored-refresh",
+            "token_type": "bearer",
+            "scopes": ["bookmark.read", "tweet.read", "users.read", "offline.access"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "obtained_at": datetime.now(timezone.utc).isoformat(),
+            "client_id": "client-123",
+            "redirect_uri": "http://127.0.0.1:8000/api/x-api/auth/callback",
+        },
+    )
+    client = FakeAsyncClient(
+        get_response=FakeResponse(
+            200,
+            {
+                "data": {"id": "42", "username": "thoth"},
+                "access_token": "provider-secret",
+                "note": "echoed provider-secret",
+            },
+        )
+    )
+
+    result = pytest.importorskip("asyncio").run(
+        run_x_api_connection_test(config, layout=layout, client=client)
+    )
+
+    assert result["status"] == "ok"
+    assert result["user"]["access_token"] == "[[REDACTED]]"
+    assert "provider-secret" not in str(result)
+    assert result["redacted"] is True

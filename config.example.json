@@ -690,7 +690,12 @@
         "tweet.read",
         "users.read",
         "offline.access"
-      ]
+      ],
+      "monitoring": {
+        "enabled": false,
+        "accounts": [],
+        "webhook_secret_env": "THOTH_X_MONITOR_WEBHOOK_SECRET"
+      }
     },
     "youtube": {
       "enabled": true,
@@ -698,6 +703,10 @@
       "playlist_urls": [],
       "export_paths": [],
       "archive_video": false,
+      "archive_max_duration_seconds": null,
+      "archive_max_file_size_bytes": null,
+      "archive_format": null,
+      "archive_timeout_seconds": 300,
       "api_key": ""
     },
     "omi": {

@@ -41,6 +41,10 @@ from core import (
     XApiAuthStateError,
     XApiBookmarkSyncConfigError,
     XApiBookmarkSyncStateError,
+    X_API_MONITOR_SECRET_HEADER,
+    XApiMonitoringAuthError,
+    XApiMonitoringConfigError,
+    XApiMonitoringPayloadError,
     XApiTokenError,
     fetch_current_x_user,
     normalize_bookmark_payload,
@@ -55,9 +59,12 @@ from core import (
     store_x_api_token_bundle,
     summarize_x_api_auth,
     load_x_api_token_bundle,
+    test_x_api_connection,
+    redact_x_api_secrets,
     ensure_wiki_scaffold,
     load_connector_registry,
     run_x_api_bookmark_backfill,
+    capture_x_api_monitoring_webhook,
     queue_archivist_topic_force,
     resolve_archivist_sync_config as resolve_archivist_runtime_config,
     run_archivist_topics,
@@ -1872,6 +1879,29 @@ async def trigger_x_api_bookmark_sync(request: XApiBackfillRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.post("/api/x-api/monitoring/webhook")
+async def receive_x_api_monitoring_webhook(
+    request: Request,
+    payload: Dict[str, Any],
+):
+    """Authenticate and queue one monitored-account X webhook event."""
+    try:
+        return capture_x_api_monitoring_webhook(
+            config,
+            payload,
+            webhook_secret=request.headers.get(X_API_MONITOR_SECRET_HEADER),
+        )
+    except XApiMonitoringAuthError:
+        logger.warning("Rejected X monitoring webhook with invalid credentials")
+        raise HTTPException(status_code=401, detail="Invalid webhook credentials")
+    except (XApiMonitoringConfigError, XApiMonitoringPayloadError, ValueError) as exc:
+        logger.error(f"Rejected X monitoring webhook: {exc}")
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Unexpected X monitoring webhook error: {exc}")
+        raise HTTPException(status_code=500, detail="X monitoring capture failed")
+
+
 class ProviderModelsRequest(BaseModel):
     type: str
     api_key: Optional[str] = None
@@ -2888,6 +2918,24 @@ async def background_processor():
             await asyncio.sleep(0.1)
 
     logger.info("Background processor stopped")
+
+
+
+@app.post("/api/x-api/test-connection")
+async def test_x_api_connection_endpoint():
+    """Run an operator-safe X OAuth connection and config diagnostic."""
+    try:
+        layout = build_path_layout(config)
+        result = await test_x_api_connection(config, layout=layout)
+        return result
+    except (XApiAuthConfigError, XApiTokenError, ValueError) as exc:
+        detail = redact_x_api_secrets(str(exc))
+        logger.error(f"X API connection test failed: {detail}")
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as exc:
+        detail = redact_x_api_secrets(str(exc))
+        logger.error(f"Unexpected X API connection test error: {detail}")
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @app.on_event("startup")

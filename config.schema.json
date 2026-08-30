@@ -469,6 +469,18 @@
               "type": "array",
               "items": { "type": "string" },
               "minItems": 1
+            },
+            "monitoring": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "accounts": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "webhook_secret_env": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": true
@@ -490,6 +502,10 @@
               "items": { "type": "string" }
             },
             "archive_video": { "type": "boolean" },
+            "archive_max_duration_seconds": { "type": ["integer", "null"], "minimum": 0 },
+            "archive_max_file_size_bytes": { "type": ["integer", "null"], "minimum": 0 },
+            "archive_format": { "type": ["string", "null"] },
+            "archive_timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
             "api_key": { "type": "string" }
           },
           "additionalProperties": true

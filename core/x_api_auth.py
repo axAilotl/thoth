@@ -49,6 +49,10 @@ class XApiAuthStateError(XApiAuthError, ValueError):
 class XApiTokenError(XApiAuthError):
     """Raised when token exchange or refresh fails."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        self.status_code = status_code
+        super().__init__(message)
+
 
 @dataclass(frozen=True)
 class XApiAuthConfig:
@@ -433,7 +437,8 @@ async def exchange_authorization_code(
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise XApiTokenError(
-                f"X API token exchange failed with status {response.status_code}"
+                f"X API token exchange failed with status {response.status_code}",
+                status_code=response.status_code,
             ) from exc
         payload = response.json()
 
@@ -446,8 +451,13 @@ async def refresh_x_api_tokens(
     auth_config: XApiAuthConfig,
     *,
     refresh_token: str,
+    client: httpx.AsyncClient | None = None,
 ) -> XApiTokenBundle:
-    """Refresh an existing token bundle."""
+    """Refresh an existing token bundle.
+
+    An optional ``client`` may be injected for testing or connection diagnostics;
+    when omitted a fresh ``httpx.AsyncClient`` is used.
+    """
     if not refresh_token or not refresh_token.strip():
         raise XApiTokenError("refresh_token is required to refresh X API tokens")
 
@@ -461,40 +471,60 @@ async def refresh_x_api_tokens(
         **_build_basic_auth_header(auth_config),
     }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(auth_config.token_url, data=data, headers=headers)
+    async def _perform_refresh(c: httpx.AsyncClient) -> XApiTokenBundle:
+        response = await c.post(auth_config.token_url, data=data, headers=headers)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise XApiTokenError(
-                f"X API token refresh failed with status {response.status_code}"
+                f"X API token refresh failed with status {response.status_code}",
+                status_code=response.status_code,
             ) from exc
         payload = response.json()
+        if not isinstance(payload, dict):
+            raise XApiTokenError("X API refresh response must be a JSON object")
+        return _parse_token_response(auth_config, payload, refresh_token=refresh_token)
 
-    if not isinstance(payload, dict):
-        raise XApiTokenError("X API refresh response must be a JSON object")
-    return _parse_token_response(auth_config, payload, refresh_token=refresh_token)
+    if client is not None:
+        return await _perform_refresh(client)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        return await _perform_refresh(client)
 
 
-async def fetch_current_x_user(auth_config: XApiAuthConfig, *, access_token: str) -> dict[str, Any]:
-    """Fetch the current authenticated X user."""
+async def fetch_current_x_user(
+    auth_config: XApiAuthConfig,
+    *,
+    access_token: str,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Fetch the current authenticated X user.
+
+    An optional ``client`` may be injected for testing or connection diagnostics;
+    when omitted a fresh ``httpx.AsyncClient`` is used.
+    """
     if not access_token or not access_token.strip():
         raise XApiTokenError("access_token is required to fetch the current user")
 
     headers = {"Authorization": f"Bearer {access_token.strip()}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(auth_config.me_url, headers=headers)
+
+    async def _perform_fetch(c: httpx.AsyncClient) -> dict[str, Any]:
+        response = await c.get(auth_config.me_url, headers=headers)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise XApiTokenError(
-                f"X API /2/users/me failed with status {response.status_code}"
+                f"X API /2/users/me failed with status {response.status_code}",
+                status_code=response.status_code,
             ) from exc
         payload = response.json()
+        if not isinstance(payload, dict):
+            raise XApiTokenError("X API user response must be a JSON object")
+        return payload
 
-    if not isinstance(payload, dict):
-        raise XApiTokenError("X API user response must be a JSON object")
-    return payload
+    if client is not None:
+        return await _perform_fetch(client)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        return await _perform_fetch(client)
 
 
 async def complete_x_api_auth(

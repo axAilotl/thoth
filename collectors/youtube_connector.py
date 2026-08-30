@@ -6,10 +6,11 @@ import asyncio
 import json
 import logging
 import re
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from core.artifacts import TranscriptArtifact, VideoArtifact
@@ -34,6 +35,39 @@ YOUTUBE_URL_PATTERN = re.compile(
 )
 
 
+class YouTubeArchiveError(RuntimeError):
+    """Raised when a bounded yt-dlp archival attempt fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: str,
+        video_id: str,
+    ) -> None:
+        self.status = status
+        self.video_id = video_id
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class ArchiveBounds:
+    """Runtime bounds for a single yt-dlp archival attempt."""
+
+    max_duration_seconds: float | None = None
+    max_file_size_bytes: int | None = None
+    archive_format: str | None = None
+    timeout_seconds: float = 300.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_duration_seconds": self.max_duration_seconds,
+            "max_file_size_bytes": self.max_file_size_bytes,
+            "archive_format": self.archive_format,
+            "timeout_seconds": self.timeout_seconds,
+        }
+
+
 @dataclass(frozen=True)
 class YouTubeConnectorRecord:
     """Artifacts produced for one YouTube video."""
@@ -45,6 +79,8 @@ class YouTubeConnectorRecord:
     transcript_artifact_id: str | None = None
     transcript_path: Path | None = None
     archive_path: Path | None = None
+    archive_status: str | None = None
+    archive_error: str | None = None
     queued: bool = True
 
 
@@ -74,6 +110,8 @@ class YouTubeConnectorResult:
                     "archive_path": str(record.archive_path)
                     if record.archive_path
                     else None,
+                    "archive_status": record.archive_status,
+                    "archive_error": record.archive_error,
                     "queued": record.queued,
                 }
                 for record in self.records
@@ -119,9 +157,19 @@ class YouTubeConnector:
         export_paths: Iterable[str | Path] | None = None,
         limit: int | None = None,
         archive_video: bool | None = None,
+        archive_max_duration_seconds: float | None = None,
+        archive_max_file_size_bytes: int | None = None,
+        archive_format: str | None = None,
+        archive_timeout_seconds: float | None = None,
         resume: bool = True,
     ) -> YouTubeConnectorResult:
         """Collect configured YouTube sources and queue resulting artifacts."""
+        bounds = self._resolve_archive_bounds(
+            max_duration_seconds=archive_max_duration_seconds,
+            max_file_size_bytes=archive_max_file_size_bytes,
+            archive_format=archive_format,
+            timeout_seconds=archive_timeout_seconds,
+        )
         explicit_urls = _string_list(urls)
         playlist_inputs = _string_list(playlist_urls)
         export_inputs = [Path(path).expanduser() for path in _string_list(export_paths)]
@@ -164,6 +212,7 @@ class YouTubeConnector:
                     video_id,
                     source_url=source_url,
                     archive_video=archive_video,
+                    archive_bounds=bounds,
                     resume=resume,
                     run_id=run_id,
                     budget=budget,
@@ -201,6 +250,7 @@ class YouTubeConnector:
         *,
         source_url: str,
         archive_video: bool | None,
+        archive_bounds: ArchiveBounds,
         resume: bool,
         run_id: str,
         budget: ConnectorBudgetTracker,
@@ -222,8 +272,27 @@ class YouTubeConnector:
             )
 
         archive_path = None
+        archive_status = "skipped"
+        archive_error = None
         if self._archive_enabled(archive_video):
-            archive_path = await asyncio.to_thread(self._archive_video, source_url, video_id)
+            try:
+                archive_path = await asyncio.to_thread(
+                    self._archive_video,
+                    source_url,
+                    video_id,
+                    video=video,
+                    bounds=archive_bounds,
+                )
+                archive_status = "archived"
+            except YouTubeArchiveError as exc:
+                archive_status = exc.status
+                archive_error = str(exc)
+                logger.warning(
+                    "YouTube archive failed for %s with status %s: %s",
+                    video_id,
+                    exc.status,
+                    exc,
+                )
 
         transcript_path = self._latest_transcript_path(video_id)
         raw_payload_path = self._write_raw_payload(
@@ -283,6 +352,8 @@ class YouTubeConnector:
             transcript_artifact_id=transcript_artifact_id,
             transcript_path=transcript_path,
             archive_path=archive_path,
+            archive_status=archive_status,
+            archive_error=archive_error,
         )
 
     def _urls_from_export(self, path: Path) -> list[str]:
@@ -493,28 +564,193 @@ class YouTubeConnector:
         if self.db.get_ingestion_entry(artifact.id) is None:
             raise RuntimeError(f"Failed to queue YouTube artifact: {artifact.id}")
 
+    def _resolve_archive_bounds(
+        self,
+        *,
+        max_duration_seconds: float | None = None,
+        max_file_size_bytes: int | None = None,
+        archive_format: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> ArchiveBounds:
+        """Resolve effective archive bounds from config and CLI overrides.
+
+        Explicit override values take precedence over configuration. Invalid
+        values fail closed rather than silently falling back.
+        """
+        cfg = self.config.get("sources.youtube", {}) or {}
+
+        def _resolve(
+            override: Any,
+            config_key: str,
+            default: Any,
+            *,
+            coerce: Callable[[Any], Any] | None = None,
+        ) -> Any:
+            if override is not None:
+                value = override
+            else:
+                value = cfg.get(config_key, default)
+            if coerce is not None and value is not None:
+                value = coerce(value)
+            return value
+
+        def _positive_float(value: Any) -> float:
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError) as exc:
+                raise YouTubeArchiveError(
+                    f"archive timeout must be a positive number, got {value!r}",
+                    status="config_error",
+                    video_id="",
+                ) from exc
+            if parsed <= 0:
+                raise YouTubeArchiveError(
+                    f"archive timeout must be positive, got {parsed}",
+                    status="config_error",
+                    video_id="",
+                )
+            return parsed
+
+        def _positive_int_or_none(value: Any) -> int | None:
+            if value is None:
+                return None
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError) as exc:
+                raise YouTubeArchiveError(
+                    f"archive size/duration limit must be a non-negative integer, got {value!r}",
+                    status="config_error",
+                    video_id="",
+                ) from exc
+            if parsed < 0:
+                raise YouTubeArchiveError(
+                    f"archive size/duration limit must be non-negative, got {parsed}",
+                    status="config_error",
+                    video_id="",
+                )
+            return parsed if parsed > 0 else None
+
+        effective_timeout = _resolve(
+            timeout_seconds,
+            "archive_timeout_seconds",
+            300.0,
+            coerce=_positive_float,
+        )
+        effective_max_duration = _resolve(
+            max_duration_seconds,
+            "archive_max_duration_seconds",
+            None,
+            coerce=_positive_int_or_none,
+        )
+        effective_max_size = _resolve(
+            max_file_size_bytes,
+            "archive_max_file_size_bytes",
+            None,
+            coerce=_positive_int_or_none,
+        )
+        effective_format = _resolve(archive_format, "archive_format", None)
+        if effective_format is not None:
+            effective_format = str(effective_format).strip() or None
+
+        return ArchiveBounds(
+            max_duration_seconds=effective_max_duration,
+            max_file_size_bytes=effective_max_size,
+            archive_format=effective_format,
+            timeout_seconds=effective_timeout,
+        )
+
     def _archive_enabled(self, archive_video: bool | None) -> bool:
         if archive_video is not None:
             return bool(archive_video)
         return bool(self.config.get("sources.youtube.archive_video", False))
 
-    def _archive_video(self, source_url: str, video_id: str) -> Path:
-        try:
-            from yt_dlp import YoutubeDL
-        except ImportError as exc:
-            raise RuntimeError(
-                "YouTube video archival requires yt-dlp when sources.youtube.archive_video is enabled"
-            ) from exc
-
+    def _archive_video(
+        self,
+        source_url: str,
+        video_id: str,
+        *,
+        video: YouTubeVideo,
+        bounds: ArchiveBounds,
+    ) -> Path:
         archive_root = self.layout.library_root / "youtube" / "videos"
         archive_root.mkdir(parents=True, exist_ok=True)
         output_template = str(archive_root / f"{video_id}.%(ext)s")
-        with YoutubeDL({"outtmpl": output_template, "quiet": True, "noplaylist": True}) as ydl:
-            ydl.download([source_url])
+
+        if bounds.max_duration_seconds is not None:
+            duration_seconds = _parse_iso8601_duration(video.duration)
+            if duration_seconds is not None and duration_seconds > bounds.max_duration_seconds:
+                raise YouTubeArchiveError(
+                    f"Video {video_id} duration {duration_seconds}s exceeds "
+                    f"archive max duration {bounds.max_duration_seconds}s",
+                    status="over_duration",
+                    video_id=video_id,
+                )
+
+        cmd = [
+            "yt-dlp",
+            "--no-playlist",
+            "--quiet",
+            "--no-warnings",
+            "-o",
+            output_template,
+        ]
+        if bounds.archive_format:
+            cmd.extend(["-f", bounds.archive_format])
+        cmd.append(source_url)
+
+        try:
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=bounds.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise YouTubeArchiveError(
+                f"yt-dlp archive for {video_id} timed out after "
+                f"{bounds.timeout_seconds}s",
+                status="timeout",
+                video_id=video_id,
+            ) from exc
+        except FileNotFoundError as exc:
+            raise YouTubeArchiveError(
+                "yt-dlp command not found; install yt-dlp to archive YouTube videos",
+                status="error",
+                video_id=video_id,
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            raise YouTubeArchiveError(
+                f"yt-dlp archive for {video_id} failed: {stderr or exc.returncode}",
+                status="error",
+                video_id=video_id,
+            ) from exc
+
         candidates = sorted(archive_root.glob(f"{video_id}.*"))
         if not candidates:
-            raise RuntimeError(f"yt-dlp completed without writing archive for {video_id}")
-        return candidates[0]
+            raise YouTubeArchiveError(
+                f"yt-dlp completed without writing archive for {video_id}",
+                status="error",
+                video_id=video_id,
+            )
+        archive_path = candidates[0]
+
+        if bounds.max_file_size_bytes is not None:
+            file_size = archive_path.stat().st_size
+            if file_size > bounds.max_file_size_bytes:
+                try:
+                    archive_path.unlink()
+                except OSError:
+                    pass
+                raise YouTubeArchiveError(
+                    f"Archive for {video_id} size {file_size} bytes exceeds "
+                    f"max file size {bounds.max_file_size_bytes} bytes",
+                    status="over_size",
+                    video_id=video_id,
+                )
+
+        return archive_path
 
     def _relative_to_vault(self, path: Path | None) -> str | None:
         if path is None:
@@ -544,3 +780,34 @@ def _playlist_id_from_url(value: str) -> str | None:
     if list_values:
         return list_values[0].strip() or None
     return None
+
+
+_ISO8601_DURATION_RE = re.compile(
+    r"^P"
+    r"(?:(?P<days>\d+)D)?"
+    r"(?:T"
+    r"(?:(?P<hours>\d+)H)?"
+    r"(?:(?P<minutes>\d+)M)?"
+    r"(?:(?P<seconds>\d+)S)?"
+    r")?"
+    r"$"
+)
+
+
+def _parse_iso8601_duration(value: str | None) -> int | None:
+    """Return the total seconds for an ISO 8601 duration, or None if unknown."""
+    if not value:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    match = _ISO8601_DURATION_RE.match(value)
+    if not match:
+        return None
+    parts = match.groupdict()
+    total = 0
+    total += int(parts.get("days") or 0) * 86400
+    total += int(parts.get("hours") or 0) * 3600
+    total += int(parts.get("minutes") or 0) * 60
+    total += int(parts.get("seconds") or 0)
+    return total
