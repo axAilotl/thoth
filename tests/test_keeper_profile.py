@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import io
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
 
 from core.config import Config
-from core.keeper_profile import KeeperProfile, KeeperProfileConfig, KeeperProfileError
+from keeper_profile import KeeperProfile, KeeperProfileConfig, KeeperProfileError
 from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
 from tests.fixtures.cissa_like_recording import make_cissa_like_recording
@@ -91,11 +93,61 @@ def test_keeper_profile_readiness_stale_index(tmp_path: Path):
     assert readiness.document_count == 0
 
 
+def test_keeper_profile_readiness_is_scoped_to_allowed_roots(tmp_path: Path):
+    _config, db = _make_db(tmp_path)
+    recording = make_cissa_like_recording()
+    document = _cissa_document(recording, tmp_path)
+    document = type(document)(
+        **{
+            **document.__dict__,
+            "candidate_key": "library:outside/note.md",
+            "scope": "library",
+            "scope_relative_path": "outside/note.md",
+        }
+    )
+    db.upsert_archivist_corpus_document(document)
+
+    readiness = KeeperProfile(
+        KeeperProfileConfig(
+            db_path=str(db.db_path),
+            allowed_roots=["vault/transcripts"],
+            stale_index_seconds=86400 * 365,
+        )
+    ).readiness()
+
+    assert readiness.status == "stale_index"
+    assert readiness.document_count == 0
+
+
 def test_keeper_profile_requires_explicit_allowed_roots():
     with pytest.raises(KeeperProfileError, match="At least one allowed root"):
         KeeperProfileConfig("foo.db", [])
     with pytest.raises(KeeperProfileError, match="Unsupported root scope"):
         KeeperProfileConfig("foo.db", ["bad/path"])
+
+
+def test_keeper_profile_rejects_unbounded_limits_and_supports_cancellation(
+    tmp_path: Path,
+):
+    _config, db = _make_db(tmp_path)
+    recording = make_cissa_like_recording()
+    db.upsert_archivist_corpus_document(_cissa_document(recording, tmp_path))
+    profile = KeeperProfile(
+        KeeperProfileConfig(
+            db_path=str(db.db_path),
+            allowed_roots=["vault/transcripts"],
+            stale_index_seconds=86400 * 365,
+        )
+    )
+
+    for invalid_limit in (-1, 0, 101, 1_000_000_000, "5", True):
+        with pytest.raises(KeeperProfileError, match="limit"):
+            profile.query("open schema", limit=invalid_limit)
+
+    cancelled = threading.Event()
+    cancelled.set()
+    with pytest.raises(KeeperProfileError, match="cancelled"):
+        profile.query("open schema", cancel_event=cancelled)
 
 
 def test_keeper_profile_query_retrieves_cissa_evidence(tmp_path: Path):
@@ -121,7 +173,7 @@ def test_keeper_profile_query_retrieves_cissa_evidence(tmp_path: Path):
     assert passage.source_id == recording.session_id
     assert passage.source_type == recording.source_type
     assert "schema" in passage.snippet.lower()
-    assert passage.selector == f"vault:{recording.transcript_path}"
+    assert passage.selector.startswith(f"vault:{recording.transcript_path}#char=0-")
     assert passage.trust_score == 1.0
     assert passage.provenance["artifact_id"] == recording.artifact_id
     assert passage.provenance["source_id"] == recording.session_id
@@ -218,6 +270,82 @@ def test_keeper_profile_stdio_command_wired():
     assert result.returncode == 0
     assert "--roots" in result.stdout
     assert "--db" in result.stdout
+
+
+def test_keeper_entrypoint_does_not_load_core_runtime_stack():
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, thoth_keeper; "
+                "print(any(name == 'core' or name.startswith('core.') "
+                "for name in sys.modules))"
+            ),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "False"
+
+
+def test_keeper_stdio_validates_inputs_and_routes_cancellation(monkeypatch):
+    import thoth_keeper
+
+    class SlowProfile:
+        def query(self, _query, *, limit, cancel_event):
+            assert limit == 1
+            assert cancel_event.wait(timeout=2)
+            raise KeeperProfileError("Query cancelled")
+
+    server = thoth_keeper.KeeperProfileMCPServer(SlowProfile())
+    messages = [
+        {
+            "jsonrpc": "2.0",
+            "id": "query-1",
+            "method": "tools/call",
+            "params": {
+                "name": "keeper_query",
+                "arguments": {"query": "schema", "limit": 1},
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": "query-1"},
+        },
+    ]
+    stdin = io.StringIO("".join(json.dumps(message) + "\n" for message in messages))
+    stdout = io.StringIO()
+    monkeypatch.setattr(thoth_keeper.sys, "stdin", stdin)
+    monkeypatch.setattr(thoth_keeper.sys, "stdout", stdout)
+
+    server.serve_stdio()
+
+    response = json.loads(stdout.getvalue())
+    assert response["id"] == "query-1"
+    assert "cancelled" in response["error"]["message"].lower()
+
+    real_profile = object.__new__(KeeperProfile)
+    real_server = thoth_keeper.KeeperProfileMCPServer(real_profile)
+    for arguments in (
+        {"query": "schema", "limit": -1},
+        {"query": "schema", "limit": 101},
+        {"query": "schema", "limit": "5"},
+        {"query": "schema", "extra": True},
+    ):
+        response = real_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "keeper_query", "arguments": arguments},
+            }
+        )
+        assert "error" in response
 
 
 def test_keeper_profile_stdio_readiness_and_query(tmp_path: Path):

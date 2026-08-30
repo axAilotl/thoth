@@ -18,12 +18,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.keeper_profile import (
+from keeper_profile import (
     KeeperPassage,
     KeeperProfile,
     KeeperProfileConfig,
@@ -74,6 +75,9 @@ class KeeperProfileMCPServer:
 
     def __init__(self, profile: KeeperProfile) -> None:
         self.profile = profile
+        self._active: dict[str | int, threading.Event] = {}
+        self._active_lock = threading.Lock()
+        self._output_lock = threading.Lock()
 
     def list_tools(self) -> dict[str, Any]:
         return {"tools": list(TOOL_DEFINITIONS)}
@@ -82,8 +86,18 @@ class KeeperProfileMCPServer:
         self,
         name: str,
         arguments: dict[str, Any] | None = None,
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
+        if arguments is None:
+            args: dict[str, Any] = {}
+        elif type(arguments) is dict:
+            args = arguments
+        else:
+            raise KeeperProfileError("tool arguments must be an object")
         if name == "keeper_readiness":
+            if args:
+                raise KeeperProfileError("keeper_readiness accepts no arguments")
             result = self.profile.readiness()
             payload = {
                 "status": result.status,
@@ -92,12 +106,23 @@ class KeeperProfileMCPServer:
                 "reason": result.reason,
             }
         elif name == "keeper_query":
-            args = arguments or {}
-            query_text = str(args.get("query") or "").strip()
+            unknown = set(args) - {"query", "limit"}
+            if unknown:
+                raise KeeperProfileError(
+                    f"unknown keeper_query arguments: {', '.join(sorted(unknown))}"
+                )
+            query_value = args.get("query")
+            if not isinstance(query_value, str):
+                raise KeeperProfileError("query must be a string")
+            query_text = query_value.strip()
             if not query_text:
                 raise KeeperProfileError("query is required")
-            limit = int(args.get("limit", 10))
-            result = self.profile.query(query_text, limit=limit)
+            limit = args.get("limit", 10)
+            result = self.profile.query(
+                query_text,
+                limit=limit,
+                cancel_event=cancel_event,
+            )
             payload = {
                 "query": result.query,
                 "status": result.status,
@@ -117,10 +142,19 @@ class KeeperProfileMCPServer:
             "isError": False,
         }
 
-    def handle_request(self, request: dict[str, Any]) -> dict[str, Any] | None:
+    def handle_request(
+        self,
+        request: dict[str, Any],
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any] | None:
+        if type(request) is not dict:
+            return self._error_response(None, -32600, "request must be an object")
         request_id = request.get("id")
         method = request.get("method")
         try:
+            if request.get("jsonrpc") != "2.0" or not isinstance(method, str):
+                raise KeeperProfileError("invalid JSON-RPC request")
             if method == "initialize":
                 result = {
                     "protocolVersion": "2024-11-05",
@@ -131,10 +165,21 @@ class KeeperProfileMCPServer:
                 result = self.list_tools()
             elif method == "tools/call":
                 params = request.get("params") or {}
+                if type(params) is not dict:
+                    raise KeeperProfileError("tools/call params must be an object")
                 result = self.call_tool(
                     str(params.get("name") or ""),
-                    params.get("arguments") or {},
+                    params.get("arguments"),
+                    cancel_event=cancel_event,
                 )
+            elif method == "notifications/cancelled":
+                params = request.get("params") or {}
+                if type(params) is not dict:
+                    raise KeeperProfileError(
+                        "notifications/cancelled params must be an object"
+                    )
+                self._cancel_request(params.get("requestId"))
+                return None
             elif method == "notifications/initialized":
                 return None
             else:
@@ -150,6 +195,7 @@ class KeeperProfileMCPServer:
             )
 
     def serve_stdio(self) -> None:
+        workers: list[threading.Thread] = []
         for line in sys.stdin:
             if not line.strip():
                 continue
@@ -158,9 +204,72 @@ class KeeperProfileMCPServer:
             except json.JSONDecodeError as exc:
                 response = self._error_response(None, -32700, str(exc))
             else:
-                response = self.handle_request(request)
+                if (
+                    type(request) is dict
+                    and request.get("method") == "tools/call"
+                    and type(request.get("params")) is dict
+                    and request["params"].get("name") == "keeper_query"
+                ):
+                    request_id = request.get("id")
+                    if (
+                        isinstance(request_id, bool)
+                        or not isinstance(request_id, (str, int))
+                    ):
+                        response = self._error_response(
+                            request_id, -32600, "keeper_query requires a string or integer id"
+                        )
+                    else:
+                        with self._active_lock:
+                            if request_id in self._active or self._active:
+                                response = self._error_response(
+                                    request_id,
+                                    -32001,
+                                    "another keeper query is already active",
+                                )
+                            else:
+                                cancel_event = threading.Event()
+                                self._active[request_id] = cancel_event
+                                worker = threading.Thread(
+                                    target=self._run_query_request,
+                                    args=(request, request_id, cancel_event),
+                                )
+                                workers.append(worker)
+                                worker.start()
+                                response = None
+                else:
+                    response = self.handle_request(request)
             if response is None:
                 continue
+            self._write_response(response)
+        for worker in workers:
+            worker.join()
+
+    def _run_query_request(
+        self,
+        request: dict[str, Any],
+        request_id: str | int,
+        cancel_event: threading.Event,
+    ) -> None:
+        try:
+            response = self.handle_request(request, cancel_event=cancel_event)
+            if response is not None:
+                self._write_response(response)
+        finally:
+            with self._active_lock:
+                self._active.pop(request_id, None)
+
+    def _cancel_request(self, request_id: Any) -> None:
+        if isinstance(request_id, bool) or not isinstance(request_id, (str, int)):
+            raise KeeperProfileError(
+                "notifications/cancelled requires a string or integer requestId"
+            )
+        with self._active_lock:
+            cancel_event = self._active.get(request_id)
+        if cancel_event is not None:
+            cancel_event.set()
+
+    def _write_response(self, response: dict[str, Any]) -> None:
+        with self._output_lock:
             sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
             sys.stdout.flush()
 
