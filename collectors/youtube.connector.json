@@ -30,6 +30,10 @@
     "sources.youtube.playlist_urls",
     "sources.youtube.export_paths",
     "sources.youtube.archive_video",
+    "sources.youtube.archive_max_duration_seconds",
+    "sources.youtube.archive_max_file_size_bytes",
+    "sources.youtube.archive_format",
+    "sources.youtube.archive_timeout_seconds",
     "sources.youtube.api_key",
     "youtube.enable_transcripts",
     "youtube.enable_llm_transcript_processing"

@@ -378,6 +378,16 @@ def _run_youtube_connector(
             export_paths=export_paths,
             limit=_optional_int(options.get("limit")),
             archive_video=archive_video,
+            archive_max_duration_seconds=_optional_float(
+                options.get("archive_max_duration_seconds")
+            ),
+            archive_max_file_size_bytes=_optional_int(
+                options.get("archive_max_file_size_bytes")
+            ),
+            archive_format=_optional_text(options.get("archive_format")),
+            archive_timeout_seconds=_optional_float(
+                options.get("archive_timeout_seconds")
+            ),
             resume=not bool(no_resume),
         )
     )
@@ -664,6 +674,17 @@ def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConnectorRunnerError(
+            f"Numeric connector option must be a number, got {value!r}"
+        ) from exc
 
 
 def _optional_bool(value: Any) -> bool | None:
