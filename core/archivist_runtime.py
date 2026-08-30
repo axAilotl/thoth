@@ -8,9 +8,9 @@ from typing import Any, Sequence
 
 from .archivist_compiler import ArchivistCompileResult, ArchivistCompiler
 from .config import Config
-from .metadata_db import MetadataDB
+from .metadata_db import MetadataDB, get_metadata_db
 from .non_live_state import validate_non_live_interval_hours
-from .path_layout import build_path_layout
+from .path_layout import PathLayout, build_path_layout
 
 ARCHIVIST_JOB_NAME = "archivist"
 
@@ -41,6 +41,8 @@ async def run_archivist_topics(
     config_or_data: Config | dict[str, Any],
     *,
     project_root: Path,
+    layout: PathLayout | None = None,
+    db: MetadataDB | None = None,
     topic_ids: Sequence[str] | None = None,
     force: bool = False,
     dry_run: bool = False,
@@ -48,13 +50,16 @@ async def run_archivist_topics(
 ) -> dict[str, Any]:
     """Run the archivist compiler and return a stable API-friendly payload."""
     config = _as_config(config_or_data)
-    layout = build_path_layout(config, project_root=project_root)
-    layout.ensure_directories()
+    resolved_layout = layout or build_path_layout(
+        config, project_root=project_root
+    )
+    metadata_db = db or get_metadata_db()
+    resolved_layout.ensure_directories()
     compiler = ArchivistCompiler(
         config,
         project_root=project_root,
-        layout=layout,
-        db=MetadataDB(str(layout.database_path)),
+        layout=resolved_layout,
+        db=metadata_db,
     )
     results = await compiler.run(
         topic_ids=topic_ids,

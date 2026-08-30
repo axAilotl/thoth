@@ -23,8 +23,8 @@ from .archivist_topics import (
     seed_archivist_topic_registry_from_example,
 )
 from .config import Config
-from .metadata_db import MetadataDB
-from .path_layout import build_path_layout
+from .metadata_db import MetadataDB, get_metadata_db
+from .path_layout import PathLayout, build_path_layout
 
 
 class ArchivistAdminError(ValueError):
@@ -35,10 +35,16 @@ def build_archivist_admin_payload(
     config_data: dict[str, Any],
     *,
     project_root: Path,
+    layout: PathLayout | None = None,
+    db: MetadataDB | None = None,
 ) -> dict[str, Any]:
     """Return raw and parsed archivist registry state for the settings UI."""
 
     config = _as_config(config_data)
+    resolved_layout = layout or build_path_layout(
+        config, project_root=project_root
+    )
+    metadata_db = db or get_metadata_db()
     registry_path = resolve_archivist_topics_path(config, project_root=project_root)
     existed_before = registry_path.exists()
     seeded_path = seed_archivist_topic_registry_from_example(
@@ -76,7 +82,6 @@ def build_archivist_admin_payload(
     payload["version"] = registry.version
     payload["defaults"] = asdict(registry.defaults)
 
-    metadata_db = _build_metadata_db(config, project_root=project_root)
     payload["corpus"] = metadata_db.get_archivist_corpus_stats()
     payload["topics"] = [
         _serialize_topic(topic, db=metadata_db)
@@ -90,6 +95,8 @@ def save_archivist_registry_text(
     *,
     project_root: Path,
     content: str,
+    layout: PathLayout | None = None,
+    db: MetadataDB | None = None,
 ) -> dict[str, Any]:
     """Validate and atomically persist the archivist registry file."""
 
@@ -130,7 +137,12 @@ def save_archivist_registry_text(
         if temp_path is not None and temp_path.exists():
             temp_path.unlink()
 
-    return build_archivist_admin_payload(config_data, project_root=project_root)
+    return build_archivist_admin_payload(
+        config_data,
+        project_root=project_root,
+        layout=layout,
+        db=db,
+    )
 
 
 def queue_archivist_topic_force(
@@ -139,6 +151,8 @@ def queue_archivist_topic_force(
     project_root: Path,
     topic_id: str,
     reason: str | None = None,
+    layout: PathLayout | None = None,
+    db: MetadataDB | None = None,
 ) -> dict[str, Any]:
     """Queue a manual force request for the next archivist topic run."""
 
@@ -147,7 +161,7 @@ def queue_archivist_topic_force(
         project_root=project_root,
         topic_id=topic_id,
     )
-    metadata_db = _build_metadata_db(_as_config(config_data), project_root=project_root)
+    metadata_db = db or get_metadata_db()
     state = request_archivist_topic_force(topic, db=metadata_db, reason=reason)
     return {
         "status": "ok",
@@ -162,6 +176,8 @@ def clear_archivist_topic_force_request(
     *,
     project_root: Path,
     topic_id: str,
+    layout: PathLayout | None = None,
+    db: MetadataDB | None = None,
 ) -> dict[str, Any]:
     """Clear a queued manual force request for an archivist topic."""
 
@@ -170,7 +186,7 @@ def clear_archivist_topic_force_request(
         project_root=project_root,
         topic_id=topic_id,
     )
-    metadata_db = _build_metadata_db(_as_config(config_data), project_root=project_root)
+    metadata_db = db or get_metadata_db()
     state = clear_archivist_topic_force(topic.id, db=metadata_db)
     return {
         "status": "ok",
@@ -288,12 +304,6 @@ def _build_registry_override_config(
     config = Config()
     config.data = updated
     return config
-
-
-def _build_metadata_db(config: Config, *, project_root: Path) -> MetadataDB:
-    layout = build_path_layout(config, project_root=project_root)
-    layout.ensure_directories()
-    return MetadataDB(str(layout.database_path))
 
 
 def _as_config(config_data: dict[str, Any]) -> Config:

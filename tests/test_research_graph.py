@@ -58,8 +58,10 @@ def _paper(
 
 
 def test_research_graph_dedupes_edges_and_ranks_missing_candidates(tmp_path: Path):
-    db = MetadataDB(str(tmp_path / "meta.db"))
-    service = ResearchGraphService(db)
+    cfg = _config(tmp_path)
+    layout = build_path_layout(cfg, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = ResearchGraphService(db, config=cfg, layout=layout)
     shared_reference = {
         "title": "Shared Missing Paper",
         "arxiv_id": "2501.12345",

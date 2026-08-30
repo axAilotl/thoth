@@ -29,6 +29,7 @@ from .postgres import (
     open_postgres_connection,
     resolve_postgres_settings,
 )
+from .runtime_composition import validate_metadata_db_matches_layout
 from .retention_service import CaptureRetentionService, RetentionServiceError
 from .wiki_updater import CompiledWikiUpdater
 
@@ -60,6 +61,8 @@ class CaptureSurfaceService:
         self.lifecycle_service = lifecycle_service
         self.layout = layout
         self.db = db
+        if self.layout is not None and self.db is not None:
+            validate_metadata_db_matches_layout(self.db, self.layout)
 
     def list_sources(self) -> dict[str, Any]:
         """Return configured capture sources."""
@@ -406,8 +409,9 @@ def open_capture_surface(
         )
 
     surface_layout = layout or build_path_layout(config_obj)
-    surface_layout.ensure_directories()
     surface_db = db or MetadataDB(str(surface_layout.database_path))
+    validate_metadata_db_matches_layout(surface_db, surface_layout)
+    surface_layout.ensure_directories()
 
     try:
         with open_postgres_connection(settings) as conn:

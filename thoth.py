@@ -56,6 +56,7 @@ from processors.huggingface_likes_processor import HuggingFaceLikesProcessor
 from processors.youtube_processor import YouTubeProcessor
 from processors.transcription_processor import TranscriptionProcessor
 from core.download_tracker import get_download_tracker
+from core.runtime_composition import resolve_runtime_database
 
 
 logger = logging.getLogger(__name__)
@@ -3939,6 +3940,10 @@ Examples:
     }
     if args.command not in scaffold_exempt:
         ensure_wiki_scaffold(config)
+
+    # Resolve and register the canonical metadata database once per CLI run.
+    # Subcommands use get_metadata_db() or receive the same instance explicitly.
+    resolve_runtime_database(config)
 
     # Run command
     try:

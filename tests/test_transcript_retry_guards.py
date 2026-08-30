@@ -141,8 +141,8 @@ def test_transcript_llm_skips_recent_failed_chunk_and_uses_redacted_fallback(
         lambda: metadata_db,
     )
     monkeypatch.setattr(
-        "processors.transcript_llm_processor.llm_cache",
-        LLMCache(str(tmp_path / "llm_cache")),
+        "processors.transcript_llm_processor.get_llm_cache",
+        lambda: LLMCache(str(tmp_path / "llm_cache")),
     )
     monkeypatch.setattr(
         "processors.transcript_llm_processor.LLMInterface",
@@ -192,8 +192,8 @@ def test_transcript_llm_retries_after_failed_chunk_cooldown_expires(
         lambda: metadata_db,
     )
     monkeypatch.setattr(
-        "processors.transcript_llm_processor.llm_cache",
-        LLMCache(str(tmp_path / "llm_cache")),
+        "processors.transcript_llm_processor.get_llm_cache",
+        lambda: LLMCache(str(tmp_path / "llm_cache")),
     )
     monkeypatch.setattr(
         "processors.transcript_llm_processor.LLMInterface",
@@ -252,8 +252,8 @@ def test_transcript_llm_rejects_noisy_json_before_cache_write(
         lambda: metadata_db,
     )
     monkeypatch.setattr(
-        "processors.transcript_llm_processor.llm_cache",
-        llm_cache,
+        "processors.transcript_llm_processor.get_llm_cache",
+        lambda: llm_cache,
     )
     monkeypatch.setattr(
         "processors.transcript_llm_processor.LLMInterface",
@@ -295,8 +295,8 @@ def test_transcript_llm_accepts_fenced_json_and_trailing_comma(
         lambda: MetadataDB(db_path=str(tmp_path / "meta.db")),
     )
     monkeypatch.setattr(
-        "processors.transcript_llm_processor.llm_cache",
-        LLMCache(str(tmp_path / "llm_cache")),
+        "processors.transcript_llm_processor.get_llm_cache",
+        lambda: LLMCache(str(tmp_path / "llm_cache")),
     )
     monkeypatch.setattr(
         "processors.transcript_llm_processor.LLMInterface",
@@ -330,8 +330,8 @@ def test_youtube_single_chunk_validation_failure_writes_redacted_fallback(
         lambda: MetadataDB(db_path=str(tmp_path / "meta.db")),
     )
     monkeypatch.setattr(
-        "processors.transcript_llm_processor.llm_cache",
-        LLMCache(str(tmp_path / "llm_cache")),
+        "processors.transcript_llm_processor.get_llm_cache",
+        lambda: LLMCache(str(tmp_path / "llm_cache")),
     )
     monkeypatch.setattr(
         "processors.transcript_llm_processor.LLMInterface",
@@ -412,8 +412,8 @@ def test_transcript_llm_logs_source_label_and_output_path(
         lambda: metadata_db,
     )
     monkeypatch.setattr(
-        "processors.transcript_llm_processor.llm_cache",
-        LLMCache(str(tmp_path / "llm_cache")),
+        "processors.transcript_llm_processor.get_llm_cache",
+        lambda: LLMCache(str(tmp_path / "llm_cache")),
     )
     monkeypatch.setattr(
         "processors.transcript_llm_processor.LLMInterface",
@@ -459,8 +459,8 @@ def test_transcript_llm_uses_stable_chunk_ids_and_exposes_cache_stats(
         lambda: metadata_db,
     )
     monkeypatch.setattr(
-        "processors.transcript_llm_processor.llm_cache",
-        llm_cache,
+        "processors.transcript_llm_processor.get_llm_cache",
+        lambda: llm_cache,
     )
     monkeypatch.setattr(
         "processors.transcript_llm_processor.LLMInterface",

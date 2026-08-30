@@ -12,7 +12,7 @@ import time
 from core.data_models import Tweet, ProcessingStats
 from core.config import config
 from core.llm_interface import LLMInterface
-from core.llm_cache import llm_cache
+from core.llm_cache import get_llm_cache
 from .llm_processor import LLMProcessor
 
 logger = logging.getLogger(__name__)
@@ -167,7 +167,7 @@ class AsyncLLMProcessor(LLMProcessor):
             if self._is_task_enabled('tags'):
                 try:
                     cache_provider = self.llm_config.get('tasks', {}).get('tags', {}).get('provider', '')
-                    cached_tags = llm_cache.get(self._get_tweet_content_for_tagging(tweet), 'tags', cache_provider)
+                    cached_tags = get_llm_cache().get(self._get_tweet_content_for_tagging(tweet), 'tags', cache_provider)
                 except Exception:
                     cached_tags = None
                 if cached_tags:
@@ -180,7 +180,7 @@ class AsyncLLMProcessor(LLMProcessor):
             if self._is_task_enabled('summary') and self._should_summarize_tweet(tweet):
                 try:
                     cache_provider = self.llm_config.get('tasks', {}).get('summary', {}).get('provider', '')
-                    cached_summary = llm_cache.get(tweet.full_text or '', 'summary', cache_provider)
+                    cached_summary = get_llm_cache().get(tweet.full_text or '', 'summary', cache_provider)
                 except Exception:
                     cached_summary = None
                 if cached_summary:
@@ -210,7 +210,7 @@ class AsyncLLMProcessor(LLMProcessor):
                     tweet.llm_tags = result
                     try:
                         cache_provider = self.llm_config.get('tasks', {}).get('tags', {}).get('provider', '')
-                        llm_cache.set(self._get_tweet_content_for_tagging(tweet), 'tags', result, cache_provider)
+                        get_llm_cache().set(self._get_tweet_content_for_tagging(tweet), 'tags', result, cache_provider)
                     except Exception:
                         pass
                     updated = True
@@ -218,7 +218,7 @@ class AsyncLLMProcessor(LLMProcessor):
                     tweet.llm_summary = result
                     try:
                         cache_provider = self.llm_config.get('tasks', {}).get('summary', {}).get('provider', '')
-                        llm_cache.set(tweet.full_text or '', 'summary', result, cache_provider)
+                        get_llm_cache().set(tweet.full_text or '', 'summary', result, cache_provider)
                     except Exception:
                         pass
                     updated = True

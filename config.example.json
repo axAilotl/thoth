@@ -518,7 +518,7 @@
   },
   "database": {
     "enabled": true,
-    "path": ".thoth_system/meta.db",
+    "path": "meta.db",
     "wal_mode": true,
     "auto_vacuum": true,
     "capture_event_store": {

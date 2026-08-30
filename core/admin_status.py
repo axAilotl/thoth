@@ -14,8 +14,8 @@ from .admin_lineage import wiki_lineage_status
 from .capture_event_store import CaptureEventStore
 from .config import Config
 from .llm_usage import build_llm_usage_status
-from .metadata_db import MetadataDB
-from .path_layout import build_path_layout
+from .metadata_db import MetadataDB, get_metadata_db
+from .path_layout import PathLayout, build_path_layout
 from .postgres import PostgresConfigError, open_postgres_connection, resolve_postgres_settings
 
 
@@ -23,6 +23,7 @@ def build_admin_status_dashboard(
     config_data: dict[str, Any],
     *,
     project_root: Path,
+    layout: PathLayout | None = None,
     db: MetadataDB | None = None,
     event_store: Any | None = None,
     now: datetime | None = None,
@@ -31,9 +32,11 @@ def build_admin_status_dashboard(
     """Build capture/compile health data from operational stores."""
 
     runtime_config = _as_config(config_data)
-    layout = build_path_layout(runtime_config, project_root=project_root)
-    layout.ensure_directories()
-    metadata_db = db or MetadataDB(str(layout.database_path))
+    resolved_layout = layout or build_path_layout(
+        runtime_config, project_root=project_root
+    )
+    metadata_db = db or get_metadata_db()
+    resolved_layout.ensure_directories()
     now_dt = parse_datetime(now) or datetime.now(timezone.utc)
 
     def build_with_store(
@@ -48,21 +51,21 @@ def build_admin_status_dashboard(
         queue_payload = queue_status(metadata_db)
         stale_payload = stale_pages_status(
             runtime_config,
-            layout=layout,
+            layout=resolved_layout,
             event_store=active_event_store,
             project_root=project_root,
             stale_after_days=stale_after_days,
         )
         compiler_payload = compiler_status(
             runtime_config,
-            layout=layout,
+            layout=resolved_layout,
             db=metadata_db,
             project_root=project_root,
             now=now_dt,
         )
         lineage_payload = wiki_lineage_status(
             runtime_config,
-            layout=layout,
+            layout=resolved_layout,
             db=metadata_db,
             project_root=project_root,
             event_store=active_event_store,
@@ -98,9 +101,9 @@ def build_admin_status_dashboard(
             "status": "degraded" if degraded else "ok",
             "generated_at": dt_text(now_dt),
             "layout": {
-                "database_path": str(layout.database_path),
-                "wiki_root": str(layout.wiki_root),
-                "system_root": str(layout.system_root),
+                "database_path": str(resolved_layout.database_path),
+                "wiki_root": str(resolved_layout.wiki_root),
+                "system_root": str(resolved_layout.system_root),
             },
             "source_health": capture_payload["source_health"],
             "recent_sessions": capture_payload["recent_sessions"],
@@ -133,7 +136,7 @@ def build_admin_status_dashboard(
             active_store = CaptureEventStore(
                 conn,
                 schema=settings.schema,
-                raw_roots=[layout.raw_root],
+                raw_roots=[resolved_layout.raw_root],
             )
             return build_with_store(active_store)
     except Exception as exc:

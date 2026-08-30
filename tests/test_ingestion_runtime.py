@@ -25,6 +25,7 @@ from core.ingestion_runtime import (
     UnsupportedArtifactTypeError,
 )
 from core.metadata_db import IngestionQueueEntry, MetadataDB
+from core.path_layout import build_path_layout
 from core.prompt_security import (
     PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
     THOTH_SECURITY_AUDIT_KEY,
@@ -65,7 +66,7 @@ def test_materialize_artifact_supports_known_types(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    runtime = KnowledgeArtifactRuntime()
+    runtime = KnowledgeArtifactRuntime(db=MetadataDB(str(build_path_layout(config).database_path)))
 
     tweet_entry = IngestionQueueEntry(
         artifact_id="tweet-1",
@@ -134,7 +135,7 @@ def test_materialized_artifacts_include_canonical_queue_contract(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    runtime = KnowledgeArtifactRuntime()
+    runtime = KnowledgeArtifactRuntime(db=MetadataDB(str(build_path_layout(config).database_path)))
     entry = IngestionQueueEntry(
         artifact_id="paper-queued",
         artifact_type="paper",
@@ -179,7 +180,7 @@ def test_materialized_artifact_canonical_metadata_preserves_prompt_findings(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    runtime = KnowledgeArtifactRuntime()
+    runtime = KnowledgeArtifactRuntime(db=MetadataDB(str(build_path_layout(config).database_path)))
     secret = "sk-proj-" + "b" * 32
     entry = IngestionQueueEntry(
         artifact_id="paper-suspicious",
@@ -216,7 +217,7 @@ def test_ingestion_queue_payload_persists_security_metadata(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     secret = "sk-proj-" + "c" * 32
     entry = IngestionQueueEntry(
         artifact_id="repo-suspicious",
@@ -254,7 +255,7 @@ def test_ingestion_queue_applies_quarantine_policy_and_audited_override(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     low_entry = IngestionQueueEntry(
         artifact_id="clip-low",
         artifact_type="web_clipper",
@@ -355,7 +356,7 @@ def test_ingestion_queue_routes_bad_artifacts_to_review_states(
     _configure_runtime_config(tmp_path)
     config.set("ingestion.max_review_payload_bytes", 4096)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     assert db.upsert_ingestion_entry(
         IngestionQueueEntry(
             artifact_id="bad-json",
@@ -417,7 +418,7 @@ def test_web_clipper_materialization_preserves_raw_and_derived_locations(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    runtime = KnowledgeArtifactRuntime()
+    runtime = KnowledgeArtifactRuntime(db=MetadataDB(str(build_path_layout(config).database_path)))
     artifact = WebClipperArtifact(
         id="webclip:Clippings/capture.md",
         source_type="web_clipper",
@@ -463,7 +464,7 @@ def test_serialized_tweet_artifact_materializes_with_canonical_outputs(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    runtime = KnowledgeArtifactRuntime()
+    runtime = KnowledgeArtifactRuntime(db=MetadataDB(str(build_path_layout(config).database_path)))
     artifact = TweetArtifact(
         id="123",
         source_type="twitter",
@@ -550,7 +551,7 @@ def test_canonical_metadata_people_do_not_replace_artifact_link(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     service = CanonicalIdentityService(db)
     paper = PaperArtifact(
         id="2401.12345",
@@ -623,7 +624,7 @@ def test_process_pending_ingestions_marks_processed(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     runtime = KnowledgeArtifactRuntime(db=db)
 
     repo_entry = IngestionQueueEntry(
@@ -660,7 +661,7 @@ def test_process_pending_ingestions_respects_concurrency_and_cancel_event(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     runtime = KnowledgeArtifactRuntime(db=db)
     for index in range(4):
         assert db.upsert_ingestion_entry(
@@ -730,7 +731,7 @@ def test_process_ingestion_entry_requeues_cancelled_processing_row(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     entry = IngestionQueueEntry(
         artifact_id="repo-cancelled",
         artifact_type="repository",
@@ -778,7 +779,7 @@ def test_process_pending_ingestions_does_not_drop_siblings_after_one_failure(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     runtime = KnowledgeArtifactRuntime(db=db)
     for index in range(3):
         assert db.upsert_ingestion_entry(
@@ -826,7 +827,7 @@ def test_process_pending_ingestions_deduplicates_imported_doc_wiki_pages(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     runtime = KnowledgeArtifactRuntime(db=db)
     layout = runtime.layout
     clippings = layout.vault_root / "Clippings"
@@ -908,7 +909,7 @@ def test_process_pending_ingestions_routes_materialization_errors_to_review(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     runtime = KnowledgeArtifactRuntime(db=db)
     entry = IngestionQueueEntry(
         artifact_id="bad-capabilities",
@@ -938,7 +939,7 @@ def test_runtime_fails_closed_when_quarantined_entry_is_called_directly(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    db = MetadataDB()
+    db = MetadataDB(str(build_path_layout(config).database_path))
     runtime = KnowledgeArtifactRuntime(db=db)
     entry = IngestionQueueEntry(
         artifact_id="repo-review",
@@ -968,7 +969,7 @@ async def test_bookmark_payload_uses_shared_runtime(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
 
-    runtime = KnowledgeArtifactRuntime()
+    runtime = KnowledgeArtifactRuntime(db=MetadataDB(str(build_path_layout(config).database_path)))
     
     async def fake_process_tweets_pipeline(*args, **kwargs):
         return SimpleNamespace(processed_tweets=1)

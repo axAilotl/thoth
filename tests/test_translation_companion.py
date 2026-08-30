@@ -6,6 +6,7 @@ import pytest
 from core.artifacts import WebClipperArtifact
 from core.config import Config, config
 from core.llm_interface import LLMResponse
+from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
 from core.translation_companion import EnglishCompanionPublisher, TranslationRuntimeError
 
@@ -67,6 +68,7 @@ async def test_translation_companion_publishes_english_note(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
     layout = build_path_layout(config)
+    db = MetadataDB(str(layout.database_path))
 
     source_note = layout.vault_root / "Clippings" / "capture.md"
     source_note.parent.mkdir(parents=True, exist_ok=True)
@@ -104,6 +106,7 @@ async def test_translation_companion_publishes_english_note(
         config,
         layout=layout,
         llm_interface=FakeTranslationLLM(),
+        db=db,
     )
 
     result = await publisher.publish_web_clipper_artifact(artifact)
@@ -131,6 +134,7 @@ async def test_translation_companion_rejects_schema_mismatch_before_write(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
     layout = build_path_layout(config)
+    db = MetadataDB(str(layout.database_path))
     source_note = layout.vault_root / "Clippings" / "capture.md"
     source_note.parent.mkdir(parents=True, exist_ok=True)
     source_note.write_text("---\ntitle: ejemplo\nlang: es\n---\n\nContenido.\n", encoding="utf-8")
@@ -153,6 +157,7 @@ async def test_translation_companion_rejects_schema_mismatch_before_write(
         config,
         layout=layout,
         llm_interface=InvalidTranslationLLM(),
+        db=db,
     )
 
     with pytest.raises(TranslationRuntimeError, match="validation failed"):
@@ -168,6 +173,7 @@ async def test_translation_companion_skips_english_source(
     monkeypatch.chdir(tmp_path)
     _configure_runtime_config(tmp_path)
     layout = build_path_layout(config)
+    db = MetadataDB(str(layout.database_path))
 
     source_note = layout.vault_root / "Clippings" / "capture.md"
     source_note.parent.mkdir(parents=True, exist_ok=True)
@@ -201,6 +207,7 @@ async def test_translation_companion_skips_english_source(
         config,
         layout=layout,
         llm_interface=FakeTranslationLLM(),
+        db=db,
     )
 
     result = await publisher.publish_web_clipper_artifact(artifact)
