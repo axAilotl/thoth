@@ -276,3 +276,91 @@ def test_omi_agent_surface_runs_api_source_from_env(
 
     assert result["result"]["api_conversation_count"] == 1
     assert result["result"]["queued_count"] == 1
+
+
+def test_omi_api_metadata_only_records_are_skipped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = _config(tmp_path)
+    config.set("sources.omi.api_key", "omi_dev_test-key")
+    config.set("sources.omi.include_transcript", False)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+
+    async def fake_fetch(query):
+        assert query.include_transcript is False
+        return [
+            {
+                "id": "conv_meta",
+                "started_at": "2026-05-02T10:00:00Z",
+                "structured": {"title": "Metadata only conversation"},
+            }
+        ]
+
+    monkeypatch.setattr(
+        "collectors.personal_transcript_connector.fetch_omi_conversations",
+        fake_fetch,
+    )
+    connector = PersonalTranscriptConnector(config, layout=layout, db=db)
+
+    result = asyncio.run(connector.collect(limit=1))
+
+    assert result.api_conversation_count == 1
+    assert result.queued_count == 0
+    assert result.skipped_count == 1
+    assert result.skip_reason == "metadata_only_no_transcript"
+    assert result.records == ()
+
+    result_dict = result.to_dict()
+    assert result_dict["api_conversation_count"] == 1
+    assert result_dict["queued_count"] == 0
+    assert result_dict["skipped_count"] == 1
+    assert result_dict["skip_reason"] == "metadata_only_no_transcript"
+
+    raw_paths = list(
+        (layout.raw_root / "personal_transcripts" / "omi").glob("api_conv-meta-*.json")
+    )
+    assert len(raw_paths) == 1
+    raw_payload = json.loads(raw_paths[0].read_text(encoding="utf-8"))
+    assert raw_payload["id"] == "conv_meta"
+
+
+def test_omi_api_mixed_records_skip_metadata_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = _config(tmp_path)
+    config.set("sources.omi.api_key", "omi_dev_test-key")
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+
+    async def fake_fetch(query):
+        return [
+            {
+                "id": "conv_meta",
+                "started_at": "2026-05-02T10:00:00Z",
+                "structured": {"title": "Metadata only conversation"},
+            },
+            {
+                "id": "conv_transcript",
+                "transcript_segments": [
+                    {"speaker": "Ada", "text": "This one has transcript text."}
+                ],
+            },
+        ]
+
+    monkeypatch.setattr(
+        "collectors.personal_transcript_connector.fetch_omi_conversations",
+        fake_fetch,
+    )
+    connector = PersonalTranscriptConnector(config, layout=layout, db=db)
+
+    result = asyncio.run(connector.collect(limit=2))
+
+    assert result.api_conversation_count == 2
+    assert result.queued_count == 1
+    assert result.skipped_count == 1
+    assert result.skip_reason == "metadata_only_no_transcript"
+    assert len(result.records) == 1
+    assert result.records[0].session_id == "conv_transcript"

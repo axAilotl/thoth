@@ -53,6 +53,12 @@ class PersonalTranscriptResult:
     export_paths: tuple[str, ...] = field(default_factory=tuple)
     export_dirs: tuple[str, ...] = field(default_factory=tuple)
     api_conversation_count: int = 0
+    skipped_count: int = 0
+    skip_reason: str | None = None
+
+    @property
+    def queued_count(self) -> int:
+        return sum(1 for record in self.records if record.queued)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,10 +73,12 @@ class PersonalTranscriptResult:
                 }
                 for record in self.records
             ],
-            "queued_count": sum(1 for record in self.records if record.queued),
+            "queued_count": self.queued_count,
             "export_paths": list(self.export_paths),
             "export_dirs": list(self.export_dirs),
             "api_conversation_count": self.api_conversation_count,
+            "skipped_count": self.skipped_count,
+            "skip_reason": self.skip_reason,
         }
 
 
@@ -245,6 +253,8 @@ class PersonalTranscriptConnector:
                         )
 
         api_conversation_count = 0
+        skipped_count = 0
+        skip_reason: str | None = None
         if api_query is not None:
             conversations = await fetch_omi_conversations(api_query)
             api_conversation_count = len(conversations)
@@ -256,12 +266,19 @@ class PersonalTranscriptConnector:
                         defaults.source_name,
                         source_label="api",
                     )
-                    session = _session_from_mapping(
-                        conversation,
-                        fallback_id="omi-api",
-                        index=index,
-                        defaults=defaults,
-                    )
+                    try:
+                        session = _session_from_mapping(
+                            conversation,
+                            fallback_id="omi-api",
+                            index=index,
+                            defaults=defaults,
+                        )
+                    except ValueError as exc:
+                        if "has no transcript text" not in str(exc):
+                            raise
+                        skipped_count += 1
+                        skip_reason = "metadata_only_no_transcript"
+                        continue
                     records.append(
                         self._queue_session(
                             session,
@@ -277,6 +294,8 @@ class PersonalTranscriptConnector:
             export_paths=tuple(str(path) for path in resolved_paths),
             export_dirs=tuple(str(path) for path in resolved_dirs),
             api_conversation_count=api_conversation_count,
+            skipped_count=skipped_count,
+            skip_reason=skip_reason,
         )
 
     def _resolve_input_files(
