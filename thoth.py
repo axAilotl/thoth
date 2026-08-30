@@ -11,7 +11,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from collections import Counter
 from typing import Dict, List, Any
 
 # Add current directory to path for imports
@@ -84,7 +83,7 @@ def load_cached_data(limit: int = None, verbose: bool = False):
     return tweets, url_mappings
 
 
-def setup_logging(verbose: bool = False):
+def setup_logging(verbose: bool = False, *, file_logging: bool = True):
     """Setup logging configuration"""
     level = logging.DEBUG if verbose else logging.INFO
 
@@ -97,18 +96,17 @@ def setup_logging(verbose: bool = False):
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
 
-    # File handler - write into the canonical runtime log path.
-    log_file = build_path_layout(config).log_file
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(formatter)
-
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
     root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
+    if file_logging:
+        # Normal command execution keeps the canonical runtime file logger.
+        log_file = build_path_layout(config).log_file
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
 
     # Reduce noise from other libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -1668,16 +1666,15 @@ async def cmd_social(args):
 
 async def cmd_web_clipper(args):
     """Index explicit Web Clipper source directories."""
-    from core.metadata_db import get_metadata_db
-
     layout = build_path_layout(config)
-    db = get_metadata_db()
 
     if getattr(args, "plan", False):
+        from core.metadata_db import get_metadata_db
+
         service = AgentSurfaceService(
             config,
             layout=layout,
-            db=db,
+            db=get_metadata_db(),
         )
         payload = service.plan_web_clipper()
         if getattr(args, "json", False):
@@ -1693,6 +1690,9 @@ async def cmd_web_clipper(args):
         print("❌ Web Clipper collection is disabled in config")
         return
 
+    from core.metadata_db import get_metadata_db
+
+    db = get_metadata_db()
     collector = WebClipperCollector(
         config,
         layout=layout,
@@ -1724,29 +1724,6 @@ async def cmd_web_clipper(args):
         result = await runtime.publish_english_companion(record.artifact)
         if result.status in {"created", "updated"}:
             translated += 1
-
-    if getattr(args, "json", False):
-        _print_json(
-            {
-                "schema_version": "1.0",
-                "tool": "thoth",
-                "surface": "web-clipper",
-                "counts": {
-                    "source_directories": len(collector.contract.watch_dirs),
-                    "files": len(discovered),
-                    "new_or_changed": changed,
-                    "notes_queued": queued,
-                    "attachments_staged": staged,
-                    "english_companions": translated,
-                    "by_file_type": _counts_by(discovered, "file_type"),
-                },
-                "records": [
-                    _serialize_web_clipper_record(record)
-                    for record in discovered
-                ],
-            }
-        )
-        return
 
     print(f"✅ Scanned {len(discovered)} files from {len(collector.contract.watch_dirs)} source directories.")
     print(f"   New or changed files: {changed}")
@@ -1925,42 +1902,6 @@ def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
-def _counts_by(records: list[Any], attr_name: str) -> dict[str, int]:
-    return dict(
-        sorted(
-            Counter(str(getattr(record, attr_name, "")) for record in records).items()
-        )
-    )
-
-
-def _serialize_web_clipper_record(record: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "path": str(record.path),
-        "root": str(record.root),
-        "source_id": record.source_id,
-        "file_type": record.file_type,
-        "size_bytes": record.size_bytes,
-        "sha256": record.sha256,
-        "updated_at": record.updated_at,
-        "is_new_or_changed": record.is_new_or_changed,
-        "would_queue": getattr(record, "would_queue", False),
-        "would_stage": getattr(record, "would_stage", False),
-    }
-    managed_path = getattr(record, "managed_path", None)
-    if managed_path is not None:
-        payload["managed_path"] = str(managed_path)
-    artifact = getattr(record, "artifact", None)
-    if artifact is not None:
-        payload["artifact"] = {
-            "id": getattr(artifact, "id", ""),
-            "source_type": getattr(artifact, "source_type", ""),
-            "file_type": getattr(artifact, "file_type", ""),
-            "title": getattr(artifact, "title", ""),
-            "source_url": getattr(artifact, "source_url", None),
-        }
-    return payload
-
-
 def _render_web_clipper_plan(payload: dict[str, Any]) -> None:
     print("Web Clipper plan")
     if not payload["plan"]["ready"]:
@@ -2002,20 +1943,6 @@ def _render_x_api_sync_plan(payload: dict[str, Any]) -> None:
     print(f"   Resume from checkpoint: {params['resume_from_checkpoint']}")
     print("   No network request, queue write, processing run, or checkpoint write occurred.")
     print("   Run without --plan to execute the X API sync.")
-
-
-def _serialize_ingest_queue_results(results: list[Any]) -> list[dict[str, Any]]:
-    from dataclasses import asdict, is_dataclass
-
-    serialized: list[dict[str, Any]] = []
-    for result in results:
-        if is_dataclass(result):
-            serialized.append(asdict(result))
-        elif hasattr(result, "__dict__"):
-            serialized.append(dict(result.__dict__))
-        else:
-            serialized.append({"value": str(result)})
-    return serialized
 
 
 def _read_json_arg(value: str | None, *, field_name: str) -> dict[str, Any] | None:
@@ -2507,27 +2434,6 @@ async def cmd_ingest_queue(args):
     print("📥 Processing ingestion queue...")
     results = await runtime.process_pending_ingestions_once(limit=limit)
 
-    if getattr(args, "json", False):
-        _print_json(
-            {
-                "schema_version": "1.0",
-                "tool": "thoth",
-                "surface": "ingest-queue",
-                "limit": limit,
-                "counts": {
-                    "results": len(results),
-                    "processed": sum(
-                        1 for result in results if result.status == "processed"
-                    ),
-                    "skipped": sum(
-                        1 for result in results if result.status == "skipped"
-                    ),
-                },
-                "results": _serialize_ingest_queue_results(results),
-            }
-        )
-        return
-
     if not results:
         print("✅ No pending ingestion entries found")
         return
@@ -2889,17 +2795,6 @@ async def cmd_x_api_sync(args):
         resume_from_checkpoint=not args.no_resume,
         process_immediately=True,
     )
-
-    if getattr(args, "json", False):
-        _print_json(
-            {
-                "schema_version": "1.0",
-                "tool": "thoth",
-                "surface": "x-api-sync",
-                "result": result,
-            }
-        )
-        return
 
     print(f"✅ User: {result['user_id']}")
     print(f"   Pages fetched: {result['pages_fetched']}")
@@ -3765,7 +3660,7 @@ Examples:
     x_api_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit sync plan or run result as JSON",
+        help="Emit the sync plan as JSON (requires --plan)",
     )
 
     # X API connection test command
@@ -3792,7 +3687,7 @@ Examples:
     web_clipper_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit Web Clipper plan or run result as JSON",
+        help="Emit the Web Clipper plan as JSON (requires --plan)",
     )
 
     connectors_parser = subparsers.add_parser(
@@ -4268,13 +4163,27 @@ Examples:
     ingest_queue_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit queue plan or processing result as JSON",
+        help="Emit the queue plan as JSON (requires --plan)",
     )
 
     args = parser.parse_args()
 
-    # Setup logging
-    setup_logging(args.verbose)
+    plan_only_command = (
+        args.command in {"web-clipper", "ingest-queue", "x-api-sync"}
+        and getattr(args, "plan", False)
+    )
+    if (
+        args.command in {"web-clipper", "ingest-queue", "x-api-sync"}
+        and getattr(args, "json", False)
+        and not plan_only_command
+    ):
+        parser.error(f"{args.command} --json requires --plan")
+
+    plan_json_command = plan_only_command and getattr(args, "json", False)
+    diagnostic_stream = sys.stderr if plan_json_command else sys.stdout
+
+    # Planning is read-only, so it deliberately avoids creating or writing a log file.
+    setup_logging(args.verbose, file_logging=not plan_only_command)
 
     validation_exempt = {
         "artifacts",
@@ -4287,16 +4196,11 @@ Examples:
         "x-api-test",
     }
 
-    plan_only_command = (
-        args.command in {"web-clipper", "ingest-queue", "x-api-sync"}
-        and getattr(args, "plan", False)
-    )
-
     # Validate configuration (allow offline-safe commands even if invalid)
     if args.command not in validation_exempt and not config.validate_and_warn():
         print(
             "⚠️ Configuration validation failed. Check logs for details.",
-            file=sys.stderr,
+            file=diagnostic_stream,
         )
         offline_safe = {
             "stats",
@@ -4330,7 +4234,7 @@ Examples:
         if args.command not in offline_safe:  # Block only network-heavy commands
             print(
                 "❌ Cannot proceed with invalid configuration for this command",
-                file=sys.stderr,
+                file=diagnostic_stream,
             )
             sys.exit(1)
 
@@ -4424,14 +4328,14 @@ Examples:
         elif args.command == "ingest-queue":
             asyncio.run(cmd_ingest_queue(args))
     except KeyboardInterrupt:
-        print("\n❌ Interrupted by user", file=sys.stderr)
+        print("\n❌ Interrupted by user", file=diagnostic_stream)
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Error: {e}", file=sys.stderr)
+        print(f"❌ Error: {e}", file=diagnostic_stream)
         if args.verbose:
             import traceback
 
-            traceback.print_exc(file=sys.stderr)
+            traceback.print_exc(file=diagnostic_stream)
         sys.exit(1)
 
 

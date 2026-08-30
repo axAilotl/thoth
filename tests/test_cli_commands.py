@@ -606,6 +606,21 @@ def test_x_api_sync_plan_json_uses_agent_safe_envelope():
     assert "Configuration validation failed" not in result.stdout
 
 
+def test_ingestion_json_output_requires_plan_mode():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    for command in ("web-clipper", "ingest-queue", "x-api-sync"):
+        result = subprocess.run(
+            [sys.executable, "thoth.py", command, "--json"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 2
+        assert f"{command} --json requires --plan" in result.stderr
+
+
 class _FakeMetadataDB:
     """Minimal stand-in for MetadataDB reads used by plan surfaces."""
 

@@ -836,3 +836,45 @@ def test_stable_agent_cli_groups_are_wired():
             text=True,
         )
         assert result.returncode == 0, result.stderr
+
+
+def test_web_clipper_plan_reports_disabled_surface(tmp_path: Path):
+    config = _config(tmp_path)
+    config.set("sources.web_clipper.enabled", False)
+    config.set("sources.web_clipper.note_dirs", ["Clippings"])
+    config.set("sources.web_clipper.attachment_dirs", ["clipper-assets"])
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    db = MetadataDB(str(layout.database_path))
+
+    payload = AgentSurfaceService(config, layout=layout, db=db).plan_web_clipper()
+
+    assert payload["plan"]["ready"] is False
+    assert payload["plan"]["issues"] == ["sources.web_clipper.enabled is false"]
+    assert payload["plan"]["counts"]["source_directories"] == 2
+    assert payload["plan"]["records"] == []
+
+
+def test_web_clipper_plan_does_not_swallow_unexpected_errors(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from collectors.web_clipper_collector import WebClipperCollector
+
+    config = _config(tmp_path)
+    config.set("sources.web_clipper.enabled", True)
+    config.set("sources.web_clipper.note_dirs", ["Clippings"])
+    config.set("sources.web_clipper.attachment_dirs", [])
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    (layout.vault_root / "Clippings").mkdir(parents=True)
+    db = MetadataDB(str(layout.database_path))
+    monkeypatch.setattr(
+        WebClipperCollector,
+        "plan",
+        lambda self: (_ for _ in ()).throw(RuntimeError("unexpected scan failure")),
+    )
+
+    service = AgentSurfaceService(config, layout=layout, db=db)
+    with pytest.raises(RuntimeError, match="unexpected scan failure"):
+        service.plan_web_clipper()

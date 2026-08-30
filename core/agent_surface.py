@@ -594,32 +594,40 @@ class AgentSurfaceService:
 
     def plan_web_clipper(self) -> dict[str, Any]:
         """Return a read-only plan for the Web Clipper ingestion surface."""
-        from collectors.web_clipper_collector import WebClipperCollector
-
-        try:
-            collector = WebClipperCollector(
-                self.config,
-                layout=self.layout,
-                db=self.db,
-            )
-            records = collector.plan()
-            issues: list[str] = []
-            ready = True
-        except Exception as exc:
-            issues = [str(exc)]
-            ready = False
-            records = []
-            collector = None
-
-        watch_dirs = (
-            list(collector.contract.watch_dirs)
-            if collector is not None
-            else []
+        from collectors.web_clipper_collector import (
+            WebClipperCollector,
+            WebClipperSourceError,
         )
+        from collectors.web_clipper_layout import build_web_clipper_contract
+        from collectors.web_clipper_parser import WebClipperParseError
+
+        issues: list[str] = []
+        records: list[Any] = []
+        watch_dirs: list[Path] = []
+        try:
+            contract = build_web_clipper_contract(self.config, layout=self.layout)
+        except ValueError as exc:
+            issues.append(str(exc))
+        else:
+            watch_dirs = list(contract.watch_dirs)
+            if self.config.get("sources.web_clipper.enabled", True) is False:
+                issues.append("sources.web_clipper.enabled is false")
+            else:
+                try:
+                    collector = WebClipperCollector(
+                        self.config,
+                        layout=self.layout,
+                        contract=contract,
+                        db=self.db,
+                    )
+                    records = collector.plan()
+                except (WebClipperSourceError, WebClipperParseError) as exc:
+                    issues.append(str(exc))
+
         return build_agent_plan_response(
             surface="web-clipper",
             plan={
-                "ready": ready,
+                "ready": not issues,
                 "issues": issues,
                 "source_directories": [str(path) for path in watch_dirs],
                 "mutation": {
@@ -684,18 +692,15 @@ class AgentSurfaceService:
         resume_from_checkpoint: bool,
     ) -> dict[str, Any]:
         """Return a read-only plan for the X API bookmark backfill surface."""
+        from .x_api_auth import X_API_REQUIRED_SCOPES, X_API_TOKEN_FILENAME
+
         x_api_config = self.config.get("sources.x_api", {}) or {}
         if not isinstance(x_api_config, dict):
             x_api_config = {}
 
         scopes = [str(scope) for scope in x_api_config.get("scopes", []) or []]
         normalized_scopes = {scope.strip() for scope in scopes if scope.strip()}
-        required_scopes = {
-            "bookmark.read",
-            "tweet.read",
-            "users.read",
-            "offline.access",
-        }
+        required_scopes = set(X_API_REQUIRED_SCOPES)
         missing_scopes = sorted(required_scopes.difference(normalized_scopes))
         client_id_configured = bool(
             str(x_api_config.get("client_id") or "").strip()
@@ -717,7 +722,7 @@ class AgentSurfaceService:
                 "sources.x_api.scopes is missing: " + ", ".join(missing_scopes)
             )
 
-        token_path = self.layout.auth_root / "x_api_tokens.json"
+        token_path = self.layout.auth_root / X_API_TOKEN_FILENAME
         checkpoint_path = self.layout.auth_root / "x_api_bookmark_sync_checkpoint.json"
         if not token_path.exists():
             issues.append("Stored X API token bundle is missing")

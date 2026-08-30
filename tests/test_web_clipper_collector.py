@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from collectors.web_clipper_collector import WebClipperCollector
+from collectors.web_clipper_parser import WebClipperMarkdownError
 from core.config import Config
 from core.connector_budgets import ConnectorBudgetError
 from core.ingestion_runtime import IngestionRuntimeError, KnowledgeArtifactRuntime
@@ -131,6 +132,17 @@ def test_web_clipper_collector_reindexes_changed_files(tmp_path: Path):
     third_pass = collector.collect()
     assert len(third_pass) == 1
     assert third_pass[0].is_new_or_changed is True
+
+
+def test_web_clipper_plan_and_collect_share_note_decode_errors(tmp_path: Path):
+    collector, vault_root = make_collector(tmp_path)
+    note_file = vault_root / "Clippings" / "invalid.md"
+    note_file.write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(WebClipperMarkdownError, match="Failed to decode"):
+        collector.plan()
+    with pytest.raises(WebClipperMarkdownError, match="Failed to decode"):
+        collector.collect()
 
 
 def test_web_clipper_collector_queues_notes_for_shared_runtime(
