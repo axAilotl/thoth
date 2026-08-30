@@ -18,12 +18,14 @@ from core.x_api_auth import (
     generate_pkce_pair,
     load_pending_x_api_auth,
     load_x_api_token_bundle,
-    redact_x_api_secrets,
     refresh_x_api_tokens,
     resolve_x_api_auth_config,
     start_x_api_auth,
     store_x_api_token_bundle,
     summarize_x_api_auth,
+)
+from core.x_api_diagnostics import (
+    redact_x_api_secrets,
     test_x_api_connection as run_x_api_connection_test,
 )
 
@@ -662,7 +664,7 @@ def test_redact_x_api_secrets_removes_tokens_and_secrets():
 
 
 def test_test_x_api_connection_redacts_secrets_in_output(tmp_path: Path, monkeypatch):
-    from core import x_api_auth as x_api_auth_module
+    from core import x_api_diagnostics as x_api_diagnostics_module
 
     config = make_config(tmp_path)
     config.set("sources.x_api.client_secret_env", "X_API_CLIENT_SECRET")
@@ -690,7 +692,11 @@ def test_test_x_api_connection_redacts_secrets_in_output(tmp_path: Path, monkeyp
             "with secret leaked-client-secret"
         )
 
-    monkeypatch.setattr(x_api_auth_module, "refresh_x_api_tokens", fake_refresh_with_secret)
+    monkeypatch.setattr(
+        x_api_diagnostics_module,
+        "refresh_x_api_tokens",
+        fake_refresh_with_secret,
+    )
 
     result = pytest.importorskip("asyncio").run(
         run_x_api_connection_test(config, layout=layout)
