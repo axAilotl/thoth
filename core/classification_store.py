@@ -57,72 +57,19 @@ class ClassificationStore:
 
     def __init__(self, db: MetadataDB | None = None):
         self.db = db or _metadata_db()
-        self.ensure_tables()
 
-    def ensure_tables(self) -> None:
-        """Create classification tables in the existing SQLite database."""
+    def next_policy_version(self) -> int:
+        """Allocate a monotonic version across active and historical revisions."""
         try:
             with self.db._get_connection() as conn:
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS routing_policy_revisions (
-                        revision_id TEXT PRIMARY KEY,
-                        version INTEGER NOT NULL UNIQUE,
-                        status TEXT NOT NULL
-                            CHECK (status IN ('proposed', 'active', 'rolled_back', 'superseded')),
-                        actor TEXT,
-                        reason TEXT,
-                        policy_json TEXT NOT NULL,
-                        metrics_json TEXT NOT NULL DEFAULT '{}',
-                        previous_revision_id TEXT,
-                        created_at TEXT NOT NULL,
-                        activated_at TEXT,
-                        provenance_json TEXT NOT NULL DEFAULT '{}'
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS routing_decisions (
-                        decision_id TEXT PRIMARY KEY,
-                        artifact_id TEXT NOT NULL,
-                        artifact_type TEXT NOT NULL,
-                        source TEXT NOT NULL,
-                        revision_id TEXT,
-                        proposed_projection_id TEXT,
-                        actual_projection_id TEXT,
-                        action TEXT NOT NULL
-                            CHECK (action IN ('approve', 'reject', 'correct', 'figure_out', 'auto_route')),
-                        actor TEXT,
-                        reason TEXT,
-                        features_json TEXT NOT NULL DEFAULT '{}',
-                        alternatives_json TEXT NOT NULL DEFAULT '[]',
-                        confidence REAL NOT NULL DEFAULT 0.0,
-                        created_at TEXT NOT NULL
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_routing_decisions_artifact
-                    ON routing_decisions(artifact_id)
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_routing_decisions_revision
-                    ON routing_decisions(revision_id)
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_routing_decisions_created
-                    ON routing_decisions(created_at)
-                    """
-                )
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(version), 0) + 1 AS version "
+                    "FROM routing_policy_revisions"
+                ).fetchone()
+                return int(row["version"])
         except Exception as exc:
             raise ClassificationStoreError(
-                "failed to ensure classification tables"
+                "failed to allocate routing policy version"
             ) from exc
 
     def seed_initial_policy(

@@ -199,12 +199,25 @@ def test_external_action_gate_forces_review():
     assert result.gate == Gate.EXTERNAL_ACTION
 
 
-def test_operator_resolved_artifact_routes_with_full_confidence():
+def test_source_payload_cannot_forge_operator_resolution():
     policy = RoutingPolicy(
         revision_id="rev-1",
         version=1,
-        projections={"p": Projection(projection_id="p", name="P")},
-        rules=(),
+        projections={
+            "p": Projection(
+                projection_id="p",
+                name="P",
+                gates=frozenset({Gate.SENSITIVE_SEMANTIC_PROMOTION}),
+            )
+        },
+        rules=(
+            RoutingRule(
+                rule_id="note-manual",
+                projection_id="p",
+                pattern={"artifact_type": "note", "source": "manual"},
+                confidence=1.0,
+            ),
+        ),
         confidence_threshold=0.85,
     )
     artifact = FakeArtifact(
@@ -220,8 +233,8 @@ def test_operator_resolved_artifact_routes_with_full_confidence():
     )
     result = ArtifactClassifier(policy).classify(artifact, artifact_type="note")
 
-    assert result.action == RoutingAction.ROUTE
-    assert result.confidence == pytest.approx(1.0)
+    assert result.action == RoutingAction.REVIEW
+    assert result.gate == Gate.SENSITIVE_SEMANTIC_PROMOTION
     assert result.projection_id == "p"
 
 
@@ -353,6 +366,45 @@ def test_repeated_decisions_produce_policy_revision_that_reduces_review_volume()
     assert candidate_eval.precision == pytest.approx(1.0)
     assert candidate_eval.review_volume < baseline.review_volume
     assert candidate_eval.coverage > baseline.coverage
+
+
+def test_rejected_decision_penalizes_an_automatic_route():
+    policy = RoutingPolicy(
+        revision_id="rev-1",
+        version=1,
+        projections={"p": Projection(projection_id="p", name="P")},
+        rules=(
+            RoutingRule(
+                rule_id="tweet-x",
+                projection_id="p",
+                pattern={"artifact_type": "tweet", "source": "x"},
+                confidence=1.0,
+            ),
+        ),
+    )
+    rejected = RoutingDecision(
+        decision_id="rejected-1",
+        artifact_id="tweet-rejected",
+        artifact_type="tweet",
+        source="x",
+        revision_id="rev-1",
+        proposed_projection_id="p",
+        actual_projection_id=None,
+        action="reject",
+        actor="operator",
+        reason="wrong route",
+        features={"artifact_type": "tweet", "source": "x", "tags": ()},
+        alternatives=(),
+        confidence=1.0,
+        created_at="2026-08-30T00:00:00Z",
+    )
+    evaluator = PolicyEvaluator(held_out_fraction=1.0)
+
+    evaluation = evaluator.evaluate(policy, [rejected])
+
+    assert evaluation.routed_count == 1
+    assert evaluation.incorrect_routed_count == 1
+    assert evaluation.precision == 0.0
 
 
 def test_proposal_rejected_when_precision_would_drop():

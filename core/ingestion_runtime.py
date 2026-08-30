@@ -129,6 +129,8 @@ def _reviewable_artifact_error(exc: Exception) -> bool:
 
 
 def _review_category_for_error(exc: Exception) -> str:
+    if isinstance(exc, ClassificationReviewRequired):
+        return "classification"
     message = str(exc).lower()
     if "invalid json" in message or "decode" in message:
         return "malformed_payload"
@@ -382,7 +384,10 @@ class KnowledgeArtifactRuntime:
                 raise IngestionRuntimeError(
                     f"Ingestion artifact {entry.artifact_id} requires security review"
                 )
-            classification = self._classify_artifact(artifact)
+            classification = self._classify_artifact(
+                artifact,
+                artifact_type=entry.artifact_type,
+            )
             if classification is not None and classification.action == RoutingAction.REVIEW:
                 raise ClassificationReviewRequired(classification)
             canonical_identity = self._canonicalize_artifact(
@@ -414,6 +419,7 @@ class KnowledgeArtifactRuntime:
                 result.details.setdefault(
                     "routing_projection_id", classification.projection_id
                 )
+                self._record_auto_route(entry, classification)
             self._sync_wiki_for_artifact(
                 artifact,
                 dispatch_details=result.details,
@@ -449,7 +455,8 @@ class KnowledgeArtifactRuntime:
         error = f"artifact review required: {exc}"
         metadata: dict[str, Any] = {"stage": stage}
         if classification is not None:
-            metadata["classification"] = classification.to_review_event()
+            metadata = classification.to_review_event()
+            metadata["stage"] = stage
         updated = self.db.mark_ingestion_review_required(
             entry.artifact_id,
             category=_review_category_for_error(exc),
@@ -479,6 +486,8 @@ class KnowledgeArtifactRuntime:
     def _classify_artifact(
         self,
         artifact: KnowledgeArtifact,
+        *,
+        artifact_type: str,
     ) -> ClassificationResult | None:
         """Classify an artifact when the classification feature is enabled."""
         if not self.config.get("classification.enabled", False):
@@ -488,7 +497,44 @@ class KnowledgeArtifactRuntime:
         review_service = ClassificationReviewService(self.db, config=self.config)
         policy = review_service.get_active_policy()
         classifier = ArtifactClassifier(policy)
-        return classifier.classify(artifact, artifact_type=entry.artifact_type)
+        classification = classifier.classify(artifact, artifact_type=artifact_type)
+        resolution = review_service.operator_resolution(artifact.id, policy=policy)
+        if resolution is None:
+            return classification
+        projection_id = resolution.actual_projection_id
+        return ClassificationResult(
+            artifact_id=classification.artifact_id,
+            artifact_type=classification.artifact_type,
+            source=classification.source,
+            projection_id=projection_id,
+            confidence=1.0,
+            reasons=("durable operator routing decision",),
+            evidence={
+                "features": classification.evidence.get("features", {}),
+                "decision_id": resolution.decision_id,
+                "operator_resolved": True,
+            },
+            alternatives=(),
+            action=RoutingAction.ROUTE,
+        )
+
+    def _record_auto_route(
+        self,
+        entry: IngestionQueueEntry,
+        classification: ClassificationResult,
+    ) -> None:
+        if classification.action != RoutingAction.ROUTE:
+            return
+        if classification.evidence.get("operator_resolved"):
+            return
+        from .classification_review import ClassificationReviewService
+
+        ClassificationReviewService(self.db, config=self.config).record_auto_route(
+            artifact_id=entry.artifact_id,
+            artifact_type=entry.artifact_type,
+            source=entry.source,
+            classification=classification,
+        )
 
     def _canonicalize_artifact(
         self,

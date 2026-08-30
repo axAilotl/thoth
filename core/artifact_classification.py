@@ -178,6 +178,9 @@ class ClassificationResult:
         """Serialize as an ingestion review event payload."""
         return {
             "category": "classification",
+            "artifact_id": self.artifact_id,
+            "artifact_type": self.artifact_type,
+            "source": self.source,
             "projection_id": self.projection_id,
             "confidence": self.confidence,
             "reasons": list(self.reasons),
@@ -296,17 +299,11 @@ def _features_for_artifact(
     elif not isinstance(tags, (list, tuple)):
         tags = []
     normalized_tags = tuple(str(t).strip().lower() for t in tags if str(t).strip())
-    metadata = getattr(artifact, "normalized_metadata", None)
-    if not isinstance(metadata, Mapping):
-        metadata = {}
-    resolved = metadata.get("classification_resolved")
     features: dict[str, Any] = {
         "artifact_type": artifact_type,
         "source": source_type,
         "tags": normalized_tags,
     }
-    if isinstance(resolved, Mapping) and resolved.get("projection_id"):
-        features["resolved_projection_id"] = str(resolved["projection_id"]).strip()
     return features
 
 
@@ -383,24 +380,6 @@ class ArtifactClassifier:
         artifact_id = str(getattr(artifact, "id", "") or "unknown")
         artifact_type = str(features.get("artifact_type") or "unknown")
         source = str(features.get("source") or "unknown")
-
-        resolved_projection_id = features.get("resolved_projection_id")
-        if resolved_projection_id:
-            projection = self.policy.projections.get(resolved_projection_id)
-            return ClassificationResult(
-                artifact_id=artifact_id,
-                artifact_type=artifact_type,
-                source=source,
-                projection_id=resolved_projection_id,
-                confidence=1.0,
-                reasons=("operator resolved routing",),
-                evidence={
-                    "features": dict(features),
-                    "resolved": True,
-                },
-                alternatives=(),
-                action=RoutingAction.ROUTE,
-            )
 
         projection_id, confidence, evidence, alternatives = _projection_for_result(
             self.policy, features
@@ -480,9 +459,6 @@ class PolicyEvaluator:
         classifier = ArtifactClassifier(policy)
         for decision in held_out:
             actual = decision.actual_projection_id
-            if actual is None:
-                # Rejected items are not something we should auto-route.
-                continue
             features = dict(decision.features)
             # Build a lightweight artifact-like object for the classifier.
             pseudo = _PseudoArtifact(
@@ -495,7 +471,7 @@ class PolicyEvaluator:
             result = classifier.classify(pseudo)
             if result.action == RoutingAction.ROUTE:
                 routed += 1
-                if result.projection_id == actual:
+                if actual is not None and result.projection_id == actual:
                     correct += 1
                 else:
                     incorrect += 1
@@ -567,12 +543,19 @@ class PolicyEvaluator:
             accuracy = group["correct"] / total
             if accuracy < policy.min_precision:
                 continue
+            pattern = _simplify_features(group["features"])
+            if any(
+                rule.projection_id == projection_id
+                and rule.pattern == pattern
+                for rule in policy.rules
+            ):
+                continue
             rule_id = f"rule:{fingerprint}:{projection_id}"
             new_rules.append(
                 RoutingRule(
                     rule_id=rule_id,
                     projection_id=projection_id,
-                    pattern=_simplify_features(group["features"]),
+                    pattern=pattern,
                     confidence=accuracy,
                     support_count=total,
                     correct_count=group["correct"],
@@ -586,7 +569,7 @@ class PolicyEvaluator:
             revision_id=revision_id,
             version=policy.version + 1,
             projections=policy.projections,
-            rules=tuple(new_rules),
+            rules=tuple(policy.rules) + tuple(new_rules),
             confidence_threshold=policy.confidence_threshold,
             min_support=policy.min_support,
             min_precision=policy.min_precision,

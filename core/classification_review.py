@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from .artifact_classification import (
@@ -93,6 +94,11 @@ class ClassificationReviewService:
             )
         return items
 
+    def is_review_item(self, artifact_id: str) -> bool:
+        """Return whether an ingestion row carries a classification review."""
+        entry = self.db.get_ingestion_entry(artifact_id)
+        return bool(entry and _extract_classification_event(entry.review_json))
+
     def approve(
         self,
         artifact_id: str,
@@ -108,7 +114,7 @@ class ClassificationReviewService:
             raise ClassificationReviewError(
                 f"artifact {artifact_id} has no proposed projection to approve"
             )
-        self._record_decision(
+        decision = self._build_decision(
             entry=entry,
             classification=classification,
             action="approve",
@@ -117,13 +123,12 @@ class ClassificationReviewService:
             actual_projection_id=proposed,
             revision_id=policy.revision_id,
         )
-        updated = self._resolve_review(
-            artifact_id,
-            status="reviewed",
-            action="classification_approved",
+        updated = self.db.apply_classification_review_decision(
+            decision,
+            status="pending",
+            transition_action="classification_approved",
             actor=actor,
             reason=reason,
-            projection_id=proposed,
         )
         return {"artifact_id": artifact_id, "status": updated.status, "projection_id": proposed}
 
@@ -137,7 +142,7 @@ class ClassificationReviewService:
         """Reject routing for this artifact."""
         entry, classification = self._require_classification_review(artifact_id)
         policy = self.get_active_policy()
-        self._record_decision(
+        decision = self._build_decision(
             entry=entry,
             classification=classification,
             action="reject",
@@ -146,13 +151,12 @@ class ClassificationReviewService:
             actual_projection_id=None,
             revision_id=policy.revision_id,
         )
-        updated = self._resolve_review(
-            artifact_id,
+        updated = self.db.apply_classification_review_decision(
+            decision,
             status="rejected",
-            action="classification_rejected",
+            transition_action="classification_rejected",
             actor=actor,
             reason=reason,
-            projection_id=None,
         )
         return {"artifact_id": artifact_id, "status": updated.status, "projection_id": None}
 
@@ -171,7 +175,7 @@ class ClassificationReviewService:
             raise ClassificationReviewError(
                 f"unknown projection: {projection_id}"
             )
-        self._record_decision(
+        decision = self._build_decision(
             entry=entry,
             classification=classification,
             action="correct",
@@ -180,13 +184,12 @@ class ClassificationReviewService:
             actual_projection_id=projection_id,
             revision_id=policy.revision_id,
         )
-        updated = self._resolve_review(
-            artifact_id,
+        updated = self.db.apply_classification_review_decision(
+            decision,
             status="pending",
-            action="classification_corrected",
+            transition_action="classification_corrected",
             actor=actor,
             reason=reason,
-            projection_id=projection_id,
         )
         return {"artifact_id": artifact_id, "status": updated.status, "projection_id": projection_id}
 
@@ -213,6 +216,7 @@ class ClassificationReviewService:
         )
         if candidate is None:
             return None
+        candidate = replace(candidate, version=self.store.next_policy_version())
         baseline_eval = self._evaluator.evaluate(policy, decisions)
         candidate_eval = self._evaluator.evaluate(candidate, decisions)
         saved = self.store.save_proposed_revision(
@@ -238,7 +242,7 @@ class ClassificationReviewService:
             "revision_id": saved.revision_id,
             "version": saved.version,
             "previous_revision_id": saved.previous_revision_id,
-            "rules_added": len(saved.rules),
+            "rules_added": max(0, len(saved.rules) - len(policy.rules)),
             "metrics": {
                 "baseline": {
                     "precision": baseline_eval.precision,
@@ -339,7 +343,62 @@ class ClassificationReviewService:
             )
         return entry, classification
 
-    def _record_decision(
+    def operator_resolution(
+        self,
+        artifact_id: str,
+        *,
+        policy: RoutingPolicy,
+    ) -> RoutingDecision | None:
+        """Return the latest durable operator routing resolution, if any."""
+        for decision in self.store.list_decisions(artifact_id=artifact_id, limit=20):
+            if decision.action not in {"approve", "correct"}:
+                continue
+            projection_id = decision.actual_projection_id
+            if not projection_id or projection_id not in policy.projections:
+                raise ClassificationReviewError(
+                    f"operator resolution for {artifact_id} references unknown "
+                    f"projection {projection_id!r}"
+                )
+            return decision
+        return None
+
+    def record_auto_route(
+        self,
+        *,
+        artifact_id: str,
+        artifact_type: str,
+        source: str,
+        classification: ClassificationResult,
+    ) -> RoutingDecision:
+        """Persist a successful automatic route as evaluation evidence."""
+        policy = self.get_active_policy()
+        recent = self.store.list_decisions(artifact_id=artifact_id, limit=20)
+        for decision in recent:
+            if (
+                decision.action == "auto_route"
+                and decision.revision_id == policy.revision_id
+                and decision.actual_projection_id == classification.projection_id
+            ):
+                return decision
+        decision = RoutingDecision(
+            decision_id=_new_decision_id(),
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            source=source,
+            revision_id=policy.revision_id,
+            proposed_projection_id=classification.projection_id,
+            actual_projection_id=classification.projection_id,
+            action="auto_route",
+            actor="system",
+            reason="high-confidence automatic route",
+            features=classification.evidence.get("features", {}),
+            alternatives=classification.alternatives,
+            confidence=classification.confidence,
+            created_at=_now_iso(),
+        )
+        return self.store.record_decision(decision)
+
+    def _build_decision(
         self,
         *,
         entry: Any,
@@ -366,55 +425,7 @@ class ClassificationReviewService:
             confidence=classification.confidence,
             created_at=_now_iso(),
         )
-        self.store.record_decision(decision)
         return decision
-
-    def _resolve_review(
-        self,
-        artifact_id: str,
-        *,
-        status: str,
-        action: str,
-        actor: str,
-        reason: str,
-        projection_id: str | None,
-    ) -> Any:
-        """Update the queue row and, when routing, stamp the resolved projection."""
-        entry = self.db.get_ingestion_entry(artifact_id)
-        if entry is None:
-            raise ClassificationReviewError(f"artifact not found: {artifact_id}")
-
-        payload = _json_payload(entry.payload_json)
-        if projection_id is not None:
-            normalized_metadata = payload.get("normalized_metadata")
-            if not isinstance(normalized_metadata, Mapping):
-                normalized_metadata = {}
-            normalized_metadata["classification_resolved"] = {
-                "projection_id": projection_id,
-                "actor": actor,
-                "reason": reason,
-                "at": _now_iso(),
-            }
-            payload["normalized_metadata"] = normalized_metadata
-            self.db.update_ingestion_payload_json(
-                artifact_id,
-                json.dumps(payload, ensure_ascii=False, sort_keys=True),
-            )
-
-        metadata: dict[str, Any] = {"resolved_projection_id": projection_id}
-        updated = self.db.transition_ingestion_review(
-            artifact_id,
-            action=action,
-            status=status,
-            actor=actor,
-            reason=reason,
-            metadata=metadata,
-        )
-        if updated is None:
-            raise ClassificationReviewError(
-                f"failed to transition classification review for {artifact_id}"
-            )
-        return updated
 
 
 def _extract_classification_event(review_json: str | None) -> ClassificationResult | None:

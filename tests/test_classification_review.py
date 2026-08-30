@@ -16,6 +16,10 @@ from core.artifact_classification import (
     RoutingRule,
     policy_to_mapping,
 )
+from core.artifact_review_queue import (
+    ArtifactReviewQueueError,
+    ArtifactReviewQueueService,
+)
 from core.classification_review import (
     ClassificationReviewError,
     ClassificationReviewService,
@@ -216,7 +220,7 @@ def test_approve_records_decision_and_resolves_routing(svc: ClassificationReview
     )
 
     result = svc.approve("tweet-1", actor="operator", reason="looks right")
-    assert result["status"] == "reviewed"
+    assert result["status"] == "pending"
     assert result["projection_id"] == "tweet_markdown"
 
     decisions = svc.store.list_decisions(artifact_id="tweet-1")
@@ -225,8 +229,46 @@ def test_approve_records_decision_and_resolves_routing(svc: ClassificationReview
     assert decisions[0].actual_projection_id == "tweet_markdown"
 
     entry = db.get_ingestion_entry("tweet-1")
-    payload = json.loads(entry.payload_json)
-    assert payload["normalized_metadata"]["classification_resolved"]["projection_id"] == "tweet_markdown"
+    assert "classification_resolved" not in entry.payload_json
+
+
+def test_generic_review_actions_record_classification_decisions(
+    svc: ClassificationReviewService,
+):
+    db = svc.db
+    event = {
+        "artifact_id": "tweet-generic",
+        "artifact_type": "tweet",
+        "source": "twitter",
+        "projection_id": "tweet_markdown",
+        "confidence": 0.5,
+        "reasons": ["low confidence"],
+        "evidence": {
+            "features": {"artifact_type": "tweet", "source": "twitter", "tags": []}
+        },
+        "alternatives": [],
+        "action": "review",
+        "gated": False,
+    }
+    _review_entry(db, "tweet-generic", "tweet", "twitter", event)
+    queue = ArtifactReviewQueueService(db, config=_runtime_config)
+
+    assert queue.retry(
+        "tweet-generic", actor="operator", reason="approve proposed route"
+    ).status == "pending"
+    assert svc.store.list_decisions(artifact_id="tweet-generic")[0].action == "approve"
+
+    _review_entry(db, "tweet-reviewed", "tweet", "twitter", event | {
+        "artifact_id": "tweet-reviewed"
+    })
+    with pytest.raises(ArtifactReviewQueueError, match="require approve"):
+        queue.mark_reviewed(
+            "tweet-reviewed", actor="operator", reason="just mark it done"
+        )
+    assert queue.reject(
+        "tweet-reviewed", actor="operator", reason="reject route"
+    ).status == "rejected"
+    assert svc.store.list_decisions(artifact_id="tweet-reviewed")[0].action == "reject"
 
 
 def test_reject_records_decision_and_terminal_status(svc: ClassificationReviewService):
@@ -259,7 +301,9 @@ def test_reject_records_decision_and_terminal_status(svc: ClassificationReviewSe
     assert decisions[0].actual_projection_id is None
 
 
-def test_correct_records_decision_and_stamps_resolved_projection(svc: ClassificationReviewService):
+def test_correct_records_server_owned_decision_without_mutating_source_payload(
+    svc: ClassificationReviewService,
+):
     db = svc.db
     _review_entry(
         db,
@@ -296,8 +340,7 @@ def test_correct_records_decision_and_stamps_resolved_projection(svc: Classifica
     assert decisions[0].actual_projection_id == "paper_library"
 
     entry = db.get_ingestion_entry("paper-1")
-    payload = json.loads(entry.payload_json)
-    assert payload["normalized_metadata"]["classification_resolved"]["projection_id"] == "paper_library"
+    assert "classification_resolved" not in entry.payload_json
 
 
 def test_correct_unknown_projection_raises(svc: ClassificationReviewService):
@@ -460,3 +503,4 @@ def test_activate_and_rollback_policy_revision(svc: ClassificationReviewService)
     rolled = svc.rollback(actor="operator", reason="revert experiment")
     assert rolled["revision_id"] == policy.revision_id
     assert svc.get_active_policy().revision_id == policy.revision_id
+    assert svc.store.next_policy_version() == better.version + 1
