@@ -199,6 +199,53 @@ def test_semantic_memory_promotion_rejects_zero_evidence_confirmation(
     assert decision.evidence_count == 0
 
 
+def test_semantic_memory_promotion_rejects_explicit_confirmation_without_evidence(
+    tmp_path: Path,
+):
+    store = make_store(tmp_path)
+    candidate = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-explicit-no-evidence",
+            candidate_type="fact",
+            text="Explicit confirmation alone cannot promote without evidence.",
+        )
+    )
+    confirmed = store.transition_candidate(candidate.candidate_id, "confirmed")
+
+    with pytest.raises(SemanticMemoryTransitionError, match="at least one evidence"):
+        store.promote_candidate(confirmed.candidate_id)
+
+    decision = store.evaluate_promotion(confirmed.candidate_id)
+    assert decision.allowed is False
+    assert decision.explicitly_confirmed is True
+
+
+def test_semantic_memory_promotion_rejects_trusted_structured_input_without_evidence(
+    tmp_path: Path,
+):
+    store = make_store(
+        tmp_path,
+        promotion_policy=SemanticMemoryPromotionPolicy(
+            trusted_structured_metadata_keys=("operator_verified",),
+        ),
+    )
+    candidate = store.add_candidate(
+        SemanticMemoryCandidate(
+            candidate_id="candidate-trusted-no-evidence",
+            candidate_type="fact",
+            text="Trusted structured input flag alone cannot promote without evidence.",
+            metadata={"operator_verified": True},
+        )
+    )
+
+    with pytest.raises(SemanticMemoryTransitionError, match="at least one evidence"):
+        store.promote_candidate(candidate.candidate_id)
+
+    decision = store.evaluate_promotion(candidate.candidate_id)
+    assert decision.allowed is False
+    assert decision.trusted_structured_input is True
+
+
 def test_semantic_memory_review_service_records_auditable_actions(tmp_path: Path):
     store = make_store(tmp_path)
     candidate = store.add_candidate(
