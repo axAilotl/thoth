@@ -294,7 +294,7 @@ def verify_capsule(
                 capabilities=recipient_capabilities,
             ):
                 raise CapsuleError(
-                    f"cannot activate {submission['type']} {submission['id']}"
+                    f"cannot activate {requirement['name']} {submission['id']}"
                 )
         if kind == "link":
             for endpoint in (submission["from_id"], submission["to_id"]):
