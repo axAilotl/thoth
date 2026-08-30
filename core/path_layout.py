@@ -142,6 +142,7 @@ def _validate_scope_paths_in_content_roots(
     vault_root: Path,
     raw_root: Path,
     library_root: Path,
+    wiki_root: Path,
 ) -> None:
     """Fail closed when legacy scope paths lack the required ownership mode.
 
@@ -153,6 +154,7 @@ def _validate_scope_paths_in_content_roots(
         ("vault", vault_root, (ContentRootMode.MANAGED_INBOX,)),
         ("raw", raw_root, (ContentRootMode.MANAGED_INBOX,)),
         ("library", library_root, (ContentRootMode.MANAGED_INBOX,)),
+        ("wiki", wiki_root, (ContentRootMode.PROJECTION_OUTPUT,)),
     ):
         if policy.root_containing(scope_path, *modes) is None:
             mode_names = ", ".join(mode.value for mode in modes)
@@ -275,6 +277,7 @@ def build_path_layout(config: ConfigLike, *, project_root: Path | None = None) -
             vault_root=vault_root,
             raw_root=raw_root,
             library_root=library_root,
+            wiki_root=wiki_root,
         )
 
     return PathLayout(

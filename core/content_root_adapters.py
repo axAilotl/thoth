@@ -109,6 +109,17 @@ class FilesystemContentAdapter:
                 raise ContentAdapterError(
                     f"prefix escapes content root {root.root_id!r}: {prefix!r}"
                 ) from exc
+            if search_path.is_file():
+                self._check_symlink(search_path)
+                stat = search_path.stat()
+                yield ArtifactHandle(
+                    root_id=root.root_id,
+                    relpath=search_path.relative_to(root_path).as_posix(),
+                    locator=search_path,
+                    digest=_hash_file(search_path),
+                    size_bytes=stat.st_size,
+                )
+                return
             if not search_path.is_dir():
                 return
 

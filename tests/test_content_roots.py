@@ -363,6 +363,7 @@ def test_path_layout_loads_configured_content_roots(tmp_path: Path):
     config.set("paths.vault_dir", str(tmp_path / "vault"))
     config.set("paths.system_dir", ".thoth_system")
     config.set("paths.cache_dir", "graphql_cache")
+    config.set("paths.wiki_dir", str(tmp_path / "published"))
     config.set("database.path", "meta.db")
     config.set(
         "content_roots",
@@ -467,6 +468,12 @@ def test_write_connector_raw_json_is_idempotent(tmp_path: Path):
                 "adapter": "filesystem",
                 "path": str(tmp_path / "inbox"),
             },
+            {
+                "id": "wiki",
+                "mode": "projection_output",
+                "adapter": "filesystem",
+                "path": str(tmp_path / "wiki"),
+            },
         ],
     )
 
@@ -489,6 +496,45 @@ def test_write_connector_raw_json_is_idempotent(tmp_path: Path):
     )
     assert path1 == path2
     assert path1.exists()
+
+    path1.write_text("tampered", encoding="utf-8")
+    with pytest.raises(ValueError, match="different content"):
+        write_connector_raw_json(
+            layout,
+            connector_name="test",
+            native_id="abc",
+            payload=payload,
+            captured_at=captured_at,
+        )
+
+
+def test_wiki_scope_must_be_projection_output(tmp_path: Path):
+    config.data = {}
+    config.set("paths.vault_dir", str(tmp_path / "vault"))
+    config.set("paths.wiki_dir", str(tmp_path / "wiki"))
+    config.set("paths.system_dir", ".thoth_system")
+    config.set("paths.cache_dir", "graphql_cache")
+    config.set("database.path", "meta.db")
+    config.set(
+        "content_roots",
+        [
+            {
+                "id": "vault",
+                "mode": "managed_inbox",
+                "adapter": "filesystem",
+                "path": str(tmp_path / "vault"),
+            },
+            {
+                "id": "wiki",
+                "mode": "protected",
+                "adapter": "filesystem",
+                "path": str(tmp_path / "wiki"),
+            },
+        ],
+    )
+
+    with pytest.raises(ContentRootError, match="wiki scope path.*projection_output"):
+        build_path_layout(config, project_root=tmp_path)
 
 
 def test_memory_adapter_enforces_modes_and_is_deterministic(
