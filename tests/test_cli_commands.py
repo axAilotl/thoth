@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import core.metadata_db as metadata_db_module
+
 
 def test_removed_playwright_commands_are_rejected():
     repo_root = Path(__file__).resolve().parents[1]
@@ -525,3 +527,197 @@ def test_memory_candidate_cli_lists_details_and_reviews(monkeypatch, capsys):
 
     thoth.cmd_memory(_memory_args("promote"))
     assert json.loads(capsys.readouterr().out)["candidate"]["status"] == "promoted"
+
+
+def _assert_ingestion_plan_envelope(payload, surface):
+    """Pin the agent-safe plan response envelope contract."""
+    assert payload["response_type"] == "thoth.ingestion_plan_response"
+    assert payload["schema_version"] == "1.0"
+    assert payload["surface"] == surface
+    assert payload["response_id"].startswith("ipr_")
+    assert payload["action_boundary"]["mode"] == "plan_preview"
+    assert payload["action_boundary"]["plan_payload_path"] == "plan"
+    assert payload["action_boundary"]["executable_instructions_present"] is False
+    mutation = payload["plan"]["mutation"]
+    assert all(value is False for value in mutation.values())
+
+
+def test_web_clipper_plan_json_uses_agent_safe_envelope():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, "thoth.py", "web-clipper", "--plan", "--json"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    _assert_ingestion_plan_envelope(payload, "web-clipper")
+    assert "records" in payload["plan"]
+    assert "Configuration validation failed" not in result.stdout
+
+
+def test_ingest_queue_plan_json_uses_agent_safe_envelope():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, "thoth.py", "ingest-queue", "--plan", "--json", "--limit", "1"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    _assert_ingestion_plan_envelope(payload, "ingest-queue")
+    assert payload["plan"]["limit"] == 1
+    assert "entries" in payload["plan"]
+    assert "Configuration validation failed" not in result.stdout
+
+
+def test_x_api_sync_plan_json_uses_agent_safe_envelope():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "thoth.py",
+            "x-api-sync",
+            "--plan",
+            "--json",
+            "--max-pages",
+            "1",
+            "--max-results",
+            "10",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    _assert_ingestion_plan_envelope(payload, "x-api-sync")
+    assert payload["plan"]["parameters"]["max_pages"] == 1
+    assert payload["plan"]["parameters"]["max_results"] == 10
+    assert payload["plan"]["mutation"]["will_contact_x_api"] is False
+    assert "Configuration validation failed" not in result.stdout
+
+
+class _FakeMetadataDB:
+    """Minimal stand-in for MetadataDB reads used by plan surfaces."""
+
+    def __init__(self, db_path, *, pending=None, files=None):
+        self.db_path = db_path
+        self._pending = pending or []
+        self._files = files or {}
+
+    def get_pending_ingestions(self, limit=None):
+        if limit is None:
+            return list(self._pending)
+        return list(self._pending[:limit])
+
+    def get_file_entry(self, path):
+        return self._files.get(path)
+
+
+def test_web_clipper_plan_has_no_ingestion_side_effects(monkeypatch, capsys, tmp_path):
+    import thoth
+    from collectors.web_clipper_collector import WebClipperCollector
+    from core import agent_surface
+    from core import ingestion_runtime
+
+    monkeypatch.setattr(
+        agent_surface, "validate_metadata_db_matches_layout", lambda _db, _layout: None
+    )
+
+    fake_db = _FakeMetadataDB(str(tmp_path / "meta.db"))
+    monkeypatch.setattr(metadata_db_module, "get_metadata_db", lambda: fake_db)
+
+    class _RaisingRuntime:
+        async def publish_english_companion(self, artifact):
+            raise AssertionError("publish_english_companion must not be called in plan mode")
+
+    monkeypatch.setattr(
+        ingestion_runtime, "get_knowledge_artifact_runtime", lambda *a, **kw: _RaisingRuntime()
+    )
+    monkeypatch.setattr(
+        WebClipperCollector,
+        "collect",
+        lambda self: raise_assert("collect must not be called in plan mode"),
+    )
+
+    args = SimpleNamespace(plan=True, json=True)
+    asyncio.run(thoth.cmd_web_clipper(args))
+
+    payload = json.loads(capsys.readouterr().out)
+    _assert_ingestion_plan_envelope(payload, "web-clipper")
+
+
+def test_ingest_queue_plan_has_no_ingestion_side_effects(monkeypatch, capsys, tmp_path):
+    import thoth
+    from core import agent_surface
+    from core import ingestion_runtime
+    from core.metadata_db import IngestionQueueEntry
+
+    monkeypatch.setattr(
+        agent_surface, "validate_metadata_db_matches_layout", lambda _db, _layout: None
+    )
+
+    fake_db = _FakeMetadataDB(
+        str(tmp_path / "meta.db"),
+        pending=[
+            IngestionQueueEntry(
+                artifact_id="artifact-1",
+                artifact_type="web_clipper",
+                source="web_clipper",
+                payload_json='{"title": "note"}',
+            )
+        ],
+    )
+    monkeypatch.setattr(metadata_db_module, "get_metadata_db", lambda: fake_db)
+
+    def _raising_runtime(*args, **kwargs):
+        raise AssertionError("process_pending_ingestions_once must not be called in plan mode")
+
+    monkeypatch.setattr(ingestion_runtime, "get_knowledge_artifact_runtime", _raising_runtime)
+
+    args = SimpleNamespace(plan=True, json=True, limit=5)
+    asyncio.run(thoth.cmd_ingest_queue(args))
+
+    payload = json.loads(capsys.readouterr().out)
+    _assert_ingestion_plan_envelope(payload, "ingest-queue")
+    assert payload["plan"]["limit"] == 5
+    assert payload["plan"]["counts"]["pending"] == 1
+
+
+def test_x_api_sync_plan_has_no_ingestion_side_effects(monkeypatch, capsys, tmp_path):
+    import thoth
+    import thoth_api
+    from core import agent_surface
+
+    monkeypatch.setattr(
+        agent_surface, "validate_metadata_db_matches_layout", lambda _db, _layout: None
+    )
+
+    fake_db = _FakeMetadataDB(str(tmp_path / "meta.db"))
+    monkeypatch.setattr(metadata_db_module, "get_metadata_db", lambda: fake_db)
+
+    async def _raising_sync(*args, **kwargs):
+        raise AssertionError("run_x_api_bookmark_sync must not be called in plan mode")
+
+    monkeypatch.setattr(thoth_api, "run_x_api_bookmark_sync", _raising_sync)
+
+    args = SimpleNamespace(plan=True, json=True, max_results=10, max_pages=1, no_resume=False)
+    asyncio.run(thoth.cmd_x_api_sync(args))
+
+    payload = json.loads(capsys.readouterr().out)
+    _assert_ingestion_plan_envelope(payload, "x-api-sync")
+    assert payload["plan"]["parameters"]["max_pages"] == 1
+    assert payload["plan"]["parameters"]["max_results"] == 10
+
+
+def raise_assert(message):
+    raise AssertionError(message)

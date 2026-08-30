@@ -58,6 +58,8 @@ class WebClipperFileRecord:
     is_new_or_changed: bool
     artifact: WebClipperArtifact | None = None
     managed_path: Path | None = None
+    would_queue: bool = False
+    would_stage: bool = False
 
 
 class WebClipperCollector:
@@ -116,6 +118,25 @@ class WebClipperCollector:
                     )
                 elif file_type == "attachment":
                     discovered.append(self._index_attachment_file(path, root=root))
+
+        return discovered
+
+    def plan(self) -> List[WebClipperFileRecord]:
+        """Scan the configured allowlist without writing queue or file entries."""
+        discovered: List[WebClipperFileRecord] = []
+        targets: list[tuple[Path, Path, str]] = []
+
+        for root in self.contract.note_dirs:
+            targets.extend(self._discover_root(root, expected_type="note"))
+
+        for root in self.contract.attachment_dirs:
+            targets.extend(self._discover_root(root, expected_type="attachment"))
+
+        for path, root, file_type in targets:
+            if file_type == "note":
+                discovered.append(self._plan_note_file(path, root=root))
+            elif file_type == "attachment":
+                discovered.append(self._plan_attachment_file(path, root=root))
 
         return discovered
 
@@ -348,6 +369,106 @@ class WebClipperCollector:
                 managed_path=managed_path,
             ),
             managed_path=managed_path,
+        )
+
+    def _plan_note_file(
+        self,
+        path: Path,
+        *,
+        root: Path,
+    ) -> WebClipperFileRecord:
+        self._ensure_safe_source_path(path)
+        source_text = path.read_text(encoding="utf-8")
+        parsed_note = self._parse_note(path, source_text)
+
+        stat = path.stat()
+        size_bytes = stat.st_size
+        updated_at = datetime.fromtimestamp(stat.st_mtime).isoformat()
+        sha256 = self._sha256_file(path)
+        source_id = str(path.relative_to(self.layout.vault_root))
+        file_type = "note"
+        existing = self.db.get_file_entry(str(path))
+        is_new_or_changed = (
+            existing is None
+            or existing.file_type != file_type
+            or existing.size_bytes != size_bytes
+            or existing.hash != sha256
+            or existing.source_id != source_id
+        )
+
+        return WebClipperFileRecord(
+            path=path,
+            root=root,
+            source_id=source_id,
+            file_type=file_type,
+            size_bytes=size_bytes,
+            sha256=sha256,
+            updated_at=updated_at,
+            is_new_or_changed=is_new_or_changed,
+            artifact=self._build_artifact(
+                parsed_note,
+                source_path=path,
+                source_id=source_id,
+                size_bytes=size_bytes,
+                sha256=sha256,
+            ),
+            would_queue=is_new_or_changed,
+        )
+
+    def _plan_attachment_file(
+        self,
+        path: Path,
+        *,
+        root: Path,
+    ) -> WebClipperFileRecord:
+        self._ensure_safe_source_path(path)
+        stat = path.stat()
+        size_bytes = stat.st_size
+        updated_at = datetime.fromtimestamp(stat.st_mtime).isoformat()
+        sha256 = self._sha256_file(path)
+        source_id = str(path.relative_to(self.layout.vault_root))
+        file_type = "attachment"
+        existing = self.db.get_file_entry(str(path))
+        is_new_or_changed = (
+            existing is None
+            or existing.file_type != file_type
+            or existing.size_bytes != size_bytes
+            or existing.hash != sha256
+            or existing.source_id != source_id
+        )
+
+        managed_path = self._managed_attachment_path(source_id)
+        attachment_asset_type = self._attachment_asset_type(path)
+        same_path = managed_path.resolve() == path.resolve()
+        would_stage = (
+            not same_path
+            and (
+                is_new_or_changed
+                or not managed_path.exists()
+                or not validate_existing_asset(
+                    managed_path, asset_type=attachment_asset_type
+                )
+            )
+        )
+
+        return WebClipperFileRecord(
+            path=path,
+            root=root,
+            source_id=source_id,
+            file_type=file_type,
+            size_bytes=size_bytes,
+            sha256=sha256,
+            updated_at=updated_at,
+            is_new_or_changed=is_new_or_changed,
+            artifact=self._build_attachment_artifact(
+                source_path=path,
+                source_id=source_id,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                managed_path=managed_path,
+            ),
+            managed_path=managed_path,
+            would_stage=would_stage,
         )
 
     def _parse_note(self, path: Path, source_text: str) -> WebClipperParsedNote:

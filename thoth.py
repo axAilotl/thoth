@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from collections import Counter
 from typing import Dict, List, Any
 
 # Add current directory to path for imports
@@ -98,6 +99,7 @@ def setup_logging(verbose: bool = False):
 
     # File handler - write into the canonical runtime log path.
     log_file = build_path_layout(config).log_file
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
@@ -1666,16 +1668,31 @@ async def cmd_social(args):
 
 async def cmd_web_clipper(args):
     """Index explicit Web Clipper source directories."""
+    from core.metadata_db import get_metadata_db
+
+    layout = build_path_layout(config)
+    db = get_metadata_db()
+
+    if getattr(args, "plan", False):
+        service = AgentSurfaceService(
+            config,
+            layout=layout,
+            db=db,
+        )
+        payload = service.plan_web_clipper()
+        if getattr(args, "json", False):
+            _print_json(payload)
+            return
+        _render_web_clipper_plan(payload)
+        return
+
     from collectors.web_clipper_collector import WebClipperCollector
     from core.ingestion_runtime import get_knowledge_artifact_runtime
-    from core.metadata_db import get_metadata_db
 
     if config.get("sources.web_clipper.enabled", True) is False:
         print("❌ Web Clipper collection is disabled in config")
         return
 
-    layout = build_path_layout(config)
-    db = get_metadata_db()
     collector = WebClipperCollector(
         config,
         layout=layout,
@@ -1700,11 +1717,6 @@ async def cmd_web_clipper(args):
         for record in discovered
         if record.file_type == "attachment" and record.is_new_or_changed
     )
-
-    print(f"✅ Scanned {len(discovered)} files from {len(collector.contract.watch_dirs)} source directories.")
-    print(f"   New or changed files: {changed}")
-    print(f"   Notes queued for shared ingestion: {queued}")
-    print(f"   Attachments staged: {staged}")
     translated = 0
     for record in discovered:
         if record.artifact is None or record.file_type != "note":
@@ -1713,12 +1725,34 @@ async def cmd_web_clipper(args):
         if result.status in {"created", "updated"}:
             translated += 1
 
+    if getattr(args, "json", False):
+        _print_json(
+            {
+                "schema_version": "1.0",
+                "tool": "thoth",
+                "surface": "web-clipper",
+                "counts": {
+                    "source_directories": len(collector.contract.watch_dirs),
+                    "files": len(discovered),
+                    "new_or_changed": changed,
+                    "notes_queued": queued,
+                    "attachments_staged": staged,
+                    "english_companions": translated,
+                    "by_file_type": _counts_by(discovered, "file_type"),
+                },
+                "records": [
+                    _serialize_web_clipper_record(record)
+                    for record in discovered
+                ],
+            }
+        )
+        return
+
     print(f"✅ Scanned {len(discovered)} files from {len(collector.contract.watch_dirs)} source directories.")
     print(f"   New or changed files: {changed}")
     print(f"   English companions: {translated}")
     print(f"   Notes queued for shared ingestion: {queued}")
     print(f"   Attachments staged: {staged}")
-    print(f"   English companions: {translated}")
 
 
 def cmd_connectors(args):
@@ -1889,6 +1923,99 @@ def cmd_connectors(args):
 
 def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _counts_by(records: list[Any], attr_name: str) -> dict[str, int]:
+    return dict(
+        sorted(
+            Counter(str(getattr(record, attr_name, "")) for record in records).items()
+        )
+    )
+
+
+def _serialize_web_clipper_record(record: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "path": str(record.path),
+        "root": str(record.root),
+        "source_id": record.source_id,
+        "file_type": record.file_type,
+        "size_bytes": record.size_bytes,
+        "sha256": record.sha256,
+        "updated_at": record.updated_at,
+        "is_new_or_changed": record.is_new_or_changed,
+        "would_queue": getattr(record, "would_queue", False),
+        "would_stage": getattr(record, "would_stage", False),
+    }
+    managed_path = getattr(record, "managed_path", None)
+    if managed_path is not None:
+        payload["managed_path"] = str(managed_path)
+    artifact = getattr(record, "artifact", None)
+    if artifact is not None:
+        payload["artifact"] = {
+            "id": getattr(artifact, "id", ""),
+            "source_type": getattr(artifact, "source_type", ""),
+            "file_type": getattr(artifact, "file_type", ""),
+            "title": getattr(artifact, "title", ""),
+            "source_url": getattr(artifact, "source_url", None),
+        }
+    return payload
+
+
+def _render_web_clipper_plan(payload: dict[str, Any]) -> None:
+    print("Web Clipper plan")
+    if not payload["plan"]["ready"]:
+        print("   Ready: no")
+        for issue in payload["plan"]["issues"]:
+            print(f"   Issue: {issue}")
+        print("   Re-run after fixing the Web Clipper source configuration.")
+        return
+
+    counts = payload["plan"]["counts"]
+    print(f"   Ready: yes")
+    print(f"   Source directories: {counts['source_directories']}")
+    print(f"   Files scanned: {counts['files']}")
+    print(f"   New or changed: {counts['new_or_changed']}")
+    print(f"   Notes that would be queued: {counts['would_queue_notes']}")
+    print(f"   Attachments that would be staged: {counts['would_stage_attachments']}")
+    print("   No files, queue entries, or attachments were changed.")
+    print("   Run without --plan to execute the Web Clipper ingest.")
+
+
+def _render_ingest_queue_plan(payload: dict[str, Any]) -> None:
+    counts = payload["plan"]["counts"]
+    print("Ingestion queue plan")
+    print(f"   Pending entries selected: {counts['pending']}")
+    if payload["plan"]["limit"] is not None:
+        print(f"   Limit: {payload['plan']['limit']}")
+    print("   No queue rows, artifacts, or wiki pages were changed.")
+    print("   Run without --plan to process these entries.")
+
+
+def _render_x_api_sync_plan(payload: dict[str, Any]) -> None:
+    print("X API sync plan")
+    print(f"   Ready: {'yes' if payload['plan']['ready'] else 'no'}")
+    for issue in payload["plan"]["issues"]:
+        print(f"   Issue: {issue}")
+    params = payload["plan"]["parameters"]
+    print(f"   Max pages: {params['max_pages']}")
+    print(f"   Max results per page: {params['max_results']}")
+    print(f"   Resume from checkpoint: {params['resume_from_checkpoint']}")
+    print("   No network request, queue write, processing run, or checkpoint write occurred.")
+    print("   Run without --plan to execute the X API sync.")
+
+
+def _serialize_ingest_queue_results(results: list[Any]) -> list[dict[str, Any]]:
+    from dataclasses import asdict, is_dataclass
+
+    serialized: list[dict[str, Any]] = []
+    for result in results:
+        if is_dataclass(result):
+            serialized.append(asdict(result))
+        elif hasattr(result, "__dict__"):
+            serialized.append(dict(result.__dict__))
+        else:
+            serialized.append({"value": str(result)})
+    return serialized
 
 
 def _read_json_arg(value: str | None, *, field_name: str) -> dict[str, Any] | None:
@@ -2359,11 +2486,47 @@ async def cmd_ingest_queue(args):
     from core.metadata_db import get_metadata_db
 
     layout = build_path_layout(config)
-    runtime = get_knowledge_artifact_runtime(config, layout=layout, db=get_metadata_db())
-
+    db = get_metadata_db()
     limit = getattr(args, "limit", None)
+
+    if getattr(args, "plan", False):
+        service = AgentSurfaceService(
+            config,
+            layout=layout,
+            db=db,
+        )
+        payload = service.plan_ingest_queue(limit=limit)
+        if getattr(args, "json", False):
+            _print_json(payload)
+            return
+        _render_ingest_queue_plan(payload)
+        return
+
+    runtime = get_knowledge_artifact_runtime(config, layout=layout, db=db)
+
     print("📥 Processing ingestion queue...")
     results = await runtime.process_pending_ingestions_once(limit=limit)
+
+    if getattr(args, "json", False):
+        _print_json(
+            {
+                "schema_version": "1.0",
+                "tool": "thoth",
+                "surface": "ingest-queue",
+                "limit": limit,
+                "counts": {
+                    "results": len(results),
+                    "processed": sum(
+                        1 for result in results if result.status == "processed"
+                    ),
+                    "skipped": sum(
+                        1 for result in results if result.status == "skipped"
+                    ),
+                },
+                "results": _serialize_ingest_queue_results(results),
+            }
+        )
+        return
 
     if not results:
         print("✅ No pending ingestion entries found")
@@ -2698,6 +2861,25 @@ async def cmd_okf(args):
 
 async def cmd_x_api_sync(args):
     """Backfill bookmarks from the X API and process them immediately."""
+    from core.metadata_db import get_metadata_db
+
+    if getattr(args, "plan", False):
+        service = AgentSurfaceService(
+            config,
+            layout=build_path_layout(config),
+            db=get_metadata_db(),
+        )
+        payload = service.plan_x_api_sync(
+            max_results=args.max_results,
+            max_pages=args.max_pages,
+            resume_from_checkpoint=not args.no_resume,
+        )
+        if getattr(args, "json", False):
+            _print_json(payload)
+            return
+        _render_x_api_sync_plan(payload)
+        return
+
     from thoth_api import run_x_api_bookmark_sync
 
     print("🔁 Backfilling bookmarks from X API...")
@@ -2707,6 +2889,17 @@ async def cmd_x_api_sync(args):
         resume_from_checkpoint=not args.no_resume,
         process_immediately=True,
     )
+
+    if getattr(args, "json", False):
+        _print_json(
+            {
+                "schema_version": "1.0",
+                "tool": "thoth",
+                "surface": "x-api-sync",
+                "result": result,
+            }
+        )
+        return
 
     print(f"✅ User: {result['user_id']}")
     print(f"   Pages fetched: {result['pages_fetched']}")
@@ -3564,6 +3757,16 @@ Examples:
         action="store_true",
         help="Ignore the stored sync checkpoint and restart from the newest page",
     )
+    x_api_parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Preview sync parameters and auth readiness without calling the X API",
+    )
+    x_api_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit sync plan or run result as JSON",
+    )
 
     # X API connection test command
     x_api_test_parser = subparsers.add_parser(
@@ -3580,6 +3783,16 @@ Examples:
     web_clipper_parser = subparsers.add_parser(
         "web-clipper",
         help="Index files from the configured Web Clipper source directories",
+    )
+    web_clipper_parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Preview discovered files without indexing, queueing, or staging assets",
+    )
+    web_clipper_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit Web Clipper plan or run result as JSON",
     )
 
     connectors_parser = subparsers.add_parser(
@@ -4047,6 +4260,16 @@ Examples:
         default=None,
         help="Maximum number of queue entries to process",
     )
+    ingest_queue_parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Preview due queue entries without processing them",
+    )
+    ingest_queue_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit queue plan or processing result as JSON",
+    )
 
     args = parser.parse_args()
 
@@ -4064,9 +4287,17 @@ Examples:
         "x-api-test",
     }
 
+    plan_only_command = (
+        args.command in {"web-clipper", "ingest-queue", "x-api-sync"}
+        and getattr(args, "plan", False)
+    )
+
     # Validate configuration (allow offline-safe commands even if invalid)
     if args.command not in validation_exempt and not config.validate_and_warn():
-        print("⚠️ Configuration validation failed. Check logs for details.")
+        print(
+            "⚠️ Configuration validation failed. Check logs for details.",
+            file=sys.stderr,
+        )
         offline_safe = {
             "stats",
             "artifacts",
@@ -4097,7 +4328,10 @@ Examples:
             "db",
         }
         if args.command not in offline_safe:  # Block only network-heavy commands
-            print("❌ Cannot proceed with invalid configuration for this command")
+            print(
+                "❌ Cannot proceed with invalid configuration for this command",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     # Default to stats if no command given
@@ -4114,7 +4348,7 @@ Examples:
         "research",
         "x-api-test",
     }
-    if args.command not in scaffold_exempt:
+    if args.command not in scaffold_exempt and not plan_only_command:
         ensure_wiki_scaffold(config)
 
     # Resolve and register the canonical metadata database once per CLI run.
@@ -4190,14 +4424,14 @@ Examples:
         elif args.command == "ingest-queue":
             asyncio.run(cmd_ingest_queue(args))
     except KeyboardInterrupt:
-        print("\n❌ Interrupted by user")
+        print("\n❌ Interrupted by user", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error: {e}", file=sys.stderr)
         if args.verbose:
             import traceback
 
-            traceback.print_exc()
+            traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
