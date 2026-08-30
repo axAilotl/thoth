@@ -925,6 +925,59 @@ class MetadataDB:
         """)
         self._ensure_ingestion_queue_statuses(conn)
 
+        # Versioned, person-scoped artifact routing policy and decision data.
+        # MetadataDB owns this schema so constructing a service never performs
+        # an implicit migration through a private connection.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS routing_policy_revisions (
+                revision_id TEXT PRIMARY KEY,
+                version INTEGER NOT NULL UNIQUE,
+                status TEXT NOT NULL CHECK (
+                    status IN ('proposed', 'active', 'rolled_back', 'superseded')
+                ),
+                actor TEXT,
+                reason TEXT,
+                policy_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL DEFAULT '{}',
+                previous_revision_id TEXT,
+                created_at TEXT NOT NULL,
+                activated_at TEXT,
+                provenance_json TEXT NOT NULL DEFAULT '{}'
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS routing_decisions (
+                decision_id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                revision_id TEXT,
+                proposed_projection_id TEXT,
+                actual_projection_id TEXT,
+                action TEXT NOT NULL CHECK (
+                    action IN ('approve', 'reject', 'correct', 'figure_out', 'auto_route')
+                ),
+                actor TEXT,
+                reason TEXT,
+                features_json TEXT NOT NULL DEFAULT '{}',
+                alternatives_json TEXT NOT NULL DEFAULT '[]',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_routing_decisions_artifact
+            ON routing_decisions(artifact_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_routing_decisions_revision
+            ON routing_decisions(revision_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_routing_decisions_created
+            ON routing_decisions(created_at)
+        """)
+
         # Canonical identity tables for duplicate detection across connectors.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS canonical_entities (
@@ -4387,6 +4440,113 @@ class MetadataDB:
             metadata=metadata,
         )
 
+    def apply_classification_review_decision(
+        self,
+        decision: Any,
+        *,
+        transition_action: str,
+        status: str,
+        actor: str,
+        reason: str,
+    ) -> IngestionQueueEntry:
+        """Atomically record a routing decision and requeue/close its artifact."""
+        clean_actor = str(actor or "").strip()
+        clean_reason = str(reason or "").strip()
+        if status not in {"pending", "rejected"}:
+            raise ValueError(f"Unsupported classification target status: {status}")
+        if not clean_actor or not clean_reason:
+            raise ValueError("Classification decisions require actor and reason")
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM ingestion_queue WHERE artifact_id = ?",
+                (decision.artifact_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Artifact not found: {decision.artifact_id}")
+
+            review_json = _append_ingestion_review_event(
+                row["review_json"],
+                action=transition_action,
+                actor=clean_actor,
+                previous_status=row["status"],
+                status=status,
+                category="classification",
+                reason=clean_reason,
+                error=row["last_error"],
+                error_type=None,
+                metadata={
+                    "resolved_projection_id": decision.actual_projection_id,
+                    "decision_id": decision.decision_id,
+                },
+            )
+            alternatives_json = json.dumps(
+                {
+                    "alternatives": [
+                        {
+                            "projection_id": alt.projection_id,
+                            "confidence": alt.confidence,
+                            "rule_id": alt.rule_id,
+                        }
+                        for alt in decision.alternatives
+                    ]
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            conn.execute(
+                """
+                INSERT INTO routing_decisions (
+                    decision_id, artifact_id, artifact_type, source,
+                    revision_id, proposed_projection_id, actual_projection_id,
+                    action, actor, reason, features_json, alternatives_json,
+                    confidence, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision.decision_id,
+                    decision.artifact_id,
+                    decision.artifact_type,
+                    decision.source,
+                    decision.revision_id,
+                    decision.proposed_projection_id,
+                    decision.actual_projection_id,
+                    decision.action,
+                    decision.actor,
+                    decision.reason,
+                    json.dumps(
+                        dict(decision.features),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    alternatives_json,
+                    decision.confidence,
+                    decision.created_at,
+                ),
+            )
+            next_attempt_at = _now_iso() if status == "pending" else None
+            updated = conn.execute(
+                """
+                UPDATE ingestion_queue
+                SET status = ?, attempts = 0, last_error = NULL,
+                    next_attempt_at = ?, processed_at = NULL, review_json = ?
+                WHERE artifact_id = ?
+                """,
+                (status, next_attempt_at, review_json, decision.artifact_id),
+            )
+            if (updated.rowcount or 0) != 1:
+                raise RuntimeError(
+                    f"failed to transition classification review for "
+                    f"{decision.artifact_id}"
+                )
+
+        entry = self.get_ingestion_entry(decision.artifact_id)
+        if entry is None:
+            raise RuntimeError(
+                f"classification review disappeared: {decision.artifact_id}"
+            )
+        return entry
+
     def reject_ingestion_review(
         self,
         artifact_id: str,
@@ -4422,6 +4582,27 @@ class MetadataDB:
             reason=reason,
             metadata=metadata,
         )
+
+    def update_ingestion_payload_json(
+        self,
+        artifact_id: str,
+        payload_json: str,
+    ) -> Optional[IngestionQueueEntry]:
+        """Replace the queue payload JSON for an existing ingestion row."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE ingestion_queue
+                    SET payload_json = ?
+                    WHERE artifact_id = ?
+                    """,
+                    (payload_json, artifact_id),
+                )
+            return self.get_ingestion_entry(artifact_id)
+        except Exception as e:
+            logger.error(f"Failed to update ingestion payload {artifact_id}: {e}")
+            return None
 
     def approve_ingestion_security_override(
         self,

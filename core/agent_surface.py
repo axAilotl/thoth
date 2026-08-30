@@ -31,6 +31,10 @@ from .capture_surface import (
     CaptureSurfaceNotFoundError,
     CaptureSurfaceService,
 )
+from .classification_review import (
+    ClassificationReviewError,
+    ClassificationReviewService,
+)
 from .config import Config, config
 from .connector_capture import connector_run_context
 from .connector_registry import connector_policy_status, load_connector_registry
@@ -192,6 +196,71 @@ class AgentSurfaceService:
             "active_statuses": list(active_review_statuses()),
             "closed_statuses": list(closed_review_statuses()),
         }
+
+    def approve_artifact_classification(
+        self, artifact_id: str, *, actor: str, reason: str
+    ) -> dict[str, Any]:
+        """Approve a proposed classification and requeue the artifact."""
+        try:
+            return ClassificationReviewService(
+                self.db, config=self.config
+            ).approve(artifact_id, actor=actor, reason=reason)
+        except ClassificationReviewError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+
+    def correct_artifact_classification(
+        self,
+        artifact_id: str,
+        *,
+        projection_id: str,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Correct a classification and requeue the artifact."""
+        try:
+            return ClassificationReviewService(
+                self.db, config=self.config
+            ).correct(
+                artifact_id,
+                projection_id=projection_id,
+                actor=actor,
+                reason=reason,
+            )
+        except ClassificationReviewError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+
+    def propose_classification_policy(
+        self, *, actor: str, reason: str
+    ) -> dict[str, Any] | None:
+        """Propose a learned policy revision from durable routing decisions."""
+        try:
+            return ClassificationReviewService(
+                self.db, config=self.config
+            ).figure_it_out(actor=actor, reason=reason)
+        except ClassificationReviewError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+
+    def activate_classification_policy(
+        self, revision_id: str, *, actor: str, reason: str
+    ) -> dict[str, Any]:
+        """Activate an evaluated classification policy revision."""
+        try:
+            return ClassificationReviewService(
+                self.db, config=self.config
+            ).activate_revision(revision_id, actor=actor, reason=reason)
+        except ClassificationReviewError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
+
+    def rollback_classification_policy(
+        self, *, actor: str, reason: str
+    ) -> dict[str, Any]:
+        """Roll back the active classification policy revision."""
+        try:
+            return ClassificationReviewService(
+                self.db, config=self.config
+            ).rollback(actor=actor, reason=reason)
+        except ClassificationReviewError as exc:
+            raise AgentSurfaceError(str(exc)) from exc
 
     def get_artifact(
         self,

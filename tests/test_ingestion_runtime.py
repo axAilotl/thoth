@@ -16,6 +16,7 @@ from core.artifacts import (
     WebClipperArtifact,
 )
 from core.canonical_identity import CanonicalIdentityService
+from core.classification_review import ClassificationReviewService
 from core.config import config
 from core.ingestion_runtime import (
     BookmarkDispatchResult,
@@ -34,6 +35,99 @@ from core.prompt_security import (
     THOTH_SECURITY_POLICY_KEY,
 )
 from core.wiki_io import read_document
+
+
+def test_classification_runtime_routes_and_reviews_through_stored_events(
+    tmp_path: Path, monkeypatch, restore_runtime_config
+):
+    monkeypatch.chdir(tmp_path)
+    _configure_runtime_config(tmp_path)
+    config.set("classification.enabled", True)
+    config.set("classification.confidence_threshold", 0.85)
+    config.set(
+        "classification.projections",
+        [{"projection_id": "papers", "name": "Papers"}],
+    )
+    config.set(
+        "classification.rules",
+        [
+            {
+                "rule_id": "paper-arxiv",
+                "projection_id": "papers",
+                "pattern": {"artifact_type": "paper", "source": "arxiv"},
+                "confidence": 0.99,
+            },
+            {
+                "rule_id": "paper-manual-low",
+                "projection_id": "papers",
+                "pattern": {"artifact_type": "paper", "source": "manual"},
+                "confidence": 0.5,
+            },
+        ],
+    )
+    db = MetadataDB(str(build_path_layout(config).database_path))
+    entries = {
+        source: IngestionQueueEntry(
+            artifact_id=f"paper-{source}",
+            artifact_type="paper",
+            source=source,
+            payload_json=json.dumps(
+                {
+                    "id": f"paper-{source}",
+                    "source_type": source,
+                    "title": source,
+                }
+            ),
+            created_at="2026-08-30T00:00:00Z",
+        )
+        for source in ("arxiv", "manual", "unknown")
+    }
+    for entry in entries.values():
+        assert db.upsert_ingestion_entry(entry)
+
+    runtime = KnowledgeArtifactRuntime(config, db=db)
+
+    async def fake_dispatch(artifact):
+        return IngestionDispatchResult(
+            artifact_id=artifact.id,
+            artifact_type="paper",
+            source=artifact.source_type,
+            status="processed",
+            processed_at="2026-08-30T00:00:01Z",
+        )
+
+    monkeypatch.setattr(runtime, "dispatch_artifact", fake_dispatch)
+    monkeypatch.setattr(runtime, "_canonicalize_artifact", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runtime, "_sync_wiki_for_artifact", lambda *args, **kwargs: None)
+
+    high = asyncio.run(runtime.process_ingestion_entry(entries["arxiv"]))
+    low = asyncio.run(runtime.process_ingestion_entry(entries["manual"]))
+    no_match = asyncio.run(runtime.process_ingestion_entry(entries["unknown"]))
+
+    assert high.status == "processed"
+    assert low.status == "needs_review"
+    assert no_match.status == "needs_review"
+
+    reviews = ClassificationReviewService(db, config=config)
+    assert {item["artifact_id"] for item in reviews.list_review_items()} == {
+        "paper-manual",
+        "paper-unknown",
+    }
+    assert reviews.approve(
+        "paper-manual", actor="operator", reason="correct projection"
+    )["status"] == "pending"
+    assert reviews.correct(
+        "paper-unknown",
+        projection_id="papers",
+        actor="operator",
+        reason="manual correction",
+    )["status"] == "pending"
+
+    approved = db.get_ingestion_entry("paper-manual")
+    corrected = db.get_ingestion_entry("paper-unknown")
+    assert asyncio.run(runtime.process_ingestion_entry(approved)).status == "processed"
+    assert asyncio.run(runtime.process_ingestion_entry(corrected)).status == "processed"
+    assert reviews.store.list_decisions(action="auto_route")[0].artifact_id == "paper-arxiv"
 
 
 @pytest.fixture

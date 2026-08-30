@@ -306,6 +306,44 @@ class Config:
                                 path="semantic_memory.promotion",
                             )
 
+        classification_config = self.get("classification", {})
+        if classification_config:
+            if not isinstance(classification_config, dict):
+                errors.append("classification must be an object")
+            else:
+                for key in ("confidence_threshold", "min_precision"):
+                    value = classification_config.get(key)
+                    if value is not None:
+                        try:
+                            parsed = float(value)
+                            if not 0.0 <= parsed <= 1.0:
+                                errors.append(
+                                    f"classification.{key} must be between 0.0 and 1.0"
+                                )
+                        except (TypeError, ValueError):
+                            errors.append(
+                                f"classification.{key} must be a number between 0.0 and 1.0"
+                            )
+                min_support = classification_config.get("min_support")
+                if min_support is not None:
+                    try:
+                        if int(min_support) < 1:
+                            errors.append("classification.min_support must be a positive integer")
+                    except (TypeError, ValueError):
+                        errors.append("classification.min_support must be a positive integer")
+                held_out = classification_config.get("held_out_fraction")
+                if held_out is not None:
+                    try:
+                        parsed = float(held_out)
+                        if not 0.0 <= parsed <= 1.0:
+                            errors.append(
+                                "classification.held_out_fraction must be between 0.0 and 1.0"
+                            )
+                    except (TypeError, ValueError):
+                        errors.append(
+                            "classification.held_out_fraction must be a number between 0.0 and 1.0"
+                        )
+
         try:
             from .postgres import validate_capture_event_store_config
 
