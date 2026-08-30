@@ -53,4 +53,4 @@ def test_runtime_helpers_pin_state_under_thoth_system(
     assert LLMCache().cache_dir == layout.llm_cache_root
     assert DownloadTracker().tracking_file == layout.download_tracking_file
     assert CacheLoader().cache_dir == layout.cache_root
-    assert MetadataDB().db_path == layout.database_path
+    assert MetadataDB(str(layout.database_path)).db_path == layout.database_path

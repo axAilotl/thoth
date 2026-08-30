@@ -72,13 +72,17 @@ class URLProcessor:
         self.download_tracker = get_download_tracker()
         self.asset_publisher = StagedAssetPublisher(config)
         
-        # Metadata database
-        if config.get('database.enabled', False):
+        # Metadata database is resolved lazily so importing this module does not
+        # require an already-registered runtime database.
+        self._metadata_db = None
+
+    @property
+    def metadata_db(self):
+        if self._metadata_db is None and config.get('database.enabled', False):
             from core.metadata_db import get_metadata_db
-            self.metadata_db = get_metadata_db()
-        else:
-            self.metadata_db = None
-    
+            self._metadata_db = get_metadata_db()
+        return self._metadata_db
+
     def apply_url_expansions(self, tweets: List[Tweet], url_mappings: Dict[str, str]) -> ProcessingStats:
         """Apply URL expansions from GraphQL data to tweet content"""
         stats = ProcessingStats()

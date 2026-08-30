@@ -27,12 +27,16 @@ class LLMCache:
             self.cache_dir = Path(cache_dir)
         else:
             self.cache_dir = build_path_layout(config).llm_cache_root
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        # Directory creation is deferred until the first read/write so that
+        # importing this module does not create runtime state.
         
         # Cache stats
         self.hits = 0
         self.misses = 0
     
+    def _ensure_dir(self) -> None:
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
     def _redact_cache_material(self, content: str) -> tuple[str, dict[str, Any] | None]:
         redaction = redact_sensitive_text(content)
         metadata = redaction.to_metadata() if redaction.has_findings else None
@@ -86,6 +90,7 @@ class LLMCache:
     def set(self, content: str, task_type: str, result: Dict[str, Any], model: str = ""):
         """Cache an LLM result"""
         try:
+            self._ensure_dir()
             redacted_content, redaction_metadata = self._redact_cache_material(content)
             cache_key = self._generate_cache_key(content, task_type, model)
             cache_file = self.cache_dir / f"{cache_key}.json"
@@ -113,6 +118,7 @@ class LLMCache:
     def clear(self):
         """Clear all cached results"""
         try:
+            self._ensure_dir()
             for cache_file in self.cache_dir.glob("*.json"):
                 cache_file.unlink()
             logger.info(f"Cleared LLM cache directory: {self.cache_dir}")
@@ -173,5 +179,25 @@ class LLMCache:
         }
 
 
-# Global cache instance
-llm_cache = LLMCache()
+_llm_cache_instance: LLMCache | None = None
+
+
+def get_llm_cache(cache_dir: str | None = None) -> LLMCache:
+    """Return the lazily-constructed process singleton LLM cache.
+
+    Importing the module does not create runtime state; the cache directory is
+    only created on the first cache read or write operation.
+    """
+    global _llm_cache_instance
+    if _llm_cache_instance is None:
+        _llm_cache_instance = LLMCache(cache_dir)
+        return _llm_cache_instance
+
+    if cache_dir is not None:
+        requested = Path(cache_dir).resolve()
+        existing = Path(_llm_cache_instance.cache_dir).resolve()
+        if requested != existing:
+            raise RuntimeError(
+                f"Refusing to reuse LLM cache at {existing} for requested path {requested}"
+            )
+    return _llm_cache_instance

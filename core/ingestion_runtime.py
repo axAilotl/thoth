@@ -12,6 +12,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping
 
 from .artifacts import (
@@ -126,12 +127,26 @@ class KnowledgeArtifactRuntime:
     ):
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
-        self.layout.ensure_directories()
         self.db = db or get_metadata_db()
+        if isinstance(self.db, MetadataDB):
+            resolved_db_path = Path(self.db.db_path).resolve()
+            resolved_layout_path = Path(self.layout.database_path).resolve()
+            if resolved_db_path != resolved_layout_path:
+                raise IngestionRuntimeError(
+                    f"Metadata database path {resolved_db_path} does not match "
+                    f"runtime layout database path {resolved_layout_path}"
+                )
+        self.layout.ensure_directories()
         self._pipeline = None
         self._wiki_updater = None
         self._companion_publisher = None
         self._canonical_identity_service = None
+        self._worker_health: dict[str, Any] = {
+            "healthy": True,
+            "last_error": None,
+            "last_error_at": None,
+            "consecutive_failures": 0,
+        }
 
     @property
     def pipeline(self):
@@ -258,7 +273,11 @@ class KnowledgeArtifactRuntime:
         poll_interval_seconds: float = 5.0,
         batch_size: int = 25,
     ) -> None:
-        """Poll the ingestion queue until shutdown."""
+        """Poll the ingestion queue until shutdown.
+
+        Queue read and processing failures are recorded in ``worker_health`` so
+        they surface as unhealthy work instead of being mistaken for idle time.
+        """
         while not shutdown_event.is_set():
             try:
                 results = await self.process_pending_ingestions_once(
@@ -266,23 +285,45 @@ class KnowledgeArtifactRuntime:
                     concurrency=self._ingestion_worker_concurrency(),
                     cancel_event=shutdown_event,
                 )
-                if not results:
-                    await asyncio.wait_for(
-                        shutdown_event.wait(), timeout=poll_interval_seconds
-                    )
+                # Any successful poll (including an empty queue) recovers health.
+                self._record_worker_success()
+                if results:
                     continue
+                await asyncio.wait_for(
+                    shutdown_event.wait(), timeout=poll_interval_seconds
+                )
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.error("Ingestion worker iteration failed: %s", exc)
+                self._record_worker_failure(exc)
                 try:
                     await asyncio.wait_for(
                         shutdown_event.wait(), timeout=poll_interval_seconds
                     )
                 except asyncio.TimeoutError:
                     continue
+
+    def _record_worker_failure(self, exc: Exception) -> None:
+        """Update health state after a failed worker iteration."""
+        self._worker_health["healthy"] = False
+        self._worker_health["last_error"] = f"{exc.__class__.__name__}: {exc}"
+        self._worker_health["last_error_at"] = _now_iso()
+        self._worker_health["consecutive_failures"] += 1
+
+    def _record_worker_success(self) -> None:
+        """Reset health state after a successful worker iteration."""
+        self._worker_health["healthy"] = True
+        self._worker_health["last_error"] = None
+        self._worker_health["last_error_at"] = None
+        self._worker_health["consecutive_failures"] = 0
+
+    @property
+    def worker_health(self) -> dict[str, Any]:
+        """Return the current worker health snapshot."""
+        return dict(self._worker_health)
 
     def _ingestion_worker_concurrency(self) -> int:
         return resolve_worker_concurrency(
@@ -799,21 +840,75 @@ class KnowledgeArtifactRuntime:
 _shared_runtime: KnowledgeArtifactRuntime | None = None
 
 
+def clear_knowledge_artifact_runtime() -> None:
+    """Release the process-global knowledge runtime during composition teardown."""
+    global _shared_runtime
+    _shared_runtime = None
+
+
+def _runtime_configs_compatible(
+    existing: KnowledgeArtifactRuntime,
+    runtime_config: Config | None,
+    layout: PathLayout | None,
+    db: MetadataDB | None,
+) -> bool:
+    """Check whether explicit arguments point at the same runtime as the singleton."""
+    if db is not None and db is not existing.db:
+        return False
+    if runtime_config is not None and runtime_config is not existing.config:
+        if runtime_config.data != existing.config.data:
+            return False
+    if layout is not None and layout is not existing.layout:
+        if layout != existing.layout:
+            return False
+    return True
+
+
 def get_knowledge_artifact_runtime(
     runtime_config: Config | None = None,
     *,
     layout: PathLayout | None = None,
     db: MetadataDB | None = None,
 ) -> KnowledgeArtifactRuntime:
-    """Return the singleton runtime used by CLI and API entrypoints."""
+    """Return the singleton runtime used by CLI and API entrypoints.
+
+    The first call may provide explicit configuration, layout, and database.
+    Subsequent calls must use the same instance (no arguments) or match the
+    existing singleton exactly; mismatched arguments raise a hard failure so
+    workers and API endpoints never silently use a different runtime.
+    """
     global _shared_runtime
-    if (
-        _shared_runtime is None
-        or runtime_config is not None
-        or layout is not None
-        or db is not None
-    ):
+    if _shared_runtime is None:
         _shared_runtime = KnowledgeArtifactRuntime(
             runtime_config or config, layout=layout, db=db
         )
+        return _shared_runtime
+
+    if runtime_config is None and layout is None and db is None:
+        return _shared_runtime
+
+    if not _runtime_configs_compatible(_shared_runtime, runtime_config, layout, db):
+        raise RuntimeError(
+            "Mismatched knowledge artifact runtime requested: "
+            f"existing db={_shared_runtime.db.db_path}, "
+            f"requested layout db={layout.database_path if layout else None}"
+        )
     return _shared_runtime
+
+
+def get_knowledge_artifact_runtime_health() -> dict[str, Any]:
+    """Return the singleton runtime's worker health.
+
+    An uninitialized runtime is explicitly unhealthy so callers cannot mistake
+    "not yet started" for "healthy".
+    """
+    if _shared_runtime is None:
+        return {
+            "healthy": False,
+            "state": "uninitialized",
+            "reason": "Knowledge artifact runtime has not been initialized",
+            "last_error": None,
+            "last_error_at": None,
+            "consecutive_failures": 0,
+        }
+    return _shared_runtime.worker_health

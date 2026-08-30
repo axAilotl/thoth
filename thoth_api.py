@@ -77,8 +77,12 @@ from core.bookmark_ingest import (
 from core.admin_lint import admin_lint_report_path, run_admin_lint
 from core.admin_status import build_admin_status_dashboard
 from core.config import Config
-from core.ingestion_runtime import get_knowledge_artifact_runtime
-from core.metadata_db import MetadataDB, get_metadata_db, BookmarkQueueEntry
+from core.ingestion_runtime import (
+    get_knowledge_artifact_runtime,
+    get_knowledge_artifact_runtime_health,
+)
+from core.metadata_db import get_metadata_db, BookmarkQueueEntry
+from core.runtime_composition import resolve_runtime_database, teardown_runtime_services
 from core.non_live_state import (
     get_non_live_next_run_at,
     mark_non_live_run_finished,
@@ -104,13 +108,21 @@ static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# Shared pipeline instance protected by an asyncio lock to avoid overlapping runs
-pipeline_runner = PipelineProcessor()
+# Shared pipeline instance protected by an asyncio lock to avoid overlapping runs.
+# The runner is created lazily so importing this module does not create runtime state.
+_pipeline_runner: PipelineProcessor | None = None
 pipeline_lock = asyncio.Lock()
 github_trigger_lock = asyncio.Lock()
 huggingface_trigger_lock = asyncio.Lock()
 x_api_trigger_lock = asyncio.Lock()
 archivist_trigger_lock = asyncio.Lock()
+
+
+def _get_pipeline_runner() -> PipelineProcessor:
+    global _pipeline_runner
+    if _pipeline_runner is None:
+        _pipeline_runner = PipelineProcessor()
+    return _pipeline_runner
 
 BASE_CONFIG_PATH = Path(__file__).parent / "config.example.json"
 LOCAL_CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -327,7 +339,7 @@ async def run_pipeline_for_tweets(
     batch_size = max(1, len(tweets))
 
     async with pipeline_lock:
-        return await pipeline_runner.process_tweets_pipeline(
+        return await _get_pipeline_runner().process_tweets_pipeline(
             tweets,
             url_mappings=url_mappings,
             resume=resume,
@@ -829,16 +841,16 @@ def save_graphql_to_cache(tweet_id: str, graphql_response: dict) -> str:
     return cache_filename
 
 
-REALTIME_BOOKMARKS_FILE = get_realtime_bookmarks_file()
 PROCESSING_QUEUE = asyncio.Queue()
 BOOKMARKS_FILE_LOCK = asyncio.Lock()
 
 
 def load_realtime_bookmarks() -> list:
     """Load existing realtime bookmarks"""
-    if REALTIME_BOOKMARKS_FILE.exists():
+    realtime_bookmarks_file = get_realtime_bookmarks_file()
+    if realtime_bookmarks_file.exists():
         try:
-            with open(REALTIME_BOOKMARKS_FILE, "r", encoding="utf-8") as f:
+            with open(realtime_bookmarks_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse realtime bookmarks JSON: {e}")
@@ -944,7 +956,7 @@ async def process_bookmark_async(bookmark_data: dict):
     """Process a bookmark asynchronously through the shared tweet runtime."""
     tweet_id = None
     db = get_metadata_db()
-    runtime = get_knowledge_artifact_runtime(config, layout=build_path_layout(config), db=db)
+    runtime = get_knowledge_artifact_runtime()
     try:
         tweet_id = validate_tweet_id(bookmark_data.get("tweet_id"))
         logger.info(f"Processing bookmark {tweet_id}")
@@ -1017,8 +1029,20 @@ async def process_bookmark_async(bookmark_data: dict):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "service": "Thoth API"}
+    """Health check endpoint including ingestion worker state."""
+    worker_health = get_knowledge_artifact_runtime_health()
+    if not worker_health.get("healthy", True):
+        detail = {
+            "status": "unhealthy",
+            "service": "Thoth API",
+            "ingestion_worker": worker_health,
+        }
+        raise HTTPException(status_code=503, detail=detail)
+    return {
+        "status": "healthy",
+        "service": "Thoth API",
+        "ingestion_worker": worker_health,
+    }
 
 
 @app.get("/settings")
@@ -1190,16 +1214,13 @@ def open_api_capture_surface():
     return open_capture_surface(
         runtime_config,
         layout=layout,
-        db=MetadataDB(str(layout.database_path)),
+        db=get_metadata_db(),
     )
 
 
 def open_api_semantic_memory_review_service() -> SemanticMemoryReviewService:
     """Open the semantic memory review service using API runtime configuration."""
-    runtime_config = Config()
-    runtime_config.data = load_runtime_settings()
-    layout = build_path_layout(runtime_config, project_root=BASE_CONFIG_PATH.parent)
-    return SemanticMemoryReviewService(db=MetadataDB(str(layout.database_path)))
+    return SemanticMemoryReviewService(db=get_metadata_db())
 
 
 def semantic_memory_review_kwargs(
@@ -1492,7 +1513,7 @@ def run_connector_endpoint(connector_name: str, request: ConnectorRunRequest):
         service = AgentSurfaceService(
             runtime_config,
             layout=layout,
-            db=MetadataDB(str(layout.database_path)),
+            db=get_metadata_db(),
         )
         return service.run_connector(
             connector_name,
@@ -1520,7 +1541,7 @@ def list_connector_runs_endpoint(
         service = AgentSurfaceService(
             runtime_config,
             layout=layout,
-            db=MetadataDB(str(layout.database_path)),
+            db=get_metadata_db(),
         )
         return service.list_connector_runs(
             connector_name=connector_name,
@@ -1991,8 +2012,12 @@ async def get_bookmarks(limit: int = 100, processed: Optional[bool] = None):
 @app.get("/api/bookmarks/pending")
 async def get_pending_bookmarks(limit: int = 100):
     """Return bookmarks that have not been processed yet."""
-    db = get_metadata_db()
-    entries = db.get_unprocessed_bookmarks(limit=limit)
+    try:
+        db = get_metadata_db()
+        entries = db.get_unprocessed_bookmarks(limit=limit)
+    except Exception as exc:
+        logger.error("Failed to read pending bookmarks: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to read pending bookmarks") from exc
     unprocessed = [entry for entry in entries if entry.status != "processed"]
     return {
         "total": len(unprocessed),
@@ -2057,7 +2082,7 @@ def query_wiki_endpoint(
         service = AgentSurfaceService(
             runtime_config,
             layout=layout,
-            db=MetadataDB(str(layout.database_path)),
+            db=get_metadata_db(),
         )
         return service.query_wiki(
             query,
@@ -2657,7 +2682,7 @@ async def social_sync_scheduler():
 
 async def ingestion_worker():
     """Process queued knowledge artifacts in the background."""
-    runtime = get_knowledge_artifact_runtime(config, layout=build_path_layout(config))
+    runtime = get_knowledge_artifact_runtime()
     await runtime.run_background(_shutdown_event, poll_interval_seconds=5.0)
 
 
@@ -2848,6 +2873,12 @@ async def startup_event():
     _shutdown_event = asyncio.Event()
     PROCESSING_QUEUE = asyncio.Queue()
     ensure_wiki_scaffold(config)
+    # Explicit composition root: construct and register the same database service
+    # used by background workers and API endpoints.
+    resolved_layout = build_path_layout(config)
+    runtime_db = resolve_runtime_database(config, layout=resolved_layout)
+    # Create one stable runtime instance shared by worker and bookmark traffic.
+    get_knowledge_artifact_runtime(config, layout=resolved_layout, db=runtime_db)
     _background_task = asyncio.create_task(background_processor())
     _ingestion_task = asyncio.create_task(ingestion_worker())
     _social_sync_task = asyncio.create_task(social_sync_scheduler())
@@ -2860,40 +2891,40 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Gracefully shutdown background processor"""
+    """Gracefully shutdown background processor and runtime services."""
     global _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task
     logger.info("Shutting down Thoth API server...")
-    _shutdown_event.set()
-    if _background_task:
-        _background_task.cancel()
-        try:
-            await _background_task
-        except asyncio.CancelledError:
-            pass
-    if _ingestion_task:
-        _ingestion_task.cancel()
-        try:
-            await _ingestion_task
-        except asyncio.CancelledError:
-            pass
-    if _social_sync_task:
-        _social_sync_task.cancel()
-        try:
-            await _social_sync_task
-        except asyncio.CancelledError:
-            pass
-    if _x_api_sync_task:
-        _x_api_sync_task.cancel()
-        try:
-            await _x_api_sync_task
-        except asyncio.CancelledError:
-            pass
-    if _archivist_task:
-        _archivist_task.cancel()
-        try:
-            await _archivist_task
-        except asyncio.CancelledError:
-            pass
+    tasks = tuple(
+        task
+        for task in (
+            _background_task,
+            _ingestion_task,
+            _social_sync_task,
+            _x_api_sync_task,
+            _archivist_task,
+        )
+        if task is not None
+    )
+    try:
+        _shutdown_event.set()
+        for task in tasks:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        failures = [
+            result
+            for result in results
+            if isinstance(result, Exception)
+            and not isinstance(result, asyncio.CancelledError)
+        ]
+        if failures:
+            raise ExceptionGroup("API background task shutdown failed", failures)
+    finally:
+        _background_task = None
+        _ingestion_task = None
+        _social_sync_task = None
+        _x_api_sync_task = None
+        _archivist_task = None
+        teardown_runtime_services()
     logger.info("Thoth API server stopped")
 
 

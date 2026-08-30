@@ -69,7 +69,7 @@ async def test_universal_ingestion_loop_keeps_sources_in_vault_and_outputs_in_ma
     _configure_runtime_config(tmp_path)
 
     layout = build_path_layout(config)
-    db = MetadataDB()
+    db = MetadataDB(str(layout.database_path))
 
     # Canonical runtime state stays under .thoth_system, not in the synced vault.
     assert layout.system_root == tmp_path / ".thoth_system"
