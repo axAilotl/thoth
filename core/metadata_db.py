@@ -4423,6 +4423,27 @@ class MetadataDB:
             metadata=metadata,
         )
 
+    def update_ingestion_payload_json(
+        self,
+        artifact_id: str,
+        payload_json: str,
+    ) -> Optional[IngestionQueueEntry]:
+        """Replace the queue payload JSON for an existing ingestion row."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE ingestion_queue
+                    SET payload_json = ?
+                    WHERE artifact_id = ?
+                    """,
+                    (payload_json, artifact_id),
+                )
+            return self.get_ingestion_entry(artifact_id)
+        except Exception as e:
+            logger.error(f"Failed to update ingestion payload {artifact_id}: {e}")
+            return None
+
     def approve_ingestion_security_override(
         self,
         artifact_id: str,
