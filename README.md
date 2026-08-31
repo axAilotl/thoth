@@ -36,6 +36,17 @@ Topic-scoped compilation over selected source folders, types, tags, and terms.
 3. Analyst / Agent
 Higher-cost interactive work over the compiled layer for synthesis, comparison, and refinement.
 
+### The Universal Loop
+
+The layers are not a one-way pipeline — they form a loop that compounds:
+
+1. **Capture** — bookmarks, papers, clippings, and transcripts flow in raw.
+2. **Compile** — processors and the archivist turn them into cited wiki pages.
+3. **Query** — you and agents read the compiled layer.
+4. **Feed back** — `wiki-query --write-back` persists curated query results as new wiki pages, the archivist recompiles topics when their input manifest changes, and digests resurface unread material — which drives the next round of capture.
+
+Each pass makes the wiki a better source for the next one, without raw material ever being rewritten.
+
 ## Quick Start
 
 ### Setup
