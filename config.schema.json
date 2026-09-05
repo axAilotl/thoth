@@ -396,6 +396,13 @@
         "additionalProperties": false
       }
     },
+    "wiki": {
+      "type": "object",
+      "properties": {
+        "publish_source_pages": {"type": "boolean", "default": false}
+      },
+      "additionalProperties": false
+    },
     "paths": {
       "type": "object",
       "properties": {

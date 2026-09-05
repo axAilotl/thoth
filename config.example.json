@@ -644,7 +644,7 @@
     },
     "inbox": {
       "enabled": false,
-      "directory": "inbox",
+      "directory": "/data/vault/inbox",
       "stable_seconds": 60,
       "consume": false,
       "max_source_bytes": 52428800,
@@ -873,6 +873,7 @@
       "resume_from_checkpoint": true
     }
   },
+  "wiki": {"publish_source_pages": false},
   "paths": {
     "vault_dir": "knowledge_vault",
     "raw_dir": "raw",

@@ -294,6 +294,10 @@ class CompiledWikiUpdater:
         if canonical_identity and canonical_identity.wiki_slug:
             spec = replace(spec, slug=canonical_identity.wiki_slug)
         page_path = self.contract.page_path_for(spec)
+        from .wiki_publication import WikiPublicationStore
+
+        publication_store = WikiPublicationStore(self.db, self.layout.wiki_root)
+        publication = publication_store.inspect(page_path)
         existing = _read_frontmatter(page_path)
         created_at = str(existing.get("created_at") or spec.created_at or _now_iso())
         updated_at = _now_iso()
@@ -402,7 +406,8 @@ class CompiledWikiUpdater:
         )
         content = self._render_page(updated_spec, artifact, dispatch_details=dispatch_details)
         action = "updated" if page_path.exists() else "created"
-        _atomic_write_text(page_path, content)
+        publication_store.publish(page_path, content, snapshot=publication,
+                                  metadata=updated_spec.frontmatter())
         if canonical_identity and not canonical_identity.wiki_slug:
             self.canonical_identity_service.set_wiki_slug(
                 canonical_identity.canonical_id,
