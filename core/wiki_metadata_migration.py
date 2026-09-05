@@ -30,8 +30,12 @@ def compact_topic_pages(layout, *, db, obsidian_root: Path, archive_root: Path,
             continue
         doc = read_document(path)
         meta = doc.frontmatter
-        if not (meta.get("thoth_kind") == "topic" and meta.get("thoth_input_manifest")
-                and meta.get("thoth_type") == "wiki_page"):
+        current_topic = meta.get("thoth_kind") == "topic" and meta.get("thoth_input_manifest")
+        # One-time migration of the earlier renderer, not a runtime fallback.
+        earlier_topic = (meta.get("kind") == "topic" and meta.get("slug") == path.stem
+                         and isinstance(meta.get("source_paths"), list) and meta["source_paths"]
+                         and meta.get("created_at") and meta.get("updated_at"))
+        if not ((current_topic or earlier_topic) and meta.get("thoth_type") == "wiki_page"):
             skipped.append({"path": relative, "reason": "not a generated topic with metadata"})
             continue
         if publications.inspect(path).status != "unowned":
@@ -52,6 +56,9 @@ def compact_topic_pages(layout, *, db, obsidian_root: Path, archive_root: Path,
             raise ValueError("Topic archive checksum mismatch")
         archives.archive(original_path=str(path), archive_path=str(archive),
                          document=content.decode(), metadata=meta)
+        if earlier_topic and not current_topic:
+            meta = dict(meta, thoth_id=meta["slug"], thoth_kind="topic",
+                        thoth_updated_at=meta["updated_at"])
         snapshot = publications.adopt_baseline(path, expected_hash=expected, metadata=meta)
         body, _ = split_feedback(doc.body)
         prefix, separator, sources = body.rpartition("\n## Sources\n")

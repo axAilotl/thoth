@@ -5,9 +5,11 @@ from types import SimpleNamespace
 from core.metadata_db import MetadataDB
 from core.wiki_metadata_migration import compact_topic_pages
 from core.wiki_publication import WikiPublicationStore
+import pytest
 
 
-def test_topic_metadata_compaction_preserves_prose_links_and_feedback(tmp_path):
+@pytest.mark.parametrize("earlier_renderer", [False, True])
+def test_topic_metadata_compaction_preserves_prose_links_and_feedback(tmp_path, earlier_renderer):
     root = tmp_path / "obsidian"
     layout = SimpleNamespace(wiki_root=root / "wiki")
     page = layout.wiki_root / "pages/topic-example.md"
@@ -17,6 +19,10 @@ def test_topic_metadata_compaction_preserves_prose_links_and_feedback(tmp_path):
         "thoth_summary: metadata\n---\n\n# Example\n\nImportant human-readable prose.\n"
         "\n## Sources\n\n- [S1] [Original](../../knowledge_vault/paper.pdf)\n"
         "  - Path: paper.pdf\n  - Trust: 1.0\n\n> [!thoth-feedback]\n> More detail please.\n")
+    if earlier_renderer:
+        original = original.replace("thoth_kind: topic", "kind: topic").replace(
+            "thoth_id: topic-example", "slug: topic-example").replace(
+            "thoth_input_manifest:\n- sha256: example", "source_paths:\n- paper.pdf\ncreated_at: yesterday\nupdated_at: today")
     page.write_text(original)
     db = MetadataDB(str(tmp_path / "state/meta.db"))
     expected = hashlib.sha256(original.encode()).hexdigest()
@@ -31,7 +37,11 @@ def test_topic_metadata_compaction_preserves_prose_links_and_feedback(tmp_path):
     assert "  - Trust:" not in after
     assert next((tmp_path / "archives/topic-pages").glob("*.md")).read_text() == original
     store = WikiPublicationStore(db, layout.wiki_root)
-    assert store.metadata_for(page)["thoth_input_manifest"] == [{"sha256": "example"}]
+    if earlier_renderer:
+        assert store.metadata_for(page)["source_paths"] == ["paper.pdf"]
+        assert "thoth_id: topic-example" in after
+    else:
+        assert store.metadata_for(page)["thoth_input_manifest"] == [{"sha256": "example"}]
     assert store.inspect(page).status == "clean"
     assert store.inspect(page).pending_feedback
     assert store.feedback_records(page)[0]["status"] == "pending"
