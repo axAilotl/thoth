@@ -1,0 +1,21 @@
+{
+  "name": "inbox",
+  "source_name": "inbox",
+  "display_name": "File Inbox",
+  "description": "Reconcile stable local inbox files into managed sources with durable receipts and recoverable optional consumption.",
+  "artifact_types": ["markdown"],
+  "inputs": ["local_files:inbox"],
+  "outputs": ["artifact_queue:markdown", "managed_files:source_documents"],
+  "capabilities": ["queue", "text_extraction", "raw_preservation"],
+  "config_keys": ["sources.inbox.enabled", "sources.inbox.directory", "sources.inbox.stable_seconds", "sources.inbox.consume", "sources.inbox.max_source_bytes", "sources.inbox.max_files_per_run", "sources.inbox.max_text_chars", "sources.inbox.pdf_max_pages", "sources.inbox.schedule"],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "local_ingest_queue",
+  "allowed_side_effects": ["local_file_read", "raw_file_write", "artifact_queue_write", "metadata_write", "archived_inbox_file_removal"],
+  "entrypoint": "collectors.inbox_connector:InboxConnector",
+  "cli_command": "connectors run inbox",
+  "config_namespace": "sources.inbox",
+  "default_enabled": false,
+  "ccf": {"lane": "markdown", "artifact_role": "raw_capture"}
+}

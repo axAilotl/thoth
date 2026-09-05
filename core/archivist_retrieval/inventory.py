@@ -18,6 +18,7 @@ from collectors.web_clipper_layout import (
 from collectors.web_clipper_parser import parse_web_clipper_markdown
 
 from ..config import Config
+from ..docx_text import DOCXTextExtractionError, extract_docx_text
 from ..metadata_db import MetadataDB, get_metadata_db
 from ..path_layout import PathLayout, build_path_layout
 from ..pdf_text import PDFTextExtractionError, extract_pdf_text, extract_pdf_title
@@ -36,7 +37,7 @@ from .models import (
 )
 
 SUPPORTED_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
-SUPPORTED_BINARY_EXTENSIONS = {".pdf"}
+SUPPORTED_BINARY_EXTENSIONS = {".pdf", ".docx"}
 KNOWN_VAULT_ROOTS = {
     "tweets",
     "threads",
@@ -297,7 +298,7 @@ def _load_or_parse_document(
         and existing.path == path
         # A failed/textless PDF extraction is not a completed content index.
         # Retry on subsequent inventory runs instead of caching failure forever.
-        and (suffix != ".pdf" or bool(existing.content_text.strip()))
+        and (suffix not in SUPPORTED_BINARY_EXTENSIONS or bool(existing.content_text.strip()))
     ):
         secured_existing = _apply_source_trust_metadata(
             existing,
@@ -320,6 +321,10 @@ def _load_or_parse_document(
             scope=root.scope,
             scope_relative_path=scope_relative_path,
             web_clipper_contract=web_clipper_contract,
+        )
+    elif suffix == ".docx":
+        title, content_text, tags, source_type, file_type, source_hash = _read_docx_document(
+            path, scope=root.scope, scope_relative_path=scope_relative_path,
         )
     else:
         title, content_text, tags, source_type, file_type, source_hash = _read_pdf_document(
@@ -711,6 +716,25 @@ def _read_text_document(
     )
     raw_text = path.read_text(encoding="utf-8")
     return title, document.body.strip(), tags, source_type, file_type, _sha256_text(raw_text)
+
+
+def _read_docx_document(path: Path, *, scope: str, scope_relative_path: str):
+    """Index bounded Word body text without publishing a Markdown sidecar."""
+    with path.open("rb") as source:
+        payload = source.read(50 * 1024 * 1024 + 1)
+    text = ""
+    try:
+        text = extract_docx_text(payload)
+        if len(text) > 500000:
+            raise DOCXTextExtractionError("DOCX extracted text exceeds 500000 characters")
+    except DOCXTextExtractionError as exc:
+        logger.warning("Failed to extract DOCX text for %s: %s", path, exc)
+        text = ""
+    return (
+        _prettify_name(path.stem), text, (),
+        _detect_source_type(scope=scope, scope_relative_path=scope_relative_path, default_type="document"),
+        "docx", hashlib.sha256(payload).hexdigest(),
+    )
 
 
 def _read_pdf_document(
