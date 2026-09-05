@@ -690,9 +690,7 @@ def test_ingest_queue_plan_has_no_ingestion_side_effects(monkeypatch, capsys, tm
             IngestionQueueEntry(
                 artifact_id="artifact-1",
                 artifact_type="web_clipper",
-        "wiki_reconcile",
                 source="web_clipper",
-        "wiki_reconcile",
                 payload_json='{"title": "note"}',
             )
         ],

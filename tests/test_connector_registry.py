@@ -326,7 +326,6 @@ def test_builtin_manifests_declare_ccf_lanes(tmp_path: Path):
         "skill_outputs": "mixed",
         "web_clipper": "web_clipper",
         "wiki_reconcile": "markdown",
-        "wiki_reconcile",
         "x_api": "tweet",
         "youtube": "video",
     }

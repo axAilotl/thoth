@@ -407,7 +407,7 @@ class CompiledWikiUpdater:
         content = self._render_page(updated_spec, artifact, dispatch_details=dispatch_details)
         action = "updated" if page_path.exists() else "created"
         publication_store.publish(page_path, content, snapshot=publication,
-                                  metadata=updated_spec.frontmatter())
+                                  metadata=updated_spec.frontmatter(), feedback_included=False)
         if canonical_identity and not canonical_identity.wiki_slug:
             self.canonical_identity_service.set_wiki_slug(
                 canonical_identity.canonical_id,
@@ -463,8 +463,8 @@ class CompiledWikiUpdater:
         if results:
             append_wiki_log_entry(
                 self.scaffold,
-                "Compiled capture event wiki pages: "
-                + ", ".join(f"`{result.slug}`" for result in results)
+                "Capture event wiki publication: "
+                + ", ".join(f"`{result.slug}` ({result.action})" for result in results)
                 + ".",
             )
         return results

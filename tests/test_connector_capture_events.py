@@ -85,6 +85,7 @@ class RecordingCaptureEventStore:
 def _config(tmp_path: Path) -> Config:
     config = Config()
     config.data = {}
+    config.set("wiki.publish_source_pages", True)
     config.set("paths.vault_dir", str(tmp_path / "vault"))
     config.set("paths.system_dir", str(tmp_path / ".thoth_system"))
     config.set("paths.cache_dir", "cache")

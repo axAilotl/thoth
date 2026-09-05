@@ -42,6 +42,7 @@ Check other synced clients for pending edits before applying the approved plan.
 ```sh
 python -m core.vault_maintenance plan --obsidian-root /path/to/obsidian
 python -m core.vault_maintenance apply --plan /outside/obsidian/plan.json --archive-root /outside/obsidian/archive
+python -m core.vault_maintenance compact-topics --obsidian-root /path/to/obsidian --plan /outside/obsidian/topic-hashes.json --archive-root /outside/obsidian/archive
 python -m core.vault_maintenance export
 ```
 
@@ -64,6 +65,9 @@ Existing topic pages require explicit, hash-checked baseline adoption; a file
 with an existing baseline cannot be re-adopted to bypass an edit conflict.
 During the deployment migration, full topic documents are archived before
 metadata is condensed, and prose/citation links must be verified unchanged.
+The `compact-topics` plan is a JSON object mapping Obsidian-relative page paths
+to their approved SHA-256 hashes. Compaction preserves pending feedback; it does
+not claim that a metadata cleanup researched or fulfilled a request.
 
 ## Backups and export
 
