@@ -26,10 +26,12 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
         "github",
         "huggingface",
         "imported_markdown",
+        "inbox",
         "omi",
         "pi_skills",
         "skill_outputs",
         "web_clipper",
+        "wiki_reconcile",
         "x_api",
         "youtube",
     ]
@@ -62,7 +64,7 @@ def test_builtin_manifests_are_colocated_with_collectors(tmp_path: Path):
     repo_root = Path(__file__).resolve().parents[1]
     manifest_paths = sorted((repo_root / "collectors").glob("*.connector.json"))
 
-    assert len(manifest_paths) == 11
+    assert len(manifest_paths) == 13
 
     registry = load_connector_registry(project_root=tmp_path)
     builtins = [manifest for manifest in registry.list() if manifest.origin == "builtin"]
@@ -318,15 +320,18 @@ def test_builtin_manifests_declare_ccf_lanes(tmp_path: Path):
         "github": "repository",
         "huggingface": "repository",
         "imported_markdown": "markdown",
+        "inbox": "markdown",
         "omi": "transcript",
         "pi_skills": "mixed",
         "skill_outputs": "mixed",
         "web_clipper": "web_clipper",
+        "wiki_reconcile": "markdown",
+        "wiki_reconcile",
         "x_api": "tweet",
         "youtube": "video",
     }
     for manifest in registry.list():
-        assert manifest.ccf.artifact_role == ("derived_index" if manifest.name == "corpus_index" else "raw_capture")
+        assert manifest.ccf.artifact_role == ({"corpus_index": "derived_index", "wiki_reconcile": "wiki_revision"}.get(manifest.name, "raw_capture"))
         assert manifest.ccf.extensions == {}
 
     as_dict = registry.get("arxiv").to_dict()["ccf"]

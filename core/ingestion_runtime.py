@@ -263,6 +263,9 @@ class KnowledgeArtifactRuntime:
         *,
         dispatch_details: dict[str, Any] | None = None,
     ) -> None:
+        from .source_records import SourceRecordStore
+
+        SourceRecordStore(self.db).record(artifact, metadata=dispatch_details)
         updater = self.wiki_updater
         if updater.supports_artifact(artifact):
             updater.update_from_artifact(
@@ -270,7 +273,8 @@ class KnowledgeArtifactRuntime:
                 dispatch_details=dispatch_details,
             )
             return
-        updater.prune_legacy_tweet_pages()
+        # Imported Markdown and tweets are source evidence, not wiki articles.
+        # Existing generated files are removed only by explicit backed-up migration.
 
     async def process_pending_ingestions_once(
         self,

@@ -220,7 +220,7 @@ class WikiUpdateResult:
     """Summary of a single compiled wiki update."""
 
     slug: str
-    page_path: Path
+    page_path: Path | None
     source_paths: tuple[str, ...]
     action: str
 
@@ -239,9 +239,9 @@ class CompiledWikiUpdater:
         self.config = config
         self.layout = layout or build_path_layout(config)
         self.layout.ensure_directories()
-        self.contract = contract or WikiContract(root=self.layout.wiki_root)
+        self.contract = contract or WikiContract(root=self.layout.wiki_root,
+            maintenance_log_path=self.layout.system_root / "wiki" / "log.md")
         self.db = db or MetadataDB(str(self.layout.database_path))
-        self._legacy_pages_pruned = False
         self._canonical_identity_service = None
         self.scaffold = ensure_wiki_scaffold(
             config,
@@ -257,33 +257,6 @@ class CompiledWikiUpdater:
     def supports_artifact(self, artifact: KnowledgeArtifact) -> bool:
         """Return True when an artifact should compile into the wiki layer."""
         return not isinstance(artifact, (MarkdownArtifact, TweetArtifact))
-
-    def prune_legacy_tweet_pages(self) -> tuple[Path, ...]:
-        """Delete legacy generated tweet pages from the wiki pages directory."""
-        if self._legacy_pages_pruned:
-            return tuple()
-
-        removed: list[Path] = []
-        for page_path in sorted(self.contract.pages_dir.glob("tweet-*.md")):
-            frontmatter = _read_frontmatter(page_path)
-            slug = str(frontmatter.get("slug") or page_path.stem)
-            if not is_legacy_tweet_slug(slug):
-                continue
-            try:
-                page_path.unlink()
-                removed.append(page_path)
-            except FileNotFoundError:
-                continue
-
-        if removed:
-            append_wiki_log_entry(
-                self.scaffold,
-                "Pruned legacy compiled tweet wiki pages: "
-                + ", ".join(f"`{path.stem}`" for path in removed)
-                + ".",
-            )
-        self._legacy_pages_pruned = True
-        return tuple(removed)
 
     def update_from_artifact(
         self,
@@ -307,6 +280,17 @@ class CompiledWikiUpdater:
             artifact,
             canonical_identity=canonical_identity,
         )
+        from .source_records import SourceRecordStore
+
+        SourceRecordStore(self.db).record(artifact,
+            canonical_id=canonical_identity.canonical_id if canonical_identity else None,
+            metadata={"page_spec": spec.frontmatter(), "dispatch": dispatch_details or {}})
+        publish_sources = self.config.get("wiki.publish_source_pages", False)
+        if not isinstance(publish_sources, bool):
+            raise ValueError("wiki.publish_source_pages must be a boolean")
+        if not publish_sources:
+            return WikiUpdateResult(slug=spec.slug, page_path=None,
+                source_paths=spec.source_paths, action="recorded")
         if canonical_identity and canonical_identity.wiki_slug:
             spec = replace(spec, slug=canonical_identity.wiki_slug)
         page_path = self.contract.page_path_for(spec)
@@ -590,7 +574,6 @@ class CompiledWikiUpdater:
                 )
 
     def refresh_index(self) -> Path:
-        self.prune_legacy_tweet_pages()
         entries = []
         for page_path in sorted(self.contract.pages_dir.glob("*.md")):
             frontmatter = _read_frontmatter(page_path)
@@ -602,6 +585,10 @@ class CompiledWikiUpdater:
             if is_legacy_tweet_slug(slug):
                 continue
             if _frontmatter_requires_security_review(frontmatter):
+                continue
+            # A source record is not a topic, even if an older renderer labelled
+            # it 'concept'. Existing files remain untouched until migration.
+            if frontmatter.get("thoth_artifact_id") or frontmatter.get("thoth_capture_page_type"):
                 continue
             title = str(frontmatter.get("title") or page_path.stem)
             summary = _truncate_summary(
@@ -629,8 +616,6 @@ class CompiledWikiUpdater:
             lines.append("")
             for title, rel_link, summary in entries:
                 line = f"* [{title}]({rel_link})"
-                if summary:
-                    line += f" - {summary}"
                 lines.append(line)
 
         _atomic_write_text(self.contract.index_path, "\n".join(lines) + "\n")

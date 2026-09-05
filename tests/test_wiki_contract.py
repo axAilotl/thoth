@@ -66,7 +66,7 @@ def test_wiki_contract_paths_and_frontmatter(tmp_path: Path):
 
     assert contract.root == tmp_path / "wiki"
     assert contract.index_path == tmp_path / "wiki" / "index.md"
-    assert contract.log_path == tmp_path / "wiki" / "log.md"
+    assert contract.log_path == tmp_path / ".thoth_system" / "wiki" / "log.md"
     assert contract.page_path_for(spec) == tmp_path / "wiki" / "pages" / "llm-knowledge-base.md"
 
     frontmatter = contract.frontmatter_for(spec)

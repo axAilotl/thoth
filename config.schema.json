@@ -466,6 +466,29 @@
           },
           "additionalProperties": true
         },
+        "inbox": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean", "default": false},
+            "directory": {"type": "string", "minLength": 1},
+            "stable_seconds": {"type": "number", "minimum": 0},
+            "consume": {"type": "boolean", "default": false},
+            "max_source_bytes": {"type": "integer", "minimum": 1},
+            "max_files_per_run": {"type": "integer", "minimum": 1},
+            "max_text_chars": {"type": "integer", "minimum": 1},
+            "pdf_max_pages": {"type": "integer", "minimum": 1},
+            "schedule": {"type": "object"}
+          },
+          "additionalProperties": true
+        },
+        "wiki_reconcile": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean", "default": false},
+            "schedule": {"type": "object"}
+          },
+          "additionalProperties": true
+        },
         "corpus_index": {
           "type": "object",
           "properties": {

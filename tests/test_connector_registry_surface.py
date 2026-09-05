@@ -14,10 +14,12 @@ BUILTIN_CONNECTOR_NAMES = [
     "github",
     "huggingface",
     "imported_markdown",
+    "inbox",
     "omi",
     "pi_skills",
     "skill_outputs",
     "web_clipper",
+    "wiki_reconcile",
     "x_api",
     "youtube",
 ]

@@ -169,10 +169,12 @@ def test_connectors_list_command_reads_registry_metadata():
         "github",
         "huggingface",
         "imported_markdown",
+        "inbox",
         "omi",
         "pi_skills",
         "skill_outputs",
         "web_clipper",
+        "wiki_reconcile",
         "x_api",
         "youtube",
     ]
@@ -688,7 +690,9 @@ def test_ingest_queue_plan_has_no_ingestion_side_effects(monkeypatch, capsys, tm
             IngestionQueueEntry(
                 artifact_id="artifact-1",
                 artifact_type="web_clipper",
+        "wiki_reconcile",
                 source="web_clipper",
+        "wiki_reconcile",
                 payload_json='{"title": "note"}',
             )
         ],

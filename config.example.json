@@ -642,6 +642,21 @@
       ],
       "limit": 50
     },
+    "inbox": {
+      "enabled": false,
+      "directory": "inbox",
+      "stable_seconds": 60,
+      "consume": false,
+      "max_source_bytes": 52428800,
+      "max_files_per_run": 25,
+      "max_text_chars": 500000,
+      "pdf_max_pages": 80,
+      "schedule": {"enabled": false, "interval_seconds": 60, "run_on_startup": true}
+    },
+    "wiki_reconcile": {
+      "enabled": false,
+      "schedule": {"enabled": false, "interval_seconds": 120, "run_on_startup": true}
+    },
     "corpus_index": {
       "enabled": false,
       "include_roots": ["papers", "clippings", "Clippings", "pdfs"],

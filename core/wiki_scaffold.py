@@ -66,7 +66,7 @@ def _render_index_content(contract: WikiContract, created_at: str, updated_at: s
         "This directory stores the compiled wiki layer.\n\n"
         "## Structure\n\n"
         f"* [`index.md`]({contract.index_filename}) - Navigation root.\n"
-        f"* [`log.md`]({contract.log_filename}) - Append-only maintenance log.\n"
+        "* Detailed maintenance history is stored outside the vault in THOTH control state.\n"
         f"* [`pages/`]({contract.pages_dirname}/) - Compiled wiki pages.\n"
     )
 

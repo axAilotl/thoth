@@ -306,6 +306,7 @@ class WikiContract:
     supported_record_types: Tuple[str, ...] = WIKI_SUPPORTED_RECORD_TYPES
     reserved_filenames: Tuple[str, ...] = WIKI_RESERVED_FILENAMES
     slug_max_length: int = WIKI_SLUG_MAX_LENGTH
+    maintenance_log_path: Path | None = None
 
     @property
     def index_path(self) -> Path:
@@ -313,7 +314,7 @@ class WikiContract:
 
     @property
     def log_path(self) -> Path:
-        return self.root / self.log_filename
+        return self.maintenance_log_path or self.root / self.log_filename
 
     @property
     def pages_dir(self) -> Path:
@@ -392,4 +393,5 @@ class WikiContract:
 def build_wiki_contract(config: Config, *, project_root: Path | None = None) -> WikiContract:
     """Build the wiki contract from runtime configuration."""
     layout = build_path_layout(config, project_root=project_root)
-    return WikiContract(root=layout.wiki_root)
+    return WikiContract(root=layout.wiki_root,
+        maintenance_log_path=layout.system_root / "wiki" / "log.md")

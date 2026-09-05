@@ -57,6 +57,7 @@ def _configure_runtime_config(tmp_path: Path) -> None:
     config.set("paths.wiki_dir", "wiki")
     config.set("paths.digests_dir", "_digests")
     config.set("database.path", "meta.db")
+    config.set("wiki.publish_source_pages", True)
 
 
 def _capture_store_with_public_and_restricted_events(layout):
@@ -236,12 +237,12 @@ def test_wiki_updater_creates_repository_page_and_refreshes_index(
 
     page_content = result.page_path.read_text(encoding="utf-8")
     index_content = (layout.wiki_root / "index.md").read_text(encoding="utf-8")
-    log_content = (layout.wiki_root / "log.md").read_text(encoding="utf-8")
+    log_content = updater.scaffold.log_path.read_text(encoding="utf-8")
 
     assert result.slug == "repo-owner-repo"
     assert "Repository summary" in page_content
     assert "stars/owner_repo_summary.md" in page_content
-    assert "[owner/repo](pages/repo-owner-repo.md)" in index_content
+    assert "pages/repo-owner-repo.md" not in index_content
     assert "Created `repo-owner-repo` from `github:gh_1`." in log_content
 
 
@@ -350,7 +351,7 @@ async def test_bookmark_runtime_does_not_create_compiled_tweet_pages(
     assert not wiki_page.exists()
 
 
-def test_wiki_updater_prunes_legacy_tweet_pages_when_refreshing_index(
+def test_index_refresh_does_not_delete_existing_source_pages(
     tmp_path: Path, monkeypatch, restore_runtime_config
 ):
     monkeypatch.chdir(tmp_path)
@@ -375,11 +376,10 @@ def test_wiki_updater_prunes_legacy_tweet_pages_when_refreshing_index(
     updater = CompiledWikiUpdater(config, layout=layout)
     updater.refresh_index()
 
-    assert not legacy_page.exists()
+    assert legacy_page.exists()
     index_content = (layout.wiki_root / "index.md").read_text(encoding="utf-8")
     assert "tweet-123.md" not in index_content
-    log_content = (layout.wiki_root / "log.md").read_text(encoding="utf-8")
-    assert "Pruned legacy compiled tweet wiki pages" in log_content
+    assert not (layout.wiki_root / "log.md").exists()
 
 
 def test_ingestion_runtime_updates_wiki_after_dispatch(

@@ -32,6 +32,8 @@ def make_config(tmp_path: Path) -> Config:
     config.set("paths.wiki_dir", "wiki")
     config.set("paths.digests_dir", "_digests")
     config.set("database.path", "meta.db")
+    # These publication tests exercise the explicit source-note export option.
+    config.set("wiki.publish_source_pages", True)
     config.set("sources.web_clipper.note_dirs", ["Clippings"])
     config.set("sources.web_clipper.attachment_dirs", ["clipper-assets"])
     return config
@@ -310,7 +312,7 @@ def test_web_clipper_collector_queues_notes_for_shared_runtime(
     assert queue_entry.artifact_type == "web_clipper"
     assert queue_entry.status == "pending"
 
-    runtime = KnowledgeArtifactRuntime(layout=collector.layout, db=collector.db)
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
     results = asyncio.run(runtime.process_pending_ingestions_once())
 
     assert len(results) == 1

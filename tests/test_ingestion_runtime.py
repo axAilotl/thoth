@@ -150,6 +150,7 @@ def _configure_runtime_config(tmp_path: Path) -> None:
     config.set("paths.raw_dir", "raw")
     config.set("paths.library_dir", "library")
     config.set("paths.wiki_dir", "wiki")
+    config.set("wiki.publish_source_pages", True)
     config.set("paths.digests_dir", "_digests")
     config.set("database.path", "meta.db")
 
