@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from .path_layout import PathLayout
+from .metadata_db import MetadataDB
 from .prompt_security import prompt_security_requires_review
 from .semantic_memory import (
     SemanticMemoryCandidate,
@@ -21,7 +22,8 @@ from .wiki_contract import (
     normalize_wiki_slug,
     wiki_slug_component as _slug_component,
 )
-from .wiki_io import atomic_write_text, read_frontmatter, render_frontmatter
+from .wiki_io import read_frontmatter, render_frontmatter
+from .wiki_publication import WikiPublicationConflict, WikiPublicationStore
 
 
 SEMANTIC_WIKI_ALLOWED_STATUSES = ("confirmed", "promoted")
@@ -241,6 +243,7 @@ class SemanticMemoryWikiCompiler:
     ) -> None:
         self.layout = layout
         self.contract = contract
+        self.publications = WikiPublicationStore(MetadataDB(str(layout.database_path)), layout.wiki_root)
 
     def compile(
         self,
@@ -383,6 +386,9 @@ class SemanticMemoryWikiCompiler:
             semantic_evidence_ids=evidence_ids,
         )
         page_path = self.contract.page_path_for(spec)
+        publication = self.publications.inspect(page_path)
+        if not publication.publishable:
+            return SemanticWikiPageResult(spec.slug, page_path, spec.source_paths, "blocked")
         existing = read_frontmatter(page_path) if page_path.exists() else {}
         created_at = str(existing.get("created_at") or spec.created_at or updated_at)
         updated_spec = replace(
@@ -392,7 +398,14 @@ class SemanticMemoryWikiCompiler:
         )
         content = self._render_page(updated_spec, group)
         action = "updated" if page_path.exists() else "created"
-        atomic_write_text(page_path, content)
+        try:
+            self.publications.publish(
+                page_path, content, snapshot=publication,
+                metadata=self.contract.frontmatter_for(updated_spec), feedback_included=False,
+            )
+        except WikiPublicationConflict:
+            # Blocked is an explicit result, not successful generation.
+            action = "blocked"
         return SemanticWikiPageResult(
             slug=updated_spec.slug,
             page_path=page_path,
@@ -404,6 +417,11 @@ class SemanticMemoryWikiCompiler:
         self,
         current_slugs: set[str],
     ) -> list[SemanticWikiPageResult]:
+        """Report stale pages without deleting reading-surface or human content.
+
+        A changed candidate set is not authority to remove a local document.
+        Reconciliation records the current revision for deliberate later cleanup.
+        """
         results: list[SemanticWikiPageResult] = []
         self.contract.pages_dir.mkdir(parents=True, exist_ok=True)
         for page_path in sorted(self.contract.pages_dir.glob("*.md")):
@@ -422,13 +440,13 @@ class SemanticMemoryWikiCompiler:
                 for item in frontmatter.get("thoth_source_paths", []) or []
                 if _clean_text(item)
             )
-            page_path.unlink(missing_ok=True)
+            self.publications.inspect(page_path)
             results.append(
                 SemanticWikiPageResult(
                     slug=slug,
                     page_path=page_path,
                     source_paths=source_paths,
-                    action="deleted",
+                    action="stale",
                 )
             )
         return results

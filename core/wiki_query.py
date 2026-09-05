@@ -10,6 +10,7 @@ from typing import Any, Iterable, Sequence
 
 from .config import Config
 from .hybrid_search import HybridSearchFilters, HybridSearchResult, HybridSearchService
+from .metadata_db import MetadataDB
 from .path_layout import PathLayout, build_path_layout
 from .prompt_security import prompt_security_requires_review
 from .time_utils import utc_now_iso as _now_iso
@@ -21,12 +22,12 @@ from .wiki_contract import (
     normalize_wiki_slug,
 )
 from .wiki_io import (
-    atomic_write_text,
     read_document,
     read_document_cached,
     render_frontmatter,
     truncate_summary,
 )
+from .wiki_publication import WikiPublicationConflict, WikiPublicationStore
 from .wiki_scaffold import (
     append_wiki_log_entry,
     build_wiki_scaffold,
@@ -263,6 +264,12 @@ class WikiQueryRunner:
 
         slug = f"query-{normalize_wiki_slug(query)}"
         page_path = self.contract.page_path(slug)
+        publications = WikiPublicationStore(
+            self.db if self.db is not None else MetadataDB(str(self.layout.database_path)), self.layout.wiki_root,
+        )
+        publication = publications.inspect(page_path)
+        if not publication.publishable:
+            raise WikiPublicationConflict(f"Curated wiki write-back blocked: {publication.status}")
         existing_frontmatter = read_document(page_path).frontmatter if page_path.exists() else {}
         now = _now_iso()
         created_at = str(existing_frontmatter.get("created_at") or now)
@@ -332,7 +339,10 @@ class WikiQueryRunner:
             self.config,
             project_root=self.project_root,
         )
-        atomic_write_text(page_path, "\n".join(body_lines) + "\n")
+        publications.publish(
+            page_path, "\n".join(body_lines) + "\n", snapshot=publication,
+            metadata=self.contract.frontmatter_for(spec), feedback_included=False,
+        )
 
         from .wiki_updater import CompiledWikiUpdater
 

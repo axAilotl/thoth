@@ -20,6 +20,7 @@ from .capture_event_store import (
     SecurityFinding,
 )
 from .path_layout import PathLayout
+from .metadata_db import MetadataDB
 from .prompt_security import prompt_security_requires_review
 from .time_utils import utc_now_iso as _now_iso
 from .wiki_change_provenance import (
@@ -33,7 +34,8 @@ from .wiki_contract import (
     normalize_wiki_slug,
     wiki_slug_component as _slug_component,
 )
-from .wiki_io import atomic_write_text, read_frontmatter, render_frontmatter
+from .wiki_io import read_frontmatter, render_frontmatter
+from .wiki_publication import WikiPublicationConflict, WikiPublicationStore
 
 
 _RESTRICTED_PRIVACY_CLASSES = {
@@ -373,6 +375,7 @@ class CaptureWikiCompiler:
     ) -> None:
         self.layout = layout
         self.contract = contract
+        self.publications = WikiPublicationStore(MetadataDB(str(layout.database_path)), layout.wiki_root)
 
     def compile(
         self,
@@ -696,6 +699,9 @@ class CaptureWikiCompiler:
             input_manifest=input_snapshot.input_manifest,
         )
         page_path = self.contract.page_path_for(spec)
+        publication = self.publications.inspect(page_path)
+        if not publication.publishable:
+            return CaptureWikiPageResult(spec.slug, page_path, spec.source_paths, "blocked")
         existing = read_frontmatter(page_path) if page_path.exists() else {}
         created_at = str(existing.get("created_at") or spec.created_at or _now_iso())
         previous_manifest = existing.get("thoth_input_manifest")
@@ -720,7 +726,14 @@ class CaptureWikiCompiler:
         )
         content = self._render_capture_page(updated_spec, group)
         action = "updated" if page_path.exists() else "created"
-        atomic_write_text(page_path, content)
+        try:
+            self.publications.publish(
+                page_path, content, snapshot=publication,
+                metadata=self.contract.frontmatter_for(updated_spec), feedback_included=False,
+            )
+        except WikiPublicationConflict:
+            # The action is returned to callers; human changes remain untouched.
+            action = "blocked"
         return CaptureWikiPageResult(
             slug=updated_spec.slug,
             page_path=page_path,

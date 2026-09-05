@@ -949,10 +949,10 @@ def test_wiki_updater_compiles_only_confirmed_semantic_memory_with_evidence(
     prune_results = updater.update_from_semantic_memory(store)
 
     assert any(
-        result.slug == "person-ada" and result.action == "deleted"
+        result.slug == "person-ada" and result.action == "stale"
         for result in prune_results
     )
-    assert not (layout.wiki_root / "pages" / "person-ada.md").exists()
+    assert (layout.wiki_root / "pages" / "person-ada.md").exists()
     updated_digest = read_document(
         layout.wiki_root / "pages" / "semantic-memory-digest.md"
     )

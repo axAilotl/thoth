@@ -137,6 +137,37 @@ def test_wiki_query_curated_write_back_rewrites_existing_page(
     assert index_content.count("query-agentic-workflows.md") == 1
 
 
+@pytest.mark.parametrize("already_owned", [False, True])
+def test_wiki_query_write_back_preserves_existing_human_edits(wiki_env, already_owned):
+    from core.wiki_publication import WikiPublicationConflict
+    layout, contract = wiki_env
+    _copy_page_fixtures(layout, ("repo-owner-repo.md",))
+    runner = WikiQueryRunner(config, layout=layout, contract=contract)
+    target = contract.page_path("query-agentic-workflows")
+    if already_owned:
+        runner.curated_write_back("agentic workflows", selected_slugs=["repo-owner-repo"])
+    original = "# My curated article\n\nHuman edits must not disappear.\n"
+    target.write_text(original)
+    with pytest.raises(WikiPublicationConflict, match="blocked"):
+        runner.curated_write_back("agentic workflows", selected_slugs=["repo-owner-repo"])
+    assert target.read_text() == original
+
+
+def test_wiki_query_write_back_preserves_feedback_without_marking_included(wiki_env):
+    from core.metadata_db import MetadataDB
+    from core.wiki_publication import WikiPublicationStore
+    layout, contract = wiki_env
+    _copy_page_fixtures(layout, ("repo-owner-repo.md",))
+    runner = WikiQueryRunner(config, layout=layout, contract=contract)
+    first = runner.curated_write_back("agentic workflows", selected_slugs=["repo-owner-repo"])
+    raw = "> [!thoth-feedback]\n> Research more examples.\n"
+    first.page_path.write_text(first.page_path.read_text() + "\n" + raw)
+    runner.curated_write_back("agentic workflows", selected_slugs=["repo-owner-repo"])
+    assert first.page_path.read_text().count(raw) == 1
+    publications = WikiPublicationStore(MetadataDB(str(layout.database_path)), layout.wiki_root)
+    assert publications.feedback_records(first.page_path)[0]["status"] == "pending"
+
+
 def test_wiki_lint_accepts_query_pages_and_reports_invalid_timestamps(
     wiki_env,
 ):
