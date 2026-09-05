@@ -165,6 +165,7 @@ def test_connectors_list_command_reads_registry_metadata():
     names = [item["name"] for item in payload["connectors"]]
     assert names == [
         "arxiv",
+        "corpus_index",
         "github",
         "huggingface",
         "imported_markdown",

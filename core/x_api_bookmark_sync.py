@@ -464,7 +464,7 @@ async def _resolve_bundle_and_user_id(
     return auth_config, bundle, user_id
 
 
-def _merge_seen_ids(existing: tuple[str, ...], new_ids: list[str]) -> tuple[str, ...]:
+def _merge_seen_ids(existing: tuple[str, ...], new_ids: list[str], *, preserve_head: bool = False) -> tuple[str, ...]:
     merged = list(existing)
     seen = set(existing)
     for tweet_id in new_ids:
@@ -472,7 +472,7 @@ def _merge_seen_ids(existing: tuple[str, ...], new_ids: list[str]) -> tuple[str,
             merged.append(tweet_id)
             seen.add(tweet_id)
     if len(merged) > X_API_BOOKMARKS_MAX_SEEN_IDS:
-        merged = merged[-X_API_BOOKMARKS_MAX_SEEN_IDS:]
+        merged = merged[:X_API_BOOKMARKS_MAX_SEEN_IDS] if preserve_head else merged[-X_API_BOOKMARKS_MAX_SEEN_IDS:]
     return tuple(merged)
 
 
@@ -485,12 +485,15 @@ async def sync_x_api_bookmarks(
     max_results: int = X_API_BOOKMARKS_MAX_RESULTS,
     max_pages: int | None = None,
     resume_from_checkpoint: bool = True,
+    full_scan: bool = False,
 ) -> dict[str, Any]:
     """Fetch bookmark pages, persist delivery-safe checkpoint state, and emit payloads.
 
     Returned-payload mode persists the checkpoint only after all fetched payloads
     can be returned to the caller. Capture-event mode persists after each page is
     successfully queued, because the queue is the durable delivery boundary.
+    Full scans skip known IDs without assuming the rest of the history is known.
+    Use resume_from_checkpoint=False to start such a scan at the newest page.
     """
     if not 1 <= max_results <= X_API_BOOKMARKS_MAX_RESULTS:
         raise XApiBookmarkSyncConfigError(
@@ -527,11 +530,12 @@ async def sync_x_api_bookmarks(
         config,
         capture_event_store=capture_event_store,
     )
+    capture_db = (db or get_metadata_db()) if should_capture_events else None
     capture_queue = (
         _build_connector_capture_queue(
             config,
             layout=resolved_layout,
-            db=db or get_metadata_db(),
+            db=capture_db,
             capture_event_store=capture_event_store,
         )
         if should_capture_events
@@ -567,15 +571,29 @@ async def sync_x_api_bookmarks(
                     raise XApiBookmarkSyncError("X API bookmark lookup meta must be an object")
 
                 page_unseen_ids: list[str] = []
+                page_ids: list[str] = []
                 for tweet in page_data:
                     if not isinstance(tweet, dict):
                         raise XApiBookmarkSyncError(
                             "X API bookmark lookup returned a non-object tweet"
                         )
                     tweet_id = validate_tweet_id(tweet.get("id"))
+                    page_ids.append(tweet_id)
+                    if tweet_id in seen_ids and full_scan:
+                        continue
                     if tweet_id in seen_ids:
                         stopped_at_known_id = True
                         break
+                    if full_scan and capture_db is not None and (
+                        capture_db.get_bookmark_entry(tweet_id) is not None
+                        or capture_db.get_ingestion_entry(tweet_id) is not None
+                        or capture_db.get_ingestion_entry(f"tweet:{tweet_id}") is not None
+                    ):
+                        # Already durable through another capture path. Record
+                        # it as seen without creating a second processing job.
+                        seen_ids.add(tweet_id)
+                        page_unseen_ids.append(tweet_id)
+                        continue
                     payload = normalize_bookmark_payload(
                         {
                             "tweet_id": tweet_id,
@@ -605,7 +623,12 @@ async def sync_x_api_bookmarks(
                     if raw_next_token is not None:
                         next_token = str(raw_next_token).strip() or None
 
-                seen_order = list(_merge_seen_ids(tuple(seen_order), page_unseen_ids))
+                if full_scan and not pagination_token:
+                    # Pin the newest page before walking older history. A long
+                    # scan must not evict the incremental stopping boundary.
+                    seen_order = list(_merge_seen_ids(tuple(page_ids), seen_order, preserve_head=True))
+                else:
+                    seen_order = list(_merge_seen_ids(tuple(seen_order), page_unseen_ids, preserve_head=full_scan))
                 latest_checkpoint = XApiBookmarkSyncCheckpoint(
                     user_id=user_id,
                     seen_bookmark_ids=tuple(seen_order),
@@ -650,6 +673,7 @@ async def run_x_api_bookmark_backfill(
     max_results: int | None = None,
     max_pages: int | None = None,
     resume_from_checkpoint: bool | None = None,
+    full_scan: bool = False,
 ) -> dict[str, Any]:
     """Run a backfill using the resolved X sync settings."""
     sync_config = resolve_x_api_bookmark_sync_config(config)
@@ -670,6 +694,7 @@ async def run_x_api_bookmark_backfill(
             if resume_from_checkpoint is None
             else resume_from_checkpoint
         ),
+        full_scan=full_scan,
     )
 
 

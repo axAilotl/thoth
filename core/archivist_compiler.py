@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
+from .wiki_io import markdown_file_link
 from pathlib import Path
 import re
 from typing import Any, Sequence
@@ -426,7 +427,7 @@ class ArchivistCompiler:
             source_abs_path = self._absolute_path_for_candidate(candidate)
             rel_link = os.path.relpath(source_abs_path, page_dir)
             tags = ", ".join(candidate.tags) if candidate.tags else "none"
-            lines.append(f"- [S{index}] [{candidate.title}]({rel_link})")
+            lines.append(f"- [S{index}] {markdown_file_link(candidate.title, rel_link)}")
             lines.append(f"  - Path: `{self._normalized_source_path(candidate)}`")
             lines.append(f"  - Type: `{candidate.source_type}` / `{candidate.file_type}`")
             lines.append(f"  - Tags: `{tags}`")

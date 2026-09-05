@@ -112,6 +112,18 @@ Open `/settings` for:
 - path layout inspection for active shared roots
 - archivist topic registry editing, immediate runs, and background automation
 
+### Containers
+
+Use `compose.yaml` for the application; `compose.dev.yml` only provisions a
+development Postgres database. See README's container deployment section for
+initialization, mounts, private access, and upgrade/rollback rules. Run CLI
+commands in the service with `docker compose exec thoth python thoth.py ...`,
+using the same Compose files/environment as startup. Settings live in the
+persistent runtime's `config/` directory and must survive container replacement.
+Do not initialize over an existing operator configuration or start a second API
+against the live SQLite database. The image includes PDF tools and FFmpeg;
+Pi, local Whisper models, and yt-dlp need a separately configured image.
+
 ## Archivist
 
 Archivist now ships as a real compiler plus the existing control plane.

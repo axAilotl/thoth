@@ -10,6 +10,7 @@ import thoth_api
 
 BUILTIN_CONNECTOR_NAMES = [
     "arxiv",
+    "corpus_index",
     "github",
     "huggingface",
     "imported_markdown",

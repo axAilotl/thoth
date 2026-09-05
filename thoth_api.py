@@ -84,6 +84,7 @@ from core.bookmark_ingest import (
 from core.admin_lint import admin_lint_report_path, run_admin_lint
 from core.admin_status import build_admin_status_dashboard
 from core.config import Config
+from core.connector_scheduler import ConnectorScheduler
 from core.ingestion_runtime import (
     get_knowledge_artifact_runtime,
     get_knowledge_artifact_runtime_health,
@@ -109,6 +110,10 @@ logger = logging.getLogger(__name__)
 
 # FastAPI app
 app = FastAPI(title="Thoth API", version="1.0.0")
+
+from core.artifact_review_api import create_review_router
+
+app.include_router(create_review_router(lambda: get_knowledge_artifact_runtime()))
 
 # Mount static files for settings UI
 static_dir = Path(__file__).parent / "static"
@@ -475,7 +480,7 @@ async def schedule_retry(tweet_id: str, next_attempt_iso: Optional[str]):
         logger.debug(f"Invalid next_attempt_at for {tweet_id}: {next_attempt_iso}")
         return
 
-    delay_seconds = max(0.0, (next_attempt - datetime.now()).total_seconds())
+    delay_seconds = max(0.0, (next_attempt - datetime.now(next_attempt.tzinfo)).total_seconds())
     await asyncio.sleep(delay_seconds)
 
     db = get_metadata_db()
@@ -600,6 +605,7 @@ async def run_x_api_bookmark_sync(
     max_pages: Optional[int] = None,
     resume_from_checkpoint: Optional[bool] = None,
     process_immediately: bool = False,
+    full_scan: bool = False,
 ):
     """Run the X bookmark backfill and hand emitted payloads to the queue."""
     async with x_api_trigger_lock:
@@ -617,12 +623,22 @@ async def run_x_api_bookmark_sync(
                 if resume_from_checkpoint is None
                 else resume_from_checkpoint
             ),
+            full_scan=full_scan,
         )
 
         payloads = sync_result.get("payloads", [])
         queued = 0
         processed = 0
         for payload in payloads:
+            # A historical scan may find items already captured by the browser.
+            # Preserve their processing/review state; retries are explicit.
+            if full_scan:
+                db = get_metadata_db()
+                tweet_id = payload["tweet_id"]
+                if (db.get_bookmark_entry(tweet_id) is not None
+                        or db.get_ingestion_entry(tweet_id) is not None
+                        or db.get_ingestion_entry(f"tweet:{tweet_id}") is not None):
+                    continue
             await ingest_bookmark_capture(
                 payload,
                 process_immediately=process_immediately,
@@ -653,8 +669,9 @@ async def run_archivist_compilation(
     """Run archivist topic compilation with shared locking."""
     async with archivist_trigger_lock:
         runtime = get_knowledge_artifact_runtime()
-        return await run_archivist_topics(
-            load_runtime_settings(),
+        settings = load_runtime_settings()
+        worker = asyncio.create_task(asyncio.to_thread(lambda: asyncio.run(run_archivist_topics(
+            settings,
             project_root=BASE_CONFIG_PATH.parent,
             layout=runtime.layout,
             db=runtime.db,
@@ -662,14 +679,19 @@ async def run_archivist_compilation(
             force=force,
             dry_run=dry_run,
             limit=limit,
-        )
+        ))))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            # Do not release the shared lock while a publishing thread is live.
+            await worker
+            raise
 
 
 async def load_pending_bookmarks_from_db():
     """Load pending bookmarks from the durable queue into memory on startup."""
     db = get_metadata_db()
     entries = db.get_unprocessed_bookmarks()
-    now = datetime.now()
 
     for entry in entries:
         payload = bookmark_entry_to_payload(entry)
@@ -680,7 +702,7 @@ async def load_pending_bookmarks_from_db():
         if entry.status == "pending" and entry.next_attempt_at:
             try:
                 next_attempt = datetime.fromisoformat(entry.next_attempt_at)
-                delay = max(0.0, (next_attempt - now).total_seconds())
+                delay = max(0.0, (next_attempt - datetime.now(next_attempt.tzinfo)).total_seconds())
             except ValueError:
                 delay = 0.0
 
@@ -745,6 +767,7 @@ class XApiBackfillRequest(BaseModel):
     max_results: Optional[int] = Field(default=None, gt=0, le=100)
     max_pages: Optional[int] = Field(default=None, gt=0)
     resume_from_checkpoint: bool = True
+    full_scan: bool = False
 
 
 class ArchivistRegistryUpdateRequest(BaseModel):
@@ -1066,7 +1089,7 @@ async def settings_page():
     """Serve the settings UI page"""
     settings_file = Path(__file__).parent / "static" / "settings.html"
     if settings_file.exists():
-        return FileResponse(settings_file)
+        return FileResponse(settings_file, headers={"Cache-Control": "no-cache"})
     raise HTTPException(status_code=404, detail="Settings page not found")
 
 
@@ -1850,6 +1873,7 @@ async def trigger_x_api_bookmark_sync(request: XApiBackfillRequest):
             max_pages=request.max_pages,
             resume_from_checkpoint=request.resume_from_checkpoint,
             process_immediately=False,
+            full_scan=request.full_scan,
         )
         return {
             "status": "ok",
@@ -2104,6 +2128,24 @@ async def bookmark_status(request: BookmarkStatusRequest):
             }
 
     return {"statuses": response}
+
+
+@app.get("/api/query/corpus")
+async def query_corpus_endpoint(
+    query: str = Query(..., min_length=1, max_length=12000),
+    mode: str = Query(default="keyword"),
+    limit: int = Query(default=10, ge=1, le=100),
+):
+    """Search allowlisted source evidence, with opt-in cached semantic retrieval."""
+    from core.corpus_query import query_corpus
+    runtime = get_knowledge_artifact_runtime()
+    try:
+        return await asyncio.to_thread(lambda: asyncio.run(query_corpus(
+            config=runtime.config, layout=runtime.layout, db=runtime.db,
+            query=query, mode=mode, limit=limit,
+        )))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/query/wiki")
@@ -2621,6 +2663,7 @@ _ingestion_task = None
 _social_sync_task = None
 _x_api_sync_task = None
 _archivist_task = None
+_connector_scheduler_task = None
 
 
 async def run_periodic_social_sync(sync_config: Optional[Dict[str, Any]] = None):
@@ -2941,7 +2984,7 @@ async def test_x_api_connection_endpoint():
 @app.on_event("startup")
 async def startup_event():
     """Start background processor on startup"""
-    global PROCESSING_QUEUE, _shutdown_event, _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task
+    global PROCESSING_QUEUE, _shutdown_event, _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task, _connector_scheduler_task
     _shutdown_event = asyncio.Event()
     PROCESSING_QUEUE = asyncio.Queue()
     ensure_wiki_scaffold(config)
@@ -2957,6 +3000,10 @@ async def startup_event():
     resolve_x_api_sync_config()
     _x_api_sync_task = asyncio.create_task(x_api_sync_scheduler())
     _archivist_task = asyncio.create_task(archivist_scheduler())
+    connector_scheduler = ConnectorScheduler(
+        AgentSurfaceService(config, layout=resolved_layout, db=runtime_db)
+    )
+    _connector_scheduler_task = asyncio.create_task(connector_scheduler.run(_shutdown_event))
     await load_pending_bookmarks_from_db()
     logger.info("Thoth API server started")
 
@@ -2964,7 +3011,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Gracefully shutdown background processor and runtime services."""
-    global _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task
+    global _background_task, _ingestion_task, _social_sync_task, _x_api_sync_task, _archivist_task, _connector_scheduler_task
     logger.info("Shutting down Thoth API server...")
     tasks = tuple(
         task
@@ -2974,6 +3021,7 @@ async def shutdown_event():
             _social_sync_task,
             _x_api_sync_task,
             _archivist_task,
+            _connector_scheduler_task,
         )
         if task is not None
     )
@@ -2996,6 +3044,7 @@ async def shutdown_event():
         _social_sync_task = None
         _x_api_sync_task = None
         _archivist_task = None
+        _connector_scheduler_task = None
         teardown_runtime_services()
     logger.info("Thoth API server stopped")
 

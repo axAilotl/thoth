@@ -642,6 +642,14 @@
       ],
       "limit": 50
     },
+    "corpus_index": {
+      "enabled": false,
+      "include_roots": ["papers", "clippings", "Clippings", "pdfs"],
+      "exclude_roots": [],
+      "embeddings_enabled": false,
+      "max_new_embeddings_per_run": 128,
+      "schedule": { "enabled": false, "interval_seconds": 900, "run_on_startup": false }
+    },
     "web_clipper": {
       "enabled": false,
       "note_dirs": [],

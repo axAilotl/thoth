@@ -59,6 +59,144 @@ def make_collector(tmp_path: Path) -> tuple[WebClipperCollector, Path]:
     return collector, layout.vault_root
 
 
+def test_pdf_opt_in_queues_previously_indexed_attachment(tmp_path):
+    collector, vault = make_collector(tmp_path)
+    pdf = vault / "clipper-assets" / "paper.pdf"
+    pdf.write_bytes(b"%PDF-test")
+    assert collector.collect()[0].would_queue is False
+    assert collector.db.get_ingestion_entry("webclip:clipper-assets/paper.pdf") is None
+    collector.config.set("sources.web_clipper.queue_pdfs", True)
+    assert collector.plan()[0].would_queue is True
+    assert collector.collect()[0].would_queue is True
+    assert collector.db.get_ingestion_entry("webclip:clipper-assets/paper.pdf").status == "pending"
+    assert collector.collect()[0].would_queue is False
+    assert pdf.read_bytes() == b"%PDF-test"
+
+
+@pytest.mark.parametrize("pdf", [False, True])
+def test_failed_queue_does_not_mark_file_indexed_and_retries(tmp_path, monkeypatch, pdf):
+    collector, vault = make_collector(tmp_path)
+    collector.config.set("sources.web_clipper.queue_pdfs", True)
+    path = vault / ("clipper-assets/paper.pdf" if pdf else "Clippings/note.md")
+    path.write_bytes(b"%PDF-test" if pdf else b"---\ntitle: Useful note\n---\nUseful note\n")
+    original = collector.capture_queue.queue_artifact
+    def fail(*args, **kwargs):
+        raise RuntimeError("queue unavailable")
+    monkeypatch.setattr(collector.capture_queue, "queue_artifact", fail)
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        collector.collect()
+    assert collector.db.get_file_entry(str(path)) is None
+    monkeypatch.setattr(collector.capture_queue, "queue_artifact", original)
+    assert collector.collect()[0].would_queue is True
+
+
+def test_changed_processed_note_is_pending_again(tmp_path):
+    collector, vault = make_collector(tmp_path)
+    note = vault / "Clippings/note.md"
+    note.write_text("---\ntitle: First version\n---\nFirst version\n")
+    artifact_id = collector.collect()[0].artifact.id
+    collector.db.mark_ingestion_processed(artifact_id)
+    note.write_text("---\ntitle: New version\n---\nNew version\n")
+    collector.collect()
+    assert collector.db.get_ingestion_entry(artifact_id).status == "pending"
+
+
+def test_bounded_collection_skips_unchanged_and_counts_pdf_backfill(tmp_path):
+    collector, vault = make_collector(tmp_path)
+    (vault / "Clippings/a.md").write_text("---\ntitle: Existing\n---\nExisting\n")
+    collector.collect()
+    (vault / "Clippings/b.md").write_text("---\ntitle: New\n---\nNew\n")
+    (vault / "Clippings/c.md").write_text("---\ntitle: Also new\n---\nAlso new\n")
+    records = collector.collect(limit=1)
+    assert [r.path.name for r in records] == ["b.md"]
+    assert records[0].would_queue is True
+    assert [r.path.name for r in collector.collect(limit=1)] == ["c.md"]
+
+
+def test_bad_source_does_not_starve_valid_source_in_bounded_scan(tmp_path):
+    collector, vault = make_collector(tmp_path)
+    (vault / "Clippings/a-invalid.md").write_text("Missing frontmatter")
+    (vault / "Clippings/b-valid.md").write_text("---\ntitle: Valid\n---\nUseful evidence\n")
+    with pytest.raises(ValueError, match="completed 1 files with 1 errors"):
+        collector.collect(limit=1)
+    assert collector.db.get_ingestion_entry("webclip:Clippings/b-valid.md") is not None
+    assert collector.last_scan_errors[0]["path"].endswith("a-invalid.md")
+    assert collector.db.get_file_entry(str(vault / "Clippings/a-invalid.md")) is None
+
+
+@pytest.mark.parametrize("key", ["queue_pdfs", "summarize"])
+@pytest.mark.parametrize("value", ["false", "true", 0, 1, None, []])
+def test_malformed_opt_ins_never_collect_or_plan(tmp_path, key, value):
+    collector, vault = make_collector(tmp_path)
+    collector.config.set(f"sources.web_clipper.{key}", value)
+    path = vault / "Clippings/note.md"
+    path.write_text("---\ntitle: Note\n---\nEvidence\n")
+    with pytest.raises(ValueError, match="must be a boolean"):
+        collector.plan()
+    with pytest.raises(ValueError, match="must be a boolean"):
+        collector.collect()
+    assert collector.db.get_file_entry(str(path)) is None
+    assert collector.db.get_ingestion_entry("webclip:Clippings/note.md") is None
+
+
+@pytest.mark.parametrize("status", ["pending", "processing"])
+def test_changed_active_source_keeps_old_queue_payload_and_file_hash(tmp_path, status):
+    collector, vault = make_collector(tmp_path)
+    path = vault / "Clippings/note.md"
+    path.write_text("---\ntitle: Note\n---\nOld evidence\n")
+    artifact_id = collector.collect()[0].artifact.id
+    if status == "processing":
+        collector.db.mark_ingestion_processing(artifact_id)
+    before_entry = collector.db.get_ingestion_entry(artifact_id)
+    before_hash = collector.db.get_file_entry(str(path)).hash
+    path.write_text("---\ntitle: Note\n---\nNew evidence\n")
+    new_path = vault / "Clippings/z-new.md"
+    new_path.write_text("---\ntitle: New\n---\nIndependent evidence\n")
+    records = collector.collect(limit=1)
+    assert len(records) == 1
+    assert records[0].path == new_path
+    assert collector.last_deferred_sources == [str(path)]
+    assert collector.db.get_ingestion_entry(artifact_id).payload_json == before_entry.payload_json
+    assert collector.db.get_file_entry(str(path)).hash == before_hash
+    collector.db.mark_ingestion_processed(artifact_id)
+    collector.collect()
+    assert collector.db.get_ingestion_entry(artifact_id).status == "pending"
+    assert collector.db.get_file_entry(str(path)).hash != before_hash
+
+
+def test_changed_terminal_failed_source_is_retryable(tmp_path):
+    collector, vault = make_collector(tmp_path)
+    path = vault / "Clippings/note.md"
+    path.write_text("---\ntitle: Note\n---\nOld evidence\n")
+    artifact_id = collector.collect()[0].artifact.id
+    collector.db.mark_ingestion_processing(artifact_id)
+    collector.db.mark_ingestion_failed(artifact_id, "exhausted retries", max_attempts=1)
+    assert collector.db.get_ingestion_entry(artifact_id).status == "failed"
+    path.write_text("---\ntitle: Note\n---\nCorrected evidence\n")
+    collector.collect()
+    refreshed = collector.db.get_ingestion_entry(artifact_id)
+    assert refreshed.status == "pending"
+    assert refreshed.attempts == 0
+    assert refreshed.last_error is None
+
+
+@pytest.mark.parametrize("reject", [False, True])
+def test_changed_reviewed_source_preserves_operator_review_state(tmp_path, reject):
+    collector, vault = make_collector(tmp_path)
+    path = vault / "Clippings/note.md"
+    path.write_text("---\ntitle: Note\n---\nOriginal evidence\n")
+    artifact_id = collector.collect()[0].artifact.id
+    collector.db.mark_ingestion_review_required(
+        artifact_id, category="security_policy", reason="operator review required"
+    )
+    if reject:
+        collector.db.reject_ingestion_review(artifact_id, actor="test", reason="rejected")
+    expected = collector.db.get_ingestion_entry(artifact_id).status
+    path.write_text("---\ntitle: Note\n---\nChanged evidence\n")
+    collector.collect()
+    assert collector.db.get_ingestion_entry(artifact_id).status == expected
+
+
 def test_web_clipper_collector_indexes_allowlisted_roots_only(tmp_path: Path):
     collector, vault_root = make_collector(tmp_path)
 
@@ -120,6 +258,7 @@ def test_web_clipper_collector_reindexes_changed_files(tmp_path: Path):
     second_pass = collector.collect()
     assert len(second_pass) == 1
     assert second_pass[0].is_new_or_changed is False
+    collector.db.mark_ingestion_processed(first_pass[0].artifact.id)
 
     note_file.write_text(
         "---\n"
@@ -178,7 +317,7 @@ def test_web_clipper_collector_queues_notes_for_shared_runtime(
     assert results[0].artifact_type == "web_clipper"
     assert collector.db.get_ingestion_entry("webclip:Clippings/capture.md").status == "processed"
 
-    wiki_page = collector.layout.wiki_root / "pages" / "clip-captured-note.md"
+    wiki_page = next((collector.layout.wiki_root / "pages").glob("clip-captured-note-*.md"))
     assert wiki_page.exists()
     wiki_content = wiki_page.read_text(encoding="utf-8")
     assert "captured note" in wiki_content
@@ -220,9 +359,7 @@ def test_web_clipper_collector_quarantines_hostile_fixture(tmp_path: Path):
     runtime = KnowledgeArtifactRuntime(layout=collector.layout, db=collector.db)
     with pytest.raises(IngestionRuntimeError, match="security review"):
         asyncio.run(runtime.process_ingestion_entry(entry))
-    assert not (
-        collector.layout.wiki_root / "pages" / "clip-hostile-hidden-html.md"
-    ).exists()
+    assert not list((collector.layout.wiki_root / "pages").glob("clip-hostile-hidden-html-*.md"))
 
 
 def test_web_clipper_collector_fails_closed_when_roots_missing(tmp_path: Path):

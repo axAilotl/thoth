@@ -1,4 +1,5 @@
 from dataclasses import replace
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,6 +41,25 @@ class FakeEmbeddingLLM:
                 ]
             )
         return SimpleNamespace(vectors=vectors, error=None, provider=provider, model=model)
+
+
+def test_hybrid_topic_keeps_ranked_documents_when_merging_scores(tmp_path):
+    config, db = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    folder = layout.vault_root / 'repos'
+    folder.mkdir(parents=True)
+    (folder / 'evidence.md').write_text('# Companion memory\nCompanion persona memory and reflection.')
+    topic = ArchivistTopicDefinition(
+        id='companion', title='Companion memory', output_path='pages/topic-companion.md',
+        include_roots=('repos',), source_types=('repository',),
+        retrieval=ArchivistRetrievalPolicy(mode='hybrid'),
+    )
+    result = asyncio.run(select_archivist_candidates_async(
+        topic, config=config, layout=layout, db=db, llm_interface=FakeEmbeddingLLM(),
+    ))
+    assert len(result.candidates) == 1
+    assert result.candidates[0].candidate_key == 'vault:repos/evidence.md'
+    assert result.candidates[0].retrieval_sources == ('full_text', 'semantic')
 
 
 def make_config(tmp_path: Path) -> tuple[Config, MetadataDB]:

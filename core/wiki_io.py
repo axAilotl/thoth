@@ -5,9 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import os
 import yaml
+
+
+def markdown_file_link(label: str, path: str) -> str:
+    """Render a portable file link, including spaces, percent signs and brackets."""
+    label = label.replace('\\', '\\\\').replace('[', '\\[').replace(']', '\\]')
+    # Obsidian decodes URI components selectively: commas, plus and ampersands must
+    # remain literal path characters, while spaces/parentheses need encoding.
+    return f'[{label}]({quote(path, safe="/,+&")})'
 
 
 @dataclass(frozen=True)

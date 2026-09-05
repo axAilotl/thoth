@@ -58,6 +58,80 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("existing_status", ["processed", "pending", "processing", "failed"])
+async def test_full_scan_preserves_bookmarks_imported_by_other_sources(
+    tmp_path, restore_thoth_config, monkeypatch, existing_status,
+):
+    thoth_api.config.data = deepcopy(make_config(tmp_path).data)
+    async def backfill(*args, **kwargs):
+        return {"payloads": [{"tweet_id": "100"}, {"tweet_id": "101"}]}
+    delivered = []
+    async def ingest(payload, **kwargs):
+        delivered.append(payload["tweet_id"])
+    monkeypatch.setattr(thoth_api, "run_x_api_bookmark_backfill", backfill)
+    monkeypatch.setattr(thoth_api, "ingest_bookmark_capture", ingest)
+    monkeypatch.setattr(thoth_api, "get_metadata_db", lambda: SimpleNamespace(
+        get_bookmark_entry=lambda item: SimpleNamespace(status=existing_status) if item == "100" else None,
+        get_ingestion_entry=lambda item: None))
+    result = await thoth_api.run_x_api_bookmark_sync(full_scan=True)
+    assert delivered == ["101"]
+    assert result["queued"] == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", ["needs_review", "failed", "processed"])
+@pytest.mark.parametrize("artifact_id", ["100", "tweet:100"])
+async def test_full_scan_preserves_ingestion_only_items(
+    tmp_path, restore_thoth_config, monkeypatch, status, artifact_id,
+):
+    thoth_api.config.data = deepcopy(make_config(tmp_path).data)
+    async def backfill(*args, **kwargs):
+        return {"payloads": [{"tweet_id": "100"}, {"tweet_id": "101"}]}
+    delivered = []
+    async def ingest(payload, **kwargs):
+        delivered.append(payload["tweet_id"])
+    monkeypatch.setattr(thoth_api, "run_x_api_bookmark_backfill", backfill)
+    monkeypatch.setattr(thoth_api, "ingest_bookmark_capture", ingest)
+    monkeypatch.setattr(thoth_api, "get_metadata_db", lambda: SimpleNamespace(
+        get_bookmark_entry=lambda item: None,
+        get_ingestion_entry=lambda item: SimpleNamespace(status=status) if item == artifact_id else None))
+    result = await thoth_api.run_x_api_bookmark_sync(full_scan=True)
+    assert delivered == ["101"]
+    assert result["queued"] == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("timestamp", ["2020-01-01T00:00:00", "2020-01-01T00:00:00Z", "2020-01-01T00:00:00+03:00"])
+async def test_pending_bookmark_startup_accepts_naive_and_aware_timestamps(monkeypatch, timestamp):
+    import asyncio
+    entry = SimpleNamespace(status="pending", next_attempt_at=timestamp)
+    monkeypatch.setattr(thoth_api, "get_metadata_db", lambda: SimpleNamespace(
+        get_unprocessed_bookmarks=lambda: [entry]))
+    monkeypatch.setattr(thoth_api, "bookmark_entry_to_payload", lambda item: {"tweet_id": "100"})
+    queued = []
+    async def enqueue(payload, delay):
+        queued.append((payload, delay))
+    monkeypatch.setattr(thoth_api, "enqueue_bookmark_payload", enqueue)
+    await thoth_api.load_pending_bookmarks_from_db()
+    await asyncio.sleep(0)
+    assert queued == [({"tweet_id": "100"}, 0.0)]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("timestamp", ["2020-01-01T00:00:00", "2020-01-01T00:00:00Z", "2020-01-01T00:00:00+03:00"])
+async def test_retry_accepts_naive_and_aware_timestamps(monkeypatch, timestamp):
+    import asyncio
+    entry = SimpleNamespace(status="pending")
+    monkeypatch.setattr(thoth_api, "get_metadata_db", lambda: SimpleNamespace(
+        get_bookmark_entry=lambda item: entry))
+    monkeypatch.setattr(thoth_api, "bookmark_entry_to_payload", lambda item: {"tweet_id": "100"})
+    queue = asyncio.Queue()
+    monkeypatch.setattr(thoth_api, "PROCESSING_QUEUE", queue)
+    await thoth_api.schedule_retry("100", timestamp)
+    assert queue.get_nowait() == {"tweet_id": "100"}
+
+
+@pytest.mark.anyio
 async def test_run_x_api_bookmark_sync_enqueues_or_processes(
     tmp_path: Path,
     restore_thoth_config,
@@ -220,6 +294,7 @@ def test_x_api_bookmark_sync_route_wires_into_fastapi(restore_thoth_config, monk
     )
 
     async def fake_run_x_api_bookmark_sync(*args, **kwargs):
+        assert kwargs["full_scan"] is True
         return {
             "status": "ok",
             "sync_config": {
@@ -248,6 +323,7 @@ def test_x_api_bookmark_sync_route_wires_into_fastapi(restore_thoth_config, monk
                 "max_results": 25,
                 "max_pages": 2,
                 "resume_from_checkpoint": False,
+                "full_scan": True,
             },
         )
 

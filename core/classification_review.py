@@ -30,6 +30,11 @@ class ClassificationReviewError(RuntimeError):
     """Raised when a classification review action cannot be completed."""
 
 
+def entry_has_classification_review(entry) -> bool:
+    """Inspect a caller's checked snapshot without another fallible DB read."""
+    return bool(entry and _extract_classification_event(entry.review_json))
+
+
 class ClassificationReviewService:
     """List and resolve uncertain artifact routing decisions.
 
@@ -97,7 +102,7 @@ class ClassificationReviewService:
     def is_review_item(self, artifact_id: str) -> bool:
         """Return whether an ingestion row carries a classification review."""
         entry = self.db.get_ingestion_entry(artifact_id)
-        return bool(entry and _extract_classification_event(entry.review_json))
+        return entry_has_classification_review(entry)
 
     def approve(
         self,

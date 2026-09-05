@@ -241,7 +241,7 @@ def _collect_web_clipper(
     return (
         ("webclip:Clippings/matrix.md",),
         ("web_clipper_note",),
-        ("clip-matrix-web-clip",),
+        ("clip-matrix-web-clip-84cee526c4e9",),
     )
 
 

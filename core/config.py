@@ -187,11 +187,15 @@ class Config:
                 base[key] = value
     
     def _apply_legacy_path_aliases(self):
-        """Lift values from paths.* to top-level keys for backward compatibility."""
+        """Keep existing processor path keys aligned with canonical paths.*.
+
+        This runs after every configuration layer. Defaults copied on an earlier
+        load must not shadow the operator's later nested path overrides.
+        """
         paths = self.get('paths', {})
         if isinstance(paths, dict):
             for key in ['bookmarks_file', 'cookies_file', 'cache_dir', 'images_dir', 'videos_dir', 'media_dir', 'vault_dir', 'system_dir']:
-                if key not in self.data and key in paths:
+                if key in paths:
                     self.data[key] = paths[key]
     
     def validate(self) -> List[str]:

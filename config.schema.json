@@ -3,6 +3,23 @@
   "title": "thoth.config",
   "type": "object",
   "definitions": {
+    "connectorSchedule": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "interval_seconds": { "type": "number", "minimum": 60 },
+        "interval_hours": { "type": "number", "minimum": 0.016666666666666666 },
+        "run_on_startup": { "type": "boolean", "default": false },
+        "options": { "type": "object" }
+      },
+      "additionalProperties": false,
+      "not": { "required": ["interval_seconds", "interval_hours"] },
+      "if": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] },
+      "then": { "anyOf": [
+        { "required": ["interval_seconds"] },
+        { "required": ["interval_hours"] }
+      ] }
+    },
     "connectorBudget": {
       "type": "object",
       "properties": {
@@ -340,6 +357,14 @@
       "type": "object",
       "additionalProperties": true
     },
+    "review_ui": {
+      "type": "object",
+      "properties": {
+        "obsidian_vault_name": { "type": "string", "minLength": 1 },
+        "obsidian_content_prefix": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "content_roots": {
       "type": "array",
       "items": {
@@ -392,6 +417,12 @@
     },
     "sources": {
       "type": "object",
+      "patternProperties": {
+        ".*": {
+          "type": "object",
+          "properties": { "schedule": { "$ref": "#/definitions/connectorSchedule" } }
+        }
+      },
       "properties": {
         "arxiv": {
           "type": "object",
@@ -435,10 +466,27 @@
           },
           "additionalProperties": true
         },
+        "corpus_index": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "include_roots": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "exclude_roots": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "embeddings_enabled": { "type": "boolean", "default": false },
+            "max_new_embeddings_per_run": { "type": "integer", "minimum": 1, "default": 128 }
+          },
+          "additionalProperties": true
+        },
         "web_clipper": {
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
+            "queue_pdfs": { "type": "boolean", "default": false },
+            "summarize": { "type": "boolean", "default": false },
+            "max_source_bytes": { "type": "integer", "minimum": 1, "default": 52428800 },
+            "pdf_max_pages": { "type": "integer", "minimum": 1, "default": 40 },
+            "pdf_text_max_chars": { "type": "integer", "minimum": 1, "default": 500000 },
+            "summary_max_chars": { "type": "integer", "minimum": 1, "default": 24000 },
             "note_dirs": {
               "type": "array",
               "items": { "type": "string" }

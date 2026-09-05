@@ -7,6 +7,7 @@ from datetime import datetime
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Optional
 
@@ -30,6 +31,7 @@ from ..wiki_io import read_document
 from .models import (
     ArchivistCandidate,
     ArchivistCorpusDocument,
+    EMBEDDING_BLOCKED_PRIVACY_CLASSES,
     ResolvedArchivistRoot,
 )
 
@@ -107,7 +109,7 @@ def sync_archivist_inventory(
 
         scanned_roots.append(root.spec)
         keep_candidate_keys: list[str] = []
-        for path in sorted(root.path.rglob("*"), key=lambda item: str(item)):
+        for path in iter_allowed_corpus_paths(root, exclude_roots=exclude_roots):
             if not path.is_file():
                 continue
 
@@ -152,6 +154,30 @@ def sync_archivist_inventory(
         indexed_count=indexed_count,
         reused_count=reused_count,
     )
+
+
+def iter_allowed_corpus_paths(root: ResolvedArchivistRoot, *, exclude_roots):
+    """Prune excluded trees before traversal, file reads, or index writes."""
+    def excluded(path):
+        return any(item.scope == root.scope and path.is_relative_to(item.path)
+                   for item in exclude_roots)
+
+    if excluded(root.path):
+        return
+    def fail(error):
+        raise error
+
+    for directory, names, files in os.walk(root.path, followlinks=False, onerror=fail):
+        base = Path(directory)
+        names[:] = sorted(name for name in names if not excluded(base / name))
+        # Yield symlink directories too, so connector preflight can reject them.
+        for name in names:
+            if (base / name).is_symlink():
+                yield base / name
+        for name in sorted(files):
+            path = base / name
+            if not excluded(path):
+                yield path
 
 
 def resolve_archivist_root_spec(spec: str, *, layout: PathLayout) -> ResolvedArchivistRoot:
@@ -269,6 +295,9 @@ def _load_or_parse_document(
         and existing.updated_at == updated_at
         and existing.size_bytes == stat.st_size
         and existing.path == path
+        # A failed/textless PDF extraction is not a completed content index.
+        # Retry on subsequent inventory runs instead of caching failure forever.
+        and (suffix != ".pdf" or bool(existing.content_text.strip()))
     ):
         secured_existing = _apply_source_trust_metadata(
             existing,
@@ -329,7 +358,7 @@ def _load_or_parse_document(
 def _lookup_source_id(path: Path, *, layout: PathLayout, db: MetadataDB) -> str | None:
     entry = db.get_file_entry(str(path))
     if entry and entry.source_id:
-        return entry.source_id
+        return _canonical_queue_source_id(entry.source_id, db=db)
 
     for base in (layout.vault_root, layout.raw_root):
         try:
@@ -338,9 +367,43 @@ def _lookup_source_id(path: Path, *, layout: PathLayout, db: MetadataDB) -> str 
             continue
         entry = db.get_file_entry(rel_path)
         if entry and entry.source_id:
-            return entry.source_id
+            return _canonical_queue_source_id(entry.source_id, db=db)
 
     return None
+
+
+def _canonical_queue_source_id(source_id: str, *, db: MetadataDB) -> str:
+    """Resolve the Web Clipper file identity only against its actual queue row.
+
+    Other collectors already store canonical queue IDs; never blindly prefix
+    their identities or infer provenance from a similarly named missing row.
+    """
+    if db.get_ingestion_entry(source_id) is not None:
+        return source_id
+    if not source_id.startswith("webclip:"):
+        candidate = f"webclip:{source_id}"
+        entry = db.get_ingestion_entry(candidate)
+        if entry is not None and entry.source == "web_clipper":
+            return candidate
+    return source_id
+
+
+def refresh_document_queue_security(document: ArchivistCorpusDocument, *, db: MetadataDB):
+    """Refresh mutable queue gates on cached documents without reindexing files."""
+    if not document.source_id:
+        file_entry = db.get_file_entry(str(document.path)) or db.get_file_entry(document.scope_relative_path)
+        if file_entry and file_entry.source_id:
+            document = replace(document, source_id=file_entry.source_id)
+    if document.source_id:
+        document = replace(document, source_id=_canonical_queue_source_id(document.source_id, db=db))
+    for identity in {document.source_id, document.artifact_id} - {None, ""}:
+        if db.ingestion_entry_requires_security_review(identity):
+            return None
+    refreshed = _apply_embedding_provenance_metadata(document, frontmatter={}, db=db)
+    # A queue update cannot silently weaken a previously indexed source policy.
+    if document.privacy_class.strip().lower() in EMBEDDING_BLOCKED_PRIVACY_CLASSES:
+        refreshed = replace(refreshed, privacy_class=document.privacy_class)
+    return refreshed
 
 
 def _is_security_excluded_path(
@@ -350,7 +413,7 @@ def _is_security_excluded_path(
     db: MetadataDB,
     source_id: str | None,
 ) -> bool:
-    if source_id and db.ingestion_entry_requires_security_review(source_id):
+    if source_id and db.ingestion_entry_requires_security_review(_canonical_queue_source_id(source_id, db=db)):
         return True
     if suffix not in {".md", ".markdown"}:
         return False
@@ -373,6 +436,9 @@ def _apply_source_trust_metadata(
     suffix: str,
     db: MetadataDB,
 ) -> ArchivistCorpusDocument | None:
+    document = refresh_document_queue_security(document, db=db)
+    if document is None:
+        return None
     source_label = _source_label_for_document(document)
     metadata = prompt_security_metadata_for_text(
         document.content_text,
@@ -421,15 +487,17 @@ def _apply_embedding_provenance_metadata(
     entry_payload: dict[str, Any] = {}
     entry_artifact_id: str | None = None
     if document.source_id:
-        entry = db.get_ingestion_entry(document.source_id)
+        entry = db.get_ingestion_entry(_canonical_queue_source_id(document.source_id, db=db))
         if entry is not None:
             entry_artifact_id = entry.artifact_id
             try:
                 loaded = json.loads(entry.payload_json)
-            except Exception:
-                loaded = {}
+            except (TypeError, ValueError) as exc:
+                raise ArchivistInventoryError(f"Invalid queue provenance for {entry.artifact_id}") from exc
             if isinstance(loaded, dict):
                 entry_payload = loaded
+            else:
+                raise ArchivistInventoryError(f"Queue provenance is not an object for {entry.artifact_id}")
 
     mappings = _provenance_mappings(frontmatter, entry_payload)
     artifact_id = (
@@ -441,6 +509,7 @@ def _apply_embedding_provenance_metadata(
             "canonical_artifact_id",
         )
         or entry_artifact_id
+        or document.artifact_id
     )
     event_id = _first_metadata_text(
         mappings,
@@ -461,6 +530,14 @@ def _apply_embedding_provenance_metadata(
         "privacy_class",
         "classification",
     )
+    for mapping in mappings:
+        explicit_privacy = _first_nested_metadata_text(
+            (mapping,), mapping_keys=("thoth_privacy", "privacy"),
+            value_keys=("privacy_class", "classification", "class"),
+        ) or _first_metadata_text((mapping,), "thoth_privacy_class", "privacy_class", "classification")
+        if explicit_privacy and explicit_privacy.lower() in EMBEDDING_BLOCKED_PRIVACY_CLASSES:
+            privacy_class = explicit_privacy
+            break
     retention_class = _first_nested_metadata_text(
         mappings,
         mapping_keys=("thoth_retention", "retention"),
@@ -476,9 +553,9 @@ def _apply_embedding_provenance_metadata(
     return replace(
         document,
         artifact_id=artifact_id,
-        event_id=event_id,
-        privacy_class=privacy_class or "unspecified",
-        retention_class=retention_class or "unspecified",
+        event_id=event_id or document.event_id,
+        privacy_class=privacy_class or document.privacy_class,
+        retention_class=retention_class or document.retention_class,
     )
 
 

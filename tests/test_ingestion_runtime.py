@@ -1091,7 +1091,8 @@ def test_process_pending_ingestions_routes_materialization_errors_to_review(
 
     assert results[0].status == "needs_review"
     assert persisted.status == "needs_review"
-    assert persisted.attempts == 0
+    # Ownership is claimed atomically before materializing the current revision.
+    assert persisted.attempts == 1
     assert "capabilities_json" in persisted.last_error
     assert review["state"]["category"] == "malformed_payload"
     assert review["state"]["metadata"] == {"stage": "materialize"}

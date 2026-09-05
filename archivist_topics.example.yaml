@@ -14,6 +14,54 @@ defaults:
     max_new_embeddings_per_run: 24
 
 topics:
+  - id: asr-speech-to-text
+    title: ASR & Speech-to-Text Research
+    output_path: pages/topic-asr-speech-to-text.md
+    description: >
+      Evidence-led research on automatic speech recognition, streaming transcription,
+      speaker diarization, overlapping speech and multilingual audio models. Compare
+      accuracy metrics (WER/CER and DER), latency, hardware requirements and local or
+      private deployment only where the supplied sources support those comparisons.
+      Distinguish speech recognition from speech generation and general audio
+      understanding. Separate paper results, model/repository claims and secondary
+      commentary. Identify practical evaluation questions and missing evidence for a
+      personal transcription application; do not invent benchmarks or application
+      decisions. These are bounded excerpts, not full-paper reviews.
+    include_roots: [papers, pdfs, repos, stars, clippings, Clippings, tweets, threads]
+    exclude_roots: [journals, private-notes, transcripts, media]
+    exclude_tags: [personal]
+    include_terms:
+      - speech recognition
+      - speech-to-text
+      - speech to text
+      - speaker diarization
+      - diarization
+      - streaming asr
+      - whisper
+      - voxtral
+      - omnilingual-asr
+      - fireredasr
+      - nemotron
+      - parakeet
+    cadence_hours: 24
+    max_sources: 18
+    retrieval:
+      mode: hybrid
+      tag_mode: "off"
+      term_mode: required
+      query_text: >
+        Automatic speech recognition and streaming speech-to-text: Whisper,
+        Voxtral, multilingual ASR, speaker diarization, overlapping speech,
+        accuracy, latency and private local inference.
+      max_new_embeddings_per_run: 0
+      full_text_limit: 100
+      semantic_limit: 60
+      rerank_limit: 40
+      source_type_weights:
+        paper: 1.3
+        repository: 1.2
+        tweet: 0.7
+
   - id: companion-ai-research
     title: Companion AI Research
     output_path: pages/topic-companion-ai-research.md

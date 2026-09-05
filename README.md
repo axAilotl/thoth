@@ -80,6 +80,66 @@ Important paths:
 
 Then open `/settings` for the operator control plane.
 
+### Container deployment
+
+The application image runs one Uvicorn worker without development reload. The
+same process owns the ingestion and scheduled workers. Python dependencies are
+locked with hashes in `docker/requirements.lock`; PDF extraction and FFmpeg
+are included. Pi CLI, local Whisper models, and yt-dlp are optional tools and
+are not included in this image. Use an HTTP provider route for LLM processing.
+
+For a **new, empty installation**, initialize persistent operator files and start:
+
+```bash
+python3 docker/container.py init .runtime/container
+mkdir -p knowledge_vault wiki
+docker compose build
+docker compose up -d --wait
+```
+
+The initializer refuses to overwrite existing settings. Set `THOTH_UID` and
+`THOTH_GID` to the owner of the mounted files when different from `1000:1000`.
+The default URL is `http://127.0.0.1:8001/settings`. On a remote server, use an
+SSH tunnel (`ssh -L 8001:127.0.0.1:8001 your-server`) or configure a trusted
+reverse proxy. The operator API has no built-in authentication: keep it on a
+private network or behind an authenticated proxy. `THOTH_BIND_ADDRESS` and
+`THOTH_PORT` control host binding; the default is loopback only.
+
+The runtime mount contains `config/` (config.json, control.json, .env, and the
+archivist registry) and `system/` (SQLite, authentication, caches, and logs).
+Vault and wiki mounts remain separate. Settings UI edits persist across image
+replacement. Configure credentials and routes in `/settings`, then enable
+`processing.enable_llm_features`; it is disabled in the fresh container template.
+Host paths can be set through `THOTH_RUNTIME_DIR`, `THOTH_VAULT_DIR`, and
+`THOTH_WIKI_DIR`. Their directories must exist before startup. Runtime settings
+continue to live in the operator JSON files, not Compose environment variables.
+
+For an **existing installation**, back up operational state and take a SQLite
+backup before starting the new code. Copy the existing operator files into the
+runtime's `config/` directory, adapt `paths.system_dir` and the database path,
+and mount all configured content paths. Preserve absolute content paths if the
+existing database references them. Check for the older doubled
+`.thoth_system/.thoth_system/meta.db` location: an empty top-level `meta.db` is
+not evidence of an empty archive. Validate on copies before pointing the
+container at your live vault. Never run two API instances against the same
+SQLite database. Retain the pre-upgrade state for rollback; old code must not
+be pointed at a database migrated by a newer release.
+
+Operational commands (use the same Compose files and environment as startup):
+
+```bash
+docker compose ps
+docker compose logs --tail 100 thoth
+docker compose exec thoth python thoth.py stats
+docker compose exec thoth python thoth.py web-clipper --plan --json
+docker compose restart thoth
+docker compose stop
+```
+
+To refresh the Python lock intentionally, run
+`uv pip compile requirements.txt --python-version 3.12 --generate-hashes --output-file docker/requirements.lock`
+and validate the resulting image before deployment.
+
 ## Settings UI
 
 The settings UI exposes:

@@ -1,0 +1,21 @@
+{
+  "name": "corpus_index",
+  "source_name": "corpus_index",
+  "display_name": "Corpus Index",
+  "description": "Incrementally index explicit local roots for keyword search and bounded full-content document embeddings, without generating summaries.",
+  "artifact_types": ["markdown", "paper"],
+  "inputs": ["local_files:explicit_corpus_roots"],
+  "outputs": ["local_index:keyword", "local_index:document_embeddings"],
+  "capabilities": ["keyword_index", "embedding_backfill"],
+  "config_keys": ["sources.corpus_index.enabled", "sources.corpus_index.include_roots", "sources.corpus_index.exclude_roots", "sources.corpus_index.embeddings_enabled", "sources.corpus_index.max_new_embeddings_per_run"],
+  "auth": [],
+  "queue_capability": false,
+  "queue_behavior": "no_queue",
+  "safety_mode": "local_index_optional_remote_embeddings",
+  "allowed_side_effects": ["local_file_read", "metadata_write", "configured_embedding_provider_request"],
+  "entrypoint": "collectors.corpus_index_connector:CorpusIndexConnector",
+  "cli_command": "corpus-index",
+  "config_namespace": "sources.corpus_index",
+  "default_enabled": false,
+  "ccf": { "lane": "mixed", "artifact_role": "derived_index" }
+}

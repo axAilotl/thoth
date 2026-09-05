@@ -1,0 +1,39 @@
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h2 class="card-title">Review inbox</h2>
+            <p class="card-description">Inspect paused sources, see why processing stopped, and decide what happens next. Originals stay in your vault.</p>
+        </div>
+    </div>
+    <p class="review-notice">Security flags can occur in legitimate research, quoted prompts or PDF formatting. A flag is not proof of malicious content. Approval permits processing under your configured settings; source text remains untrusted input.</p>
+    <div class="review-toolbar">
+        <div class="form-group">
+            <label for="review-status">Show</label>
+            <select id="review-status"><option value="active">Needs attention</option><option value="needs_review">Needs review</option><option value="blocked">Blocked</option><option value="failed">Failed</option><option value="decided">Decision history</option><option value="rejected">Rejected</option><option value="reviewed">Closed without processing</option></select>
+        </div>
+        <button id="review-refresh" class="btn btn-secondary" type="button">Refresh</button>
+        <p id="review-count" class="stat-label" aria-live="polite"></p>
+    </div>
+    <p id="review-message" role="status" aria-live="polite"></p>
+</div>
+<div id="review-items" aria-label="Review items"></div>
+<nav class="btn-group" aria-label="Inbox pages"><button id="review-previous" class="btn btn-secondary" type="button" disabled>Previous</button><button id="review-next" class="btn btn-secondary" type="button" disabled>Next</button></nav>
+<p class="card-description review-footer">Rejecting stops processing; it never deletes the source. Automatic extraction retries appear here once they exhaust their retry allowance. This is the trusted-network operator console, not a public sharing page.</p>
+<dialog id="review-decision-dialog" class="card" aria-labelledby="review-decision-title">
+    <form id="review-decision-form">
+        <div class="card-header"><h2 id="review-decision-title" class="card-title"></h2></div>
+        <p id="review-decision-source"></p>
+        <p id="review-decision-explanation" class="card-description"></p>
+        <div class="form-group">
+            <label for="review-actor">Your name</label>
+            <input type="text" id="review-actor" required maxlength="120" autocomplete="name">
+        </div>
+        <div class="form-group">
+            <label for="review-reason">Reason for this decision</label>
+            <textarea id="review-reason" required maxlength="2000" rows="3"></textarea>
+        </div>
+        <label id="review-ack-label"><input id="review-ack" type="checkbox"> I inspected the source and approve processing this flagged content. The configured pipeline may send permitted content to model providers.</label>
+        <p id="review-decision-error" role="alert"></p>
+        <div class="btn-group"><button id="review-cancel" class="btn btn-secondary" type="button">Cancel</button><button id="review-confirm" class="btn btn-primary" type="submit">Confirm decision</button></div>
+    </form>
+</dialog>

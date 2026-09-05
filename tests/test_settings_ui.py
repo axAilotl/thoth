@@ -1,6 +1,33 @@
 from pathlib import Path
 
 
+def test_x_sync_message_uses_backfill_count_and_distinguishes_processing():
+    html = (Path(__file__).resolve().parents[1] / 'static/settings.html').read_text()
+    function = html.split('async function runXApiSync()', 1)[1].split('async function loadArchivistRegistry()', 1)[0]
+    assert 'result.backfill?.bookmarks_emitted' in function
+    assert 'result.queued ?? 0' in function
+    assert 'queued for background processing' in function
+    assert 'result.backfill?.checkpoint?.pagination_token' in function
+    assert 'result.bookmarks_emitted' not in function
+
+
+def test_review_is_a_settings_tab_using_shared_components():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / 'static/settings.html').read_text()
+    assert 'data-tab="review"' in html
+    assert 'id="review" class="tab-content"' in html
+    assert 'href="/review"' not in html
+    assert 'type="module" src="/static/review.js' in html
+    panel = (root / 'static/review-panel.html').read_text()
+    assert '<html' not in panel and '<body' not in panel
+    assert 'class="card"' in panel
+    assert 'class="btn btn-primary"' in panel
+    css = (root / 'static/review.css').read_text()
+    assert ':root' not in css
+    assert 'var(--bg-card)' in css
+    assert 'var(--border)' in css
+
+
 def test_settings_ui_exposes_archivist_web_clipper_and_translation_controls():
     html = (Path(__file__).resolve().parents[1] / "static" / "settings.html").read_text(
         encoding="utf-8"

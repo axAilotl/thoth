@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Thoth Settings</title>
     <link rel="icon" type="image/png" href="/static/thoth.png">
+    <link rel="stylesheet" href="/static/review.css?v=2">
+    <script type="module" src="/static/review.js?v=2"></script>
     <style>
         :root {
             --bg-primary: #140f0a;
@@ -697,10 +699,15 @@
             <button class="tab" data-tab="pipeline">Sources &amp; Skills</button>
             <button class="tab" data-tab="archivist">Wiki &amp; Archivist</button>
             <button class="tab" data-tab="security">Security</button>
+            <button class="tab" data-tab="review">Review</button>
             <button class="tab" data-tab="paths">Advanced</button>
         </div>
 
         <!-- LLM Providers Advanced Section -->
+        <section id="review" class="tab-content" aria-label="Review inbox">
+            <p class="card-description" role="status">Loading review inbox…</p>
+        </section>
+
         <div id="providers" class="tab-content">
             <div class="card">
                 <div class="card-header">
@@ -1758,6 +1765,9 @@
 
         // Tab switching
         function showTab(tabName) {
+            if (![...document.querySelectorAll('.tab')].some(tab => tab.dataset.tab === tabName)) {
+                tabName = 'stats';
+            }
             const activeContentIds = tabName === 'paths'
                 ? ['providers', 'tasks', 'paths']
                 : [tabName];
@@ -1767,11 +1777,18 @@
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.toggle('active', activeContentIds.includes(content.id));
             });
+            if (location.hash !== `#${tabName}`) history.replaceState(null, '', `#${tabName}`);
+            document.dispatchEvent(new CustomEvent('thoth:tab-changed', {detail: tabName}));
         }
 
         document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => showTab(tab.dataset.tab));
+            tab.addEventListener('click', () => {
+                if (location.hash === `#${tab.dataset.tab}`) showTab(tab.dataset.tab);
+                else location.hash = tab.dataset.tab;
+            });
         });
+        window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
+        showTab(location.hash.slice(1));
 
         function showAlert(message, type = 'success') {
             const alerts = document.getElementById('alerts');
@@ -3232,7 +3249,11 @@
                 if (!response.ok) {
                     throw new Error(result.detail || 'Failed to start X bookmark sync');
                 }
-                showAlert(`X sync complete: ${result.bookmarks_emitted || 0} bookmarks emitted`);
+                const fetched = result.backfill?.bookmarks_emitted ?? 0;
+                const queued = result.queued ?? 0;
+                const remaining = result.backfill?.checkpoint?.pagination_token
+                    ? ' More history remains; run sync again to continue.' : '';
+                showAlert(`X sync fetched ${fetched} new bookmarks; ${queued} queued for background processing.${remaining}`);
                 await refreshXApiStatus();
             } catch (e) {
                 showAlert(`Failed to run X bookmark sync: ${e.message}`, 'error');

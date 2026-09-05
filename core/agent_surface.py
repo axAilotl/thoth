@@ -643,7 +643,12 @@ class AgentSurfaceService:
                         1 for record in records if record.is_new_or_changed
                     ),
                     "would_queue_notes": sum(
-                        1 for record in records if getattr(record, "would_queue", False)
+                        1 for record in records
+                        if record.file_type == "note" and getattr(record, "would_queue", False)
+                    ),
+                    "would_queue_pdfs": sum(
+                        1 for record in records
+                        if record.file_type == "attachment" and getattr(record, "would_queue", False)
                     ),
                     "would_stage_attachments": sum(
                         1 for record in records if getattr(record, "would_stage", False)

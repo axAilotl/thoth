@@ -302,20 +302,30 @@ def _run_web_clipper_connector(
     if context.config.get("sources.web_clipper.enabled", True) is False:
         raise ConnectorRunnerError("web_clipper connector is disabled")
 
+    unknown = set(options) - {"limit"}
+    if unknown:
+        raise ConnectorRunnerError(f"Unsupported web_clipper options: {sorted(unknown)}")
+    limit = options.get("limit")
+    if limit is not None and (
+        isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+    ):
+        raise ConnectorRunnerError("web_clipper limit must be a positive integer")
     collector = entrypoint.target(context.config, layout=context.layout, db=context.db)
-    records = collector.collect()
+    records = collector.collect(limit=limit) if limit is not None else collector.collect()
     changed = [record for record in records if record.is_new_or_changed]
     queued = [
         record
-        for record in changed
-        if record.file_type == "note" and record.artifact is not None
+        for record in records
+        if record.would_queue and record.artifact is not None
     ]
-    staged = [record for record in changed if record.file_type == "attachment"]
+    staged = [record for record in records if record.would_stage]
     return {
         "scanned_count": len(records),
         "changed_count": len(changed),
         "queued_count": len(queued),
         "staged_count": len(staged),
+        "deferred_count": len(collector.last_deferred_sources),
+        "deferred_sources": collector.last_deferred_sources,
         "queued": [
             {
                 "artifact_id": record.artifact.id if record.artifact else None,

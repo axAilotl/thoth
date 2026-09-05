@@ -135,10 +135,8 @@ async def test_universal_ingestion_loop_keeps_sources_in_vault_and_outputs_in_ma
     assert results[0].status == "processed"
     assert db.get_ingestion_entry(note_record.artifact.id).status == "processed"
 
-    wiki_page = (
-        layout.wiki_root
-        / "pages"
-        / f"clip-{normalize_wiki_slug(note_record.artifact.title)}.md"
+    wiki_page, = (layout.wiki_root / "pages").glob(
+        f"clip-{normalize_wiki_slug(note_record.artifact.title)}-*.md"
     )
     assert wiki_page.exists()
     wiki_content = wiki_page.read_text(encoding="utf-8")

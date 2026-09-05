@@ -1,0 +1,34 @@
+# Only application sources and build inputs enter the context. In particular,
+# exclude credentials, vaults, databases, worktrees and local agent state.
+**
+!Dockerfile
+!docker/
+!docker/requirements.lock
+!docker/container.py
+!docker/config.container.example.json
+!core/
+!core/**
+!collectors/
+!collectors/**
+!processors/
+!processors/**
+!ccf/
+!ccf/**
+!spec/
+!spec/**
+!prompts/
+!prompts/**
+!static/
+!static/**
+!scripts/
+!scripts/**
+!thoth.py
+!thoth_api.py
+!thoth_keeper.py
+!thoth_mcp.py
+!keeper_profile.py
+!config.example.json
+!config.schema.json
+!archivist_topics.example.yaml
+**/__pycache__/
+**/*.pyc

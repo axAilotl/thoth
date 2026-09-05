@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import logging
 import os
+from .wiki_io import markdown_file_link
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -725,11 +727,16 @@ class CompiledWikiUpdater:
             raise ValueError("Tweet artifacts do not compile into wiki pages")
         if isinstance(artifact, WebClipperArtifact):
             title = artifact.title or artifact.source_relative_path or artifact.id
+            suffix = "-" + hashlib.sha256(artifact.id.encode("utf-8")).hexdigest()[:12]
             return (
                 title,
-                f"clip-{normalize_wiki_slug(title)}",
+                f"clip-{normalize_wiki_slug(title, max_length=62)}{suffix}",
                 "concept",
-                _truncate_summary(artifact.body or artifact.raw_content),
+                _truncate_summary(
+                    (artifact.custom_metadata.get("document_summary") or {}).get("text")
+                    or (artifact.custom_metadata.get("document_abstract") or {}).get("text")
+                    or artifact.body or artifact.raw_content
+                ),
                 tuple(alias for alias in (artifact.source_url,) if alias),
             )
         if isinstance(artifact, VideoArtifact):
@@ -932,7 +939,33 @@ class CompiledWikiUpdater:
             f"# {spec.title}",
             "",
         ]
-        if spec.summary:
+        document_summary = artifact.custom_metadata.get("document_summary")
+        if isinstance(artifact, WebClipperArtifact) and isinstance(document_summary, dict):
+            lines.extend(["## Generated summary", "", document_summary["text"], ""])
+            if document_summary.get("coverage") != "complete_note_body":
+                lines.extend([
+                    "> Partial-source summary: based only on the bounded extracted excerpt "
+                    f"({document_summary.get('input_characters')} characters; "
+                    f"PDF page cap: {document_summary.get('pdf_page_limit')}). "
+                    "Consult the original for complete coverage.", "",
+                ])
+            lines.extend([
+                f"- Summary model: `{document_summary.get('provider')}/{document_summary.get('model')}`",
+                f"- Source SHA-256: `{document_summary.get('source_checksum')}`", "",
+            ])
+        elif isinstance(artifact, WebClipperArtifact) and artifact.custom_metadata.get("document_extraction"):
+            abstract = artifact.custom_metadata.get("document_abstract") or {}
+            if abstract.get("text"):
+                lines.extend(["## Source abstract (extracted, not AI-generated)", "", abstract["text"], ""])
+            else:
+                lines.extend(["No explicit abstract section could be extracted. No AI summary was requested.", ""])
+            extraction = artifact.custom_metadata["document_extraction"]
+            lines.extend([
+                f"> Text extraction is bounded to the first {extraction.get('pdf_page_limit')} "
+                f"PDF pages and {extraction.get('input_characters')} retained characters. "
+                "The original PDF remains the source of record.", "",
+            ])
+        elif spec.summary:
             lines.extend([spec.summary, ""])
         lines.extend(
             [
@@ -981,7 +1014,7 @@ class CompiledWikiUpdater:
             for source_path in spec.source_paths:
                 absolute_source = self.layout.vault_root / source_path
                 relative_link = os.path.relpath(absolute_source, self.contract.pages_dir)
-                lines.append(f"- [{source_path}]({relative_link})")
+                lines.append(f"- {markdown_file_link(source_path, relative_link)}")
             lines.append("")
 
         citation_lines = self._citation_lines(
@@ -1009,7 +1042,7 @@ class CompiledWikiUpdater:
         for source_path in spec.source_paths:
             absolute_source = self.layout.vault_root / source_path
             relative_link = os.path.relpath(absolute_source, self.contract.pages_dir)
-            citations.append(f"[{len(citations) + 1}] [{source_path}]({relative_link})")
+            citations.append(f"[{len(citations) + 1}] {markdown_file_link(source_path, relative_link)}")
         citations.extend(
             research_citation_lines(
                 research_context,

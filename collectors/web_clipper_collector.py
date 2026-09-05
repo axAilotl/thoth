@@ -9,8 +9,9 @@ source documents.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -18,6 +19,7 @@ from typing import List, Optional
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config
+from core.document_options import document_boolean, validate_document_opt_ins
 from core.connector_budgets import start_connector_budget_run
 from core.connector_capture import ConnectorCaptureQueue
 from core.artifacts.web_clipper import WebClipperArtifact
@@ -46,6 +48,10 @@ logger = logging.getLogger(__name__)
 
 class WebClipperSourceError(ValueError):
     """Raised when configured Web Clipper source roots are unusable."""
+
+
+class WebClipperSourceBusy(RuntimeError):
+    """An earlier capture still owns this source; retry on the next scan."""
 
 
 @dataclass(frozen=True)
@@ -102,37 +108,79 @@ class WebClipperCollector:
             capture_event_store=capture_event_store,
         )
         self.last_budget_usage: dict[str, object] = {}
+        self.last_scan_errors: list[dict[str, str]] = []
+        self.last_deferred_sources: list[str] = []
 
         self._validate_roots()
 
-    def collect(self) -> List[WebClipperFileRecord]:
+    def collect(self, *, limit: int | None = None) -> List[WebClipperFileRecord]:
         """Scan the configured allowlist and upsert file metadata."""
+        validate_document_opt_ins(self.config)
         discovered: List[WebClipperFileRecord] = []
         run_id = datetime.now().isoformat()
         targets = self._discover_targets()
+        self.last_scan_errors = []
+        self.last_deferred_sources = []
+        if limit is not None:
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+                raise ValueError("Web Clipper collect limit must be a positive integer")
+            # Limit work, not discovery order: unchanged files cannot starve new ones.
+            selected = []
+            for path, root, file_type in targets:
+                try:
+                    scanned = self._scan_file(path, root=root, file_type=file_type)
+                    if not self._needs_queue(scanned):
+                        continue
+                    previous = self.db.get_ingestion_entry(f"webclip:{scanned.source_id}")
+                    if previous is not None and previous.status in {"pending", "processing"}:
+                        self.last_deferred_sources.append(str(path))
+                        continue
+                    if file_type == "note":
+                        self._read_note(path)
+                    selected.append((path, root, file_type))
+                    if len(selected) >= limit:
+                        break
+                except (OSError, ValueError) as exc:
+                    self.last_scan_errors.append({"path": str(path), "error": str(exc)})
+            targets = selected
 
         budget = start_connector_budget_run(self.config, "web_clipper")
-        budget.add_files([path for path, _root, _file_type in targets])
+        for path, _root, file_type in targets:
+            # Binary attachment bytes are not language-model input tokens.
+            budget.add_file(path, count_input_tokens=file_type == "note")
         self.last_budget_usage = budget.summary()
 
         with self.capture_queue.lifecycle() as lifecycle:
             for path, root, file_type in targets:
-                if file_type == "note":
-                    discovered.append(
-                        self._index_note_file(
-                            path,
-                            root=root,
-                            lifecycle=lifecycle,
-                            run_id=run_id,
-                        )
-                    )
-                elif file_type == "attachment":
-                    discovered.append(self._index_attachment_file(path, root=root))
+                # A revision may still be owned by another worker. Do not
+                # acknowledge its checksum or let it starve unrelated files.
+                scanned = self._scan_file(path, root=root, file_type=file_type)
+                previous = self.db.get_ingestion_entry(f"webclip:{scanned.source_id}")
+                if self._needs_queue(scanned) and previous is not None and previous.status in {"pending", "processing"}:
+                    self.last_deferred_sources.append(str(path))
+                    continue
+                try:
+                    if file_type == "note":
+                        discovered.append(self._index_note_file(
+                            path, root=root, lifecycle=lifecycle, run_id=run_id,
+                        ))
+                    elif file_type == "attachment":
+                        discovered.append(self._index_attachment_file(
+                            path, root=root, lifecycle=lifecycle, run_id=run_id,
+                        ))
+                except WebClipperSourceBusy:
+                    self.last_deferred_sources.append(str(path))
 
+        if self.last_scan_errors:
+            raise WebClipperSourceError(
+                f"Web Clipper scan completed {len(discovered)} files with "
+                f"{len(self.last_scan_errors)} errors: {self.last_scan_errors}"
+            )
         return discovered
 
     def plan(self) -> List[WebClipperFileRecord]:
         """Scan the configured allowlist without writing queue or file entries."""
+        validate_document_opt_ins(self.config)
         discovered: List[WebClipperFileRecord] = []
         for path, root, file_type in self._discover_targets():
             if file_type == "note":
@@ -193,9 +241,8 @@ class WebClipperCollector:
     ) -> WebClipperFileRecord:
         scanned = self._scan_file(path, root=root, file_type="note")
         parsed_note = self._read_note(path)
-        self._upsert_scanned_file(scanned)
-
-        if scanned.is_new_or_changed:
+        queued = self._needs_queue(scanned)
+        if queued:
             self._queue_note_artifact(
                 parsed_note,
                 source_id=scanned.source_id,
@@ -204,8 +251,9 @@ class WebClipperCollector:
                 lifecycle=lifecycle,
                 run_id=run_id,
             )
+        self._upsert_scanned_file(scanned)
 
-        return self._note_record(scanned, parsed_note)
+        return self._note_record(scanned, parsed_note, would_queue=queued)
 
     def _queue_note_artifact(
         self,
@@ -224,6 +272,7 @@ class WebClipperCollector:
             size_bytes=size_bytes,
             sha256=sha256,
         )
+        previous = self._queue_previous(artifact)
         self.capture_queue.queue_artifact(
             lifecycle,
             artifact,
@@ -258,15 +307,17 @@ class WebClipperCollector:
             raise RuntimeError(
                 f"Failed to queue Web Clipper note for ingestion: {parsed_note.source_path}"
             )
+        self._requeue_changed(artifact, previous)
 
     def _index_attachment_file(
         self,
         path: Path,
         *,
         root: Path,
+        lifecycle: CaptureLifecycleService,
+        run_id: str,
     ) -> WebClipperFileRecord:
         scanned = self._scan_file(path, root=root, file_type="attachment")
-        self._upsert_scanned_file(scanned)
         managed_path, attachment_asset_type, should_stage = (
             self._attachment_stage_plan(scanned)
         )
@@ -284,7 +335,59 @@ class WebClipperCollector:
                     f"Failed to stage Web Clipper attachment {path}: {exc}"
                 ) from exc
 
-        return self._attachment_record(scanned, managed_path=managed_path)
+        queued = self._needs_queue(scanned)
+        record = self._attachment_record(
+            scanned, managed_path=managed_path, would_queue=queued, would_stage=should_stage
+        )
+        if queued:
+            previous = self._queue_previous(record.artifact)
+            self.capture_queue.queue_artifact(
+                lifecycle, record.artifact, artifact_type="web_clipper",
+                source={"source_name": "web_clipper", "source_type": "web_clipper",
+                        "native_source_id": scanned.source_id,
+                        "metadata": {"file_type": "attachment",
+                                     "source_relative_path": scanned.source_id}},
+                session={"session_type": "web_clipper_scan",
+                         "native_session_id": f"web_clipper:{run_id}"},
+                raw_path=path,
+            )
+            if self.db.get_ingestion_entry(record.artifact.id) is None:
+                raise RuntimeError(f"Failed to queue Web Clipper PDF: {path}")
+            self._requeue_changed(record.artifact, previous)
+        self._upsert_scanned_file(scanned)
+        return record
+
+    def _queue_previous(self, artifact: WebClipperArtifact):
+        previous = self.db.get_ingestion_entry(artifact.id)
+        if previous is not None and previous.status in {"pending", "processing"}:
+            raise WebClipperSourceBusy(f"Source is pending or processing; retry scan: {artifact.id}")
+        return previous
+
+    def _requeue_changed(self, artifact: WebClipperArtifact, previous) -> None:
+        if previous is None or previous.status not in {"processed", "failed"}:
+            return
+        old_payload = json.loads(previous.payload_json)
+        if old_payload.get("source_checksum") == artifact.source_checksum:
+            return
+        current = self.db.get_ingestion_entry(artifact.id)
+        if current is not None and current.status not in {"processed", "failed"}:
+            # A newly captured revision may itself require security review.
+            return
+        if current is None or not self.db.upsert_ingestion_entry(replace(
+            current, status="pending", attempts=0, last_error=None,
+            processed_at=None, next_attempt_at=datetime.now().isoformat(),
+        )):
+            raise RuntimeError(f"Failed to requeue changed source: {artifact.id}")
+
+    def _needs_queue(self, scanned: _ScannedFile) -> bool:
+        if scanned.file_type == "attachment" and not (
+            scanned.path.suffix.lower() == ".pdf"
+            and document_boolean(self.config, "queue_pdfs")
+        ):
+            return False
+        return scanned.is_new_or_changed or self.db.get_ingestion_entry(
+            f"webclip:{scanned.source_id}"
+        ) is None
 
     def _get_asset_publisher(self) -> StagedAssetPublisher:
         if self._asset_publisher is None:
@@ -304,7 +407,7 @@ class WebClipperCollector:
         return self._note_record(
             scanned,
             self._read_note(path),
-            would_queue=scanned.is_new_or_changed,
+            would_queue=self._needs_queue(scanned),
         )
 
     def _plan_attachment_file(
@@ -319,6 +422,7 @@ class WebClipperCollector:
             scanned,
             managed_path=managed_path,
             would_stage=would_stage,
+            would_queue=self._needs_queue(scanned),
         )
 
     def _scan_file(
@@ -331,6 +435,11 @@ class WebClipperCollector:
         self._ensure_safe_source_path(path)
         stat = path.stat()
         size_bytes = stat.st_size
+        max_bytes = self.config.get("sources.web_clipper.max_source_bytes", 52428800)
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
+            raise ValueError("sources.web_clipper.max_source_bytes must be positive")
+        if size_bytes > max_bytes:
+            raise WebClipperSourceError(f"Source exceeds max_source_bytes: {path}")
         updated_at = datetime.fromtimestamp(stat.st_mtime).isoformat()
         sha256 = self._sha256_file(path)
         source_id = str(path.relative_to(self.layout.vault_root))
@@ -423,6 +532,7 @@ class WebClipperCollector:
         *,
         managed_path: Path,
         would_stage: bool = False,
+        would_queue: bool = False,
     ) -> WebClipperFileRecord:
         return WebClipperFileRecord(
             path=scanned.path,
@@ -442,6 +552,7 @@ class WebClipperCollector:
             ),
             managed_path=managed_path,
             would_stage=would_stage,
+            would_queue=would_queue,
         )
 
     def _parse_note(self, path: Path, source_text: str) -> WebClipperParsedNote:
@@ -544,6 +655,9 @@ class WebClipperCollector:
             raise ValueError(
                 f"Web Clipper source path escapes the vault root: {path}"
             ) from exc
+        for part in (path, *path.parents):
+            if part.is_symlink():
+                raise ValueError(f"Web Clipper source symlinks are not allowed: {path}")
 
     def _managed_attachment_path(self, source_id: str) -> Path:
         return self.layout.vault_root / source_id

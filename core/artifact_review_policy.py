@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
@@ -34,6 +35,22 @@ SUPPORTED_INGESTION_ARTIFACT_TYPES = frozenset(
         "transcript",
     }
 )
+
+
+def review_revision(entry) -> str:
+    """Opaque precondition for the exact queue content and decision history seen."""
+    return hashlib.sha256(json.dumps([
+        entry.artifact_id, entry.status, entry.payload_json, entry.review_json,
+        entry.attempts, entry.last_error, entry.next_attempt_at,
+    ], ensure_ascii=False).encode()).hexdigest()
+
+
+def require_review_revision(entry, expected_revision: str | None) -> None:
+    if expected_revision is not None and (
+        entry.status not in INGESTION_ACTIVE_REVIEW_STATUSES
+        or review_revision(entry) != expected_revision
+    ):
+        raise ValueError("Review item changed; refresh before deciding")
 
 
 def structural_review_for_ingestion(

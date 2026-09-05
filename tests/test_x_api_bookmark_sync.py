@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from core.config import Config
-from core.metadata_db import MetadataDB
+from core.metadata_db import MetadataDB, BookmarkQueueEntry, IngestionQueueEntry
 from core.path_layout import build_path_layout
 from core.x_api_auth import store_x_api_token_bundle
 from core.x_api_bookmark_sync import (
@@ -155,6 +155,32 @@ def write_token_bundle(layout):
             },
         },
     )
+
+
+def test_full_scan_continues_past_known_bookmarks(tmp_path, monkeypatch):
+    import asyncio
+    import core.x_api_bookmark_sync as sync
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    write_token_bundle(layout)
+    sync.store_x_api_bookmark_sync_checkpoint(layout, XApiBookmarkSyncCheckpoint(
+        user_id="42", seen_bookmark_ids=("100",)))
+    client = FakeAsyncClient([
+        FakeResponse(200, {"data": [{"id": "100", "text": "known"},
+                                    {"id": "99", "text": "missing"}],
+                           "meta": {"next_token": "page-2"}}),
+        FakeResponse(200, {"data": [{"id": "98", "text": "older missing"}],
+                           "meta": {}}),
+    ])
+    monkeypatch.setattr(sync.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(sync, "X_API_BOOKMARKS_MAX_SEEN_IDS", 2)
+    result = asyncio.run(sync.sync_x_api_bookmarks(config, layout=layout, full_scan=True))
+    assert [item["tweet_id"] for item in result["payloads"]] == ["99", "98"]
+    assert result["pages_fetched"] == 2
+    assert result["stopped_at_known_id"] is False
+    assert result["checkpoint"]["pagination_token"] is None
+    assert result["checkpoint"]["seen_bookmark_ids"] == ["100", "99"]
 
 
 def test_sync_x_api_bookmarks_pages_and_persists_checkpoint(tmp_path: Path):
@@ -502,6 +528,36 @@ def test_sync_x_api_bookmarks_checkpoint_queued_page_before_later_failure(
     ]
     assert db.get_ingestion_entry("902") is not None
     assert next(iter(event_store.events.values())).native_event_id == "902"
+
+
+def test_full_scan_capture_mode_preserves_existing_queue_identities(tmp_path, monkeypatch):
+    import asyncio
+    import core.x_api_bookmark_sync as sync
+    config = make_config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    layout.ensure_directories()
+    write_token_bundle(layout)
+    db = MetadataDB(str(layout.database_path))
+    db.upsert_bookmark_entry(BookmarkQueueEntry(tweet_id="700", status="processed"))
+    db.upsert_ingestion_entry(IngestionQueueEntry(
+        artifact_id="tweet:701", artifact_type="tweet", source="twitter",
+        payload_json='{}', status="needs_review"))
+    event_store = RecordingCaptureEventStore(raw_roots=(layout.raw_root, layout.library_root, layout.vault_root))
+    client = FakeAsyncClient([FakeResponse(200, {
+        "data": [{"id": item, "text": "bookmark"} for item in ("700", "701", "702")],
+        "meta": {"result_count": 3},
+    })])
+    monkeypatch.setattr(sync.httpx, "AsyncClient", lambda *args, **kwargs: client)
+    result = asyncio.run(sync.sync_x_api_bookmarks(
+        config, layout=layout, db=db, capture_event_store=event_store, full_scan=True))
+    assert [p["tweet_id"] for p in result["payloads"]] == ["702"]
+    assert db.get_bookmark_entry("700").status == "processed"
+    assert db.get_ingestion_entry("tweet:701").status == "needs_review"
+    assert db.get_ingestion_entry("700") is None
+    assert db.get_ingestion_entry("701") is None
+    assert db.get_ingestion_entry("702") is not None
+    assert set(result["checkpoint"]["seen_bookmark_ids"]) == {"700", "701", "702"}
+    assert len(event_store.events) == 1
 
 
 def test_sync_x_api_bookmarks_records_capture_event_when_store_supplied(

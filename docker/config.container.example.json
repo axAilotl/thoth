@@ -1,0 +1,18 @@
+{
+  "paths": {
+    "vault_dir": "/data/vault",
+    "wiki_dir": "/data/wiki",
+    "system_dir": "/runtime/system",
+    "archivist_topics_file": "/runtime/config/archivist_topics.yaml",
+    "bookmarks_file": "/runtime/system/twitter-bookmarks-merged.json",
+    "cookies_file": "/runtime/system/twitter_cookies.json"
+  },
+  "database": {"path": "meta.db"},
+  "processing": {"enable_llm_features": false},
+  "llm": {
+    "providers": {
+      "pi": {"enabled": false},
+      "pi_openrouter": {"enabled": false}
+    }
+  }
+}

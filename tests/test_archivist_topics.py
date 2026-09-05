@@ -106,6 +106,32 @@ def test_archivist_registry_loads_defaults_and_normalizes_fields(tmp_path: Path)
     assert evals.max_sources == 60
 
 
+def test_shipped_asr_topic_is_parsed_and_bounded(tmp_path: Path):
+    config = _make_config(tmp_path)
+    config.set('paths.archivist_topics_file', str(Path(__file__).resolve().parents[1] / 'archivist_topics.example.yaml'))
+    topic = load_archivist_topic_registry(config, required=True).get_topic('asr-speech-to-text')
+    assert topic is not None
+    assert topic.retrieval.mode == 'hybrid'
+    assert topic.retrieval.term_mode == 'required'
+    assert topic.retrieval.max_new_embeddings_per_run == 0
+    assert topic.max_sources == 18
+    assert 'diarization' in topic.include_terms
+    assert 'transcripts' in topic.exclude_roots
+
+
+@pytest.mark.parametrize('value', [-1, False, True, 0.5, '0'])
+def test_embedding_backfill_budget_rejects_invalid_counts(tmp_path: Path, value):
+    import yaml
+    config = _make_config(tmp_path)
+    path = tmp_path / 'topics.yaml'
+    path.write_text(yaml.safe_dump({'topics': [{'id': 'test', 'title': 'Test',
+        'output_path': 'pages/test.md', 'include_roots': ['papers'],
+        'retrieval': {'max_new_embeddings_per_run': value}}]}))
+    config.set('paths.archivist_topics_file', str(path))
+    with pytest.raises(ArchivistTopicConfigError, match='non-negative'):
+        load_archivist_topic_registry(config, required=True)
+
+
 def test_archivist_registry_uses_default_project_relative_path(tmp_path: Path):
     config = _make_config(tmp_path)
     registry_path = tmp_path / ARCHIVIST_TOPICS_FILENAME

@@ -69,6 +69,10 @@ class UnsupportedArtifactTypeError(IngestionRuntimeError, ValueError):
     """Raised when a queue entry declares an unsupported artifact type."""
 
 
+class StaleIngestionRevision(IngestionRuntimeError):
+    """A newer capture superseded this worker; do not mutate its queue state."""
+
+
 class ClassificationReviewRequired(IngestionRuntimeError):
     """Raised when an artifact needs human review before routing."""
 
@@ -378,6 +382,14 @@ class KnowledgeArtifactRuntime:
                 f"Ingestion artifact {entry.artifact_id} requires security review "
                 "or operator review"
             )
+        claimed = self.db.claim_ingestion_entry(entry.artifact_id)
+        if claimed is None:
+            return IngestionDispatchResult(
+                artifact_id=entry.artifact_id, artifact_type=entry.artifact_type,
+                source=entry.source, status="skipped", processed_at=_now_iso(),
+                details={"reason": "not_pending_or_already_claimed"},
+            )
+        entry = claimed
         try:
             processing_request = self._extract_processing_request(entry)
             artifact = self.materialize_artifact(entry)
@@ -404,9 +416,8 @@ class KnowledgeArtifactRuntime:
                     stage="classification" if classification else "materialize",
                     classification=classification,
                 )
+            self.db.mark_ingestion_failed(entry.artifact_id, str(exc))
             raise
-        self.db.mark_ingestion_processing(entry.artifact_id)
-
         try:
             with processing_request_scope(processing_request):
                 result = await self.dispatch_artifact(artifact)
@@ -425,8 +436,20 @@ class KnowledgeArtifactRuntime:
                 artifact,
                 dispatch_details=result.details,
             )
-            self.db.mark_ingestion_processed(entry.artifact_id)
+            if not self.db.mark_ingestion_processed(
+                entry.artifact_id,
+                expected_source_checksum=(
+                    artifact.source_checksum if isinstance(artifact, WebClipperArtifact) else None
+                ),
+            ):
+                raise StaleIngestionRevision(entry.artifact_id)
             return result
+        except StaleIngestionRevision:
+            return IngestionDispatchResult(
+                artifact_id=entry.artifact_id, artifact_type=entry.artifact_type,
+                source=entry.source, status="skipped", processed_at=_now_iso(),
+                details={"reason": "source_revision_changed"},
+            )
         except asyncio.CancelledError:
             self.db.mark_ingestion_failed(
                 entry.artifact_id,
@@ -892,10 +915,30 @@ class KnowledgeArtifactRuntime:
         self, artifact: WebClipperArtifact
     ) -> IngestionDispatchResult:
         """Process a Web Clipper artifact through the shared wiki path."""
-        if artifact.file_type != "note":
+        if artifact.file_type not in {"note", "attachment"}:
             raise IngestionRuntimeError(
                 f"Unsupported Web Clipper artifact type: {artifact.file_type}"
             )
+
+        from .document_enrichment import enrich_document
+
+        try:
+            enrichment = await enrich_document(artifact, self.config, self.layout)
+        except ValueError:
+            # Preserve extracted-text security findings for operator review.
+            if self.db.get_ingestion_entry(artifact.id) is not None:
+                if self.db.update_ingestion_payload_json(
+                    artifact.id, json.dumps(artifact.to_dict(), ensure_ascii=False),
+                    expected_source_checksum=artifact.source_checksum,
+                ) is None:
+                    raise StaleIngestionRevision(artifact.id)
+            raise
+        if self.db.get_ingestion_entry(artifact.id) is not None:
+            if self.db.update_ingestion_payload_json(
+                artifact.id, json.dumps(artifact.to_dict(), ensure_ascii=False),
+                expected_source_checksum=artifact.source_checksum,
+            ) is None:
+                raise StaleIngestionRevision(artifact.id)
 
         return IngestionDispatchResult(
             artifact_id=artifact.id,
@@ -910,6 +953,7 @@ class KnowledgeArtifactRuntime:
                 "source_url": artifact.source_url,
                 "source_language": artifact.source_language,
                 "file_type": artifact.file_type,
+                **enrichment,
             },
         )
 

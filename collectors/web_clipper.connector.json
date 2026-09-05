@@ -2,7 +2,7 @@
   "name": "web_clipper",
   "source_name": "web_clipper",
   "display_name": "Web Clipper",
-  "description": "Index configured Web Clipper notes and staged attachments.",
+  "description": "Index configured Web Clipper notes and attachments, with opt-in bounded PDF intake and document summaries.",
   "artifact_types": [
     "web_clipper"
   ],
@@ -24,7 +24,13 @@
     "sources.web_clipper.note_dirs",
     "sources.web_clipper.attachment_dirs",
     "sources.web_clipper.note_extensions",
-    "sources.web_clipper.attachment_extensions"
+    "sources.web_clipper.attachment_extensions",
+    "sources.web_clipper.queue_pdfs",
+    "sources.web_clipper.summarize",
+    "sources.web_clipper.max_source_bytes",
+    "sources.web_clipper.pdf_max_pages",
+    "sources.web_clipper.pdf_text_max_chars",
+    "sources.web_clipper.summary_max_chars"
   ],
   "auth": [],
   "queue_capability": true,

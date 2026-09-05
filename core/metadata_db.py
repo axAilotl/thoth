@@ -21,6 +21,7 @@ from .artifact_review_policy import (
     INGESTION_REVIEW_STATUSES,
     append_ingestion_review_event as _append_ingestion_review_event,
     structural_review_for_ingestion as _ingestion_structural_review,
+    require_review_revision,
 )
 from .config import config
 from .prompt_security import (
@@ -2521,9 +2522,9 @@ class MetadataDB:
             for scope, relative_prefix in root_filters:
                 if relative_prefix:
                     root_clauses.append(
-                        "(scope = ? AND (scope_relative_path = ? OR scope_relative_path LIKE ?))"
+                        "(scope = ? AND (scope_relative_path = ? OR substr(scope_relative_path, 1, ?) = ?))"
                     )
-                    params.extend([scope, relative_prefix, f"{relative_prefix}/%"])
+                    params.extend([scope, relative_prefix, len(relative_prefix) + 1, f"{relative_prefix}/"])
                 else:
                     root_clauses.append("(scope = ?)")
                     params.append(scope)
@@ -2633,8 +2634,8 @@ class MetadataDB:
         where_parts = ["scope = ?"]
         params: list[Any] = [scope]
         if relative_prefix:
-            where_parts.append("(scope_relative_path = ? OR scope_relative_path LIKE ?)")
-            params.extend([relative_prefix, f"{relative_prefix}/%"])
+            where_parts.append("(scope_relative_path = ? OR substr(scope_relative_path, 1, ?) = ?)")
+            params.extend([relative_prefix, len(relative_prefix) + 1, f"{relative_prefix}/"])
         if keep_candidate_keys:
             placeholders = ",".join("?" for _ in keep_candidate_keys)
             where_parts.append(f"candidate_key NOT IN ({placeholders})")
@@ -2687,9 +2688,9 @@ class MetadataDB:
             for scope, relative_prefix in root_filters:
                 if relative_prefix:
                     root_clauses.append(
-                        "(d.scope = ? AND (d.scope_relative_path = ? OR d.scope_relative_path LIKE ?))"
+                        "(d.scope = ? AND (d.scope_relative_path = ? OR substr(d.scope_relative_path, 1, ?) = ?))"
                     )
-                    params.extend([scope, relative_prefix, f"{relative_prefix}/%"])
+                    params.extend([scope, relative_prefix, len(relative_prefix) + 1, f"{relative_prefix}/"])
                 else:
                     root_clauses.append("(d.scope = ?)")
                     params.append(scope)
@@ -4210,6 +4211,26 @@ class MetadataDB:
             logger.error(f"Failed to upsert ingestion entry {entry.artifact_id}: {e}")
             return False
 
+    def claim_ingestion_entry(self, artifact_id: str) -> Optional[IngestionQueueEntry]:
+        """Atomically claim a pending row and return its current payload.
+
+        A worker's earlier queue listing is only a candidate list, never a lease
+        on that revision. Database failures propagate rather than looking idle.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """UPDATE ingestion_queue
+                   SET status='processing', attempts=attempts + 1, next_attempt_at=NULL
+                   WHERE artifact_id=? AND status='pending'
+                     AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+                   RETURNING *""", (artifact_id, _now_iso()),
+            ).fetchone()
+            if row is None:
+                return None
+            return IngestionQueueEntry(**{
+                name: row[name] for name in IngestionQueueEntry.__dataclass_fields__
+            })
+
     def mark_ingestion_processing(self, artifact_id: str) -> Optional[IngestionQueueEntry]:
         """Mark an artifact as being processed and increment attempts."""
         try:
@@ -4229,21 +4250,27 @@ class MetadataDB:
             logger.error(f"Failed to mark ingestion {artifact_id} processing: {e}")
             return None
 
-    def mark_ingestion_processed(self, artifact_id: str) -> bool:
+    def mark_ingestion_processed(
+        self, artifact_id: str, *, expected_source_checksum: str | None = None,
+    ) -> bool:
         """Mark an artifact as processed."""
         try:
             with self._get_connection() as conn:
-                result = conn.execute(
-                    """
+                query = """
                     UPDATE ingestion_queue
                     SET status='processed', processed_at=?, last_error=NULL, next_attempt_at=NULL
                     WHERE artifact_id = ? AND status NOT IN ('needs_review', 'blocked', 'failed', 'reviewed', 'rejected')
-                    """,
-                    (_now_iso(), artifact_id)
-                )
+                    """
+                params = [_now_iso(), artifact_id]
+                if expected_source_checksum is not None:
+                    query += " AND status='processing' AND json_extract(payload_json, '$.source_checksum')=?"
+                    params.append(expected_source_checksum)
+                result = conn.execute(query, params)
                 return (result.rowcount or 0) > 0
         except Exception as e:
             logger.error(f"Failed to mark ingestion {artifact_id} processed: {e}")
+            if expected_source_checksum is not None:
+                raise
             return False
 
     def mark_ingestion_failed(self, artifact_id: str, error: str, max_attempts: int = 5) -> Optional[IngestionQueueEntry]:
@@ -4358,6 +4385,7 @@ class MetadataDB:
         clear_error: bool = False,
         reset_attempts: bool = False,
         metadata: Mapping[str, Any] | None = None,
+        expected_revision: str | None = None,
     ) -> Optional[IngestionQueueEntry]:
         """Apply an audited operator transition to a review-queue row."""
         clean_actor = str(actor or "").strip()
@@ -4374,9 +4402,10 @@ class MetadataDB:
             raise ValueError("Ingestion review transition requires reason")
 
         try:
-            entry = self.get_ingestion_entry(artifact_id)
+            entry = self.get_ingestion_entry(artifact_id, raise_errors=expected_revision is not None)
             if not entry:
                 return None
+            require_review_revision(entry, expected_revision)
             now_iso = _now_iso()
             review_json = _append_ingestion_review_event(
                 entry.review_json,
@@ -4395,7 +4424,7 @@ class MetadataDB:
             next_attempt_at = now_iso if clean_status == "pending" else None
             attempts = 0 if reset_attempts else entry.attempts
             with self._get_connection() as conn:
-                conn.execute(
+                row = conn.execute(
                     """
                     UPDATE ingestion_queue
                     SET status=?,
@@ -4404,7 +4433,10 @@ class MetadataDB:
                         next_attempt_at=?,
                         processed_at=NULL,
                         review_json=?
-                    WHERE artifact_id = ?
+                    WHERE artifact_id = ? AND status = ? AND payload_json = ?
+                        AND review_json IS ? AND attempts = ? AND last_error IS ?
+                        AND next_attempt_at IS ?
+                    RETURNING *
                     """,
                     (
                         clean_status,
@@ -4413,11 +4445,19 @@ class MetadataDB:
                         next_attempt_at,
                         review_json,
                         artifact_id,
+                        entry.status, entry.payload_json, entry.review_json,
+                        entry.attempts, entry.last_error, entry.next_attempt_at,
                     ),
-                )
-            return self.get_ingestion_entry(artifact_id)
+                ).fetchone()
+                if row is None:
+                    raise ValueError("Review item changed; refresh before deciding")
+                return IngestionQueueEntry(**{
+                    name: row[name] for name in IngestionQueueEntry.__dataclass_fields__
+                })
         except Exception as e:
             logger.error(f"Failed to transition ingestion review {artifact_id}: {e}")
+            if expected_revision is not None:
+                raise
             return None
 
     def retry_ingestion_review(
@@ -4587,21 +4627,35 @@ class MetadataDB:
         self,
         artifact_id: str,
         payload_json: str,
+        *,
+        expected_source_checksum: str | None = None,
     ) -> Optional[IngestionQueueEntry]:
         """Replace the queue payload JSON for an existing ingestion row."""
         try:
             with self._get_connection() as conn:
-                conn.execute(
-                    """
+                query = """
                     UPDATE ingestion_queue
                     SET payload_json = ?
                     WHERE artifact_id = ?
-                    """,
-                    (payload_json, artifact_id),
-                )
+                    """
+                params = [payload_json, artifact_id]
+                if expected_source_checksum is not None:
+                    query += " AND status='processing' AND json_extract(payload_json, '$.source_checksum')=?"
+                    params.append(expected_source_checksum)
+                    row = conn.execute(query + " RETURNING *", params).fetchone()
+                    if row is None:
+                        return None
+                    return IngestionQueueEntry(**{
+                        name: row[name] for name in IngestionQueueEntry.__dataclass_fields__
+                    })
+                result = conn.execute(query, params)
+                if result.rowcount != 1:
+                    return None
             return self.get_ingestion_entry(artifact_id)
         except Exception as e:
             logger.error(f"Failed to update ingestion payload {artifact_id}: {e}")
+            if expected_source_checksum is not None:
+                raise
             return None
 
     def approve_ingestion_security_override(
@@ -4610,6 +4664,7 @@ class MetadataDB:
         *,
         actor: str,
         reason: str,
+        expected_revision: str | None = None,
     ) -> Optional[IngestionQueueEntry]:
         """Move a quarantined ingestion back to pending with audited operator approval."""
         clean_actor = str(actor or "").strip()
@@ -4619,9 +4674,11 @@ class MetadataDB:
         if not clean_reason:
             raise ValueError("Security override requires reason")
 
-        entry = self.get_ingestion_entry(artifact_id)
+        entry = self.get_ingestion_entry(artifact_id, raise_errors=expected_revision is not None)
         if not entry:
             return None
+
+        require_review_revision(entry, expected_revision)
 
         payload = _json_payload(entry.payload_json)
         normalized_metadata = payload.get("normalized_metadata")
@@ -4684,22 +4741,34 @@ class MetadataDB:
 
         try:
             with self._get_connection() as conn:
-                conn.execute(
+                row = conn.execute(
                     """
                     UPDATE ingestion_queue
                     SET status='pending',
+                        attempts=0,
                         payload_json=?,
                         last_error=NULL,
                         next_attempt_at=?,
                         processed_at=NULL,
                         review_json=?
-                    WHERE artifact_id = ?
+                    WHERE artifact_id = ? AND status = ? AND payload_json = ?
+                        AND review_json IS ? AND attempts = ? AND last_error IS ?
+                        AND next_attempt_at IS ?
+                    RETURNING *
                     """,
-                    (payload_json, now_iso, review_json, artifact_id),
-                )
-            return self.get_ingestion_entry(artifact_id)
+                    (payload_json, now_iso, review_json, artifact_id,
+                     entry.status, entry.payload_json, entry.review_json,
+                     entry.attempts, entry.last_error, entry.next_attempt_at),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("Review item changed; refresh before deciding")
+                return IngestionQueueEntry(**{
+                    name: row[name] for name in IngestionQueueEntry.__dataclass_fields__
+                })
         except Exception as e:
             logger.error(f"Failed to approve ingestion security override {artifact_id}: {e}")
+            if expected_revision is not None:
+                raise
             return None
 
     def ingestion_entry_requires_security_review(self, artifact_id: str) -> bool:
@@ -4716,7 +4785,7 @@ class MetadataDB:
             and prompt_security_requires_review(normalized_metadata)
         )
 
-    def get_ingestion_entry(self, artifact_id: str) -> Optional[IngestionQueueEntry]:
+    def get_ingestion_entry(self, artifact_id: str, *, raise_errors: bool = False) -> Optional[IngestionQueueEntry]:
         """Fetch single ingestion queue entry."""
         try:
             with self._get_connection() as conn:
@@ -4743,6 +4812,8 @@ class MetadataDB:
                 )
         except Exception as e:
             logger.error(f"Failed to get ingestion entry {artifact_id}: {e}")
+            if raise_errors:
+                raise
             return None
 
     def get_pending_ingestions(self, limit: Optional[int] = None) -> List[IngestionQueueEntry]:
@@ -4896,6 +4967,8 @@ class MetadataDB:
         status: Optional[str] = None,
         include_closed: bool = False,
         limit: int = 50,
+        offset: int = 0,
+        raise_errors: bool = False,
     ) -> List[IngestionQueueEntry]:
         """List artifacts in active or closed operator review states."""
         if status:
@@ -4905,16 +4978,28 @@ class MetadataDB:
             if include_closed:
                 statuses.extend(INGESTION_CLOSED_REVIEW_STATUSES)
         statuses = [item for item in statuses if item in INGESTION_REVIEW_STATUSES]
-        if not statuses:
+        if not statuses and status != "decided":
             return []
 
         placeholders = ",".join("?" for _ in statuses)
+        where = f"status IN ({placeholders})"
+        if status == "decided":
+            where = """EXISTS (
+                SELECT 1 FROM json_each(
+                    CASE WHEN json_valid(review_json) THEN review_json ELSE '{}' END,
+                    '$.events'
+                ) AS event WHERE json_extract(
+                    CASE WHEN event.type='object' THEN event.value ELSE '{}' END,
+                    '$.action'
+                ) IN ('retry', 'reject', 'mark_reviewed', 'security_override_approved',
+                      'classification_approved', 'classification_rejected', 'classification_corrected')
+            )"""
         query = (
             "SELECT * FROM ingestion_queue "
-            f"WHERE status IN ({placeholders}) "
-            "ORDER BY created_at DESC, priority DESC LIMIT ?"
+            f"WHERE {where} "
+            "ORDER BY created_at DESC, priority DESC, artifact_id LIMIT ? OFFSET ?"
         )
-        params: list[Any] = [*statuses, max(1, int(limit))]
+        params: list[Any] = [*statuses, max(1, int(limit)), max(0, int(offset))]
         try:
             with self._get_connection() as conn:
                 rows = conn.execute(query, tuple(params)).fetchall()
@@ -4938,6 +5023,8 @@ class MetadataDB:
                 ]
         except Exception as e:
             logger.error(f"Failed to list ingestion review entries: {e}")
+            if raise_errors:
+                raise
             return []
 
     def get_ingestion_security_summary(self, *, limit: int = 25) -> Dict[str, Any]:

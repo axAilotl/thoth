@@ -277,7 +277,7 @@ def test_golden_web_clip_fixture_preserves_raw_queues_and_compiles_wiki(tmp_path
     processed = asyncio.run(runtime.process_pending_ingestions_once())
 
     assert [item.artifact_type for item in processed] == ["web_clipper"]
-    wiki_page = layout.wiki_root / "pages" / "clip-golden-web-clip.md"
+    wiki_page = next((layout.wiki_root / "pages").glob("clip-golden-web-clip-*.md"))
     assert wiki_page.exists()
     wiki_text = wiki_page.read_text(encoding="utf-8")
     assert "Golden Web Clip" in wiki_text

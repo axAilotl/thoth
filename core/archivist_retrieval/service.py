@@ -211,8 +211,8 @@ async def _rank_hybrid_documents(
     if not full_text_results and not semantic_results:
         return _rank_literal_documents(documents, include_roots=include_roots, topic=topic)
 
-    full_text_scores = dict(_normalize_full_text_scores(full_text_results))
-    semantic_scores = dict(_normalize_semantic_scores(semantic_results))
+    full_text_scores = {doc.candidate_key: score for doc, score in _normalize_full_text_scores(full_text_results)}
+    semantic_scores = {doc.candidate_key: score for doc, score in _normalize_semantic_scores(semantic_results)}
     merged_documents = {
         document.candidate_key: document for document in documents
         if document.candidate_key in full_text_scores or document.candidate_key in semantic_scores

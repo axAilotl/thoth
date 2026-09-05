@@ -22,6 +22,7 @@ def test_builtin_connector_registry_exposes_core_sources(tmp_path: Path):
 
     assert names == [
         "arxiv",
+        "corpus_index",
         "github",
         "huggingface",
         "imported_markdown",
@@ -61,7 +62,7 @@ def test_builtin_manifests_are_colocated_with_collectors(tmp_path: Path):
     repo_root = Path(__file__).resolve().parents[1]
     manifest_paths = sorted((repo_root / "collectors").glob("*.connector.json"))
 
-    assert len(manifest_paths) == 10
+    assert len(manifest_paths) == 11
 
     registry = load_connector_registry(project_root=tmp_path)
     builtins = [manifest for manifest in registry.list() if manifest.origin == "builtin"]
@@ -313,6 +314,7 @@ def test_builtin_manifests_declare_ccf_lanes(tmp_path: Path):
     lanes = {manifest.name: manifest.ccf.lane for manifest in registry.list()}
     assert lanes == {
         "arxiv": "paper",
+        "corpus_index": "mixed",
         "github": "repository",
         "huggingface": "repository",
         "imported_markdown": "markdown",
@@ -324,7 +326,7 @@ def test_builtin_manifests_declare_ccf_lanes(tmp_path: Path):
         "youtube": "video",
     }
     for manifest in registry.list():
-        assert manifest.ccf.artifact_role == "raw_capture"
+        assert manifest.ccf.artifact_role == ("derived_index" if manifest.name == "corpus_index" else "raw_capture")
         assert manifest.ccf.extensions == {}
 
     as_dict = registry.get("arxiv").to_dict()["ccf"]

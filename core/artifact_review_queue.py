@@ -10,6 +10,7 @@ from typing import Any
 from .artifact_review_policy import (
     INGESTION_ACTIVE_REVIEW_STATUSES,
     INGESTION_CLOSED_REVIEW_STATUSES,
+    require_review_revision,
 )
 from .ccf_dualwrite import mirrored_queue_artifact, open_dual_write_service
 from .config import config as _runtime_config
@@ -49,6 +50,58 @@ class ArtifactReviewQueueService:
             include_closed=include_closed,
             limit=limit,
         )
+
+    def decide(
+        self, artifact_id: str, *, action: str, actor: str, reason: str,
+        expected_revision: str, security_acknowledged: bool = False,
+    ) -> IngestionQueueEntry:
+        """Apply an explicit web decision to precisely the revision displayed.
+
+        Security approval is a separate action, never an implicit side effect of
+        retry. Classification decisions retain their dedicated routing workflow.
+        """
+        from .classification_review import entry_has_classification_review
+
+        entry = self.db.get_ingestion_entry(artifact_id, raise_errors=True)
+        if entry is None:
+            raise ArtifactReviewQueueError("Review item no longer exists")
+        require_review_revision(entry, expected_revision)
+        if entry_has_classification_review(entry):
+            raise ArtifactReviewQueueError("Classification review requires the classification CLI")
+        security = False
+        if action != "reject":
+            payload = json.loads(entry.payload_json)
+            if not isinstance(payload, dict):
+                raise ArtifactReviewQueueError("Malformed payload must be repaired before retry")
+            metadata = payload.get("normalized_metadata", {})
+            if not isinstance(metadata, dict):
+                raise ArtifactReviewQueueError("Malformed security metadata must be repaired before retry")
+            security = prompt_security_requires_review(metadata)
+        kwargs = dict(actor=actor, reason=reason, expected_revision=expected_revision)
+        if action == "approve_security":
+            if not security or not security_acknowledged:
+                raise ArtifactReviewQueueError("Security approval requires explicit acknowledgement")
+            updated = self.db.approve_ingestion_security_override(artifact_id, **kwargs)
+            mirror_action = "security_override_approved"
+        elif action == "retry":
+            if security:
+                raise ArtifactReviewQueueError("Use explicit security approval for flagged content")
+            updated = self.db.transition_ingestion_review(
+                artifact_id, action="retry", status="pending", clear_error=True,
+                reset_attempts=True, **kwargs,
+            )
+            mirror_action = "retry"
+        elif action == "reject":
+            updated = self.db.transition_ingestion_review(
+                artifact_id, action="reject", status="rejected", **kwargs,
+            )
+            mirror_action = "reject"
+        else:
+            raise ArtifactReviewQueueError("Unsupported review action")
+        if updated is None:
+            raise ArtifactReviewQueueError("Review item no longer exists")
+        self._mirror_review_decision(updated, action=mirror_action)
+        return updated
 
     def retry(
         self,

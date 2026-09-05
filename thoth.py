@@ -1917,6 +1917,7 @@ def _render_web_clipper_plan(payload: dict[str, Any]) -> None:
     print(f"   Files scanned: {counts['files']}")
     print(f"   New or changed: {counts['new_or_changed']}")
     print(f"   Notes that would be queued: {counts['would_queue_notes']}")
+    print(f"   PDFs that would be queued: {counts.get('would_queue_pdfs', 0)}")
     print(f"   Attachments that would be staged: {counts['would_stage_attachments']}")
     print("   No files, queue entries, or attachments were changed.")
     print("   Run without --plan to execute the Web Clipper ingest.")

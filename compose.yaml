@@ -1,0 +1,43 @@
+name: thoth
+services:
+  thoth:
+    image: ${THOTH_IMAGE:-thoth:local}
+    build: .
+    user: "${THOTH_UID:-1000}:${THOTH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "${THOTH_BIND_ADDRESS:-127.0.0.1}:${THOTH_PORT:-8001}:8001"
+    volumes:
+      - type: bind
+        source: ${THOTH_RUNTIME_DIR:-./.runtime/container}
+        target: /runtime
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${THOTH_VAULT_DIR:-./knowledge_vault}
+        target: /data/vault
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${THOTH_WIKI_DIR:-./wiki}
+        target: /data/wiki
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    stop_grace_period: 60s
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5).read()"]
+      start_period: 60s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

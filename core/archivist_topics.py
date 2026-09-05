@@ -356,6 +356,7 @@ def _parse_retrieval_policy(
                 fallback.max_new_embeddings_per_run,
             ),
             field_name=f"{field_name}.max_new_embeddings_per_run",
+            allow_zero=True,
         ),
         semantic_weight=_parse_non_negative_float(
             raw_policy.get("semantic_weight", fallback.semantic_weight),
@@ -565,15 +566,18 @@ def _parse_positive_int(
     *,
     field_name: str,
     allow_none: bool = False,
+    allow_zero: bool = False,
 ) -> int | None:
     if value is None:
         if allow_none:
             return None
         raise ArchivistTopicConfigError(f"{field_name} is required")
+    if allow_zero and (isinstance(value, bool) or not isinstance(value, int)):
+        raise ArchivistTopicConfigError(f"{field_name} must be a non-negative integer")
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:
         raise ArchivistTopicConfigError(f"{field_name} must be an integer") from exc
-    if parsed <= 0:
-        raise ArchivistTopicConfigError(f"{field_name} must be positive")
+    if parsed < 0 or (parsed == 0 and not allow_zero):
+        raise ArchivistTopicConfigError(f"{field_name} must be {'non-negative' if allow_zero else 'positive'}")
     return parsed

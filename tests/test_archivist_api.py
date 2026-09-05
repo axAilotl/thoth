@@ -1,11 +1,25 @@
 import json
 import asyncio
+import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import thoth_api
+
+
+def test_archivist_compilation_runs_outside_api_event_loop(monkeypatch):
+    caller_thread = threading.get_ident()
+    async def compile_topics(*args, **kwargs):
+        assert threading.get_ident() != caller_thread
+        return {'status': 'ok'}
+    monkeypatch.setattr(thoth_api, 'archivist_trigger_lock', asyncio.Lock())
+    monkeypatch.setattr(thoth_api, 'get_knowledge_artifact_runtime', lambda: SimpleNamespace(layout=None, db=None))
+    monkeypatch.setattr(thoth_api, 'load_runtime_settings', lambda: {})
+    monkeypatch.setattr(thoth_api, 'run_archivist_topics', compile_topics)
+    assert asyncio.run(thoth_api.run_archivist_compilation()) == {'status': 'ok'}
 
 
 @pytest.fixture(autouse=True)

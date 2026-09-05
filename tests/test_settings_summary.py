@@ -118,9 +118,10 @@ topics:
         str(tmp_path / "vault" / "imports" / "notes"),
         str(tmp_path / "vault" / "imports" / "assets"),
     ]
-    assert summary["connectors"]["total"] == 10
+    assert summary["connectors"]["total"] == 11
     assert [item["name"] for item in summary["connectors"]["connectors"]] == [
         "arxiv",
+        "corpus_index",
         "github",
         "huggingface",
         "imported_markdown",
@@ -143,7 +144,7 @@ topics:
         "enabled": True,
         "fallback_providers": ["openai"],
     }
-    assert summary["groups"]["sources_and_skills"]["connectors"]["total"] == 10
+    assert summary["groups"]["sources_and_skills"]["connectors"]["total"] == 11
     assert summary["groups"]["sources_and_skills"]["skills"]["total"] == 1
     assert (
         summary["groups"]["sources_and_skills"]["skills"]["safety_mode"]
@@ -185,7 +186,7 @@ topics:
     )
     assert summary["groups"]["overview"]["what_happened"] == [
         "1/1 providers enabled",
-        "9/10 sources enabled",
+        "9/11 sources enabled",
         "1 Pi skills configured",
         "2 archivist topics loaded",
         "0 security findings across 0 artifacts",
