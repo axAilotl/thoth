@@ -478,7 +478,7 @@
           "properties": {
             "enabled": {"type": "boolean", "default": false},
             "directory": {"type": "string", "minLength": 1},
-            "stable_seconds": {"type": "number", "minimum": 0},
+            "stable_seconds": {"type": "integer", "minimum": 1},
             "consume": {"type": "boolean", "default": false},
             "max_source_bytes": {"type": "integer", "minimum": 1},
             "max_files_per_run": {"type": "integer", "minimum": 1},

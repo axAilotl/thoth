@@ -75,3 +75,14 @@ def test_source_symlink_is_not_followed(tmp_path):
     source.symlink_to(external)
     plan = plan_source_pages(layout, obsidian_root=obsidian)
     assert plan["pages"][0]["blocked_by"]
+
+
+def test_link_from_retained_source_record_protects_its_target(tmp_path):
+    obsidian, layout, _, target, db = setup(tmp_path)
+    other = target.with_name("clip-other-123.md")
+    other.write_text(target.read_text().replace("clip-paper-123", "clip-other-123")
+                     .replace("papers/paper.pdf", "papers/missing.pdf") + "\nSee [[clip-paper-123]]\n")
+    plan = plan_source_pages(layout, obsidian_root=obsidian)
+    result = apply_source_page_plan(plan, archive_root=tmp_path / "archive", db=db, layout=layout)
+    assert not result["archived"]
+    assert target.exists() and other.exists()

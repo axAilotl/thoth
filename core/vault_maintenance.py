@@ -74,20 +74,21 @@ def plan_source_pages(layout, *, obsidian_root: Path) -> dict:
                            "resolved_source_paths": resolved_sources,
                            "blocked_by": [f"missing/unsafe source: {s}" for s in missing]})
     by_slug = {Path(item["path"]).stem: item for item in candidates}
-    candidate_paths = {obsidian_root / item["path"] for item in candidates}
     # Check every Markdown note, not just generated wiki pages. Leave linked
     # wrappers in place; an intentional link rewrite needs a separate decision.
     import re
     pattern = re.compile("|".join(re.escape(slug) for slug in by_slug)) if by_slug else None
     if pattern:
         for path in obsidian_root.rglob("*.md"):
-            if path in candidate_paths or path == wiki / "index.md":
+            if path == wiki / "index.md":
                 continue
             _contained(path, obsidian_root)
             text = unquote(path.read_text(encoding="utf-8"))
             if path == wiki / "log.md" and text.lstrip().startswith("# Wiki Maintenance Log\n"):
                 continue
             for slug in set(pattern.findall(text)):
+                if path == obsidian_root / by_slug[slug]["path"]:
+                    continue
                 by_slug[slug]["blocked_by"].append(f"referenced by: {path.relative_to(obsidian_root)}")
     return {"schema": "thoth.source-page-migration/v1", "obsidian_root": str(obsidian_root.resolve()),
             "wiki_root": str(wiki), "vault_root": str(layout.vault_root.resolve()), "pages": candidates}
