@@ -59,7 +59,7 @@ class CorpusIndexConnector:
                 # Preflight the entire allowlist before inventory can read it.
                 if path.is_symlink():
                     raise ValueError(f"Corpus index refuses symlinks: {path}")
-                if (path.is_file() and path.suffix.lower() in {".md", ".markdown", ".txt", ".pdf"}
+                if (path.is_file() and path.suffix.lower() in {".md", ".markdown", ".txt", ".pdf", ".docx"}
                         and path not in seen):
                     budget.add_file(path, count_input_tokens=False)
                     seen.add(path)

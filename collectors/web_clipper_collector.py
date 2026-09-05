@@ -380,6 +380,10 @@ class WebClipperCollector:
             raise RuntimeError(f"Failed to requeue changed source: {artifact.id}")
 
     def _needs_queue(self, scanned: _ScannedFile) -> bool:
+        if not scanned.is_new_or_changed and scanned.source_id.startswith("inbox-"):
+            entry = self.db.get_ingestion_entry(scanned.source_id)
+            if entry is not None and entry.source == "inbox":
+                return False
         if scanned.file_type == "attachment" and not (
             scanned.path.suffix.lower() == ".pdf"
             and document_boolean(self.config, "queue_pdfs")
@@ -444,6 +448,16 @@ class WebClipperCollector:
         sha256 = self._sha256_file(path)
         source_id = str(path.relative_to(self.layout.vault_root))
         existing = self.db.get_file_entry(str(path))
+        # Inbox already captured these exact bytes through the shared queue.
+        # Preserve that identity (including its security/review state) instead
+        # of creating a second Web Clipper artifact for our own staging write.
+        if (existing is not None and existing.source_id
+                and existing.source_id.startswith("inbox-")
+                and existing.file_type == file_type
+                and existing.size_bytes == size_bytes and existing.hash == sha256):
+            inbox_entry = self.db.get_ingestion_entry(existing.source_id)
+            if inbox_entry is not None and inbox_entry.source == "inbox":
+                source_id = existing.source_id
         is_new_or_changed = (
             existing is None
             or existing.file_type != file_type
@@ -513,6 +527,8 @@ class WebClipperCollector:
         self,
         scanned: _ScannedFile,
     ) -> tuple[Path, str, bool]:
+        if not scanned.is_new_or_changed and scanned.source_id.startswith("inbox-"):
+            return scanned.path, self._attachment_asset_type(scanned.path), False
         managed_path = self._managed_attachment_path(scanned.source_id)
         asset_type = self._attachment_asset_type(scanned.path)
         same_path = managed_path.resolve() == scanned.path.resolve()
