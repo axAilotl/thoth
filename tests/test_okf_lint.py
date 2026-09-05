@@ -62,7 +62,7 @@ def test_okf_lint_accepts_generated_scaffold_and_concept_page(tmp_path: Path, mo
 
         assert report.okf_version == "0.1"
         assert report.concepts_checked == 1
-        assert report.reserved_files_checked == 2
+        assert report.reserved_files_checked == 1
         assert report.issues == ()
     finally:
         config.data = original
@@ -94,7 +94,7 @@ def test_okf_lint_reports_missing_type_and_reserved_frontmatter(
             "# Index\n",
         )
         atomic_write_text(
-            contract.log_path,
+            contract.root / "log.md",
             "# Log\n\n"
             "## 2026-04-04T00:00:00Z\n\n"
             "* **Update**: bad date heading\n",

@@ -28,6 +28,7 @@ def restore_runtime_config():
 def wiki_env(tmp_path: Path, monkeypatch, restore_runtime_config):
     monkeypatch.chdir(tmp_path)
     config.data = {}
+    config.set("wiki.publish_source_pages", True)
     config.set("paths.vault_dir", str(tmp_path / "vault"))
     config.set("paths.system_dir", ".thoth_system")
     config.set("paths.cache_dir", "graphql_cache")
@@ -70,8 +71,13 @@ def test_compiled_wiki_updater_preserves_created_at_and_refreshes_index(
 
     page_path = layout.wiki_root / "pages" / "repo-owner-repo.md"
     original_created_at = read_document(page_path).frontmatter["created_at"]
+    from core.metadata_db import MetadataDB
+    from core.wiki_publication import WikiPublicationStore, content_hash
+    db = MetadataDB(str(layout.database_path))
+    WikiPublicationStore(db, layout.wiki_root).adopt_baseline(
+        page_path, expected_hash=content_hash(page_path.read_text()))
 
-    result = CompiledWikiUpdater(config, layout=layout).update_from_artifact(
+    result = CompiledWikiUpdater(config, layout=layout, db=db).update_from_artifact(
         RepositoryArtifact(
             id="gh_1",
             source_type="github",
@@ -86,7 +92,7 @@ def test_compiled_wiki_updater_preserves_created_at_and_refreshes_index(
 
     updated_document = read_document(result.page_path)
     index_content = (layout.wiki_root / "index.md").read_text(encoding="utf-8")
-    log_content = (layout.wiki_root / "log.md").read_text(encoding="utf-8")
+    log_content = (layout.system_root / "wiki/log.md").read_text(encoding="utf-8")
 
     assert result.action == "updated"
     assert result.source_paths == (
@@ -96,7 +102,7 @@ def test_compiled_wiki_updater_preserves_created_at_and_refreshes_index(
     assert updated_document.frontmatter["created_at"] == original_created_at
     assert updated_document.frontmatter["updated_at"] != original_created_at
     assert "Updated repository description" in updated_document.body
-    assert index_content.count("repo-owner-repo.md") == 1
+    assert "repo-owner-repo.md" not in index_content
     assert "Updated `repo-owner-repo` from `github:gh_1`." in log_content
 
 

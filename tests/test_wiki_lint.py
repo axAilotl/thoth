@@ -14,6 +14,7 @@ from core.wiki_updater import CompiledWikiUpdater
 def make_config(tmp_path: Path):
     original = deepcopy(config.data)
     config.data = {}
+    config.set("wiki.publish_source_pages", True)
     config.set("paths.vault_dir", str(tmp_path / "vault"))
     config.set("paths.system_dir", ".thoth_system")
     config.set("paths.cache_dir", "graphql_cache")

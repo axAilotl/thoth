@@ -187,7 +187,7 @@ class WikiPublicationStore:
             return self._inspect(conn, path, key)
 
     def publish(self, page_path: Path, generated_content: str, *, snapshot: PublicationSnapshot,
-                metadata: dict | None = None) -> str:
+                metadata: dict | None = None, feedback_included: bool = True) -> str:
         """Publish only against the exact observed revision, retaining raw feedback.
 
         DB locks serialize THOTH writers. External editors do not share those locks;
@@ -231,7 +231,7 @@ class WikiPublicationStore:
                 ON CONFLICT(page_key) DO UPDATE SET baseline_hash=excluded.baseline_hash,
                     baseline_text=excluded.baseline_text, updated_at=excluded.updated_at
             """, (key, digest, content, _now()))
-            for block in snapshot.feedback:
+            for block in snapshot.feedback if feedback_included else ():
                 # Inclusion is observable; fulfillment is not inferred from model success.
                 conn.execute("""UPDATE wiki_feedback SET status = CASE WHEN status = 'pending'
                     THEN 'included' ELSE status END, included_revision = ?

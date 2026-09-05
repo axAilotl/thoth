@@ -38,6 +38,7 @@ def _make_runtime_and_service(
     tmp_path: Path,
 ) -> tuple[KnowledgeArtifactRuntime, TranscriptEnrichmentService, Config, PathLayout, MetadataDB]:
     config = make_test_config(tmp_path)
+    config.set("wiki.publish_source_pages", True)
     layout = build_path_layout(config, project_root=tmp_path)
     db = MetadataDB(str(layout.database_path))
     summarizer = CountingFakeSummarizer()

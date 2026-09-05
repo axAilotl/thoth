@@ -156,7 +156,7 @@ def apply_source_page_plan(plan: dict, *, archive_root: Path, db, layout) -> dic
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "apply", "export"))
+    parser.add_argument("action", choices=("plan", "apply", "compact-topics", "export"))
     parser.add_argument("--obsidian-root", type=Path)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--archive-root", type=Path)
@@ -176,6 +176,13 @@ def main() -> None:
             parser.error("apply requires --plan and --archive-root; back up the DB first")
         result = apply_source_page_plan(json.loads(args.plan.read_text()), archive_root=args.archive_root,
                                        db=MetadataDB(str(layout.database_path)), layout=layout)
+    elif args.action == "compact-topics":
+        if not args.obsidian_root or not args.plan or not args.archive_root:
+            parser.error("compact-topics requires --obsidian-root, --plan (relative-path/hash JSON map), --archive-root")
+        from .wiki_metadata_migration import compact_topic_pages
+        result = compact_topic_pages(layout, db=MetadataDB(str(layout.database_path)),
+            obsidian_root=args.obsidian_root, archive_root=args.archive_root,
+            expected_hashes=json.loads(args.plan.read_text()))
     else:
         result = SourceRecordStore(MetadataDB(str(layout.database_path))).export()
     print(json.dumps(result, ensure_ascii=False, indent=2))

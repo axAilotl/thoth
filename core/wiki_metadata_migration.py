@@ -8,7 +8,7 @@ from .source_records import SourceRecordStore
 from .vault_maintenance import _contained, digest
 from .wiki_feedback import split_feedback
 from .wiki_io import read_document, render_frontmatter
-from .wiki_publication import WikiPublicationStore, content_hash, minimal_wiki_frontmatter
+from .wiki_publication import WikiPublicationStore, minimal_wiki_frontmatter
 
 
 def compact_topic_pages(layout, *, db, obsidian_root: Path, archive_root: Path,
@@ -52,7 +52,6 @@ def compact_topic_pages(layout, *, db, obsidian_root: Path, archive_root: Path,
             raise ValueError("Topic archive checksum mismatch")
         archives.archive(original_path=str(path), archive_path=str(archive),
                          document=content.decode(), metadata=meta)
-        before = content.decode()
         snapshot = publications.adopt_baseline(path, expected_hash=expected, metadata=meta)
         body, _ = split_feedback(doc.body)
         prefix, separator, sources = body.rpartition("\n## Sources\n")
@@ -63,6 +62,6 @@ def compact_topic_pages(layout, *, db, obsidian_root: Path, archive_root: Path,
         # The only changes to body are removal of known per-citation metadata.
         # Source links, findings and prose are retained exactly.
         minimal = render_frontmatter(minimal_wiki_frontmatter(meta)) + "\n" + body.lstrip("\n")
-        publications.publish(path, minimal, snapshot=snapshot, metadata=meta)
+        publications.publish(path, minimal, snapshot=snapshot, metadata=meta, feedback_included=False)
         migrated.append(relative)
     return {"compacted": migrated, "skipped": skipped}

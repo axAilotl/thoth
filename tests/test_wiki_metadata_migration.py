@@ -33,6 +33,8 @@ def test_topic_metadata_compaction_preserves_prose_links_and_feedback(tmp_path):
     store = WikiPublicationStore(db, layout.wiki_root)
     assert store.metadata_for(page)["thoth_input_manifest"] == [{"sha256": "example"}]
     assert store.inspect(page).status == "clean"
+    assert store.inspect(page).pending_feedback
+    assert store.feedback_records(page)[0]["status"] == "pending"
     assert store.feedback_records(page)[0]["raw_text"].endswith("> More detail please.\n")
     page.write_text(after + "\nHuman edit\n")
     rerun = compact_topic_pages(layout, db=db, obsidian_root=root, archive_root=tmp_path / "archives",
