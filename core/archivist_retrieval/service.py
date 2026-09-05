@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from math import ceil
+import re
 
 from ..archivist_topics import ArchivistTopicDefinition
 from ..config import Config
@@ -381,6 +382,11 @@ def _literal_query_score(
             score += 1.25
     if topic.title.lower() in search_corpus:
         score += 0.5
+    # Literal retrieval must honor explicit query text (including local wiki
+    # feedback) too, without changing any eligibility or security filters.
+    for token in set(re.findall(r"[a-z0-9_]{2,}", (topic.retrieval.query_text or "").lower())):
+        if token in search_corpus:
+            score += 0.5
     return score + _recency_score(document.updated_at, recency_weight=topic.retrieval.recency_weight)
 
 

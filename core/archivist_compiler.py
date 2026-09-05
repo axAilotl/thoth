@@ -30,7 +30,11 @@ from .wiki_change_provenance import (
     source_file_snapshot,
 )
 from .wiki_contract import WikiContract, WikiPageSpec, build_wiki_contract
-from .wiki_io import atomic_write_text, read_document, render_frontmatter, truncate_summary
+from .wiki_io import read_document, render_frontmatter, truncate_summary
+from .wiki_feedback import FEEDBACK_SYSTEM_BOUNDARY, FeedbackBlock, feedback_prompt, feedback_retrieval_topic
+from .wiki_publication import (
+    PublicationSnapshot, WikiPublicationConflict, WikiPublicationStore, minimal_wiki_frontmatter,
+)
 from .wiki_scaffold import append_wiki_log_entry, ensure_wiki_scaffold
 from .wiki_updater import CompiledWikiUpdater
 
@@ -77,6 +81,7 @@ class ArchivistCompiler:
         self.layout.ensure_directories()
         self.contract = contract or build_wiki_contract(config, project_root=self.project_root)
         self.db = db or get_metadata_db()
+        self.publications = WikiPublicationStore(self.db, self.layout.wiki_root)
         self.llm_interface = llm_interface or LLMInterface(config.get("llm", {}))
         self.scaffold = ensure_wiki_scaffold(config, project_root=self.project_root)
 
@@ -106,9 +111,13 @@ class ArchivistCompiler:
         force: bool = False,
         dry_run: bool = False,
     ) -> ArchivistCompileResult:
+        page_path = topic.output_path_for_root(self.layout.wiki_root)
+        publication = self.publications.inspect(page_path)
+        if not publication.publishable:
+            return ArchivistCompileResult(topic.id, "blocked", publication.status, page_path, 0, (), None, None)
         route = self._resolve_archivist_route()
         selection = await select_archivist_candidates_async(
-            topic,
+            feedback_retrieval_topic(topic, publication.feedback),
             config=self.config,
             layout=self.layout,
             db=self.db,
@@ -122,7 +131,7 @@ class ArchivistCompiler:
             db=self.db,
         )
 
-        should_run = force or dirty.should_run
+        should_run = force or dirty.should_run or publication.pending_feedback
         if not should_run:
             return ArchivistCompileResult(
                 topic_id=topic.id,
@@ -172,8 +181,14 @@ class ArchivistCompiler:
                 model=route[1],
             )
 
-        body = await self._generate_topic_body(topic, candidates, route=route)
-        self._write_topic_page(topic, candidates, body=body, page_path=page_path)
+        body = await self._generate_topic_body(topic, candidates, route=route, feedback=publication.feedback)
+        try:
+            self._write_topic_page(topic, candidates, body=body, page_path=page_path, publication=publication)
+        except WikiPublicationConflict as exc:
+            return ArchivistCompileResult(
+                topic.id, "blocked", str(exc), page_path, len(candidates),
+                self._source_paths_for_candidates(candidates), route[0], route[1],
+            )
         record_archivist_topic_run(
             topic,
             candidates,
@@ -193,7 +208,7 @@ class ArchivistCompiler:
         return ArchivistCompileResult(
             topic_id=topic.id,
             status="compiled",
-            reason="forced" if force else dirty.reason,
+            reason="forced" if force else "feedback_pending" if publication.pending_feedback else dirty.reason,
             page_path=page_path,
             candidate_count=len(candidates),
             source_paths=self._source_paths_for_candidates(candidates),
@@ -236,8 +251,11 @@ class ArchivistCompiler:
         candidates: Sequence[ArchivistCandidate],
         *,
         route: tuple[str, str, dict[str, Any]],
+        feedback: tuple[FeedbackBlock, ...] = (),
     ) -> str:
         system_prompt, user_prompt = self._render_prompts(topic, candidates)
+        system_prompt += FEEDBACK_SYSTEM_BOUNDARY
+        user_prompt += feedback_prompt(feedback)
         provider_name, model_id, model_cfg = route
         response = await self.llm_interface.generate(
             prompt=user_prompt,
@@ -354,11 +372,16 @@ class ArchivistCompiler:
         *,
         body: str,
         page_path: Path,
+        publication: PublicationSnapshot,
     ) -> None:
         page_path.parent.mkdir(parents=True, exist_ok=True)
         existing = read_document(page_path) if page_path.exists() else None
+        previous_metadata = self.publications.metadata_for(page_path)
+        # Explicitly adopted pre-upgrade pages retain their original metadata here.
+        if not previous_metadata and existing:
+            previous_metadata = existing.frontmatter
         created_at = str(
-            (existing.frontmatter.get("created_at") if existing else None)
+            previous_metadata.get("thoth_created_at") or previous_metadata.get("created_at")
             or self._now_iso()
         )
         source_paths = self._source_paths_for_candidates(candidates)
@@ -366,12 +389,12 @@ class ArchivistCompiler:
         previous_manifest = None
         previous_hash = None
         if existing is not None:
-            previous_hash = existing.frontmatter.get("thoth_input_hash") or existing.frontmatter.get(
+            previous_hash = previous_metadata.get("thoth_input_hash") or previous_metadata.get(
                 "input_hash"
             )
-            previous_manifest = existing.frontmatter.get("thoth_input_manifest")
+            previous_manifest = previous_metadata.get("thoth_input_manifest")
             if not isinstance(previous_manifest, list):
-                previous_manifest = existing.frontmatter.get("input_manifest")
+                previous_manifest = previous_metadata.get("input_manifest")
         if not isinstance(previous_manifest, list):
             previous_manifest = []
         updated_at = self._now_iso()
@@ -397,7 +420,9 @@ class ArchivistCompiler:
                 compiled_at=updated_at,
             ),
         )
-        frontmatter = render_frontmatter(self.contract.frontmatter_for(spec)).rstrip()
+        metadata = self.contract.frontmatter_for(spec)
+        # Full provenance is a database record; the note is the reading surface.
+        frontmatter = render_frontmatter(minimal_wiki_frontmatter(metadata)).rstrip()
         source_lines = self._render_sources_section(candidates, page_path=page_path)
         content = "\n".join(
             [
@@ -413,7 +438,7 @@ class ArchivistCompiler:
                 "",
             ]
         )
-        atomic_write_text(page_path, content)
+        self.publications.publish(page_path, content, snapshot=publication, metadata=metadata)
 
     def _render_sources_section(
         self,
@@ -426,15 +451,7 @@ class ArchivistCompiler:
         for index, candidate in enumerate(candidates, start=1):
             source_abs_path = self._absolute_path_for_candidate(candidate)
             rel_link = os.path.relpath(source_abs_path, page_dir)
-            tags = ", ".join(candidate.tags) if candidate.tags else "none"
             lines.append(f"- [S{index}] {markdown_file_link(candidate.title, rel_link)}")
-            lines.append(f"  - Path: `{self._normalized_source_path(candidate)}`")
-            lines.append(f"  - Type: `{candidate.source_type}` / `{candidate.file_type}`")
-            lines.append(f"  - Tags: `{tags}`")
-            lines.append(f"  - Updated: `{candidate.updated_at}`")
-            lines.append(f"  - Trust: `{candidate.source_trust_score:.3f}` ({candidate.source_trust_reason})")
-            if candidate.retrieval_sources:
-                lines.append(f"  - Retrieval: `{', '.join(candidate.retrieval_sources)}`")
         return lines
 
     def _scope_path_for_candidate(self, candidate: ArchivistCandidate) -> Path:

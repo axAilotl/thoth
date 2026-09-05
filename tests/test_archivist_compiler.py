@@ -265,9 +265,11 @@ def test_archivist_compiler_filters_hostile_sources_and_records_influence(
         assert result.source_paths == ("repos/safe.md",)
         assert "Trusted Security Memo" not in llm.calls[0]["prompt"]
         document = read_document(result.page_path)
-        assert document.frontmatter["thoth_source_paths"] == ["repos/safe.md"]
-        assert document.frontmatter["thoth_influence_sources"][0]["label"] == "S1"
-        assert document.frontmatter["thoth_influence_sources"][0]["source_path"] == "repos/safe.md"
+        metadata = compiler.publications.metadata_for(result.page_path)
+        assert "thoth_source_paths" not in document.frontmatter
+        assert metadata["thoth_source_paths"] == ["repos/safe.md"]
+        assert metadata["thoth_influence_sources"][0]["label"] == "S1"
+        assert metadata["thoth_influence_sources"][0]["source_path"] == "repos/safe.md"
         assert "repos/hostile.md" not in document.body
     finally:
         config.data = original
