@@ -1,0 +1,21 @@
+{
+  "name": "wiki_reconcile",
+  "source_name": "wiki_reconcile",
+  "display_name": "Wiki Edit Reconciliation",
+  "description": "Observe owned wiki revisions and explicit feedback; preserve human edits and record conflicts outside the vault.",
+  "artifact_types": ["markdown"],
+  "inputs": ["local_files:owned_wiki_pages"],
+  "outputs": ["metadata:wiki_revisions", "metadata:wiki_feedback"],
+  "capabilities": ["wiki_revision_tracking"],
+  "config_keys": ["sources.wiki_reconcile.enabled", "sources.wiki_reconcile.schedule"],
+  "auth": [],
+  "queue_capability": false,
+  "queue_behavior": "no_queue",
+  "safety_mode": "local_read_metadata_only",
+  "allowed_side_effects": ["local_file_read", "metadata_write"],
+  "entrypoint": "collectors.wiki_reconcile_connector:WikiReconcileConnector",
+  "cli_command": "wiki-reconcile",
+  "config_namespace": "sources.wiki_reconcile",
+  "default_enabled": false,
+  "ccf": {"lane": "markdown", "artifact_role": "wiki_revision"}
+}
