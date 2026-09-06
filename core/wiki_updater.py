@@ -623,7 +623,9 @@ class CompiledWikiUpdater:
                 line = "* " + markdown_file_link(title, rel_link)
                 lines.append(line)
 
-        _atomic_write_text(self.contract.index_path, "\n".join(lines) + "\n")
+        content = "\n".join(lines) + "\n"
+        if not self.contract.index_path.exists() or self.contract.index_path.read_text(encoding="utf-8") != content:
+            _atomic_write_text(self.contract.index_path, content)
         return self.contract.index_path
 
     def _canonical_identity_for_artifact(

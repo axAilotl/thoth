@@ -37,6 +37,31 @@ def test_discussion_and_generated_summary_are_not_prompt_examples(text):
 def test_reference_is_not_claimed_as_extracted_prompt():
     assert identify_prompt('Prompt in the alt text of this image.')['kind'] == 'prompt_reference'
     assert identify_prompt('Prompt: https://example.com/prompts')['kind'] == 'prompt_reference'
+    assert identify_prompt('Prompt: see the attached image for the full text of the prompt.')['kind'] == 'prompt_reference'
+
+
+def test_enrichment_is_not_source_evidence_but_later_thread_tweets_are():
+    text = '# Tweet\n## Content\nAn ordinary tweet.\n## Repository READMEs\n- **Summary**: Prompt: Draw a bird on a flowering branch in soft light.\n'
+    assert identify_prompt(text, social=True) is None
+    text += '\n## Tweet 2\nPrompt: Create a scene with a bird and a bright blue sky.\n'
+    assert identify_prompt(text, social=True)['kind'] == 'likely_prompt'
+
+
+def test_retry_repairs_main_index_after_publication_interruption(tmp_path, monkeypatch):
+    config, db, layout, doc = setup_documents(tmp_path)
+    from core.wiki_updater import CompiledWikiUpdater
+    original = CompiledWikiUpdater.refresh_index
+    def fail(_self):
+        raise OSError('interrupted index update')
+    monkeypatch.setattr(CompiledWikiUpdater, 'refresh_index', fail)
+    with pytest.raises(OSError):
+        refresh_prompt_index([doc], config=config, layout=layout, db=db)
+    page = layout.wiki_root / PAGE
+    stamp = page.stat().st_mtime_ns
+    monkeypatch.setattr(CompiledWikiUpdater, 'refresh_index', original)
+    assert refresh_prompt_index([doc], config=config, layout=layout, db=db)['status'] == 'unchanged'
+    assert page.stat().st_mtime_ns == stamp
+    assert 'Prompt%20Index.md' in (layout.wiki_root / 'index.md').read_text()
 
 
 def setup_documents(tmp_path):

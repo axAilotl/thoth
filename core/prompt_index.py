@@ -21,16 +21,37 @@ _SHARING = re.compile(r"\b(?:here(?:['’]s|\s+is)\s+(?:the\s+|my\s+|a\s+)?(?:fu
                       r"|(?:prompt pack|prompt library|prompt collection|prompt template)s?)\b", re.I)
 _SOCIAL_ID = re.compile(r"(?:tweets?|thread)_(\d{15,22})(?:_|$)")
 _GENERATED_SECTION = re.compile(r"^#{1,3}\s+(?:Summary|Analysis|Tags|Key Takeaways|Related (?:Papers|Repositories))\s*$", re.I | re.M)
+_ENRICHMENT = re.compile(r"^#{2,3}\s+(?:Repository READMEs|ArXiv Papers|PDF Documents|YouTube Videos|Thread Info)\s*$", re.I)
+_LOCATION = re.compile(r"^(?:https?://|(?:(?:see|check|read|find)\s+)?(?:the\s+)?"
+                       r"(?:(?:attached|following|linked)\s+)?(?:image|screenshot|photo|alt text|link)\b"
+                       r"|in\s+(?:the\s+)?(?:alt|comments|replies)\b)", re.I)
+
+
+def original_social_text(text: str) -> str:
+    """Keep source tweet sections, not generated linked-document enrichments."""
+    output = []
+    enrichment = False
+    for line in _GENERATED_SECTION.split(text, maxsplit=1)[0].splitlines():
+        if re.match(r"^##\s+(?:Tweet\s+\d+|Content)\s*$", line, re.I):
+            enrichment = False
+        elif _ENRICHMENT.match(line):
+            enrichment = True
+        if not enrichment:
+            # Renderer-generated media captions are not a transcribed prompt.
+            if line.startswith("!") or (line.startswith("*") and line.endswith("*") and not line.startswith("**")):
+                continue
+            output.append(line)
+    return "\n".join(output)
 
 
 def identify_prompt(text: str, *, social: bool = False) -> dict | None:
     """Conservative textual evidence, not semantic completeness or verification."""
     if social:
-        text = _GENERATED_SECTION.split(text, maxsplit=1)[0]
+        text = original_social_text(text)
     for match in _LABEL.finditer(text):
         # A marker with substantial following text is a candidate, not proof.
         tail = text[match.end():].strip().lstrip("* ")
-        if len(tail.split()) >= 6 and not re.match(r"(?:https?://|in (?:the )?(?:alt|comments|replies))", tail, re.I):
+        if len(tail.split()) >= 6 and not _LOCATION.match(tail):
             return {"kind": "likely_prompt", "reason": "explicit_prompt_label"}
     if re.search(r"<prompt>\s*\S[\s\S]{30,}?</prompt>", text, re.I):
         return {"kind": "likely_prompt", "reason": "prompt_block"}
@@ -48,12 +69,19 @@ def _label(title: str) -> str:
 def _source_title(doc, social):
     title = doc.title or doc.path.stem
     if social and re.match(r"^(?:tweet|thread)(?: by| from|$)", title, re.I):
-        original = _GENERATED_SECTION.split(doc.content_text, maxsplit=1)[0]
+        original = original_social_text(doc.content_text)
         for line in original.splitlines():
             text = line.strip().strip("*").strip()
             if text and not re.match(r"(?:#|!\[|https?://|Thread contains|Tweet \d|---)", text, re.I):
                 return title + " — " + text[:100]
     return title
+
+
+def _unique_sources(records):
+    unique = {}
+    for record in sorted(records, key=lambda r: (r["kind"] != "likely_prompt", r["path"])):
+        unique.setdefault(record["identity"], record)
+    return unique
 
 
 def collect_prompt_records(documents, *, layout, db) -> dict:
@@ -83,9 +111,7 @@ def collect_prompt_records(documents, *, layout, db) -> dict:
                         "path": str(path), "title": _source_title(doc, social),
                         "source_hash": doc.source_hash, **match})
     # Keep every matched association in DB; one visible link per source identity.
-    unique = {}
-    for record in sorted(records, key=lambda r: (r["kind"] != "likely_prompt", r["path"])):
-        unique.setdefault(record["identity"], record)
+    unique = _unique_sources(records)
     with db._get_connection() as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS prompt_index_records (
             candidate_key TEXT PRIMARY KEY, source_hash TEXT NOT NULL,
@@ -107,9 +133,7 @@ def publish_prompt_index(*, config, layout, db) -> dict:
         raise ValueError("Run corpus discovery before publishing the prompt index")
     with db._get_connection() as conn:
         records = [json.loads(row[0]) for row in conn.execute("SELECT record_json FROM prompt_index_records")]
-    unique = {}
-    for record in sorted(records, key=lambda r: (r["kind"] != "likely_prompt", r["path"])):
-        unique.setdefault(record["identity"], record)
+    unique = _unique_sources(records)
     page = layout.wiki_root / PAGE
     store = WikiPublicationStore(db, layout.wiki_root)
     snapshot = store.inspect(page)
@@ -133,6 +157,8 @@ def publish_prompt_index(*, config, layout, db) -> dict:
         lines.append("")
     content = render_frontmatter(frontmatter) + "\n" + "\n".join(lines).rstrip() + "\n"
     if snapshot.status == "clean" and comparable_body(page.read_text()) == comparable_body(content):
+        from .wiki_updater import CompiledWikiUpdater
+        CompiledWikiUpdater(config, layout=layout, db=db).refresh_index()
         return dict(report, status="unchanged")
     try:
         store.publish(page, content, snapshot=snapshot, metadata=report, feedback_included=False)
