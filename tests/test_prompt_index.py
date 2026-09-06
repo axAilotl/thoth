@@ -10,6 +10,13 @@ from core.wiki_publication import WikiPublicationStore
 from tests.test_corpus_index_connector import setup_corpus, document
 
 
+def test_unusable_import_titles_use_source_filename():
+    from core.prompt_index import _label
+    assert _label('<!doctype html>', '/repos/github_owner_useful-repo_README.md') == 'owner useful-repo'
+    assert _label('1', '/papers/2504.02991v1-a-useful-paper.pdf') == 'a-useful-paper'
+    assert _label('A descriptive title', '/papers/1.pdf') == 'A descriptive title'
+
+
 def refresh_prompt_index(documents, *, config, layout, db):
     collect_prompt_records(documents, layout=layout, db=db)
     return publish_prompt_index(config=config, layout=layout, db=db)

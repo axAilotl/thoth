@@ -60,9 +60,15 @@ def identify_prompt(text: str, *, social: bool = False) -> dict | None:
     return None
 
 
-def _label(title: str) -> str:
+def _label(title: str, path: str) -> str:
     # Titles are untrusted data too: no active Markdown/HTML/callouts in labels.
-    title = " ".join(str(title).split())[:140]
+    title = " ".join(str(title).split())
+    if (not title or title.startswith(("<", "![")) or re.search(r"<[^>]+>", title)
+            or re.fullmatch(r"(?:\d+|preprint\.?|technical report\.?)", title, re.I)):
+        title = Path(path).stem
+        title = re.sub(r"^(?:(?:hf|github)_|\d{4}\.\d{4,5}(?:v\d+)?-)", "", title)
+        title = re.sub(r"_README$", "", title, flags=re.I).replace("_", " ")
+    title = title[:140]
     return re.sub(r"[\\`*_<>{}\[\]#!|]", "", title)
 
 
@@ -151,7 +157,7 @@ def publish_prompt_index(*, config, layout, db) -> dict:
         matching = sorted((r for r in unique.values() if r["kind"] == kind), key=lambda r: (r["title"].casefold(), r["path"]))
         for record in matching:
             relative = os.path.relpath(record["path"], page.parent)
-            lines.append("- " + markdown_file_link(_label(record["title"]), relative))
+            lines.append("- " + markdown_file_link(_label(record["title"], record["path"]), relative))
         if not matching:
             lines.append("- None identified yet.")
         lines.append("")
