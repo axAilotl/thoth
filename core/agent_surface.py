@@ -842,6 +842,8 @@ class AgentSurfaceService:
                 checkpoint_id=run.checkpoint_id,
             ):
                 result = handler(execution_options)
+            from .connector_publications import publish_connector_derivatives
+            publish_connector_derivatives(manifest.name, result, config=self.config, layout=self.layout, db=self.db)
             serialized_result = serialize_agent_payload(result)
             if self.db.connector_run_output_count(run.run_id) == 0:
                 self._record_connector_result_outputs(

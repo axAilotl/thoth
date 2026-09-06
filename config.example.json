@@ -663,6 +663,7 @@
       "exclude_roots": [],
       "embeddings_enabled": false,
       "max_new_embeddings_per_run": 128,
+      "prompt_index_enabled": false,
       "schedule": { "enabled": false, "interval_seconds": 900, "run_on_startup": false }
     },
     "web_clipper": {

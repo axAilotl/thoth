@@ -45,6 +45,9 @@ class CorpusIndexConnector:
         roots = corpus_roots(self.config, self.layout)
         excluded = corpus_roots(self.config, self.layout, key="exclude_roots", required=False)
         enabled = self.config.get("sources.corpus_index.embeddings_enabled", False)
+        prompt_index_enabled = self.config.get("sources.corpus_index.prompt_index_enabled", False)
+        if not isinstance(prompt_index_enabled, bool):
+            raise ValueError("sources.corpus_index.prompt_index_enabled must be boolean")
         if not isinstance(enabled, bool):
             raise ValueError("sources.corpus_index.embeddings_enabled must be boolean")
         maximum = self.config.get("sources.corpus_index.max_new_embeddings_per_run", 128)
@@ -80,6 +83,9 @@ class CorpusIndexConnector:
             "missing_roots": list(inventory.missing_roots),
             "embeddings_enabled": enabled,
         }
+        if prompt_index_enabled:
+            from core.prompt_index import collect_prompt_records
+            result["prompt_index"] = collect_prompt_records(inventory.documents, layout=self.layout, db=self.db)
         if enabled:
             coverage = await ensure_corpus_embeddings(
                 db=self.db, llm_interface=self.llm_interface or LLMInterface(self.config.get("llm", {})),

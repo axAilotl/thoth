@@ -503,6 +503,7 @@
             "include_roots": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
             "exclude_roots": { "type": "array", "items": { "type": "string", "minLength": 1 } },
             "embeddings_enabled": { "type": "boolean", "default": false },
+            "prompt_index_enabled": { "type": "boolean", "default": false },
             "max_new_embeddings_per_run": { "type": "integer", "minimum": 1, "default": 128 }
           },
           "additionalProperties": true

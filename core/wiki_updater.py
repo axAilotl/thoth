@@ -620,7 +620,7 @@ class CompiledWikiUpdater:
         else:
             lines.append("")
             for title, rel_link, summary in entries:
-                line = f"* [{title}]({rel_link})"
+                line = "* " + markdown_file_link(title, rel_link)
                 lines.append(line)
 
         _atomic_write_text(self.contract.index_path, "\n".join(lines) + "\n")
