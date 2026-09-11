@@ -18,6 +18,8 @@ def test_review_is_a_settings_tab_using_shared_components():
     assert 'id="review" class="tab-content"' in html
     assert 'href="/review"' not in html
     assert 'type="module" src="/static/review.js' in html
+    assert 'href="/static/review.css?v=3"' in html
+    assert 'src="/static/review.js?v=3"' in html
     panel = (root / 'static/review-panel.html').read_text()
     assert '<html' not in panel and '<body' not in panel
     assert 'class="card"' in panel
