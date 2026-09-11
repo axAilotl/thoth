@@ -536,6 +536,19 @@
             color: var(--text-secondary);
             text-align: center;
         }
+        .archivist-topic-dialog {
+            width: min(760px, calc(100vw - 32px));
+            max-height: min(80vh, 720px);
+            padding: 24px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border-strong);
+        }
+        .archivist-topic-dialog::backdrop { background: var(--shadow); }
+        .archivist-topic-dialog .card-header { align-items: flex-start; }
+        .archivist-topic-dialog-body { max-height: 58vh; overflow: auto; padding-right: 4px; }
+        .archivist-topic-dialog-body .archivist-section-label { margin-top: 16px; }
+        .archivist-topic-dialog-body .archivist-section-label:first-child { margin-top: 0; }
 
         /* Alerts */
         .alert {
@@ -569,9 +582,12 @@
         .stat-label { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
 
         .security-table-wrap {
+            max-height: 22rem;
+            overflow-y: auto;
             overflow-x: auto;
             border: 1px solid rgba(202, 162, 94, 0.1);
             background: rgba(15, 10, 7, 0.3);
+            overscroll-behavior: contain;
         }
         .security-table {
             width: 100%;
@@ -586,7 +602,11 @@
             border-bottom: 1px solid rgba(202, 162, 94, 0.1);
         }
         .security-table th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
             color: var(--text-secondary);
+            background: var(--bg-elevated);
             text-transform: uppercase;
             letter-spacing: 0.08em;
             font-size: 0.72rem;
@@ -1470,6 +1490,17 @@
                 <div id="archivist-registry-error" class="alert alert-error" style="display:none;"></div>
                 <div id="archivist-topics-list" class="archivist-topic-list"></div>
             </div>
+
+            <dialog id="archivist-topic-dialog" class="archivist-topic-dialog" aria-labelledby="archivist-topic-dialog-title">
+                <div class="card-header">
+                    <div>
+                        <h2 id="archivist-topic-dialog-title" class="card-title"></h2>
+                        <p id="archivist-topic-dialog-description" class="card-description"></p>
+                    </div>
+                    <button class="btn btn-secondary btn-small" type="button" onclick="closeArchivistTopicDetails()">Close</button>
+                </div>
+                <div id="archivist-topic-dialog-body" class="archivist-topic-dialog-body"></div>
+            </dialog>
         </div>
 
         <!-- Security Tab -->
@@ -2969,6 +3000,48 @@
             setFieldValue('archivist-route-summary', getTaskRouteSummary('archivist'));
         }
 
+        function renderArchivistTopicFilters(topic) {
+            const filterSections = [
+                ['Include Roots', topic.include_roots],
+                ['Exclude Roots', topic.exclude_roots],
+                ['Source Types', topic.source_types],
+                ['Include Tags', topic.include_tags],
+                ['Exclude Tags', topic.exclude_tags],
+                ['Include Terms', topic.include_terms],
+                ['Exclude Terms', topic.exclude_terms],
+                ['Retrieval Policy', [
+                    `mode:${topic.retrieval?.mode || 'literal'}`,
+                    `tags:${topic.retrieval?.tag_mode || 'required'}`,
+                    `terms:${topic.retrieval?.term_mode || 'required'}`,
+                    `fts:${topic.retrieval?.full_text_limit ?? 'n/a'}`,
+                    `semantic:${topic.retrieval?.semantic_limit ?? 'n/a'}`,
+                    `rerank:${topic.retrieval?.rerank_limit ?? 'n/a'}`,
+                    `embed_budget:${topic.retrieval?.max_new_embeddings_per_run ?? 'n/a'}`
+                ]],
+                ['Source Type Weights', Object.entries(topic.retrieval?.source_type_weights || {})
+                    .map(([key, value]) => `${key}:${value}`)]
+            ];
+            return filterSections.map(([label, values]) => `
+                <div class="archivist-section-label">${escapeHtml(label)}</div>
+                <div class="archivist-pill-list">${renderArchivistPills(values)}</div>
+            `).join('');
+        }
+
+        function openArchivistTopicDetails(topicId) {
+            const topic = (archivistRegistryState?.topics || []).find(item => item.id === topicId);
+            const dialog = document.getElementById('archivist-topic-dialog');
+            if (!topic || !dialog) return;
+            setTextValue('archivist-topic-dialog-title', topic.title || topic.id);
+            setTextValue('archivist-topic-dialog-description', topic.description || topic.id);
+            setHtmlValue('archivist-topic-dialog-body', renderArchivistTopicFilters(topic));
+            dialog.showModal();
+        }
+
+        function closeArchivistTopicDetails() {
+            const dialog = document.getElementById('archivist-topic-dialog');
+            if (dialog?.open) dialog.close();
+        }
+
         function renderArchivistTopics(topics) {
             const container = document.getElementById('archivist-topics-list');
             if (!container) return;
@@ -3024,36 +3097,9 @@
                             <div><strong>Retrieval</strong>${escapeHtml(topic.retrieval?.mode || 'literal')}</div>
                         </div>
                         ${stateError}
-                        <div class="archivist-section-label">Include Roots</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_roots)}</div>
-                        <div class="archivist-section-label">Exclude Roots</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_roots)}</div>
-                        <div class="archivist-section-label">Source Types</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.source_types)}</div>
-                        <div class="archivist-section-label">Include Tags</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_tags)}</div>
-                        <div class="archivist-section-label">Exclude Tags</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_tags)}</div>
-                        <div class="archivist-section-label">Include Terms</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_terms)}</div>
-                        <div class="archivist-section-label">Exclude Terms</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_terms)}</div>
-                        <div class="archivist-section-label">Retrieval Policy</div>
-                        <div class="archivist-pill-list">${renderArchivistPills([
-                            `mode:${topic.retrieval?.mode || 'literal'}`,
-                            `tags:${topic.retrieval?.tag_mode || 'required'}`,
-                            `terms:${topic.retrieval?.term_mode || 'required'}`,
-                            `fts:${topic.retrieval?.full_text_limit ?? 'n/a'}`,
-                            `semantic:${topic.retrieval?.semantic_limit ?? 'n/a'}`,
-                            `rerank:${topic.retrieval?.rerank_limit ?? 'n/a'}`,
-                            `embed_budget:${topic.retrieval?.max_new_embeddings_per_run ?? 'n/a'}`
-                        ])}</div>
-                        <div class="archivist-section-label">Source Type Weights</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(
-                            Object.entries(topic.retrieval?.source_type_weights || {}).map(
-                                ([key, value]) => `${key}:${value}`
-                            )
-                        )}</div>
+                        <div class="btn-group">
+                            <button class="btn btn-secondary btn-small" onclick="openArchivistTopicDetails('${escapeHtml(topic.id)}')">View filters &amp; weights</button>
+                        </div>
                         ${forceButtons}
                     </article>
                 `;
