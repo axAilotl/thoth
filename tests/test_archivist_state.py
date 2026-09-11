@@ -1,6 +1,9 @@
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
+import core.archivist_state as archivist_state
 from core.archivist_selection import ArchivistCandidate
 from core.archivist_state import (
     clear_archivist_topic_force,
@@ -172,3 +175,27 @@ def test_archivist_state_runs_again_when_topic_is_due(tmp_path: Path):
     assert due.should_run is True
     assert due.reason == "cadence_due"
     assert due.due is True
+
+
+@pytest.mark.parametrize("run_at", [
+    "2026-04-04T00:00:00",
+    "2026-04-04T00:00:00Z",
+    "2026-04-03T20:00:00-04:00",
+])
+@pytest.mark.parametrize("now, expected_due", [
+    ("2026-04-04T05:59:59", False),
+    ("2026-04-04T06:00:00Z", True),
+])
+def test_archivist_cadence_compares_naive_and_aware_timestamps(
+    tmp_path: Path, monkeypatch, run_at, now, expected_due,
+):
+    db = MetadataDB(str(tmp_path / "meta.db"))
+    topic = make_topic(cadence_hours=6.0)
+    candidates = [make_candidate("tweets/one.md", "hash-a")]
+    record_archivist_topic_run(topic, candidates, route=None, db=db, run_at=run_at)
+    monkeypatch.setattr(archivist_state, "utc_now", lambda: datetime.fromisoformat(now))
+
+    result = evaluate_archivist_dirty_check(topic, candidates, route=None, db=db)
+
+    assert result.should_run is expected_due
+    assert result.reason == ("cadence_due" if expected_due else "up_to_date")

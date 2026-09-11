@@ -491,16 +491,13 @@ class AgentSurfaceService:
         metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Retry a review-queue artifact by moving it back to pending."""
-        try:
-            entry = ArtifactReviewQueueService(self.db, config=self.config).retry(
-                artifact_id,
-                actor=actor,
-                reason=reason,
-                metadata=metadata,
-            )
-        except ArtifactReviewQueueError as exc:
-            raise AgentSurfaceError(str(exc)) from exc
-        return {"queue": self._serialize_ingestion_entry(entry)}
+        return self._apply_artifact_review(
+            "retry",
+            artifact_id,
+            actor=actor,
+            reason=reason,
+            metadata=metadata,
+        )
 
     def reject_artifact_review(
         self,
@@ -511,16 +508,13 @@ class AgentSurfaceService:
         metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Reject a bad artifact and keep its provenance/error audit."""
-        try:
-            entry = ArtifactReviewQueueService(self.db, config=self.config).reject(
-                artifact_id,
-                actor=actor,
-                reason=reason,
-                metadata=metadata,
-            )
-        except ArtifactReviewQueueError as exc:
-            raise AgentSurfaceError(str(exc)) from exc
-        return {"queue": self._serialize_ingestion_entry(entry)}
+        return self._apply_artifact_review(
+            "reject",
+            artifact_id,
+            actor=actor,
+            reason=reason,
+            metadata=metadata,
+        )
 
     def mark_artifact_reviewed(
         self,
@@ -531,8 +525,27 @@ class AgentSurfaceService:
         metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Mark a bad artifact reviewed without retrying or accepting it."""
+        return self._apply_artifact_review(
+            "mark_reviewed",
+            artifact_id,
+            actor=actor,
+            reason=reason,
+            metadata=metadata,
+        )
+
+    def _apply_artifact_review(
+        self,
+        action: str,
+        artifact_id: str,
+        *,
+        actor: str,
+        reason: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         try:
-            entry = ArtifactReviewQueueService(self.db, config=self.config).mark_reviewed(
+            entry = getattr(
+                ArtifactReviewQueueService(self.db, config=self.config), action
+            )(
                 artifact_id,
                 actor=actor,
                 reason=reason,

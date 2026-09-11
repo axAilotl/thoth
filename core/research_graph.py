@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
@@ -20,6 +19,7 @@ from .metadata_db import (
     get_metadata_db,
 )
 from .path_layout import PathLayout, build_path_layout
+from .time_utils import utc_now_iso
 from .wiki_contract import normalize_wiki_slug
 
 
@@ -98,7 +98,7 @@ class ResearchGraphService:
         source_record = paper_record_from_artifact(artifact, collected=True)
         self.db.upsert_research_paper(source_record)
 
-        discovered_at = datetime.now().isoformat()
+        discovered_at = utc_now_iso()
         inserted_edges = 0
         references = _dedupe_references(
             [
@@ -201,7 +201,7 @@ class ResearchGraphService:
         )
         queued: list[str] = []
         skipped: list[str] = []
-        run_id = datetime.now().isoformat()
+        run_id = utc_now_iso()
         with self.capture_queue.lifecycle() as lifecycle:
             for candidate in report["high_confidence"]:
                 artifact = paper_artifact_from_missing_candidate(candidate)
@@ -371,7 +371,7 @@ def paper_record_from_artifact(
         source_provider=artifact.source_provider or artifact.source_type,
         collected=collected,
         raw_payload=raw_payload,
-        updated_at=artifact.ingested_at or datetime.now().isoformat(),
+        updated_at=artifact.ingested_at or utc_now_iso(),
     )
 
 
@@ -600,7 +600,7 @@ def paper_artifact_from_missing_candidate(candidate: Mapping[str, Any]) -> Paper
         source_type="research_graph",
         raw_content=json.dumps(dict(candidate), ensure_ascii=False),
         created_at=candidate.get("published_at"),
-        ingested_at=datetime.now().isoformat(),
+        ingested_at=utc_now_iso(),
         title=str(candidate.get("title") or paper_id),
         doi=doi,
         arxiv_id=arxiv_id,

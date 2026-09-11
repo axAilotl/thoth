@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from collections import Counter
 from typing import Any, Dict, List, Mapping, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -24,6 +24,7 @@ from .artifact_review_policy import (
     require_review_revision,
 )
 from .config import config
+from .time_utils import utc_now, utc_now_iso
 from .prompt_security import (
     THOTH_REDACTION_METADATA_KEY,
     THOTH_SECURITY_AUDIT_KEY,
@@ -44,13 +45,6 @@ from .prompt_security import (
 
 logger = logging.getLogger(__name__)
 
-
-def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _now_iso() -> str:
-    return _now_utc().isoformat().replace("+00:00", "Z")
 
 FILES_INDEX_ALLOWED_TYPES = (
     'media',
@@ -365,7 +359,7 @@ def _security_policy_audit_entry(
         "action": action,
         "status": status,
         "reason": reason,
-        "at": at or _now_iso(),
+        "at": at or utc_now_iso(),
     }
     if actor:
         entry["actor"] = actor
@@ -1377,7 +1371,7 @@ class MetadataDB:
     def upsert_research_paper_edge(self, edge: ResearchPaperEdge) -> bool:
         """Insert or update a typed paper graph edge and return true if new."""
         self.ensure_research_graph_tables()
-        discovered_at = edge.discovered_at or datetime.now().isoformat()
+        discovered_at = edge.discovered_at or utc_now_iso()
         metadata = edge.metadata or {}
         with self._get_connection() as conn:
             before = conn.execute(
@@ -4200,8 +4194,8 @@ class MetadataDB:
                         if status in INGESTION_REVIEW_STATUSES
                         else entry.next_attempt_at
                         or entry.created_at
-                        or _now_iso(),
-                        entry.created_at or _now_iso(),
+                        or utc_now_iso(),
+                        entry.created_at or utc_now_iso(),
                         entry.processed_at,
                         review_json,
                     )
@@ -4223,7 +4217,7 @@ class MetadataDB:
                    SET status='processing', attempts=attempts + 1, next_attempt_at=NULL
                    WHERE artifact_id=? AND status='pending'
                      AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-                   RETURNING *""", (artifact_id, _now_iso()),
+                   RETURNING *""", (artifact_id, utc_now_iso()),
             ).fetchone()
             if row is None:
                 return None
@@ -4261,7 +4255,7 @@ class MetadataDB:
                     SET status='processed', processed_at=?, last_error=NULL, next_attempt_at=NULL
                     WHERE artifact_id = ? AND status NOT IN ('needs_review', 'blocked', 'failed', 'reviewed', 'rejected')
                     """
-                params = [_now_iso(), artifact_id]
+                params = [utc_now_iso(), artifact_id]
                 if expected_source_checksum is not None:
                     query += " AND status='processing' AND json_extract(payload_json, '$.source_checksum')=?"
                     params.append(expected_source_checksum)
@@ -4289,7 +4283,7 @@ class MetadataDB:
 
             if attempts < max_attempts:
                 status = 'pending'
-                next_attempt_time = _now_utc() + timedelta(seconds=delay_seconds)
+                next_attempt_time = utc_now() + timedelta(seconds=delay_seconds)
                 next_attempt_at = next_attempt_time.isoformat().replace("+00:00", "Z")
 
             review_json = entry.review_json
@@ -4341,7 +4335,7 @@ class MetadataDB:
             entry = self.get_ingestion_entry(artifact_id)
             if not entry:
                 return None
-            now_iso = _now_iso()
+            now_iso = utc_now_iso()
             last_error = str(error or reason)
             review_json = _append_ingestion_review_event(
                 entry.review_json,
@@ -4406,7 +4400,7 @@ class MetadataDB:
             if not entry:
                 return None
             require_review_revision(entry, expected_revision)
-            now_iso = _now_iso()
+            now_iso = utc_now_iso()
             review_json = _append_ingestion_review_event(
                 entry.review_json,
                 action=clean_action,
@@ -4564,7 +4558,7 @@ class MetadataDB:
                     decision.created_at,
                 ),
             )
-            next_attempt_at = _now_iso() if status == "pending" else None
+            next_attempt_at = utc_now_iso() if status == "pending" else None
             updated = conn.execute(
                 """
                 UPDATE ingestion_queue
@@ -4699,7 +4693,7 @@ class MetadataDB:
         }:
             return entry
 
-        now_iso = _now_iso()
+        now_iso = utc_now_iso()
         approved_policy = {
             **current_policy,
             "status": PROMPT_SECURITY_POLICY_OVERRIDE_APPROVED,
@@ -4828,7 +4822,7 @@ class MetadataDB:
                 "WHERE status='pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?) "
                 "ORDER BY priority DESC, created_at ASC"
             )
-            params: List[Any] = [_now_iso()]
+            params: List[Any] = [utc_now_iso()]
             if limit:
                 query += " LIMIT ?"
                 params.append(limit)

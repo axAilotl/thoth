@@ -27,10 +27,6 @@ class WikiScaffoldError(RuntimeError):
     """Raised when the wiki scaffold cannot be created or updated."""
 
 
-def _now_iso() -> str:
-    return utc_now_iso()
-
-
 def _date_from_timestamp(value: str) -> str:
     normalized = value.strip().replace("Z", "+00:00")
     try:
@@ -114,7 +110,7 @@ def ensure_wiki_scaffold(
     scaffold = build_wiki_scaffold(config, project_root=project_root)
     contract = scaffold.contract
     created_paths: list[Path] = []
-    created_at = _now_iso()
+    created_at = utc_now_iso()
 
     try:
         contract.root.mkdir(parents=True, exist_ok=True)
@@ -158,10 +154,10 @@ def append_wiki_log_entry(
     if not contract.log_path.exists():
         _atomic_write_text(
             contract.log_path,
-            _render_log_content(contract, _now_iso(), _now_iso()),
+            _render_log_content(contract, utc_now_iso(), utc_now_iso()),
         )
 
-    entry_timestamp = timestamp or _now_iso()
+    entry_timestamp = timestamp or utc_now_iso()
     entry_date = _date_from_timestamp(entry_timestamp)
     entry = f"\n## {entry_date}\n\n* **Update**: {content}\n"
 

@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -701,6 +703,73 @@ def test_semantic_memory_rejected_lookup_uses_candidate_fingerprint(
     assert materialized_candidate_ids == [
         "candidate-rejected-fingerprint-target"
     ]
+
+
+def test_rejected_evidence_is_batched_without_reviving_rejected_sources(
+    tmp_path: Path, monkeypatch,
+):
+    store = make_store(tmp_path)
+    template = SemanticMemoryCandidate(
+        candidate_id="candidate-template",
+        candidate_type="preference",
+        text="Ada prefers evening standups.",
+        subject="Ada",
+        predicate="prefers",
+        object_value="evening standups",
+    )
+    for index in range(3):
+        candidate_id = f"rejected-{index}"
+        store.add_candidate(
+            replace(template, candidate_id=candidate_id),
+            evidence=(SemanticMemoryEvidence(
+                candidate_id=candidate_id,
+                evidence_id=f"evidence-{index}",
+                source_path=f"transcripts/day-{index}.txt",
+            ),),
+        )
+        store.transition_candidate(candidate_id, "rejected")
+
+    queries = []
+    original_connection = store.db._get_connection
+
+    @contextmanager
+    def traced_connection():
+        with original_connection() as conn:
+            conn.set_trace_callback(queries.append)
+            try:
+                yield conn
+            finally:
+                conn.set_trace_callback(None)
+
+    monkeypatch.setattr(store.db, "_get_connection", traced_connection)
+    for index in range(3):
+        queries.clear()
+        candidate_id = f"repeat-{index}"
+        with pytest.raises(SemanticMemoryValidationError):
+            store.add_candidate(
+                replace(template, candidate_id=candidate_id),
+                evidence=(SemanticMemoryEvidence(
+                    candidate_id=candidate_id,
+                    evidence_id=f"repeat-evidence-{index}",
+                    source_path=f"transcripts/day-{index}.txt",
+                ),),
+            )
+        evidence_reads = [
+            query for query in queries
+            if query.lstrip().upper().startswith("SELECT")
+            and "FROM semantic_memory_evidence" in query
+        ]
+        assert len(evidence_reads) == 1
+
+    revived = store.add_candidate(
+        replace(template, candidate_id="new-evidence"),
+        evidence=(SemanticMemoryEvidence(
+            candidate_id="new-evidence",
+            evidence_id="fresh-evidence",
+            source_path="transcripts/day-new.txt",
+        ),),
+    )
+    assert revived.status == "proposed"
 
 
 def test_semantic_memory_fails_closed_on_invalid_inputs(tmp_path: Path):

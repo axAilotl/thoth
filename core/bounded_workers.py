@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TypeVar
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -89,6 +92,8 @@ async def map_bounded(
 
     if errors:
         errors.sort(key=lambda item: item[0])
+        for index, exc in errors:
+            logger.error("Bounded worker item %d failed: %s", index, exc)
         raise errors[0][1]
 
     return [item for item in results if item is not _MISSING]
