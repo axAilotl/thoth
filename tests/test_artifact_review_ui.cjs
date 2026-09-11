@@ -106,6 +106,7 @@ test('bulk selection only approves eligible items, with one confirmation and exa
     assert.deepEqual(ui.state.posts, sources.slice(0, 2).map(source => ({
         artifact_id: source.artifact_id, revision: source.revision, action: 'approve_security', security_acknowledged: true,
     })));
+    assert.equal(ui.get('decision-dialog').open, false);
     assert.equal(ui.get('decision-dialog').modalCount, 1);
     assert.match(ui.get('decision-progress').textContent, /^2 of 2 decisions recorded/);
     assert.ok(ui.get('decision-results').children.every(result => result.textContent.endsWith('Approval recorded')));
@@ -201,6 +202,7 @@ for (const [action, label] of [['approve_security', 'Approve'], ['retry', 'Retry
         await ui.get('decision-form').fire('submit');
         assert.deepEqual(ui.state.posts, [{artifact_id: source.artifact_id, revision: source.revision,
             action, security_acknowledged: action === 'approve_security'}]);
+        assert.equal(ui.get('decision-dialog').open, false);
         assert.match(ui.get('decision-progress').textContent, /^1 of 1 decisions recorded/);
     });
 }

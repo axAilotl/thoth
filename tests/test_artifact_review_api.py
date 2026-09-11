@@ -286,6 +286,7 @@ def test_ocr_reason_explains_retry_and_retry_does_not_perform_ocr(ocr_inbox, mon
     before = path.read_bytes()
     item, = client.get('/api/review').json()['items']
     assert item['ocr_required'] is True
+    assert item['category'] == 'ocr_required'
     assert item['reason_summary'] == 'No PDF text; scanned pages need OCR.'
     assert 'does not run OCR' in item['action_note']
     assert 'rescan the changed PDF' in item['action_note']

@@ -77,7 +77,7 @@ def review_item(entry, service, layout):
     reason = _text(state.get("reason") or entry.last_error)
     ocr_required = (
         entry.artifact_type == "web_clipper" and payload.get("file_type") == "attachment"
-        and "Document has no extractable text; image-only PDFs require OCR review" in reason
+        and state.get("category") == "ocr_required"
     )
     action_note = "Classification routing requires the classification CLI." if classification else ""
     if ocr_required and not classification:

@@ -68,8 +68,12 @@ function openDetails(item) {
     $('details-dialog').showModal();
 }
 
+function canApproveSecurity(item) {
+    return Array.isArray(item.actions) && item.actions.includes('approve_security');
+}
+
 function updateSelection() {
-    const available = items.filter(item => item.actions.includes('approve_security'));
+    const available = items.filter(canApproveSecurity);
     $('select-all').disabled = loading || sending || !available.length;
     $('select-all').checked = available.length > 0 && selection.size === available.length;
     $('select-all').indeterminate = selection.size > 0 && selection.size < available.length;
@@ -86,7 +90,7 @@ function renderItem(item) {
     const row = element('article', undefined, 'review-item');
     const checkbox = element('input');
     checkbox.type = 'checkbox';
-    checkbox.disabled = !item.actions.includes('approve_security');
+    checkbox.disabled = !canApproveSecurity(item);
     checkbox.setAttribute('aria-label', `Select ${item.title} for approval`);
     if (checkbox.disabled) checkbox.title = 'No security approval is available for this item.';
     checkbox.addEventListener('change', () => {
@@ -169,6 +173,7 @@ function openDecision(decisions) {
     $('confirm').hidden = false;
     $('confirm').disabled = false;
     $('cancel').textContent = 'Cancel';
+    $('cancel').disabled = false;
     $('decision-dialog').showModal();
 }
 
@@ -211,10 +216,16 @@ async function submitDecision(event) {
         : `${confirmed} of ${decisions.length} decisions recorded. Original files are unchanged.`;
     $('decision-progress').textContent = summary;
     $('confirm').hidden = true;
+    sending = false;
+    if (!stopped) {
+        $('cancel').disabled = false;
+        $('decision-dialog').close();
+        await load(summary);
+        return;
+    }
     $('cancel').disabled = false;
     $('cancel').textContent = 'Close';
     $('cancel').focus();
-    sending = false;
     await load(summary);
 }
 
@@ -228,7 +239,7 @@ function bindControls() {
     $('select-all').addEventListener('change', () => {
         selection.clear();
         if ($('select-all').checked) {
-            for (const item of items) if (item.actions.includes('approve_security')) selection.set(item.artifact_id, item);
+            for (const item of items) if (canApproveSecurity(item)) selection.set(item.artifact_id, item);
         }
         updateSelection();
     });

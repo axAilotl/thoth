@@ -135,8 +135,6 @@ def test_settings_ui_exposes_archivist_web_clipper_and_translation_controls():
         "function renderLineagePages(lineage)",
         "function renderLLMExpensiveRuns(rows)",
         "function renderLLMTotals(rows, key, emptyText)",
-        "function renderArchivistTopicFilters(topic)",
-        "function openArchivistTopicDetails(topicId)",
         "async function runSettingsLint(kind)",
         "function formatGroupedRuntimeSummary(groups)",
         "function runPiSkill(options = {})",
@@ -158,13 +156,13 @@ def test_settings_ui_exposes_archivist_web_clipper_and_translation_controls():
         assert snippet in html
 
 
-def test_settings_ui_bounds_long_status_tables_and_keeps_topic_filters_in_a_modal():
+def test_settings_ui_bounds_long_status_tables_and_topics():
     root = Path(__file__).resolve().parents[1]
     html = (root / "static/settings.html").read_text(encoding="utf-8")
 
-    assert 'id="archivist-topic-dialog"' in html
-    assert 'View filters &amp; weights' in html
     assert '.security-table-wrap {' in html
     assert 'max-height: 22rem;' in html
     assert 'position: sticky;' in html
-    assert 'archivist-topic-dialog-body { max-height: 58vh; overflow: auto;' in html
+    assert '.archivist-topic-list {' in html
+    assert 'max-height: 60vh;' in html
+    assert 'overscroll-behavior: contain;' in html

@@ -137,6 +137,8 @@ def _review_category_for_error(exc: Exception) -> str:
     if isinstance(exc, ClassificationReviewRequired):
         return "classification"
     message = str(exc).lower()
+    if "image-only pdfs require ocr review" in message:
+        return "ocr_required"
     if "invalid json" in message or "decode" in message:
         return "malformed_payload"
     if "missing" in message:
