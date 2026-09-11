@@ -204,3 +204,180 @@ def test_mutation_database_failure_is_not_reported_as_missing(inbox, monkeypatch
     monkeypatch.setattr(collector.db, '_get_connection', broken)
     with pytest.raises(RuntimeError, match='database unavailable'):
         client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
+
+
+@pytest.mark.parametrize('action', ['approve_security', 'reject'])
+def test_console_defaults_preserve_audit_without_claiming_identity_or_inspection(inbox, action):
+    client, collector, path, artifact, _ = inbox
+    before = path.read_bytes()
+    body = decision(client)
+    body.pop('actor')
+    body.pop('reason')
+    body['action'] = action
+    response = client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 200, response.text
+    stored = json.loads(collector.db.get_ingestion_entry(artifact.id).review_json)['events'][-1]
+    assert stored['actor'] == 'review-console'
+    assert stored['reason'] == 'Decision submitted through the review console.'
+    assert stored['action'] == ('security_override_approved' if action == 'approve_security' else 'reject')
+    assert response.json()['item']['history'][-1]['actor'] == stored['actor']
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('field', ['actor', 'reason'])
+@pytest.mark.parametrize('value', ['', '  ', None])
+def test_explicit_empty_provenance_is_not_replaced_by_console_defaults(inbox, field, value):
+    client, collector, _, artifact, _ = inbox
+    body = decision(client)
+    body[field] = value
+    response = client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 422
+    assert collector.db.get_ingestion_entry(artifact.id).status == 'needs_review'
+
+
+@pytest.mark.parametrize('value', ['true', 'false', 'yes', 1, 0, None, [], {}])
+def test_acknowledgement_requires_a_json_boolean(inbox, value):
+    client, collector, _, artifact, _ = inbox
+    body = decision(client)
+    body['security_acknowledged'] = value
+    response = client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 422
+    assert collector.db.get_ingestion_entry(artifact.id).status == 'needs_review'
+
+
+def test_omitting_acknowledgement_does_not_approve(inbox):
+    client, collector, _, artifact, _ = inbox
+    body = decision(client)
+    for key in ('actor', 'reason', 'security_acknowledged'):
+        body.pop(key)
+    response = client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 409
+    assert collector.db.get_ingestion_entry(artifact.id).status == 'needs_review'
+
+
+@pytest.mark.parametrize('payload', ['{broken', '[]', 'null'])
+def test_malformed_source_cannot_be_retried_with_console_defaults(inbox, payload):
+    client, collector, _, artifact, _ = inbox
+    with collector.db._get_connection() as conn:
+        conn.execute('UPDATE ingestion_queue SET payload_json=? WHERE artifact_id=?', (payload, artifact.id))
+    item, = client.get('/api/review').json()['items']
+    response = client.post('/api/review/decision', json={
+        'artifact_id': item['artifact_id'], 'revision': item['revision'], 'action': 'retry',
+    }, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 409
+    assert collector.db.get_ingestion_entry(artifact.id).status == 'needs_review'
+
+
+@pytest.fixture
+def ocr_inbox(tmp_path, monkeypatch):
+    collector, path, artifact = source(tmp_path, pdf=True)
+    collector.config.set('sources.web_clipper.summarize', False)
+    monkeypatch.setattr('core.document_enrichment.extract_pdf_text', lambda path, max_pages: '')
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    result = asyncio.run(runtime.process_ingestion_entry(collector.db.get_ingestion_entry(artifact.id)))
+    assert result.status == 'needs_review'
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+    return TestClient(app), collector, path, artifact, runtime
+
+
+def test_ocr_reason_explains_retry_and_retry_does_not_perform_ocr(ocr_inbox, monkeypatch):
+    client, collector, path, artifact, runtime = ocr_inbox
+    before = path.read_bytes()
+    item, = client.get('/api/review').json()['items']
+    assert item['ocr_required'] is True
+    assert item['reason_summary'] == 'No PDF text; scanned pages need OCR.'
+    assert 'does not run OCR' in item['action_note']
+    assert 'rescan the changed PDF' in item['action_note']
+    assert item['actions'] == ['retry', 'reject']
+    assert item['security_required'] is False
+    extracted = []
+
+    def extract(path, max_pages):
+        extracted.append((path, max_pages))
+        return ''
+
+    monkeypatch.setattr('core.document_enrichment.extract_pdf_text', extract)
+    response = client.post('/api/review/decision', json={
+        'artifact_id': item['artifact_id'], 'revision': item['revision'], 'action': 'retry',
+    }, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 200, response.text
+    event = response.json()['item']['history'][-1]
+    assert event['actor'] == 'review-console' and event['action'] == 'retry'
+    assert event['reason'] == 'Decision submitted through the review console.'
+    result = asyncio.run(runtime.process_ingestion_entry(collector.db.get_ingestion_entry(artifact.id)))
+    assert result.status == 'needs_review'
+    assert len(extracted) == 1
+    assert path.read_bytes() == before
+    assert client.get('/api/review').json()['items'][0]['ocr_required'] is True
+
+
+def test_changed_ocr_source_requires_rescan_and_old_decision_stays_stale(ocr_inbox):
+    client, collector, path, artifact, _ = ocr_inbox
+    item, = client.get('/api/review').json()['items']
+    body = {'artifact_id': item['artifact_id'], 'revision': item['revision'], 'action': 'retry'}
+    path.write_bytes(b'%PDF-external-text-layer-added')
+    response = client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 409 and 'rescan required' in response.text
+    collector.collect()
+    recaptured = collector.db.get_ingestion_entry(artifact.id)
+    assert json.loads(recaptured.payload_json)['source_checksum'] != item['source_checksum']
+    assert review_revision(recaptured) != item['revision']
+    assert client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'}).status_code == 409
+
+
+@pytest.mark.parametrize('url,allowed', [
+    ('https://example.org/paper?q=research#abstract', True),
+    ('http://example.org/paper', True),
+    ('javascript:alert(1)', False), ('data:text/html,<script>alert(1)</script>', False),
+    ('//example.org/paper', False), ('https://user:secret@example.org', False), ('https://@example.org', False),
+    ('https://example.org\\@evil.test', False), ('https://example.org\n', False),
+    ('https://[invalid', False), ('https:///paper', False), (None, False), ({}, False),
+])
+def test_source_links_only_allow_explicit_web_urls(inbox, url, allowed):
+    client, collector, _, artifact, _ = inbox
+    payload = json.loads(collector.db.get_ingestion_entry(artifact.id).payload_json)
+    payload['source_url'] = url
+    with collector.db._get_connection() as conn:
+        conn.execute('UPDATE ingestion_queue SET payload_json=? WHERE artifact_id=?', (json.dumps(payload), artifact.id))
+    item, = client.get('/api/review').json()['items']
+    assert item['source_url'] == (url if allowed else None)
+    assert item['reason_summary'].startswith('Security flag: ')
+    assert 'system prompt attack' in item['reason_summary']
+    assert item['ocr_required'] is False
+
+
+def test_console_defaults_reach_the_existing_audit_mirror(inbox, monkeypatch):
+    client, _, _, _, _ = inbox
+    mirrored = []
+
+    def mirror(self, entry, *, action):
+        mirrored.append((action, json.loads(entry.review_json)['events'][-1]))
+
+    monkeypatch.setattr('core.artifact_review_queue.ArtifactReviewQueueService._mirror_review_decision', mirror)
+    body = decision(client)
+    body.pop('actor')
+    body.pop('reason')
+    response = client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 200, response.text
+    action, event = mirrored[0]
+    assert action == event['action'] == 'security_override_approved'
+    assert event['actor'] == 'review-console'
+    assert event['reason'] == 'Decision submitted through the review console.'
+
+
+def test_error_after_recording_is_not_safe_to_retry(inbox, monkeypatch):
+    client, collector, _, artifact, _ = inbox
+
+    def mirror_failure(self, entry, *, action):
+        raise RuntimeError('Mirror configuration unavailable')
+
+    monkeypatch.setattr('core.artifact_review_queue.ArtifactReviewQueueService._mirror_review_decision', mirror_failure)
+    body = decision(client)
+    response = client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
+    assert response.status_code == 409
+    # The UI treats all decision errors as unconfirmed, stops the batch and refreshes.
+    entry = collector.db.get_ingestion_entry(artifact.id)
+    assert entry.status == 'pending'
+    assert json.loads(entry.review_json)['events'][-1]['action'] == 'security_override_approved'
+    assert client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'}).status_code == 409

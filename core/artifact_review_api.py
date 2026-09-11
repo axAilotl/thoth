@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from .artifact_review_policy import review_revision, INGESTION_ACTIVE_REVIEW_STATUSES
 from .artifact_review_queue import ArtifactReviewQueueService, ArtifactReviewQueueError
@@ -22,9 +22,10 @@ class ReviewDecision(BaseModel):
     artifact_id: str = Field(min_length=1, max_length=4096)
     revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     action: Literal["retry", "approve_security", "reject"]
-    actor: str = Field(min_length=1, max_length=120)
-    reason: str = Field(min_length=1, max_length=2000)
-    security_acknowledged: bool = False
+    # Identify the console, not an authenticated person or a claimed inspection.
+    actor: str = Field(default="review-console", min_length=1, max_length=120)
+    reason: str = Field(default="Decision submitted through the review console.", min_length=1, max_length=2000)
+    security_acknowledged: StrictBool = False
 
     @field_validator("actor", "reason")
     @classmethod
@@ -46,6 +47,21 @@ def _text(value, limit=2000):
     return redact_sensitive_text(str(value or "")[:limit]).redacted_text
 
 
+def _source_url(value):
+    """Only explicit web links; never executable schemes or embedded credentials."""
+    if not isinstance(value, str) or len(value) > 4096:
+        return None
+    if any(char.isspace() or ord(char) < 32 or char == "\\" for char in value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme in ("http", "https") and parsed.hostname and parsed.username is None and parsed.password is None:
+            return value
+    except ValueError:
+        return None
+    return None
+
+
 def review_item(entry, service, layout):
     """Allowlist display fields; a source document is never HTML or an instruction."""
     payload = _object(entry.payload_json)
@@ -58,6 +74,27 @@ def review_item(entry, service, layout):
     active = entry.status in INGESTION_ACTIVE_REVIEW_STATUSES
     findings = metadata.get("thoth_security_findings") or []
     source_relative = str(payload.get("source_relative_path") or "")
+    reason = _text(state.get("reason") or entry.last_error)
+    ocr_required = (
+        entry.artifact_type == "web_clipper" and payload.get("file_type") == "attachment"
+        and "Document has no extractable text; image-only PDFs require OCR review" in reason
+    )
+    action_note = "Classification routing requires the classification CLI." if classification else ""
+    if ocr_required and not classification:
+        action_note = (
+            "Retry repeats PDF text extraction within the configured page limit; it does not run OCR. "
+            "For scanned pages, add a text layer with an external OCR tool, then rescan the changed PDF "
+            "to capture its new version before processing."
+        )
+    reason_summary = " ".join(reason.split())
+    if ocr_required:
+        reason_summary = "No PDF text; scanned pages need OCR."
+    elif security:
+        patterns = [_text(f.get("pattern_id"), 120).replace("_", " ")
+                    for f in findings[:2] if isinstance(f, dict) and f.get("pattern_id")]
+        reason_summary = "Security flag: " + (", ".join(patterns) or "potentially unsafe source instructions")
+    if len(reason_summary) > 160:
+        reason_summary = reason_summary[:157] + "…"
     # Local Obsidian uses the vault-relative path, never the server's home path.
     obsidian_url = None
     if source_relative and not Path(source_relative).is_absolute() and ".." not in Path(source_relative).parts:
@@ -80,9 +117,10 @@ def review_item(entry, service, layout):
         "source": entry.source, "status": entry.status,
         "source_path": _text(payload.get("source_path")),
         "source_relative_path": source_relative, "obsidian_url": obsidian_url,
+        "source_url": _source_url(payload.get("source_url")),
         "source_checksum": payload.get("source_checksum"),
         "attempts": entry.attempts, "category": _text(state.get("category")),
-        "reason": _text(state.get("reason") or entry.last_error),
+        "reason": reason, "reason_summary": reason_summary, "ocr_required": ocr_required,
         "last_error": _text(entry.last_error), "security_required": security,
         "findings": [{"pattern_id": _text(f.get("pattern_id"), 120),
                       "severity": _text(f.get("severity"), 30)}
@@ -91,7 +129,7 @@ def review_item(entry, service, layout):
                     for event in review.get("events", [])[-50:] if isinstance(event, dict)],
         "actions": ([] if not active or classification else
                     ["approve_security" if security else "retry", "reject"]),
-        "action_note": "Classification routing requires the classification CLI." if classification else "",
+        "action_note": action_note,
     }
 
 
