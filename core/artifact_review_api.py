@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 from .artifact_review_policy import review_revision, INGESTION_ACTIVE_REVIEW_STATUSES
 from .artifact_review_queue import ArtifactReviewQueueService, ArtifactReviewQueueError
 from .classification_review import entry_has_classification_review
+from .artifacts.web_clipper import WebClipperArtifact
+from .document_enrichment import diagnose_document_source
 from .prompt_security import prompt_security_requires_review
 from .sensitive_redaction import redact_sensitive_text
 
@@ -69,15 +71,27 @@ def review_item(entry, service, layout):
     metadata = payload.get("normalized_metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
     state = review.get("state") or {}
+    source_diagnostic = dict(state.get("metadata") or {})
     security = prompt_security_requires_review(metadata)
     classification = entry_has_classification_review(entry)
     active = entry.status in INGESTION_ACTIVE_REVIEW_STATUSES
     findings = metadata.get("thoth_security_findings") or []
     source_relative = str(payload.get("source_relative_path") or "")
-    reason = _text(state.get("reason") or entry.last_error)
+    category = state.get("category")
+    exhausted = active and category == "processing_failed"
+    reason = _text((entry.last_error or state.get("error")) if exhausted else state.get("reason"))
+    reason = reason or _text(entry.last_error)
+    if exhausted and entry.artifact_type == "web_clipper":
+        source_diagnostic = diagnose_document_source(
+            WebClipperArtifact.from_queue_payload(payload), service.config, layout, probe_pdf=True,
+        )
+        category = source_diagnostic.get("category", category)
+        reason = _text(source_diagnostic.get("reason")) or reason
+        if source_diagnostic.get("diagnostic_error"):
+            reason = _text(f"{reason}\nSource check: {source_diagnostic['diagnostic_error']}")
     ocr_required = (
         entry.artifact_type == "web_clipper" and payload.get("file_type") == "attachment"
-        and state.get("category") == "ocr_required"
+        and category == "ocr_required"
     )
     action_note = "Classification routing requires the classification CLI." if classification else ""
     if ocr_required and not classification:
@@ -86,7 +100,7 @@ def review_item(entry, service, layout):
             "For scanned pages, add a text layer with an external OCR tool, then rescan the changed PDF "
             "to capture its new version before processing."
         )
-    reason_summary = " ".join(reason.split())
+    reason_summary = _text(source_diagnostic.get("reason_summary")) or " ".join(reason.split())
     if ocr_required:
         reason_summary = "No PDF text; scanned pages need OCR."
     elif security:
@@ -119,8 +133,9 @@ def review_item(entry, service, layout):
         "source_relative_path": source_relative, "obsidian_url": obsidian_url,
         "source_url": _source_url(payload.get("source_url")),
         "source_checksum": payload.get("source_checksum"),
-        "attempts": entry.attempts, "category": _text(state.get("category")),
+        "attempts": entry.attempts, "category": _text(category),
         "reason": reason, "reason_summary": reason_summary, "ocr_required": ocr_required,
+        "source_status": _text(source_diagnostic.get("source_status")) or "unchecked",
         "last_error": _text(entry.last_error), "security_required": security,
         "findings": [{"pattern_id": _text(f.get("pattern_id"), 120),
                       "severity": _text(f.get("severity"), 30)}
@@ -184,11 +199,17 @@ def create_review_router(runtime_provider):
             raise HTTPException(404, "Review item not found")
         try:
             if body.action != "reject" and entry.artifact_type == "web_clipper":
-                from .artifacts.web_clipper import WebClipperArtifact
                 from .document_enrichment import validate_document_source
                 runtime = runtime_provider()
-                validate_document_source(WebClipperArtifact.from_queue_payload(_object(entry.payload_json)),
-                                         runtime.config, runtime.layout)
+                artifact = WebClipperArtifact.from_queue_payload(_object(entry.payload_json))
+                validate_document_source(artifact, runtime.config, runtime.layout)
+                state = _object(entry.review_json).get("state") or {}
+                if state.get("category") == "source_malformed_pdf":
+                    raise ValueError(state.get("reason") or "Malformed PDF; restore the PDF and rescan.")
+                if state.get("category") == "processing_failed":
+                    diagnostic = diagnose_document_source(artifact, runtime.config, runtime.layout, probe_pdf=True)
+                    if diagnostic.get("category", "").startswith("source_"):
+                        raise ValueError(diagnostic["reason"])
             updated = current.decide(
                 body.artifact_id, action=body.action, actor=body.actor,
                 reason=body.reason, expected_revision=body.revision,
