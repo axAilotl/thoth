@@ -71,19 +71,29 @@ def review_item(entry, service, layout):
     metadata = payload.get("normalized_metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
     state = review.get("state") or {}
-    source_diagnostic = dict(state.get("metadata") or {})
     security = prompt_security_requires_review(metadata)
     classification = entry_has_classification_review(entry)
     active = entry.status in INGESTION_ACTIVE_REVIEW_STATUSES
     findings = metadata.get("thoth_security_findings") or []
     source_relative = str(payload.get("source_relative_path") or "")
     category = state.get("category")
+    raw_source_diagnostic = state.get("metadata")
+    metadata_blocked = raw_source_diagnostic is not None and not isinstance(raw_source_diagnostic, dict)
+    source_diagnostic = dict(raw_source_diagnostic) if isinstance(raw_source_diagnostic, dict) else {}
+    if metadata_blocked:
+        category = "malformed_review_metadata"
+        source_diagnostic = {
+            "source_status": "unverified",
+            "diagnostic_error": "Review metadata must be an object.",
+        }
     source_review = active and entry.artifact_type == "web_clipper" and (
         category == "processing_failed" or str(category or "").startswith("source_")
     )
     exhausted = active and category == "processing_failed"
     reason = _text((entry.last_error or state.get("error")) if exhausted else state.get("reason"))
     reason = reason or _text(entry.last_error)
+    if metadata_blocked:
+        reason = _text(source_diagnostic["diagnostic_error"])
     if source_review:
         previously_source_blocked = str(category or "").startswith("source_")
         try:
@@ -132,6 +142,11 @@ def review_item(entry, service, layout):
     if payload_blocked and not classification:
         action_note = (
             "The queued review metadata is malformed. Repair the queue record, then rescan the source. "
+            "Retry and security approval stay unavailable until the record is valid."
+        )
+    if metadata_blocked and not classification:
+        action_note = (
+            "The stored review metadata is malformed. Repair the queue record, then rescan the source. "
             "Retry and security approval stay unavailable until the record is valid."
         )
     if ocr_required and not classification:
@@ -183,7 +198,7 @@ def review_item(entry, service, layout):
         "history": [{key: _text(event.get(key)) for key in ("at", "action", "actor", "reason", "from", "to")}
                     for event in review.get("events", [])[-50:] if isinstance(event, dict)],
         "actions": ([] if not active or classification else
-                    (["reject"] if source_blocked or payload_blocked else
+                    (["reject"] if source_blocked or payload_blocked or metadata_blocked else
                      ["approve_security" if security else "retry", "reject"])),
         "action_note": action_note,
     }

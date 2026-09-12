@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from core.document_enrichment import enrich_document
-from core.pdf_text import PDFTextExtractionError, SourceIntegrityError, extract_pdf_text, extract_pdf_title
+from core.pdf_text import (
+    PDFTextExtractionError,
+    SourceIntegrityError,
+    extract_pdf_text,
+    extract_pdf_title,
+    pdf_parser_source_error,
+)
 from tests.test_web_clipper_collector import make_collector
 
 
@@ -113,6 +119,16 @@ def test_pdf_header_allows_transport_whitespace_before_signature(tmp_path, monke
 
     assert extract_pdf_text(path) == "text"
     poppler.assert_called_once()
+
+
+def test_recorded_poppler_prefix_preserves_malformed_pdf_diagnosis():
+    error = pdf_parser_source_error(
+        "Malformed PDF; restore or download the PDF and rescan. "
+        "Poppler: Syntax Error: Couldn't read xref table"
+    )
+
+    assert error is not None
+    assert error.source_status == "malformed_pdf"
 
 
 @pytest.mark.parametrize("content,status", [(None, "missing"), (b"", "empty"),

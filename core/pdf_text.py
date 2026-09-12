@@ -96,7 +96,7 @@ def pdf_parser_source_error(detail: str, *, returncode: int | None = None) -> PD
     """
     if returncode is not None and returncode not in (1, 99):
         return None
-    if not re.search(r"(?im)^Syntax Error:|may not be a PDF file", detail):
+    if not re.search(r"(?im)(?:^|\bPoppler:\s*)Syntax Error:|may not be a PDF file", detail):
         return None
     if re.search(
         r"(?i)permission denied|couldn't open|I/O error|missing required PDF utility|"

@@ -214,6 +214,28 @@ def test_exhausted_malformed_payload_does_not_break_review_listing(inbox):
     assert 'queued review metadata is malformed' in item['action_note']
 
 
+def test_malformed_review_metadata_does_not_break_review_listing(inbox):
+    client, collector, _, artifact, _ = inbox
+    entry = collector.db.get_ingestion_entry(artifact.id)
+    review = json.loads(entry.review_json)
+    review['state']['metadata'] = 'not an object'
+    with collector.db._get_connection() as conn:
+        conn.execute(
+            'UPDATE ingestion_queue SET review_json=? WHERE artifact_id=?',
+            (json.dumps(review), artifact.id),
+        )
+
+    response = client.get('/api/review')
+
+    assert response.status_code == 200
+    item, = response.json()['items']
+    assert item['category'] == 'malformed_review_metadata'
+    assert item['source_status'] == 'unverified'
+    assert item['actions'] == ['reject']
+    assert 'Review metadata must be an object' in item['reason']
+    assert 'stored review metadata is malformed' in item['action_note']
+
+
 def test_listing_database_failure_is_not_reported_as_empty(inbox, monkeypatch):
     client, collector, *_ = inbox
     from contextlib import contextmanager
