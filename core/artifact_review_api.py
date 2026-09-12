@@ -90,11 +90,17 @@ def review_item(entry, service, layout):
         reason = _text(source_diagnostic.get("reason")) or reason
         if source_diagnostic.get("diagnostic_error"):
             reason = _text(f"{reason}\nSource check: {source_diagnostic['diagnostic_error']}")
+    source_blocked = str(category or "").startswith("source_")
     ocr_required = (
         entry.artifact_type == "web_clipper" and payload.get("file_type") == "attachment"
         and category == "ocr_required"
     )
     action_note = "Classification routing requires the classification CLI." if classification else ""
+    if source_blocked and not classification:
+        action_note = (
+            "Repair or restore the original source, then rescan it to create a new revision. "
+            "Retry and security approval stay unavailable until the source is verified."
+        )
     if ocr_required and not classification:
         action_note = (
             "Retry repeats PDF text extraction within the configured page limit; it does not run OCR. "
@@ -144,7 +150,8 @@ def review_item(entry, service, layout):
         "history": [{key: _text(event.get(key)) for key in ("at", "action", "actor", "reason", "from", "to")}
                     for event in review.get("events", [])[-50:] if isinstance(event, dict)],
         "actions": ([] if not active or classification else
-                    ["approve_security" if security else "retry", "reject"]),
+                    (["reject"] if source_blocked else
+                     ["approve_security" if security else "retry", "reject"])),
         "action_note": action_note,
     }
 
@@ -214,6 +221,11 @@ def create_review_router(runtime_provider):
                     )
                     if diagnostic.get("category", "").startswith("source_"):
                         raise ValueError(diagnostic["reason"])
+                    if diagnostic.get("diagnostic_error"):
+                        raise ValueError(
+                            "Source could not be verified before retry: "
+                            f"{diagnostic['diagnostic_error']}"
+                        )
             updated = current.decide(
                 body.artifact_id, action=body.action, actor=body.actor,
                 reason=body.reason, expected_revision=body.revision,

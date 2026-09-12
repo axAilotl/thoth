@@ -1,0 +1,176 @@
+/* Settings disclosures */
+.settings-section {
+    padding: 16px;
+    margin-bottom: 12px;
+}
+.settings-section > summary,
+.settings-group > summary {
+    cursor: pointer;
+    color: var(--accent-hover);
+}
+.settings-section > summary {
+    display: flex;
+    justify-content: flex-start;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    list-style: none;
+}
+.settings-section > summary::before { content: '▸'; }
+.settings-section[open] > summary::before { content: '▾'; }
+.settings-section > summary::-webkit-details-marker { display: none; }
+.settings-section-body {
+    max-height: min(32rem, 60vh);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    margin-top: 12px;
+    padding: 4px;
+}
+.settings-group {
+    border-top: 1px solid var(--border);
+    padding: 10px 0;
+}
+.settings-group > summary { font-weight: 600; }
+.settings-section-body .form-group { margin-bottom: 12px; }
+.settings-section-body .toggle-container { padding: 8px 0; }
+.settings-subsection { margin-top: 12px; }
+.settings-account-status {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+    overflow-wrap: anywhere;
+}
+summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+/* Archivist topic cards */
+.archivist-topic-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+    gap: 14px;
+    max-height: 60vh;
+    overflow-y: auto;
+    align-content: start;
+    padding-right: 4px;
+    overscroll-behavior: contain;
+}
+.archivist-topic-card {
+    background: rgba(15, 10, 7, 0.42);
+    border: 1px solid rgba(202, 162, 94, 0.12);
+    padding: 12px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-wrap: anywhere;
+}
+.archivist-topic-main { position: relative; flex: 1; }
+.archivist-topic-card .btn-group { margin-top: 8px; gap: 6px; }
+.archivist-topic-details > summary {
+    cursor: pointer;
+    color: var(--accent-hover);
+    height: 2.25rem;
+    padding: 6px 0;
+    font-size: 0.84rem;
+    line-height: 1.5rem;
+    position: relative;
+    z-index: 2;
+    width: fit-content;
+    padding-right: 8px;
+    background: var(--bg-card);
+}
+.archivist-topic-details > summary::before { content: '▸'; margin-right: 6px; }
+.archivist-topic-details[open] > summary::before { content: '▾'; }
+.archivist-topic-detail-panel {
+    /* Overlay this card's summary; opening never changes the grid height. */
+    position: absolute;
+    inset: 0 0 2.25rem;
+    max-height: 32rem;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    z-index: 1;
+    padding: 12px;
+    padding-top: 44px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-card);
+}
+.archivist-topic-card h3 {
+    font-family: "Palatino Linotype", "Book Antiqua", "URW Palladio L", serif;
+    font-size: 1rem;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+}
+.archivist-topic-card .topic-id {
+    color: var(--accent-hover);
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+.archivist-topic-card p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+}
+.archivist-topic-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 10px;
+    margin-bottom: 8px;
+    font-size: 0.84rem;
+}
+.archivist-topic-meta strong {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.archivist-pill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+.archivist-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border: 1px solid rgba(202, 162, 94, 0.18);
+    color: var(--text-primary);
+    background: rgba(202, 162, 94, 0.08);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+}
+.archivist-section-label {
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    margin-bottom: 6px;
+}
+.archivist-state-box {
+    border: 1px solid rgba(202, 162, 94, 0.1);
+    background: rgba(15, 10, 7, 0.3);
+    padding: 8px;
+    margin-bottom: 8px;
+    font-size: 0.84rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 4px 8px;
+}
+.archivist-state-box.error-state {
+    border-color: rgba(210, 119, 93, 0.35);
+    color: var(--error);
+}
+.archivist-empty {
+    padding: 20px;
+    border: 1px dashed var(--border);
+    color: var(--text-secondary);
+    text-align: center;
+}

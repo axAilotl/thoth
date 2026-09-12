@@ -419,6 +419,8 @@ def test_source_failure_reaches_review_from_real_ingestion(
     item, = client.get('/api/review').json()['items']
     assert item['category'] == f'source_{source_status}'
     assert item['source_status'] == source_status
+    assert item['actions'] == ['reject']
+    assert 'stay unavailable' in item['action_note']
     assert reason in item['reason']
     assert 'rescan' in item['reason_summary']
     assert item['ocr_required'] is False
@@ -470,6 +472,8 @@ def test_exhausted_source_diagnostics_are_read_only(
     assert item['status'] == 'failed'
     assert item['source_status'] == source_status
     assert item['category'] == f'source_{source_status}'
+    assert item['actions'] == ['reject']
+    assert 'stay unavailable' in item['action_note']
     assert reason in item['reason']
     assert 'rescan' in item['reason_summary']
     assert item['last_error'] == recorded_error
@@ -538,6 +542,35 @@ def test_malformed_pdf_retry_requires_repaired_source_and_rescan(tmp_path, monke
     assert review_revision(collector.db.get_ingestion_entry(artifact.id)) == item['revision']
     assert path.read_bytes() == b'%PDF-1.7\nBroken trailer\n'
     poppler.assert_not_called()
+
+
+def test_retry_fails_closed_when_source_recheck_cannot_verify(tmp_path, monkeypatch):
+    collector, _, artifact = captured_pdf(tmp_path, b'%PDF-1.7\nValid enough for storage\n')
+    claimed = collector.db.claim_ingestion_entry(artifact.id)
+    exhausted = collector.db.mark_ingestion_failed(
+        artifact.id, 'Original processing error', max_attempts=claimed.attempts,
+    )
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+    client = TestClient(app)
+    item, = client.get('/api/review').json()['items']
+
+    monkeypatch.setattr(
+        'core.artifact_review_api.diagnose_document_source',
+        lambda *args, **kwargs: {
+            'source_status': 'unverified',
+            'diagnostic_error': 'source changed while checking',
+        },
+    )
+    response = client.post('/api/review/decision', json={
+        'artifact_id': item['artifact_id'], 'revision': item['revision'], 'action': 'retry',
+    }, headers={'X-Thoth-Review': '1'})
+
+    assert exhausted.status == 'failed'
+    assert response.status_code == 409
+    assert 'could not be verified' in response.text
+    assert collector.db.get_ingestion_entry(artifact.id).status == 'failed'
 
 
 @pytest.mark.parametrize('error,source_status', [

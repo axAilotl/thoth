@@ -83,6 +83,8 @@ def test_pdf_infrastructure_failures_keep_their_error(tmp_path, monkeypatch, fai
 @pytest.mark.parametrize("content,status", [
     (None, "missing"), (b"", "empty"),
     (b"\xef\xbb\xbf \n<!DOCTYPE html><html>Denied</html>", "html"),
+    (b"<!-- proxy wrapper -->\n<!DOCTYPE html><html>Denied</html>", "html"),
+    (b"<head><title>Download denied</title></head>", "html"),
     (b"<html lang='en'>Download page</html>", "html"),
     (b"Not a PDF document", "non_pdf"),
 ])
@@ -101,6 +103,16 @@ def test_invalid_pdf_bytes_never_reach_poppler(tmp_path, monkeypatch, extract, c
     poppler.assert_not_called()
     if content is not None:
         assert path.read_bytes() == content
+
+
+def test_pdf_header_allows_transport_whitespace_before_signature(tmp_path, monkeypatch):
+    path = tmp_path / "source.pdf"
+    path.write_bytes(b"\xef\xbb\xbf  \n%PDF-1.7\n")
+    poppler = Mock(return_value=CompletedProcess([], 0, "text", ""))
+    monkeypatch.setattr("core.pdf_text.subprocess.run", poppler)
+
+    assert extract_pdf_text(path) == "text"
+    poppler.assert_called_once()
 
 
 @pytest.mark.parametrize("content,status", [(None, "missing"), (b"", "empty"),

@@ -6,6 +6,7 @@
     <title>Thoth Settings</title>
     <link rel="icon" type="image/png" href="/static/thoth.png">
     <link rel="stylesheet" href="/static/review.css?v=3">
+    <link rel="stylesheet" href="/static/settings-ui.css?v=1">
     <script type="module" src="/static/review.js?v=3"></script>
     <style>
         :root {
@@ -434,193 +435,6 @@
         .task-row select { width: 160px; }
         .task-row input[type="number"] { width: 120px; }
 
-        /* Local disclosures keep configuration available without long card stacks. */
-        .settings-section {
-            padding: 16px;
-            margin-bottom: 12px;
-        }
-        .settings-section > summary,
-        .settings-group > summary {
-            cursor: pointer;
-            color: var(--accent-hover);
-        }
-        .settings-section > summary {
-            display: flex;
-            justify-content: flex-start;
-            gap: 12px;
-            margin: 0;
-            padding: 0;
-            border: 0;
-            list-style: none;
-        }
-        .settings-section > summary::before { content: '▸'; }
-        .settings-section[open] > summary::before { content: '▾'; }
-        .settings-section > summary::-webkit-details-marker { display: none; }
-        .settings-section-body {
-            max-height: min(32rem, 60vh);
-            overflow: auto;
-            overscroll-behavior: contain;
-            scrollbar-gutter: stable;
-            margin-top: 12px;
-            padding: 4px;
-        }
-        .settings-group {
-            border-top: 1px solid var(--border);
-            padding: 10px 0;
-        }
-        .settings-group > summary { font-weight: 600; }
-        .settings-section-body .form-group { margin-bottom: 12px; }
-        .settings-section-body .toggle-container { padding: 8px 0; }
-        .settings-subsection { margin-top: 12px; }
-        .settings-account-status {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 8px;
-            margin-top: 12px;
-            overflow-wrap: anywhere;
-        }
-        summary:focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 3px;
-        }
-
-        /* Archivist */
-        .archivist-toolbar {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            align-items: end;
-            margin-bottom: 18px;
-        }
-        .archivist-toolbar .form-group {
-            flex: 1 1 240px;
-            margin-bottom: 0;
-        }
-        .archivist-toolbar .btn-group {
-            margin-top: 0;
-        }
-        .archivist-editor {
-            min-height: 320px;
-            font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
-            resize: vertical;
-        }
-        .archivist-topic-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-            gap: 14px;
-            max-height: 60vh;
-            overflow-y: auto;
-            align-content: start;
-            padding-right: 4px;
-            overscroll-behavior: contain;
-        }
-        .archivist-topic-card {
-            background: rgba(15, 10, 7, 0.42);
-            border: 1px solid rgba(202, 162, 94, 0.12);
-            padding: 12px;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-            overflow-wrap: anywhere;
-        }
-        .archivist-topic-main { position: relative; flex: 1; }
-        .archivist-topic-card .btn-group { margin-top: 8px; gap: 6px; }
-        .archivist-topic-details > summary {
-            cursor: pointer;
-            color: var(--accent-hover);
-            height: 2.25rem;
-            padding: 6px 0;
-            font-size: 0.84rem;
-            line-height: 1.5rem;
-        }
-        .archivist-topic-detail-panel {
-            /* Overlay this card's summary; opening never changes the grid height. */
-            position: absolute;
-            inset: 0 0 2.25rem;
-            max-height: 32rem;
-            overflow: auto;
-            overscroll-behavior: contain;
-            scrollbar-gutter: stable;
-            z-index: 1;
-            padding: 12px;
-            border: 1px solid var(--border-strong);
-            background: var(--bg-card);
-        }
-        .archivist-topic-card h3 {
-            font-family: "Palatino Linotype", "Book Antiqua", "URW Palladio L", serif;
-            font-size: 1rem;
-            letter-spacing: 0.05em;
-            margin-bottom: 6px;
-        }
-        .archivist-topic-card .topic-id {
-            color: var(--accent-hover);
-            font-size: 0.82rem;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            margin-bottom: 6px;
-        }
-        .archivist-topic-card p {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            margin-bottom: 8px;
-        }
-        .archivist-topic-meta {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 4px 10px;
-            margin-bottom: 8px;
-            font-size: 0.84rem;
-        }
-        .archivist-topic-meta strong {
-            display: block;
-            color: var(--text-secondary);
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }
-        .archivist-pill-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-            margin-bottom: 8px;
-        }
-        .archivist-pill {
-            display: inline-flex;
-            align-items: center;
-            padding: 2px 6px;
-            border: 1px solid rgba(202, 162, 94, 0.18);
-            color: var(--text-primary);
-            background: rgba(202, 162, 94, 0.08);
-            font-size: 0.78rem;
-            letter-spacing: 0.04em;
-        }
-        .archivist-section-label {
-            color: var(--text-secondary);
-            font-size: 0.76rem;
-            text-transform: uppercase;
-            letter-spacing: 0.09em;
-            margin-bottom: 6px;
-        }
-        .archivist-state-box {
-            border: 1px solid rgba(202, 162, 94, 0.1);
-            background: rgba(15, 10, 7, 0.3);
-            padding: 8px;
-            margin-bottom: 8px;
-            font-size: 0.84rem;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 4px 8px;
-        }
-        .archivist-state-box.error-state {
-            border-color: rgba(210, 119, 93, 0.35);
-            color: var(--error);
-        }
-        .archivist-empty {
-            padding: 20px;
-            border: 1px dashed var(--border);
-            color: var(--text-secondary);
-            text-align: center;
-        }
         /* Alerts */
         .alert {
             padding: 12px 16px;
@@ -1887,6 +1701,7 @@
         Thoth Settings &middot; <a href="https://github.com/anthropics/xmarks">GitHub</a>
     </footer>
 
+    <script src="/static/archivist-topics.js?v=1"></script>
     <script>
         const API_BASE = '';
         const TASK_ROUTE_KEYS = ['tags', 'summary', 'alt_text', 'transcript', 'translation', 'embedding', 'archivist'];
@@ -3075,15 +2890,6 @@
             return Array.isArray(values) && values.length > 0 ? values.join(', ') : 'None';
         }
 
-        function renderArchivistPills(values) {
-            if (!Array.isArray(values) || values.length === 0) {
-                return '<span class="archivist-pill">None</span>';
-            }
-            return values
-                .map(value => `<span class="archivist-pill">${escapeHtml(value)}</span>`)
-                .join('');
-        }
-
         function getTaskRouteSummary(task) {
             const taskConfig = tasksConfig[task] || {};
             const enabled = taskConfig.enabled !== false;
@@ -3101,104 +2907,6 @@
 
         function updateArchivistRouteSummary() {
             setFieldValue('archivist-route-summary', getTaskRouteSummary('archivist'));
-        }
-
-        function renderArchivistTopics(topics) {
-            const container = document.getElementById('archivist-topics-list');
-            if (!container) return;
-
-            if (!Array.isArray(topics) || topics.length === 0) {
-                container.innerHTML = '<div class="archivist-empty">No archivist topics are defined yet.</div>';
-                return;
-            }
-
-            container.innerHTML = topics.map(topic => {
-                const state = topic.state || {};
-                const stateError = topic.state_error
-                    ? `<div class="archivist-state-box error-state">${escapeHtml(topic.state_error)}</div>`
-                    : `
-                        <div class="archivist-state-box">
-                            <div><strong>Last Success</strong> ${escapeHtml(formatOptionalDate(state.last_success_at))}</div>
-                            <div><strong>Last Run</strong> ${escapeHtml(formatOptionalDate(state.last_run_at))}</div>
-                            <div><strong>Next Due</strong> ${escapeHtml(formatOptionalDate(state.next_due_at))}</div>
-                            <div><strong>Last Route</strong> ${escapeHtml(
-                                state.last_model_provider
-                                    ? `${state.last_model_provider} / ${state.last_model || 'default'}`
-                                    : 'Never run'
-                            )}</div>
-                            <div><strong>Last Candidate Count</strong> ${escapeHtml(String(state.last_candidate_count || 0))}</div>
-                            <div><strong>Force Queued</strong> ${escapeHtml(formatOptionalDate(state.force_requested_at))}</div>
-                        </div>
-                    `;
-
-                const forceButtons = topic.allow_manual_force
-                    ? `
-                        <div class="btn-group">
-                            <button class="btn btn-secondary btn-small" onclick="runArchivistTopic('${escapeHtml(topic.id)}')">Run Now</button>
-                            <button class="btn btn-secondary btn-small" onclick="queueArchivistForce('${escapeHtml(topic.id)}')">Force Run</button>
-                            <button class="btn btn-secondary btn-small" onclick="clearArchivistForce('${escapeHtml(topic.id)}')">Clear Force</button>
-                        </div>
-                    `
-                    : `
-                        <div class="btn-group">
-                            <button class="btn btn-secondary btn-small" onclick="runArchivistTopic('${escapeHtml(topic.id)}')">Run Now</button>
-                        </div>
-                    `;
-
-                return `
-                    <article class="archivist-topic-card">
-                        <div class="archivist-topic-main">
-                            <h3>${escapeHtml(topic.title)}</h3>
-                            <div class="topic-id">${escapeHtml(topic.id)}</div>
-                            ${topic.description ? `<p>${escapeHtml(topic.description)}</p>` : ''}
-                            <div class="archivist-topic-meta">
-                                <div><strong>Output</strong>${escapeHtml(topic.output_path)}</div>
-                                <div><strong>Cadence</strong>${escapeHtml(String(topic.cadence_hours))}h</div>
-                                <div><strong>Max Sources</strong>${escapeHtml(topic.max_sources == null ? 'Unlimited' : String(topic.max_sources))}</div>
-                                <div><strong>Manual Force</strong>${topic.allow_manual_force ? 'Allowed' : 'Disabled'}</div>
-                                <div><strong>Retrieval</strong>${escapeHtml(topic.retrieval?.mode || 'literal')}</div>
-                            </div>
-                            ${stateError}
-                            <details class="archivist-topic-details">
-                                <summary>Filters &amp; weights</summary>
-                                <div class="archivist-topic-detail-panel" tabindex="0" aria-label="Filters and weights for ${escapeHtml(topic.title)}">
-                                    <div class="archivist-section-label">Include Roots</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills(topic.include_roots)}</div>
-                                    <div class="archivist-section-label">Exclude Roots</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_roots)}</div>
-                                    <div class="archivist-section-label">Source Types</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills(topic.source_types)}</div>
-                                    <div class="archivist-section-label">Include Tags</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills(topic.include_tags)}</div>
-                                    <div class="archivist-section-label">Exclude Tags</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_tags)}</div>
-                                    <div class="archivist-section-label">Include Terms</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills(topic.include_terms)}</div>
-                                    <div class="archivist-section-label">Exclude Terms</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_terms)}</div>
-                                    <div class="archivist-section-label">Retrieval Policy</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills([
-                                        `mode:${topic.retrieval?.mode || 'literal'}`,
-                                        `tags:${topic.retrieval?.tag_mode || 'required'}`,
-                                        `terms:${topic.retrieval?.term_mode || 'required'}`,
-                                        `fts:${topic.retrieval?.full_text_limit ?? 'n/a'}`,
-                                        `semantic:${topic.retrieval?.semantic_limit ?? 'n/a'}`,
-                                        `rerank:${topic.retrieval?.rerank_limit ?? 'n/a'}`,
-                                        `embed_budget:${topic.retrieval?.max_new_embeddings_per_run ?? 'n/a'}`
-                                    ])}</div>
-                                    <div class="archivist-section-label">Source Type Weights</div>
-                                    <div class="archivist-pill-list">${renderArchivistPills(
-                                        Object.entries(topic.retrieval?.source_type_weights || {}).map(
-                                            ([key, value]) => `${key}:${value}`
-                                        )
-                                    )}</div>
-                                </div>
-                            </details>
-                        </div>
-                        ${forceButtons}
-                    </article>
-                `;
-            }).join('');
         }
 
         function renderArchivistRegistry(payload) {

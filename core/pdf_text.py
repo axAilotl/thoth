@@ -71,16 +71,21 @@ def validate_source_integrity(
 
 def _validate_pdf_header(header: bytes) -> None:
     prefix = header.lstrip().removeprefix(b"\xef\xbb\xbf").lstrip()
-    if re.match(br"(?:<!doctype\s+html\b|<html\b)", prefix, re.IGNORECASE):
+    if prefix.startswith(b"%PDF-"):
+        return
+    if re.search(
+        br"<\s*(?:!doctype\s+html|html|head|body|title|meta|script)\b",
+        prefix,
+        re.IGNORECASE,
+    ):
         raise PDFSourceIntegrityError(
             "html", "Document source contains HTML instead of PDF bytes; download the PDF and rescan.",
             "HTML saved as PDF; download the PDF and rescan.",
         )
-    if not header.startswith(b"%PDF-"):
-        raise PDFSourceIntegrityError(
-            "non_pdf", "Document source does not contain a PDF header; download the PDF and rescan.",
-            "Not a PDF file; download the PDF and rescan.",
-        )
+    raise PDFSourceIntegrityError(
+        "non_pdf", "Document source does not contain a PDF header; download the PDF and rescan.",
+        "Not a PDF file; download the PDF and rescan.",
+    )
 
 
 def pdf_parser_source_error(detail: str, *, returncode: int | None = None) -> PDFSourceIntegrityError | None:

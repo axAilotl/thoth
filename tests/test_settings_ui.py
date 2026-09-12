@@ -65,6 +65,8 @@ def test_review_is_a_settings_tab_using_shared_components():
     assert 'type="module" src="/static/review.js' in html
     assert 'href="/static/review.css?v=3"' in html
     assert 'src="/static/review.js?v=3"' in html
+    assert 'href="/static/settings-ui.css?v=1"' in html
+    assert 'src="/static/archivist-topics.js?v=1"' in html
     panel = (root / 'static/review-panel.html').read_text()
     assert '<html' not in panel and '<body' not in panel
     assert 'class="card"' in panel
@@ -204,13 +206,14 @@ def test_settings_ui_exposes_archivist_web_clipper_and_translation_controls():
 def test_settings_ui_bounds_long_status_tables_and_topics():
     root = Path(__file__).resolve().parents[1]
     html = (root / "static/settings.html").read_text(encoding="utf-8")
+    css = (root / "static/settings-ui.css").read_text(encoding="utf-8")
 
     assert '.security-table-wrap {' in html
     assert 'max-height: 22rem;' in html
     assert 'position: sticky;' in html
-    assert '.archivist-topic-list {' in html
-    assert 'max-height: 60vh;' in html
-    assert 'overscroll-behavior: contain;' in html
+    assert '.archivist-topic-list {' in css
+    assert 'max-height: 60vh;' in css
+    assert 'overscroll-behavior: contain;' in css
 
 
 def test_source_settings_have_one_copy_in_their_own_disclosure():
@@ -290,9 +293,8 @@ def test_advanced_groups_keep_controls_and_save_actions_accessible():
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required to exercise the topic renderer")
 def test_rendered_topics_fold_all_filters_and_keep_actions_outside():
-    html = settings_html()
-    helpers = html[html.index("function formatOptionalDate("):html.index("function renderArchivistRegistry(")]
-    escape = html[html.index("function escapeHtml("):html.index("function ensureProviderModels(")]
+    root = Path(__file__).resolve().parents[1]
+    renderer = (root / "static/archivist-topics.js").read_text(encoding="utf-8")
     topics = [
         {
             "id": "topic-1", "title": 'Security <papers> & "preprints"',
@@ -307,8 +309,8 @@ def test_rendered_topics_fold_all_filters_and_keep_actions_outside():
          "state_error": "Unable to read topic state"},
     ]
     script = "const container = {}; const document = {getElementById: () => container};\n"
-    script += escape + helpers
-    script += f"\nrenderArchivistTopics({json.dumps(topics)}); process.stdout.write(container.innerHTML);"
+    script += renderer
+    script += f"\nglobalThis.renderArchivistTopics({json.dumps(topics)}); process.stdout.write(container.innerHTML);"
     rendered = subprocess.run(
         ["node", "-e", script], check=True, capture_output=True, text=True,
     ).stdout
@@ -342,15 +344,20 @@ def test_rendered_topics_fold_all_filters_and_keep_actions_outside():
 
 
 def test_topic_details_are_out_of_flow_and_scroll_within_the_card():
-    html = settings_html()
-    css = html.split("<style>", 1)[1].split("</style>", 1)[0]
+    css = (Path(__file__).resolve().parents[1] / "static/settings-ui.css").read_text(encoding="utf-8")
     rules = dict(re.findall(r"(\.[\w-]+)\s*\{([^}]+)\}", css))
     assert "position: relative;" in rules[".archivist-topic-main"]
+    summary_match = re.search(r"\.archivist-topic-details > summary\s*\{([^}]+)\}", css)
+    assert summary_match is not None
+    summary = summary_match.group(1)
+    assert "z-index: 2;" in summary
+    assert "background: var(--bg-card);" in summary
     panel = rules[".archivist-topic-detail-panel"]
     assert "position: absolute;" in panel
     assert "inset: 0 0 2.25rem;" in panel
     assert "overflow: auto;" in panel
     assert "overscroll-behavior: contain;" in panel
+    assert "padding-top: 44px;" in panel
     settings_body = rules[".settings-section-body"]
     assert "max-height: min(32rem, 60vh);" in settings_body
     assert "overflow: auto;" in settings_body
