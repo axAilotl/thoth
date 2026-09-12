@@ -83,7 +83,8 @@ def review_item(entry, service, layout):
     reason = reason or _text(entry.last_error)
     if exhausted and entry.artifact_type == "web_clipper":
         source_diagnostic = diagnose_document_source(
-            WebClipperArtifact.from_queue_payload(payload), service.config, layout, probe_pdf=True,
+            WebClipperArtifact.from_queue_payload(payload), service.config, layout,
+            recorded_error=entry.last_error or state.get("error") or "",
         )
         category = source_diagnostic.get("category", category)
         reason = _text(source_diagnostic.get("reason")) or reason
@@ -101,9 +102,9 @@ def review_item(entry, service, layout):
             "to capture its new version before processing."
         )
     reason_summary = _text(source_diagnostic.get("reason_summary")) or " ".join(reason.split())
-    if ocr_required:
+    if ocr_required and not source_diagnostic.get("reason_summary"):
         reason_summary = "No PDF text; scanned pages need OCR."
-    elif security:
+    elif security and not source_diagnostic.get("reason_summary"):
         patterns = [_text(f.get("pattern_id"), 120).replace("_", " ")
                     for f in findings[:2] if isinstance(f, dict) and f.get("pattern_id")]
         reason_summary = "Security flag: " + (", ".join(patterns) or "potentially unsafe source instructions")
@@ -207,7 +208,10 @@ def create_review_router(runtime_provider):
                 if state.get("category") == "source_malformed_pdf":
                     raise ValueError(state.get("reason") or "Malformed PDF; restore the PDF and rescan.")
                 if state.get("category") == "processing_failed":
-                    diagnostic = diagnose_document_source(artifact, runtime.config, runtime.layout, probe_pdf=True)
+                    diagnostic = diagnose_document_source(
+                        artifact, runtime.config, runtime.layout,
+                        recorded_error=entry.last_error or state.get("error") or "",
+                    )
                     if diagnostic.get("category", "").startswith("source_"):
                         raise ValueError(diagnostic["reason"])
             updated = current.decide(

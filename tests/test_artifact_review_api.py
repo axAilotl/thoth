@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -448,15 +449,16 @@ def test_exhausted_source_diagnostics_are_read_only(
         path.write_bytes(content)
     # Reproduce a stored exhausted row from the pre-diagnostic runtime.
     claimed = collector.db.claim_ingestion_entry(artifact.id)
+    recorded_error = ("Syntax Error: Couldn't read xref table" if source_status == 'malformed_pdf'
+                      else 'Original extractor failure')
     exhausted = collector.db.mark_ingestion_failed(
-        artifact.id, "Original extractor failure", max_attempts=claimed.attempts,
+        artifact.id, recorded_error, max_attempts=claimed.attempts,
     )
     before = exhausted.__dict__.copy()
     model = AsyncMock(side_effect=AssertionError('Review read reached model'))
     monkeypatch.setattr('core.llm_interface.LLMInterface.generate', model)
-    if source_status != 'malformed_pdf':
-        poppler = Mock(side_effect=AssertionError('Invalid bytes reached Poppler'))
-        monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
+    poppler = Mock(side_effect=AssertionError('Review listing reached Poppler'))
+    monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
     runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
     app = FastAPI()
     app.include_router(create_review_router(lambda: runtime))
@@ -470,12 +472,11 @@ def test_exhausted_source_diagnostics_are_read_only(
     assert item['category'] == f'source_{source_status}'
     assert reason in item['reason']
     assert 'rescan' in item['reason_summary']
-    assert item['last_error'] == 'Original extractor failure'
+    assert item['last_error'] == recorded_error
     assert item['revision'] == review_revision(exhausted)
     assert collector.db.get_ingestion_entry(artifact.id).__dict__ == before
     model.assert_not_awaited()
-    if source_status != 'malformed_pdf':
-        poppler.assert_not_called()
+    poppler.assert_not_called()
     if content is not None:
         assert path.read_bytes() == content
 
@@ -516,7 +517,7 @@ def test_malformed_pdf_retry_requires_repaired_source_and_rescan(tmp_path, monke
     runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
     if exhausted:
         collector.db.claim_ingestion_entry(artifact.id)
-        collector.db.mark_ingestion_failed(artifact.id, 'PDF extraction failed', max_attempts=1)
+        collector.db.mark_ingestion_failed(artifact.id, "Syntax Error: Couldn't read xref table", max_attempts=1)
     else:
         assert asyncio.run(runtime.process_ingestion_entry(
             collector.db.get_ingestion_entry(artifact.id),
@@ -524,10 +525,9 @@ def test_malformed_pdf_retry_requires_repaired_source_and_rescan(tmp_path, monke
     app = FastAPI()
     app.include_router(create_review_router(lambda: runtime))
     client = TestClient(app)
+    poppler = Mock(side_effect=AssertionError('Known malformed PDF reached Poppler again'))
+    monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
     item, = client.get('/api/review').json()['items']
-    if not exhausted:
-        poppler = Mock(side_effect=AssertionError('Known malformed PDF reached Poppler again'))
-        monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
 
     response = client.post('/api/review/decision', json={
         'artifact_id': item['artifact_id'], 'revision': item['revision'], 'action': 'retry',
@@ -537,8 +537,51 @@ def test_malformed_pdf_retry_requires_repaired_source_and_rescan(tmp_path, monke
     assert 'rescan' in response.text
     assert review_revision(collector.db.get_ingestion_entry(artifact.id)) == item['revision']
     assert path.read_bytes() == b'%PDF-1.7\nBroken trailer\n'
-    if not exhausted:
-        poppler.assert_not_called()
+    poppler.assert_not_called()
+
+
+@pytest.mark.parametrize('error,source_status', [
+    ("Syntax Error: Couldn't read xref table", 'malformed_pdf'),
+    ('Unknown extraction failure', 'unverified'),
+    ('Missing required PDF utility: pdftotext', 'unverified'),
+    ("Syntax Error: Couldn't open file: Permission denied", 'unverified'),
+])
+@pytest.mark.parametrize('state_error_only', [False, True])
+def test_review_uses_recorded_pdf_errors_without_extraction(
+    tmp_path, monkeypatch, error, source_status, state_error_only,
+):
+    collector, path, artifact = captured_pdf(tmp_path, b'%PDF-1.7\n')
+    collector.db.claim_ingestion_entry(artifact.id)
+    entry = collector.db.mark_ingestion_failed(artifact.id, error, max_attempts=1)
+    if state_error_only:
+        assert collector.db.upsert_ingestion_entry(replace(entry, last_error=None))
+    before = collector.db.get_ingestion_entry(artifact.id)
+    poppler = Mock(side_effect=AssertionError('Review listing reached Poppler'))
+    monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+
+    item, = TestClient(app).get('/api/review').json()['items']
+
+    assert item['source_status'] == source_status
+    assert item['category'] == ('source_malformed_pdf' if source_status == 'malformed_pdf' else 'processing_failed')
+    assert error in item['reason']
+    assert item['revision'] == review_revision(before)
+    assert collector.db.get_ingestion_entry(artifact.id) == before
+    assert path.read_bytes() == b'%PDF-1.7\n'
+    poppler.assert_not_called()
+
+
+def test_persisted_source_summary_takes_precedence_over_security_summary(inbox):
+    client, collector, _, artifact, _ = inbox
+    collector.db.mark_ingestion_review_required(
+        artifact.id, category='source_html', reason='Document source contains HTML instead of PDF bytes.',
+        metadata={'source_status': 'html', 'reason_summary': 'HTML saved as PDF; download the PDF and rescan.'},
+    )
+    item, = client.get('/api/review').json()['items']
+    assert item['security_required'] is True
+    assert item['reason_summary'] == 'HTML saved as PDF; download the PDF and rescan.'
 
 
 @pytest.mark.parametrize('mode', ['outside', 'symlink', 'changed', 'config'])

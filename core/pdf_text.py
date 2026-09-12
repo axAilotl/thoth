@@ -83,6 +83,27 @@ def _validate_pdf_header(header: bytes) -> None:
         )
 
 
+def pdf_parser_source_error(detail: str, *, returncode: int | None = None) -> PDFSourceIntegrityError | None:
+    """Classify explicit Poppler parser evidence from a current or recorded failure.
+
+    Recorded failures may lack an exit code. Unknown errors and execution/access
+    failures never prove malformed bytes, even if they include parser output.
+    """
+    if returncode is not None and returncode not in (1, 99):
+        return None
+    if not re.search(r"(?im)^Syntax Error:|may not be a PDF file", detail):
+        return None
+    if re.search(
+        r"(?i)permission denied|couldn't open|I/O error|missing required PDF utility|"
+        r"failed to execute PDF utility|timed out|incorrect password", detail,
+    ):
+        return None
+    return PDFSourceIntegrityError(
+        "malformed_pdf", f"Malformed PDF; restore or download the PDF and rescan. Poppler: {detail}",
+        "Malformed PDF; restore or download the PDF and rescan.",
+    )
+
+
 def _run_pdf_command(args: list[str], *, path: Path, timeout: int) -> str:
     """Run a Poppler PDF utility and return stdout or raise a domain error."""
     try:
@@ -102,15 +123,9 @@ def _run_pdf_command(args: list[str], *, path: Path, timeout: int) -> str:
         stderr = result.stderr.strip()
         # The source may have disappeared or been replaced while Poppler ran.
         validate_source_integrity(path, pdf=True)
-        # Exit 1 includes OS open failures, 2 is output I/O, 3 is permissions,
-        # and 99 is unspecified. Only explicit parser evidence proves damage.
-        if result.returncode in (1, 99) and re.search(
-            r"(?im)^Syntax Error:|may not be a PDF file", stderr
-        ) and not re.search(r"(?i)permission denied|couldn't open|I/O error", stderr):
-            raise PDFSourceIntegrityError(
-                "malformed_pdf", f"Malformed PDF; restore or download the PDF and rescan. Poppler: {stderr}",
-                "Malformed PDF; restore or download the PDF and rescan.",
-            )
+        source_error = pdf_parser_source_error(stderr, returncode=result.returncode)
+        if source_error is not None:
+            raise source_error
         raise PDFTextExtractionError(
             stderr or f"PDF utility {args[0]} exited with status {result.returncode}"
         )
