@@ -11,7 +11,7 @@ from collectors.web_clipper_layout import build_web_clipper_contract
 from .artifacts.web_clipper import WebClipperArtifact
 from .document_options import document_boolean, validate_document_opt_ins
 from .llm_interface import LLMInterface
-from .pdf_text import SourceIntegrityError, extract_pdf_text, validate_source_integrity
+from .pdf_text import SourceIntegrityError, extract_pdf_text, pdf_parser_source_error, validate_source_integrity
 from .prompt_security import (
     merge_prompt_security_metadata,
     merge_prompt_security_policy_metadata,
@@ -87,20 +87,20 @@ def validate_document_source(artifact, config, layout) -> Path:
     return path
 
 
-def diagnose_document_source(artifact, config, layout, *, probe_pdf: bool = False) -> dict:
-    """Inspect a review source without changing it, enriching it, or calling a model.
+def diagnose_document_source(artifact, config, layout, *, recorded_error: str = "") -> dict:
+    """Check review-source integrity and recorded evidence without running extraction.
 
-    Probe exhausted PDFs through the same bounded extractor to recover source
-    diagnostics absent from older failures. Access, configuration and utility
-    failures leave integrity unverified, with the diagnostic error visible.
+    A parser failure applies only after authorization, header and checksum checks.
+    A PDF header alone cannot verify parseability; unknown or infrastructure
+    failures leave it unverified. Source bytes and queue records are never changed.
     """
     try:
-        path = validate_document_source(artifact, config, layout)
-        if probe_pdf and artifact.file_type == "attachment":
-            try:
-                extract_pdf_text(path, max_pages=_positive_limit(config, "pdf_max_pages", 40))
-            finally:
-                validate_document_source(artifact, config, layout)
+        validate_document_source(artifact, config, layout)
+        if artifact.file_type == "attachment":
+            source_error = pdf_parser_source_error(recorded_error)
+            if source_error is not None:
+                raise source_error
+            return {"source_status": "unverified"}
         return {"source_status": "available"}
     except SourceIntegrityError as exc:
         return {"source_status": exc.source_status, "category": exc.category,
