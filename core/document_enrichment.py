@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +11,7 @@ from collectors.web_clipper_layout import build_web_clipper_contract
 from .artifacts.web_clipper import WebClipperArtifact
 from .document_options import document_boolean, validate_document_opt_ins
 from .llm_interface import LLMInterface
-from .pdf_text import extract_pdf_text
+from .pdf_text import SourceIntegrityError, extract_pdf_text, validate_source_integrity
 from .prompt_security import (
     merge_prompt_security_metadata,
     merge_prompt_security_policy_metadata,
@@ -79,15 +78,35 @@ def validate_document_source(artifact, config, layout) -> Path:
     if artifact.file_type == "attachment" and path.suffix.lower() != ".pdf":
         raise ValueError("Unsupported document attachment extension")
     limit = _positive_limit(config, "max_source_bytes", 52428800)
-    if path.stat().st_size > limit:
-        raise ValueError("Document source exceeds max_source_bytes")
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    if not artifact.source_checksum or digest.hexdigest() != artifact.source_checksum:
+    validate_source_integrity(
+        path, pdf=artifact.file_type == "attachment", max_bytes=limit,
+        expected_checksum=artifact.source_checksum,
+    )
+    if not artifact.source_checksum:
         raise RuntimeError("Document source checksum changed since capture; rescan required")
     return path
+
+
+def diagnose_document_source(artifact, config, layout, *, probe_pdf: bool = False) -> dict:
+    """Inspect a review source without changing it, enriching it, or calling a model.
+
+    Probe exhausted PDFs through the same bounded extractor to recover source
+    diagnostics absent from older failures. Access, configuration and utility
+    failures leave integrity unverified, with the diagnostic error visible.
+    """
+    try:
+        path = validate_document_source(artifact, config, layout)
+        if probe_pdf and artifact.file_type == "attachment":
+            try:
+                extract_pdf_text(path, max_pages=_positive_limit(config, "pdf_max_pages", 40))
+            finally:
+                validate_document_source(artifact, config, layout)
+        return {"source_status": "available"}
+    except SourceIntegrityError as exc:
+        return {"source_status": exc.source_status, "category": exc.category,
+                "reason": str(exc), "reason_summary": exc.reason_summary}
+    except (OSError, ValueError, RuntimeError) as exc:
+        return {"source_status": "unverified", "diagnostic_error": str(exc)}
 
 
 async def enrich_document(artifact: WebClipperArtifact, config, layout) -> dict:
@@ -107,15 +126,17 @@ async def enrich_document(artifact: WebClipperArtifact, config, layout) -> dict:
     path = await asyncio.to_thread(validate_document_source, artifact, config, layout)
     max_chars = _positive_limit(config, "summary_max_chars", 24000)
     max_pages = _positive_limit(config, "pdf_max_pages", 40)
-    text = (
-        await asyncio.to_thread(extract_pdf_text, path, max_pages=max_pages)
-        if is_pdf else artifact.body
-    )
+    try:
+        text = (
+            await asyncio.to_thread(extract_pdf_text, path, max_pages=max_pages)
+            if is_pdf else artifact.body
+        )
+    finally:
+        # Sync can replace the source even during a failed or empty extraction.
+        # Do not attribute the old bytes' parser/OCR result to a new revision.
+        await asyncio.to_thread(validate_document_source, artifact, config, layout)
     if not text.strip():
         raise ValueError("Document has no extractable text; image-only PDFs require OCR review")
-    # Sync can replace a source while Poppler is reading it. Validate after the
-    # extraction boundary before publishing derivatives or returning a reused one.
-    await asyncio.to_thread(validate_document_source, artifact, config, layout)
     # Scan all extracted text, not merely the prefix chosen for the model.
     security = prompt_security_metadata_for_text(
         text, source_label=f"web_clipper:{artifact.id}", scope="context"

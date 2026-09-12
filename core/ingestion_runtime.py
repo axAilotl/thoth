@@ -42,6 +42,7 @@ from .metadata_db import (
     get_metadata_db,
 )
 from .path_layout import PathLayout, build_path_layout
+from .pdf_text import SourceIntegrityError
 from .runtime_composition import validate_metadata_db_matches_layout
 from .prompt_security import prompt_security_requires_review
 from .time_utils import utc_now_iso
@@ -126,10 +127,12 @@ def _capabilities_from_queue(value: str | None) -> tuple[str, ...] | None:
 
 
 def _reviewable_artifact_error(exc: Exception) -> bool:
-    return isinstance(exc, (IngestionRuntimeError, ValueError, TypeError))
+    return isinstance(exc, (IngestionRuntimeError, SourceIntegrityError, ValueError, TypeError))
 
 
 def _review_category_for_error(exc: Exception) -> str:
+    if isinstance(exc, SourceIntegrityError):
+        return exc.category
     if isinstance(exc, ClassificationReviewRequired):
         return "classification"
     message = str(exc).lower()
@@ -479,13 +482,18 @@ class KnowledgeArtifactRuntime:
         classification: ClassificationResult | None = None,
     ) -> IngestionDispatchResult:
         error = f"artifact review required: {exc}"
+        category = _review_category_for_error(exc)
         metadata: dict[str, Any] = {"stage": stage}
+        if isinstance(exc, SourceIntegrityError):
+            metadata.update(source_status=exc.source_status, reason_summary=exc.reason_summary)
+        elif category == "ocr_required":
+            metadata["source_status"] = "available"
         if classification is not None:
             metadata = classification.to_review_event()
             metadata["stage"] = stage
         updated = self.db.mark_ingestion_review_required(
             entry.artifact_id,
-            category=_review_category_for_error(exc),
+            category=category,
             reason=str(exc),
             error=error,
             error_type=exc.__class__.__name__,

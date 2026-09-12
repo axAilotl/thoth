@@ -1,6 +1,9 @@
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from subprocess import CompletedProcess
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
@@ -10,6 +13,7 @@ from core.artifact_review_api import create_review_router
 from core.artifact_review_policy import review_revision
 from core.ingestion_runtime import KnowledgeArtifactRuntime
 from tests.test_document_enrichment import source
+from tests.test_document_source_diagnostics import captured_pdf
 
 
 @pytest.fixture
@@ -382,3 +386,221 @@ def test_error_after_recording_is_not_safe_to_retry(inbox, monkeypatch):
     assert entry.status == 'pending'
     assert json.loads(entry.review_json)['events'][-1]['action'] == 'security_override_approved'
     assert client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'}).status_code == 409
+
+
+@pytest.mark.parametrize('content,source_status,reason', [
+    (None, 'missing', 'missing'), (b'', 'empty', 'empty'),
+    (b'<!DOCTYPE html><html>Download denied</html>', 'html', 'HTML'),
+    (b'Download failed', 'non_pdf', 'PDF header'),
+    (b'%PDF-1.7\nTruncated PDF without a trailer\n', 'malformed_pdf', 'xref'),
+])
+def test_source_failure_reaches_review_from_real_ingestion(
+    tmp_path, monkeypatch, content, source_status, reason,
+):
+    collector, path, artifact = captured_pdf(tmp_path, content or b'%PDF-1.7\n')
+    if content is None:
+        path.unlink()
+    elif not content:
+        path.write_bytes(content)
+    model = AsyncMock(side_effect=AssertionError('Invalid source reached model'))
+    monkeypatch.setattr('core.llm_interface.LLMInterface.generate', model)
+    if source_status != 'malformed_pdf':
+        poppler = Mock(side_effect=AssertionError('Invalid bytes reached Poppler'))
+        monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+    client = TestClient(app)
+
+    result = asyncio.run(runtime.process_ingestion_entry(collector.db.get_ingestion_entry(artifact.id)))
+
+    assert result.status == 'needs_review'
+    item, = client.get('/api/review').json()['items']
+    assert item['category'] == f'source_{source_status}'
+    assert item['source_status'] == source_status
+    assert reason in item['reason']
+    assert 'rescan' in item['reason_summary']
+    assert item['ocr_required'] is False
+    assert item['attempts'] == 1
+    assert reason in item['last_error']
+    assert reason in item['history'][-1]['reason']
+    assert len(item['reason_summary']) <= 160
+    model.assert_not_awaited()
+    if source_status != 'malformed_pdf':
+        poppler.assert_not_called()
+    if content is not None:
+        assert path.read_bytes() == content
+
+
+@pytest.mark.parametrize('content,source_status,reason', [
+    (None, 'missing', 'missing'), (b'', 'empty', 'empty'),
+    (b'<!DOCTYPE html><html>Access denied</html>', 'html', 'HTML'),
+    (b'upstream server error', 'non_pdf', 'PDF header'),
+    (b'%PDF-1.7\nTruncated download\n', 'malformed_pdf', 'xref'),
+])
+def test_exhausted_source_diagnostics_are_read_only(
+    tmp_path, monkeypatch, content, source_status, reason,
+):
+    collector, path, artifact = captured_pdf(tmp_path, content or b'%PDF-1.7\n')
+    if content is None:
+        path.unlink()
+    elif not content:
+        path.write_bytes(content)
+    # Reproduce a stored exhausted row from the pre-diagnostic runtime.
+    claimed = collector.db.claim_ingestion_entry(artifact.id)
+    exhausted = collector.db.mark_ingestion_failed(
+        artifact.id, "Original extractor failure", max_attempts=claimed.attempts,
+    )
+    before = exhausted.__dict__.copy()
+    model = AsyncMock(side_effect=AssertionError('Review read reached model'))
+    monkeypatch.setattr('core.llm_interface.LLMInterface.generate', model)
+    if source_status != 'malformed_pdf':
+        poppler = Mock(side_effect=AssertionError('Invalid bytes reached Poppler'))
+        monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+
+    response = TestClient(app).get('/api/review')
+
+    assert response.status_code == 200
+    item, = response.json()['items']
+    assert item['status'] == 'failed'
+    assert item['source_status'] == source_status
+    assert item['category'] == f'source_{source_status}'
+    assert reason in item['reason']
+    assert 'rescan' in item['reason_summary']
+    assert item['last_error'] == 'Original extractor failure'
+    assert item['revision'] == review_revision(exhausted)
+    assert collector.db.get_ingestion_entry(artifact.id).__dict__ == before
+    model.assert_not_awaited()
+    if source_status != 'malformed_pdf':
+        poppler.assert_not_called()
+    if content is not None:
+        assert path.read_bytes() == content
+
+
+def test_exhausted_runtime_preserves_underlying_infrastructure_error(tmp_path, monkeypatch):
+    collector, path, artifact = captured_pdf(tmp_path, b'%PDF-1.7\n')
+    # Only the process boundary fails; materialization, enrichment and retries run.
+    poppler = Mock(side_effect=FileNotFoundError('pdftotext'))
+    monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr('core.metadata_db.utc_now', lambda: now)
+    monkeypatch.setattr('core.metadata_db.utc_now_iso', lambda: now.isoformat().replace('+00:00', 'Z'))
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    for _ in range(5):
+        now += timedelta(hours=2)
+        entry = collector.db.get_ingestion_entry(artifact.id)
+        with pytest.raises(RuntimeError, match='Missing required PDF utility: pdftotext'):
+            asyncio.run(runtime.process_ingestion_entry(entry))
+    exhausted = collector.db.get_ingestion_entry(artifact.id)
+    assert exhausted.status == 'failed'
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+
+    item, = TestClient(app).get('/api/review').json()['items']
+
+    assert item['category'] == 'processing_failed'
+    assert item['source_status'] == 'unverified'
+    assert 'Missing required PDF utility: pdftotext' in item['reason']
+    assert 'Missing required PDF utility: pdftotext' in item['reason_summary']
+    assert 'after 5 attempt' not in item['reason_summary']
+    assert item['ocr_required'] is False
+    assert collector.db.get_ingestion_entry(artifact.id) == exhausted
+
+
+@pytest.mark.parametrize('exhausted', [False, True])
+def test_malformed_pdf_retry_requires_repaired_source_and_rescan(tmp_path, monkeypatch, exhausted):
+    collector, path, artifact = captured_pdf(tmp_path, b'%PDF-1.7\nBroken trailer\n')
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    if exhausted:
+        collector.db.claim_ingestion_entry(artifact.id)
+        collector.db.mark_ingestion_failed(artifact.id, 'PDF extraction failed', max_attempts=1)
+    else:
+        assert asyncio.run(runtime.process_ingestion_entry(
+            collector.db.get_ingestion_entry(artifact.id),
+        )).status == 'needs_review'
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+    client = TestClient(app)
+    item, = client.get('/api/review').json()['items']
+    if not exhausted:
+        poppler = Mock(side_effect=AssertionError('Known malformed PDF reached Poppler again'))
+        monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
+
+    response = client.post('/api/review/decision', json={
+        'artifact_id': item['artifact_id'], 'revision': item['revision'], 'action': 'retry',
+    }, headers={'X-Thoth-Review': '1'})
+
+    assert response.status_code == 409
+    assert 'rescan' in response.text
+    assert review_revision(collector.db.get_ingestion_entry(artifact.id)) == item['revision']
+    assert path.read_bytes() == b'%PDF-1.7\nBroken trailer\n'
+    if not exhausted:
+        poppler.assert_not_called()
+
+
+@pytest.mark.parametrize('mode', ['outside', 'symlink', 'changed', 'config'])
+def test_exhausted_diagnostics_respect_source_authorization(tmp_path, monkeypatch, mode):
+    collector, path, artifact = captured_pdf(tmp_path, b'%PDF-1.7\n')
+    if mode == 'outside':
+        collector.config.set('sources.web_clipper.attachment_dirs', ['different-assets'])
+        (collector.layout.vault_root / 'different-assets').mkdir()
+    elif mode == 'symlink':
+        original = path.with_name('original.pdf')
+        path.rename(original)
+        path.symlink_to(original)
+    elif mode == 'changed':
+        path.write_bytes(b'%PDF-1.7\nChanged since capture\n')
+    else:
+        collector.config.set('sources.web_clipper.max_source_bytes', 'not an integer')
+    collector.db.claim_ingestion_entry(artifact.id)
+    exhausted = collector.db.mark_ingestion_failed(artifact.id, 'Original error', max_attempts=1)
+    poppler = Mock(side_effect=AssertionError('Unvalidated source reached Poppler'))
+    monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+
+    item, = TestClient(app).get('/api/review').json()['items']
+
+    assert item['source_status'] == 'unverified'
+    assert item['category'] == 'processing_failed'
+    assert 'Original error' in item['reason']
+    assert 'Source check:' in item['reason']
+    assert collector.db.get_ingestion_entry(artifact.id) == exhausted
+    poppler.assert_not_called()
+
+
+def test_textless_pdf_retains_ocr_review_and_explicit_retry(tmp_path, monkeypatch):
+    content = (Path(__file__).parent / 'fixtures/pdfs/sample_paper.pdf').read_bytes()
+    collector, path, artifact = captured_pdf(tmp_path, content)
+    # Simulate a successful Poppler extraction of a scanned page at the OS boundary.
+    poppler = Mock(return_value=CompletedProcess([], 0, '\f', ''))
+    model = AsyncMock(side_effect=AssertionError('Textless PDF reached model'))
+    monkeypatch.setattr('core.pdf_text.subprocess.run', poppler)
+    monkeypatch.setattr('core.llm_interface.LLMInterface.generate', model)
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+    client = TestClient(app)
+
+    assert asyncio.run(runtime.process_ingestion_entry(
+        collector.db.get_ingestion_entry(artifact.id),
+    )).status == 'needs_review'
+    item, = client.get('/api/review').json()['items']
+    assert item['category'] == 'ocr_required'
+    assert item['source_status'] == 'available'
+    assert item['ocr_required'] is True
+    assert item['reason_summary'] == 'No PDF text; scanned pages need OCR.'
+    assert 'does not run OCR' in item['action_note']
+    assert client.post('/api/review/decision', json={
+        'artifact_id': item['artifact_id'], 'revision': item['revision'], 'action': 'retry',
+    }, headers={'X-Thoth-Review': '1'}).status_code == 200
+    assert asyncio.run(runtime.process_ingestion_entry(
+        collector.db.get_ingestion_entry(artifact.id),
+    )).status == 'needs_review'
+    assert poppler.call_count == 2
+    model.assert_not_awaited()
+    assert path.read_bytes() == content
