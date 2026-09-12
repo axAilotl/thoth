@@ -434,6 +434,56 @@
         .task-row select { width: 160px; }
         .task-row input[type="number"] { width: 120px; }
 
+        /* Local disclosures keep configuration available without long card stacks. */
+        .settings-section {
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        .settings-section > summary,
+        .settings-group > summary {
+            cursor: pointer;
+            color: var(--accent-hover);
+        }
+        .settings-section > summary {
+            display: flex;
+            justify-content: flex-start;
+            gap: 12px;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            list-style: none;
+        }
+        .settings-section > summary::before { content: '▸'; }
+        .settings-section[open] > summary::before { content: '▾'; }
+        .settings-section > summary::-webkit-details-marker { display: none; }
+        .settings-section-body {
+            max-height: min(32rem, 60vh);
+            overflow: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+            margin-top: 12px;
+            padding: 4px;
+        }
+        .settings-group {
+            border-top: 1px solid var(--border);
+            padding: 10px 0;
+        }
+        .settings-group > summary { font-weight: 600; }
+        .settings-section-body .form-group { margin-bottom: 12px; }
+        .settings-section-body .toggle-container { padding: 8px 0; }
+        .settings-subsection { margin-top: 12px; }
+        .settings-account-status {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 8px;
+            margin-top: 12px;
+            overflow-wrap: anywhere;
+        }
+        summary:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 3px;
+        }
+
         /* Archivist */
         .archivist-toolbar {
             display: flex;
@@ -456,7 +506,7 @@
         }
         .archivist-topic-list {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
             gap: 14px;
             max-height: 60vh;
             overflow-y: auto;
@@ -467,7 +517,34 @@
         .archivist-topic-card {
             background: rgba(15, 10, 7, 0.42);
             border: 1px solid rgba(202, 162, 94, 0.12);
-            padding: 16px;
+            padding: 12px;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            overflow-wrap: anywhere;
+        }
+        .archivist-topic-main { position: relative; flex: 1; }
+        .archivist-topic-card .btn-group { margin-top: 8px; gap: 6px; }
+        .archivist-topic-details > summary {
+            cursor: pointer;
+            color: var(--accent-hover);
+            height: 2.25rem;
+            padding: 6px 0;
+            font-size: 0.84rem;
+            line-height: 1.5rem;
+        }
+        .archivist-topic-detail-panel {
+            /* Overlay this card's summary; opening never changes the grid height. */
+            position: absolute;
+            inset: 0 0 2.25rem;
+            max-height: 32rem;
+            overflow: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+            z-index: 1;
+            padding: 12px;
+            border: 1px solid var(--border-strong);
+            background: var(--bg-card);
         }
         .archivist-topic-card h3 {
             font-family: "Palatino Linotype", "Book Antiqua", "URW Palladio L", serif;
@@ -480,18 +557,18 @@
             font-size: 0.82rem;
             letter-spacing: 0.08em;
             text-transform: uppercase;
-            margin-bottom: 10px;
+            margin-bottom: 6px;
         }
         .archivist-topic-card p {
             color: var(--text-secondary);
             font-size: 0.9rem;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
         }
         .archivist-topic-meta {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 8px 12px;
-            margin-bottom: 12px;
+            gap: 4px 10px;
+            margin-bottom: 8px;
             font-size: 0.84rem;
         }
         .archivist-topic-meta strong {
@@ -504,13 +581,13 @@
         .archivist-pill-list {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 12px;
+            gap: 4px;
+            margin-bottom: 8px;
         }
         .archivist-pill {
             display: inline-flex;
             align-items: center;
-            padding: 3px 8px;
+            padding: 2px 6px;
             border: 1px solid rgba(202, 162, 94, 0.18);
             color: var(--text-primary);
             background: rgba(202, 162, 94, 0.08);
@@ -527,9 +604,12 @@
         .archivist-state-box {
             border: 1px solid rgba(202, 162, 94, 0.1);
             background: rgba(15, 10, 7, 0.3);
-            padding: 10px 12px;
-            margin-bottom: 12px;
+            padding: 8px;
+            margin-bottom: 8px;
             font-size: 0.84rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 4px 8px;
         }
         .archivist-state-box.error-state {
             border-color: rgba(210, 119, 93, 0.35);
@@ -720,14 +800,15 @@
         </section>
 
         <div id="providers" class="tab-content">
-            <div class="card">
-                <div class="card-header">
+            <details class="card settings-section">
+                <summary class="card-header">
                     <div>
                         <h2 class="card-title">Advanced: Model Providers</h2>
                         <p class="card-description">Configure AI providers, API keys, and model aliases. Most operators only need this when changing provider accounts or model routes.</p>
                     </div>
-                </div>
+                </summary>
 
+                <div class="settings-section-body">
                 <div id="providers-list" class="providers-container">
                     <!-- Providers will be dynamically inserted here -->
                 </div>
@@ -735,24 +816,25 @@
                 <button class="add-provider-btn" onclick="showAddProviderModal()">
                     <span>➕</span> Add Provider
                 </button>
+                </div>
 
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="saveProviders()">💾 Save All Providers</button>
                 </div>
-            </div>
+            </details>
         </div>
 
         <!-- Task Routing Advanced Section -->
         <div id="tasks" class="tab-content">
-            <div class="card">
-                <div class="card-header">
+            <details class="card settings-section">
+                <summary class="card-header">
                     <div>
                         <h2 class="card-title">Advanced: Task Routing</h2>
                         <p class="card-description">Configure which provider and model alias handles each AI task. Translation routing is used for English companion generation.</p>
                     </div>
-                </div>
+                </summary>
 
-                <div class="task-grid">
+                <div class="task-grid settings-section-body">
                     <div class="task-row">
                         <span class="task-name">🏷️ Tag Generation</span>
                         <label class="toggle">
@@ -833,18 +915,20 @@
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="saveTasks()">💾 Save Task Settings</button>
                 </div>
-            </div>
+            </details>
         </div>
 
         <!-- Pipeline Tab -->
         <div id="pipeline" class="tab-content">
-            <div class="card">
-                <div class="card-header">
+            <details class="card settings-section">
+                <summary class="card-header">
                     <div>
                         <h2 class="card-title">Pipeline Stages</h2>
-                        <p class="card-description">Enable or disable processing stages</p>
+                        <p class="card-description">Choose how imported content is processed. Provider and model selection is under Advanced → Task Routing.</p>
                     </div>
-                </div>
+                </summary>
+
+                <div class="settings-section-body">
 
                 <div class="toggle-container">
                     <div class="toggle-info">
@@ -953,21 +1037,24 @@
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
+                </div>
 
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="savePipeline()">💾 Save Pipeline Settings</button>
                 </div>
-            </div>
+            </details>
 
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <h2 class="card-title">Research Sources</h2>
-                        <p class="card-description">Tune arXiv filters and background GitHub/HuggingFace polling. Operator overrides are saved to <code>control.json</code>.</p>
+                        <h2 class="card-title">Sources &amp; Skills</h2>
+                        <p class="card-description">Manage imports, connected accounts, skill runs, and schedules. Shared file paths and model routing are under Advanced.</p>
                     </div>
                 </div>
 
-                <h4 style="margin: 0 0 12px; color: var(--text-secondary);">ArXiv Discovery</h4>
+                <details class="settings-group" name="source-settings">
+                <summary>ArXiv Discovery</summary>
+                <div class="settings-section-body">
 
                 <div class="form-group">
                     <label>Discovery Source</label>
@@ -1000,7 +1087,12 @@
                     <input type="number" id="source-arxiv-limit" min="1" step="1" placeholder="50">
                 </div>
 
-                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Vault Markdown Imports</h4>
+                </div>
+                </details>
+
+                <details class="settings-group" name="source-settings">
+                <summary>Vault Markdown Imports</summary>
+                <div class="settings-section-body">
 
                 <div class="toggle-container">
                     <div class="toggle-info">
@@ -1033,7 +1125,12 @@
                     <textarea id="source-web-clipper-attachment-extensions" rows="3" placeholder=".png, .jpg, .pdf, .mp4"></textarea>
                 </div>
 
-                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Pi Skills</h4>
+                </div>
+                </details>
+
+                <details class="settings-group" name="source-settings">
+                <summary>Pi Skills</summary>
+                <div class="settings-section-body">
 
                 <div class="toggle-container">
                     <div class="toggle-info">
@@ -1046,6 +1143,9 @@
                     </label>
                 </div>
 
+                <details class="settings-group">
+                <summary>Runner Defaults &amp; Output</summary>
+                <div class="settings-section-body">
                 <div class="form-group">
                     <label>Default Pi Provider</label>
                     <input type="text" id="source-pi-skills-default-provider" placeholder="pi">
@@ -1060,6 +1160,8 @@
                     <label>Skill Output Directory</label>
                     <input type="text" id="source-pi-skills-output-dir" placeholder=".thoth_system/skill_outputs/pi">
                 </div>
+                </div>
+                </details>
 
                 <div class="form-group">
                     <label>Run Skill</label>
@@ -1082,7 +1184,12 @@
                     <button class="btn btn-primary btn-small" onclick="runPiSkill({ execute: true })">Run Skill</button>
                 </div>
 
-                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Social Sources</h4>
+                </div>
+                </details>
+
+                <details class="settings-group" name="source-settings">
+                <summary>GitHub &amp; HuggingFace</summary>
+                <div class="settings-section-body">
 
                 <div class="toggle-container">
                     <div class="toggle-info">
@@ -1138,68 +1245,6 @@
                     <small id="source-hf-token-status" style="color: var(--text-secondary); display: block; margin-top: 6px;">Stored: unknown</small>
                 </div>
 
-                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">X API Bookmarks</h4>
-
-                <div class="toggle-container">
-                    <div class="toggle-info">
-                        <div class="toggle-label">X API Sync Enabled</div>
-                        <div class="toggle-description">Use the authenticated X account for bookmark backfill and mobile coverage</div>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="source-x-api-enabled">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="form-group">
-                    <label>X OAuth Client ID <span class="hint">Required for PKCE. This should be the OAuth 2.0 client ID from X app settings.</span></label>
-                    <input type="text" id="source-x-api-client-id" placeholder="OAuth 2.0 client ID">
-                </div>
-
-                <div class="form-group">
-                    <label>X OAuth Redirect URI</label>
-                    <input type="text" id="source-x-api-redirect-uri" placeholder="http://127.0.0.1:8000/api/x-api/auth/callback">
-                </div>
-
-                <div class="form-group">
-                    <label>X Client Secret <span class="hint">Stored in <code>.env</code> as <code>X_API_CLIENT_SECRET</code>.</span></label>
-                    <input type="password" id="social-x-api-client-secret" placeholder="Leave blank to keep current secret">
-                    <small id="source-x-api-secret-status" style="color: var(--text-secondary); display: block; margin-top: 6px;">Stored: unknown</small>
-                </div>
-
-                <div class="card" style="margin-top: 16px; padding: 16px;">
-                    <div style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start;">
-                        <div>
-                            <div class="card-title" style="font-size: 1rem;">X Account Association</div>
-                            <p class="card-description" style="margin-top: 4px;">Save the X settings, then start the PKCE flow to connect the local Thoth instance to your X account.</p>
-                        </div>
-                        <div class="btn-group" style="margin-top: 0;">
-                            <button class="btn btn-secondary btn-small" onclick="refreshXApiStatus()">🔄 Refresh Status</button>
-                            <button class="btn btn-secondary btn-small" onclick="refreshXApiAuth()">♻️ Refresh Token</button>
-                            <button class="btn btn-primary btn-small" onclick="startXApiAuth()">🔐 Connect X Account</button>
-                            <button class="btn btn-primary btn-small" onclick="runXApiSync()">📥 Run Bookmark Sync</button>
-                        </div>
-                    </div>
-                    <div style="margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                        <div class="stat-card" style="text-align: left;">
-                            <div class="stat-label">Status</div>
-                            <div id="x-api-auth-status" style="margin-top: 6px; font-weight: 600;">Unknown</div>
-                        </div>
-                        <div class="stat-card" style="text-align: left;">
-                            <div class="stat-label">User</div>
-                            <div id="x-api-auth-user" style="margin-top: 6px; font-weight: 600;">-</div>
-                        </div>
-                        <div class="stat-card" style="text-align: left;">
-                            <div class="stat-label">Expires</div>
-                            <div id="x-api-auth-expires" style="margin-top: 6px; font-weight: 600;">-</div>
-                        </div>
-                        <div class="stat-card" style="text-align: left;">
-                            <div class="stat-label">Scopes</div>
-                            <div id="x-api-auth-scopes" style="margin-top: 6px; font-weight: 600;">-</div>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="toggle-container">
                     <div class="toggle-info">
                         <div class="toggle-label">Include Models</div>
@@ -1229,8 +1274,79 @@
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
+                </div>
+                </details>
 
-                <h4 style="margin: 24px 0 12px; color: var(--text-secondary);">Automation</h4>
+                <details class="settings-group" name="source-settings">
+                <summary>X API Bookmarks</summary>
+                <div class="settings-section-body">
+
+                <div class="toggle-container">
+                    <div class="toggle-info">
+                        <div class="toggle-label">X API Sync Enabled</div>
+                        <div class="toggle-description">Use the authenticated X account for bookmark backfill and mobile coverage</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="source-x-api-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>X OAuth Client ID <span class="hint">Required for PKCE. This should be the OAuth 2.0 client ID from X app settings.</span></label>
+                    <input type="text" id="source-x-api-client-id" placeholder="OAuth 2.0 client ID">
+                </div>
+
+                <div class="form-group">
+                    <label>X OAuth Redirect URI</label>
+                    <input type="text" id="source-x-api-redirect-uri" placeholder="http://127.0.0.1:8000/api/x-api/auth/callback">
+                </div>
+
+                <div class="form-group">
+                    <label>X Client Secret <span class="hint">Stored in <code>.env</code> as <code>X_API_CLIENT_SECRET</code>.</span></label>
+                    <input type="password" id="social-x-api-client-secret" placeholder="Leave blank to keep current secret">
+                    <small id="source-x-api-secret-status" style="color: var(--text-secondary); display: block; margin-top: 6px;">Stored: unknown</small>
+                </div>
+
+                <div class="settings-subsection">
+                    <div style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start;">
+                        <div>
+                            <div class="card-title" style="font-size: 1rem;">X Account Association</div>
+                            <p class="card-description" style="margin-top: 4px;">Save the X settings, then start the PKCE flow to connect the local Thoth instance to your X account.</p>
+                        </div>
+                        <div class="btn-group" style="margin-top: 0;">
+                            <button class="btn btn-secondary btn-small" onclick="refreshXApiStatus()">🔄 Refresh Status</button>
+                            <button class="btn btn-secondary btn-small" onclick="refreshXApiAuth()">♻️ Refresh Token</button>
+                            <button class="btn btn-primary btn-small" onclick="startXApiAuth()">🔐 Connect X Account</button>
+                            <button class="btn btn-primary btn-small" onclick="runXApiSync()">📥 Run Bookmark Sync</button>
+                        </div>
+                    </div>
+                    <div class="settings-account-status">
+                        <div>
+                            <div class="stat-label">Status</div>
+                            <div id="x-api-auth-status" style="margin-top: 6px; font-weight: 600;">Unknown</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">User</div>
+                            <div id="x-api-auth-user" style="margin-top: 6px; font-weight: 600;">-</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Expires</div>
+                            <div id="x-api-auth-expires" style="margin-top: 6px; font-weight: 600;">-</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Scopes</div>
+                            <div id="x-api-auth-scopes" style="margin-top: 6px; font-weight: 600;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                </div>
+                </details>
+
+                <details class="settings-group" name="source-settings">
+                <summary>Automation &amp; Schedules</summary>
+                <div class="settings-section-body">
 
                 <div class="toggle-container">
                     <div class="toggle-info">
@@ -1319,6 +1435,8 @@
                     <label>Archivist Interval (Hours)</label>
                     <input type="number" id="automation-archivist-interval-hours" min="5" step="1" placeholder="12">
                 </div>
+                </div>
+                </details>
 
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="saveSources()">💾 Save Source Settings</button>
@@ -1328,14 +1446,15 @@
 
         <!-- Paths Tab -->
         <div id="paths" class="tab-content">
-            <div class="card">
-                <div class="card-header">
+            <details class="card settings-section">
+                <summary class="card-header">
                     <div>
                         <h2 class="card-title">File Paths</h2>
                         <p class="card-description">Configure canonical vault and system locations. Relative paths resolve from the repo root unless noted otherwise.</p>
                     </div>
-                </div>
+                </summary>
 
+                <div class="settings-section-body">
                 <div class="form-group">
                     <label>Knowledge Vault Directory</label>
                     <input type="text" id="path-vault" placeholder="knowledge_vault">
@@ -1380,20 +1499,22 @@
                     <label>Cookies File</label>
                     <input type="text" id="path-cookies" placeholder="twitter_cookies.json">
                 </div>
+                </div>
 
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="savePaths()">💾 Save Paths</button>
                 </div>
-            </div>
+            </details>
 
-            <div class="card">
-                <div class="card-header">
+            <details class="card settings-section">
+                <summary class="card-header">
                     <div>
                         <h2 class="card-title">Resolved Runtime Layout</h2>
-                        <p class="card-description">Read-only runtime resolution for active shared roots and registries from the current merged config.</p>
+                        <p class="card-description">Read-only diagnostics for the effective paths, sources, and registry. Edit their settings in the sections above or in Sources &amp; Skills.</p>
                     </div>
-                </div>
+                </summary>
 
+                <div class="settings-section-body">
                 <div class="form-group">
                     <label>Resolved Wiki Root</label>
                     <input type="text" id="runtime-wiki-root" readonly>
@@ -1426,7 +1547,8 @@
                     <label>Grouped Runtime Config</label>
                     <textarea id="runtime-config-groups" rows="6" readonly></textarea>
                 </div>
-            </div>
+                </div>
+            </details>
         </div>
 
         <!-- Archivist Tab -->
@@ -3025,47 +3147,54 @@
 
                 return `
                     <article class="archivist-topic-card">
-                        <h3>${escapeHtml(topic.title)}</h3>
-                        <div class="topic-id">${escapeHtml(topic.id)}</div>
-                        ${topic.description ? `<p>${escapeHtml(topic.description)}</p>` : ''}
-                        <div class="archivist-topic-meta">
-                            <div><strong>Output</strong>${escapeHtml(topic.output_path)}</div>
-                            <div><strong>Cadence</strong>${escapeHtml(String(topic.cadence_hours))}h</div>
-                            <div><strong>Max Sources</strong>${escapeHtml(topic.max_sources == null ? 'Unlimited' : String(topic.max_sources))}</div>
-                            <div><strong>Manual Force</strong>${topic.allow_manual_force ? 'Allowed' : 'Disabled'}</div>
-                            <div><strong>Retrieval</strong>${escapeHtml(topic.retrieval?.mode || 'literal')}</div>
+                        <div class="archivist-topic-main">
+                            <h3>${escapeHtml(topic.title)}</h3>
+                            <div class="topic-id">${escapeHtml(topic.id)}</div>
+                            ${topic.description ? `<p>${escapeHtml(topic.description)}</p>` : ''}
+                            <div class="archivist-topic-meta">
+                                <div><strong>Output</strong>${escapeHtml(topic.output_path)}</div>
+                                <div><strong>Cadence</strong>${escapeHtml(String(topic.cadence_hours))}h</div>
+                                <div><strong>Max Sources</strong>${escapeHtml(topic.max_sources == null ? 'Unlimited' : String(topic.max_sources))}</div>
+                                <div><strong>Manual Force</strong>${topic.allow_manual_force ? 'Allowed' : 'Disabled'}</div>
+                                <div><strong>Retrieval</strong>${escapeHtml(topic.retrieval?.mode || 'literal')}</div>
+                            </div>
+                            ${stateError}
+                            <details class="archivist-topic-details">
+                                <summary>Filters &amp; weights</summary>
+                                <div class="archivist-topic-detail-panel" tabindex="0" aria-label="Filters and weights for ${escapeHtml(topic.title)}">
+                                    <div class="archivist-section-label">Include Roots</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills(topic.include_roots)}</div>
+                                    <div class="archivist-section-label">Exclude Roots</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_roots)}</div>
+                                    <div class="archivist-section-label">Source Types</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills(topic.source_types)}</div>
+                                    <div class="archivist-section-label">Include Tags</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills(topic.include_tags)}</div>
+                                    <div class="archivist-section-label">Exclude Tags</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_tags)}</div>
+                                    <div class="archivist-section-label">Include Terms</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills(topic.include_terms)}</div>
+                                    <div class="archivist-section-label">Exclude Terms</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_terms)}</div>
+                                    <div class="archivist-section-label">Retrieval Policy</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills([
+                                        `mode:${topic.retrieval?.mode || 'literal'}`,
+                                        `tags:${topic.retrieval?.tag_mode || 'required'}`,
+                                        `terms:${topic.retrieval?.term_mode || 'required'}`,
+                                        `fts:${topic.retrieval?.full_text_limit ?? 'n/a'}`,
+                                        `semantic:${topic.retrieval?.semantic_limit ?? 'n/a'}`,
+                                        `rerank:${topic.retrieval?.rerank_limit ?? 'n/a'}`,
+                                        `embed_budget:${topic.retrieval?.max_new_embeddings_per_run ?? 'n/a'}`
+                                    ])}</div>
+                                    <div class="archivist-section-label">Source Type Weights</div>
+                                    <div class="archivist-pill-list">${renderArchivistPills(
+                                        Object.entries(topic.retrieval?.source_type_weights || {}).map(
+                                            ([key, value]) => `${key}:${value}`
+                                        )
+                                    )}</div>
+                                </div>
+                            </details>
                         </div>
-                        ${stateError}
-                        <div class="archivist-section-label">Include Roots</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_roots)}</div>
-                        <div class="archivist-section-label">Exclude Roots</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_roots)}</div>
-                        <div class="archivist-section-label">Source Types</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.source_types)}</div>
-                        <div class="archivist-section-label">Include Tags</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_tags)}</div>
-                        <div class="archivist-section-label">Exclude Tags</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_tags)}</div>
-                        <div class="archivist-section-label">Include Terms</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.include_terms)}</div>
-                        <div class="archivist-section-label">Exclude Terms</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(topic.exclude_terms)}</div>
-                        <div class="archivist-section-label">Retrieval Policy</div>
-                        <div class="archivist-pill-list">${renderArchivistPills([
-                            `mode:${topic.retrieval?.mode || 'literal'}`,
-                            `tags:${topic.retrieval?.tag_mode || 'required'}`,
-                            `terms:${topic.retrieval?.term_mode || 'required'}`,
-                            `fts:${topic.retrieval?.full_text_limit ?? 'n/a'}`,
-                            `semantic:${topic.retrieval?.semantic_limit ?? 'n/a'}`,
-                            `rerank:${topic.retrieval?.rerank_limit ?? 'n/a'}`,
-                            `embed_budget:${topic.retrieval?.max_new_embeddings_per_run ?? 'n/a'}`
-                        ])}</div>
-                        <div class="archivist-section-label">Source Type Weights</div>
-                        <div class="archivist-pill-list">${renderArchivistPills(
-                            Object.entries(topic.retrieval?.source_type_weights || {}).map(
-                                ([key, value]) => `${key}:${value}`
-                            )
-                        )}</div>
                         ${forceButtons}
                     </article>
                 `;

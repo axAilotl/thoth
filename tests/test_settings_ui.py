@@ -1,4 +1,49 @@
+from collections import Counter
+from html.parser import HTMLParser
+import json
 from pathlib import Path
+import re
+import shutil
+import subprocess
+from xml.etree.ElementTree import Element, SubElement
+
+import pytest
+
+
+class SettingsMarkup(HTMLParser):
+    """Parse actual element ancestry, including markup rendered by the topic UI."""
+
+    def __init__(self, html):
+        super().__init__()
+        self.root = Element("document")
+        self.stack = [self.root]
+        self.feed(html)
+        assert self.stack == [self.root], "Unclosed settings elements"
+
+    def handle_starttag(self, tag, attrs):
+        element = SubElement(self.stack[-1], tag, dict(attrs))
+        if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input",
+                       "link", "meta", "param", "source", "track", "wbr"}:
+            self.stack.append(element)
+
+    def handle_endtag(self, tag):
+        assert self.stack[-1].tag == tag, f"Mismatched settings closing tag: {tag}"
+        self.stack.pop()
+
+    def handle_data(self, data):
+        self.stack[-1].text = (self.stack[-1].text or "") + data
+
+
+def settings_html():
+    return (Path(__file__).resolve().parents[1] / "static/settings.html").read_text()
+
+
+def element_ids(element):
+    return {node.attrib["id"] for node in element.iter() if "id" in node.attrib}
+
+
+def disclosure_title(element):
+    return " ".join("".join(element.find("summary").itertext()).split())
 
 
 def test_x_sync_message_uses_backfill_count_and_distinguishes_processing():
@@ -166,3 +211,146 @@ def test_settings_ui_bounds_long_status_tables_and_topics():
     assert '.archivist-topic-list {' in html
     assert 'max-height: 60vh;' in html
     assert 'overscroll-behavior: contain;' in html
+
+
+def test_source_settings_have_one_copy_in_their_own_disclosure():
+    root = SettingsMarkup(settings_html()).root
+    ids = Counter(node.attrib["id"] for node in root.iter() if "id" in node.attrib)
+    assert all(count == 1 for count in ids.values())
+    pipeline = root.find(".//*[@id='pipeline']")
+    groups = {
+        disclosure_title(group): group
+        for group in pipeline.findall(".//details[@name='source-settings']")
+    }
+    expected_prefixes = {
+        "ArXiv Discovery": ("source-arxiv-",),
+        "Vault Markdown Imports": ("source-web-clipper-",),
+        "Pi Skills": ("source-pi-skills-",),
+        "GitHub & HuggingFace": ("source-github-", "source-hf-", "social-github-", "social-hf-"),
+        "X API Bookmarks": ("source-x-api-", "social-x-api-", "x-api-auth-"),
+        "Automation & Schedules": ("automation-",),
+    }
+    assert groups.keys() == expected_prefixes.keys()
+    for title, prefixes in expected_prefixes.items():
+        group = groups[title]
+        assert "open" not in group.attrib
+        assert group[0].tag == "summary"
+        assert group.find("./div[@class='settings-section-body']") is not None
+        expected = {field_id for field_id in ids if field_id.startswith(prefixes)}
+        assert expected
+        assert element_ids(group) == expected
+    assert {"source-hf-models", "source-hf-datasets", "source-hf-spaces"} <= element_ids(
+        groups["GitHub & HuggingFace"]
+    )
+    assert len(pipeline.findall(".//button[@onclick='saveSources()']")) == 1
+    assert all(not group.findall(".//button[@onclick='saveSources()']") for group in groups.values())
+
+
+def test_skill_runner_defaults_fold_without_hiding_run_controls():
+    root = SettingsMarkup(settings_html()).root
+    skill_group = next(
+        group for group in root.findall(".//details[@name='source-settings']")
+        if disclosure_title(group) == "Pi Skills"
+    )
+    defaults = skill_group.find(".//details")
+    assert disclosure_title(defaults) == "Runner Defaults & Output"
+    assert "open" not in defaults.attrib
+    assert element_ids(defaults) == {
+        "source-pi-skills-default-provider", "source-pi-skills-default-model",
+        "source-pi-skills-output-dir",
+    }
+    assert not defaults.findall(".//button")
+    assert {button.attrib["onclick"] for button in skill_group.findall(".//button")} == {
+        "runPiSkill({ dryRun: true })", "runPiSkill({ execute: true })",
+    }
+
+
+def test_advanced_groups_keep_controls_and_save_actions_accessible():
+    root = SettingsMarkup(settings_html()).root
+    expected = [
+        ("providers", "Advanced: Model Providers", "saveProviders()", "providers-list"),
+        ("tasks", "Advanced: Task Routing", "saveTasks()", "task-tags-enabled"),
+        ("pipeline", "Pipeline Stages", "savePipeline()", "enable-llm"),
+        ("paths", "File Paths", "savePaths()", "path-vault"),
+    ]
+    for tab_id, title, handler, control in expected:
+        group = root.find(f".//*[@id='{tab_id}']/details")
+        assert disclosure_title(group).startswith(title)
+        assert "open" not in group.attrib
+        assert control in element_ids(group)
+        assert group.find(f"./div[@class='btn-group']/button[@onclick='{handler}']") is not None
+        assert group.find(f".//div[@class='settings-section-body']//button[@onclick='{handler}']") is None
+    diagnostics = root.findall(".//*[@id='paths']/details")[1]
+    assert disclosure_title(diagnostics).startswith("Resolved Runtime Layout")
+    assert "open" not in diagnostics.attrib
+    assert len(element_ids(diagnostics)) == 8
+    assert all("readonly" in field.attrib for field in diagnostics.iter() if "id" in field.attrib)
+    assert "? ['providers', 'tasks', 'paths']" in settings_html()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required to exercise the topic renderer")
+def test_rendered_topics_fold_all_filters_and_keep_actions_outside():
+    html = settings_html()
+    helpers = html[html.index("function formatOptionalDate("):html.index("function renderArchivistRegistry(")]
+    escape = html[html.index("function escapeHtml("):html.index("function ensureProviderModels(")]
+    topics = [
+        {
+            "id": "topic-1", "title": 'Security <papers> & "preprints"',
+            "include_roots": ["papers/security"], "exclude_roots": ["drafts"],
+            "source_types": ["pdf"], "include_tags": ["research"], "exclude_tags": ["draft"],
+            "include_terms": ["attack"], "exclude_terms": ["spam"],
+            "retrieval": {"source_type_weights": {"pdf": 2}},
+            "allow_manual_force": True,
+        },
+        {"id": "topic-2", "title": "Automatic only", "allow_manual_force": False},
+        {"id": "topic-3", "title": "State unavailable", "allow_manual_force": True,
+         "state_error": "Unable to read topic state"},
+    ]
+    script = "const container = {}; const document = {getElementById: () => container};\n"
+    script += escape + helpers
+    script += f"\nrenderArchivistTopics({json.dumps(topics)}); process.stdout.write(container.innerHTML);"
+    rendered = subprocess.run(
+        ["node", "-e", script], check=True, capture_output=True, text=True,
+    ).stdout
+    root = SettingsMarkup(rendered).root
+    cards = root.findall("article")
+    assert len(cards) == 3
+    for card, topic in zip(cards, topics):
+        main = card.find("./div[@class='archivist-topic-main']")
+        assert main.find("h3").text == topic["title"]
+        details = main.find("details")
+        assert "open" not in details.attrib
+        assert disclosure_title(details) == "Filters & weights"
+        panel = details.find("./div[@class='archivist-topic-detail-panel']")
+        assert panel.attrib["tabindex"] == "0"
+        assert panel.attrib["aria-label"] == f"Filters and weights for {topic['title']}"
+        assert [label.text for label in panel.findall("./div[@class='archivist-section-label']")] == [
+            "Include Roots", "Exclude Roots", "Source Types", "Include Tags", "Exclude Tags",
+            "Include Terms", "Exclude Terms", "Retrieval Policy", "Source Type Weights",
+        ]
+        assert not details.findall(".//button")
+        handlers = [f"runArchivistTopic('{topic['id']}')"]
+        if topic["allow_manual_force"]:
+            handlers += [f"queueArchivistForce('{topic['id']}')", f"clearArchivistForce('{topic['id']}')"]
+        assert [button.attrib["onclick"] for button in card.findall("./div[@class='btn-group']/button")] == handlers
+        state = main.find("./div[@class='archivist-state-box error-state']")
+        if "state_error" in topic:
+            assert state.text == topic["state_error"]
+        else:
+            assert "Force Queued" in "".join(main.find("./div[@class='archivist-state-box']").itertext())
+    assert "pdf:2" in "".join(cards[0].itertext())
+
+
+def test_topic_details_are_out_of_flow_and_scroll_within_the_card():
+    html = settings_html()
+    css = html.split("<style>", 1)[1].split("</style>", 1)[0]
+    rules = dict(re.findall(r"(\.[\w-]+)\s*\{([^}]+)\}", css))
+    assert "position: relative;" in rules[".archivist-topic-main"]
+    panel = rules[".archivist-topic-detail-panel"]
+    assert "position: absolute;" in panel
+    assert "inset: 0 0 2.25rem;" in panel
+    assert "overflow: auto;" in panel
+    assert "overscroll-behavior: contain;" in panel
+    settings_body = rules[".settings-section-body"]
+    assert "max-height: min(32rem, 60vh);" in settings_body
+    assert "overflow: auto;" in settings_body
