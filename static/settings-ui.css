@@ -48,7 +48,26 @@ summary:focus-visible {
     outline-offset: 3px;
 }
 
-/* Archivist topic cards */
+/* Archivist registry and topic cards */
+.archivist-toolbar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: end;
+    margin-bottom: 18px;
+}
+.archivist-toolbar .form-group {
+    flex: 1 1 240px;
+    margin-bottom: 0;
+}
+.archivist-toolbar .btn-group {
+    margin-top: 0;
+}
+.archivist-editor {
+    min-height: 320px;
+    font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+    resize: vertical;
+}
 .archivist-topic-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));

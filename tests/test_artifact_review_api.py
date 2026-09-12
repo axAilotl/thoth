@@ -186,6 +186,34 @@ def test_malformed_payload_can_be_rejected_but_not_retried(inbox, payload):
     assert collector.db.get_ingestion_entry(artifact.id).status == 'rejected'
 
 
+def test_exhausted_malformed_payload_does_not_break_review_listing(inbox):
+    client, collector, _, artifact, _ = inbox
+    entry = collector.db.get_ingestion_entry(artifact.id)
+    review = json.loads(entry.review_json)
+    review['state'].update(category='processing_failed', reason='Processing failed')
+    broken = replace(
+        entry, status='failed', attempts=5, last_error='Processing failed',
+        payload_json='{broken', review_json=json.dumps(review),
+    )
+    with collector.db._get_connection() as conn:
+        conn.execute(
+            'UPDATE ingestion_queue SET status=?, attempts=?, last_error=?, payload_json=?, review_json=? '
+            'WHERE artifact_id=?',
+            (broken.status, broken.attempts, broken.last_error, broken.payload_json,
+             broken.review_json, artifact.id),
+        )
+
+    response = client.get('/api/review')
+
+    assert response.status_code == 200
+    item, = response.json()['items']
+    assert item['category'] == 'malformed_payload'
+    assert item['source_status'] == 'unverified'
+    assert item['actions'] == ['reject']
+    assert 'reconstruct' in item['reason']
+    assert 'queued review metadata is malformed' in item['action_note']
+
+
 def test_listing_database_failure_is_not_reported_as_empty(inbox, monkeypatch):
     client, collector, *_ = inbox
     from contextlib import contextmanager
@@ -573,6 +601,38 @@ def test_retry_fails_closed_when_source_recheck_cannot_verify(tmp_path, monkeypa
     assert collector.db.get_ingestion_entry(artifact.id).status == 'failed'
 
 
+def test_restored_source_regains_retry_action(tmp_path):
+    collector, path, artifact = captured_pdf(tmp_path, b'%PDF-1.7\nRestored source\n')
+    entry = collector.db.get_ingestion_entry(artifact.id)
+    path.unlink()
+    reviewed = collector.db.mark_ingestion_review_required(
+        artifact.id,
+        category='source_missing',
+        reason='Document source file is missing; restore it and rescan.',
+        metadata={'source_status': 'missing', 'reason_summary': 'Source file missing; restore it and rescan.'},
+    )
+    path.write_bytes(b'%PDF-1.7\nRestored source\n')
+    runtime = KnowledgeArtifactRuntime(collector.config, layout=collector.layout, db=collector.db)
+    app = FastAPI()
+    app.include_router(create_review_router(lambda: runtime))
+    client = TestClient(app)
+
+    item, = client.get('/api/review').json()['items']
+
+    assert reviewed.status == 'needs_review'
+    assert item['category'] == 'processing_failed'
+    assert item['source_status'] == 'unverified'
+    assert item['actions'] == ['retry', 'reject']
+    assert 'available' in item['reason']
+
+    response = client.post('/api/review/decision', json={
+        'artifact_id': item['artifact_id'], 'revision': item['revision'], 'action': 'retry',
+    }, headers={'X-Thoth-Review': '1'})
+
+    assert response.status_code == 200, response.text
+    assert collector.db.get_ingestion_entry(artifact.id).status == 'pending'
+
+
 @pytest.mark.parametrize('error,source_status', [
     ("Syntax Error: Couldn't read xref table", 'malformed_pdf'),
     ('Unknown extraction failure', 'unverified'),
@@ -607,7 +667,8 @@ def test_review_uses_recorded_pdf_errors_without_extraction(
 
 
 def test_persisted_source_summary_takes_precedence_over_security_summary(inbox):
-    client, collector, _, artifact, _ = inbox
+    client, collector, path, artifact, _ = inbox
+    path.write_bytes(b'<!DOCTYPE html><html>Denied</html>')
     collector.db.mark_ingestion_review_required(
         artifact.id, category='source_html', reason='Document source contains HTML instead of PDF bytes.',
         metadata={'source_status': 'html', 'reason_summary': 'HTML saved as PDF; download the PDF and rescan.'},

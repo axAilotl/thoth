@@ -78,19 +78,47 @@ def review_item(entry, service, layout):
     findings = metadata.get("thoth_security_findings") or []
     source_relative = str(payload.get("source_relative_path") or "")
     category = state.get("category")
+    source_review = active and entry.artifact_type == "web_clipper" and (
+        category == "processing_failed" or str(category or "").startswith("source_")
+    )
     exhausted = active and category == "processing_failed"
     reason = _text((entry.last_error or state.get("error")) if exhausted else state.get("reason"))
     reason = reason or _text(entry.last_error)
-    if exhausted and entry.artifact_type == "web_clipper":
-        source_diagnostic = diagnose_document_source(
-            WebClipperArtifact.from_queue_payload(payload), service.config, layout,
-            recorded_error=entry.last_error or state.get("error") or "",
-        )
-        category = source_diagnostic.get("category", category)
-        reason = _text(source_diagnostic.get("reason")) or reason
-        if source_diagnostic.get("diagnostic_error"):
-            reason = _text(f"{reason}\nSource check: {source_diagnostic['diagnostic_error']}")
+    if source_review:
+        previously_source_blocked = str(category or "").startswith("source_")
+        try:
+            source_diagnostic = diagnose_document_source(
+                WebClipperArtifact.from_queue_payload(payload), service.config, layout,
+                recorded_error=entry.last_error or state.get("error") or "",
+            )
+        except Exception as exc:
+            # A broken persisted payload must not make the whole review inbox
+            # unavailable. Surface the reconstruction failure and keep the row
+            # reject-only until its queue metadata is repaired.
+            source_diagnostic = {
+                "source_status": "unverified",
+                "diagnostic_error": f"Unable to reconstruct the source: {exc}",
+            }
+            category = "malformed_payload"
+            reason = _text(source_diagnostic["diagnostic_error"])
+        else:
+            category = source_diagnostic.get("category", category)
+            if (
+                previously_source_blocked
+                and not source_diagnostic.get("category")
+                and not source_diagnostic.get("diagnostic_error")
+            ):
+                category = "processing_failed"
+                reason = "Source is available and passes integrity checks; retry processing to re-evaluate."
+                source_diagnostic["reason_summary"] = (
+                    "Source restored; retry processing to re-evaluate."
+                )
+            else:
+                reason = _text(source_diagnostic.get("reason")) or reason
+            if source_diagnostic.get("diagnostic_error"):
+                reason = _text(f"{reason}\nSource check: {source_diagnostic['diagnostic_error']}")
     source_blocked = str(category or "").startswith("source_")
+    payload_blocked = category == "malformed_payload"
     ocr_required = (
         entry.artifact_type == "web_clipper" and payload.get("file_type") == "attachment"
         and category == "ocr_required"
@@ -100,6 +128,11 @@ def review_item(entry, service, layout):
         action_note = (
             "Repair or restore the original source, then rescan it to create a new revision. "
             "Retry and security approval stay unavailable until the source is verified."
+        )
+    if payload_blocked and not classification:
+        action_note = (
+            "The queued review metadata is malformed. Repair the queue record, then rescan the source. "
+            "Retry and security approval stay unavailable until the record is valid."
         )
     if ocr_required and not classification:
         action_note = (
@@ -150,7 +183,7 @@ def review_item(entry, service, layout):
         "history": [{key: _text(event.get(key)) for key in ("at", "action", "actor", "reason", "from", "to")}
                     for event in review.get("events", [])[-50:] if isinstance(event, dict)],
         "actions": ([] if not active or classification else
-                    (["reject"] if source_blocked else
+                    (["reject"] if source_blocked or payload_blocked else
                      ["approve_security" if security else "retry", "reject"])),
         "action_note": action_note,
     }
