@@ -1,7 +1,6 @@
 """Exercise portable exchange, partial failures and hostile file locations."""
 
 from copy import deepcopy
-import json
 from pathlib import Path
 import subprocess
 import sys

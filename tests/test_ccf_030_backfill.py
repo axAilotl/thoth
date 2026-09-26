@@ -1,7 +1,6 @@
 """The migration reads native state, keeps IDs stable, and isolates failures."""
 
 import json
-from pathlib import Path
 import sqlite3
 
 from ccf.backfill import backfill

@@ -151,9 +151,7 @@ To refresh the Python lock intentionally, run
 `uv pip compile requirements.txt --python-version 3.12 --generate-hashes --output-file docker/requirements.lock`
 and validate the resulting image before deployment.
 
-## Settings UI
-
-### CCF metadata and portable exchange
+## CCF metadata and portable exchange
 
 Thoth supports CCF 0.3.0 records, links, and blob pointers in a local SQLite
 metadata store. Enable `database.ccf`, then run `python thoth.py ccf backfill`
@@ -161,6 +159,8 @@ to index existing native state without changing source files. Use `ccf status`,
 `ccf export PATH`, and `ccf import PATH` to inspect and exchange metadata.
 See the [CCF upgrade and operations guide](docs/ccf_030_upgrade.md) before
 upgrading a running installation.
+
+## Settings UI
 
 The settings UI exposes:
 - provider credentials and task routing

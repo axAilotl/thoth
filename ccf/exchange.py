@@ -170,7 +170,8 @@ def import_objects(store, source, *, content_dir=None):
                 report["counts"]["files"] += 1
             except (OSError, ValueError) as exc:
                 _issue(report, name, exc)
-        for kind, count in manifest["counts"].items():
+        for kind in actual:
+            count = manifest["counts"][kind]
             if actual[kind] != count:
                 _issue(report, "manifest.json", f"counts.{kind}: expected {count}, found {actual[kind]}")
     return report
