@@ -17,7 +17,7 @@ connector manifest ``ccf`` block (``core.connector_registry``); an
 unknown lane or a malformed extension rejects the envelope. When
 present they are threaded into the queued payload's
 ``normalized_metadata.ccf`` (``{"lane": ..., "extensions": {...}}``),
-where the dual-write mirror (``ccf.dualwrite``) applies them as a
+where the metadata service (``ccf.metadata``) applies them as a
 per-artifact override of the ingesting connector's manifest ``ccf``
 block — this is how ``mixed``-lane connectors (skill_outputs,
 pi_skills) get precise per-envelope lanes. Envelopes without the v1.1
@@ -574,7 +574,7 @@ def _parse_envelope_ccf(envelope: Mapping[str, Any]) -> dict[str, Any]:
 
     Returns the ``normalized_metadata.ccf`` block to thread into the queued
     payload — only the fields the envelope actually declared, so the
-    dual-write mirror falls back to the connector manifest's ``ccf`` block
+    metadata service uses the connector manifest's ``ccf`` block
     for anything absent. Unknown lanes and malformed extensions raise
     ``ValueError`` like every other envelope rejection.
     """

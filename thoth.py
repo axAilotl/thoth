@@ -2941,6 +2941,8 @@ Examples:
     )
     # Subcommands
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    from ccf.cli import register_parser as register_ccf_parser
+    register_ccf_parser(subparsers)
 
     # Process command
     process_parser = subparsers.add_parser("process", help="Process tweets to markdown")
@@ -4168,6 +4170,10 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    if args.command == "ccf":
+        from ccf.cli import dispatch as dispatch_ccf
+        sys.exit(dispatch_ccf(args, config))
 
     plan_only_command = (
         args.command in {"web-clipper", "ingest-queue", "x-api-sync"}

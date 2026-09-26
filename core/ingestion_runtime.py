@@ -448,6 +448,8 @@ class KnowledgeArtifactRuntime:
                 ),
             ):
                 raise StaleIngestionRevision(entry.artifact_id)
+            from .ccf_processing import record_processed_artifact
+            record_processed_artifact(self.config, self.layout, entry, artifact)
             return result
         except StaleIngestionRevision:
             return IngestionDispatchResult(
