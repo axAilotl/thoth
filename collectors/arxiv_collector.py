@@ -16,7 +16,7 @@ import feedparser
 from core.artifacts.paper import PaperArtifact
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
-from core.ccf_dualwrite import dual_write_requested
+from core.ccf_metadata import metadata_enabled
 from core.config import Config, config as runtime_config
 from core.connector_capture import ConnectorCaptureQueue, write_connector_raw_json
 from core.metadata_db import MetadataDB, get_metadata_db
@@ -226,7 +226,7 @@ class ArXivCollector:
         raw_path = None
         if (
             lifecycle.capture_event_store is not None
-            or dual_write_requested(self.config)
+            or metadata_enabled(self.config)
         ):
             raw_path = write_connector_raw_json(
                 self.layout,

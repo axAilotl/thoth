@@ -403,14 +403,14 @@ def test_source_links_only_allow_explicit_web_urls(inbox, url, allowed):
     assert item['ocr_required'] is False
 
 
-def test_console_defaults_reach_the_existing_audit_mirror(inbox, monkeypatch):
+def test_console_defaults_reach_the_metadata_audit_hook(inbox, monkeypatch):
     client, _, _, _, _ = inbox
     mirrored = []
 
     def mirror(self, entry, *, action):
         mirrored.append((action, json.loads(entry.review_json)['events'][-1]))
 
-    monkeypatch.setattr('core.artifact_review_queue.ArtifactReviewQueueService._mirror_review_decision', mirror)
+    monkeypatch.setattr('core.artifact_review_queue.ArtifactReviewQueueService._record_ccf_review', mirror)
     body = decision(client)
     body.pop('actor')
     body.pop('reason')
@@ -426,9 +426,9 @@ def test_error_after_recording_is_not_safe_to_retry(inbox, monkeypatch):
     client, collector, _, artifact, _ = inbox
 
     def mirror_failure(self, entry, *, action):
-        raise RuntimeError('Mirror configuration unavailable')
+        raise RuntimeError('Metadata hook unavailable')
 
-    monkeypatch.setattr('core.artifact_review_queue.ArtifactReviewQueueService._mirror_review_decision', mirror_failure)
+    monkeypatch.setattr('core.artifact_review_queue.ArtifactReviewQueueService._record_ccf_review', mirror_failure)
     body = decision(client)
     response = client.post('/api/review/decision', json=body, headers={'X-Thoth-Review': '1'})
     assert response.status_code == 409
