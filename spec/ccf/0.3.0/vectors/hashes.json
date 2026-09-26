@@ -1,0 +1,123 @@
+{
+  "format": "ccf-hash-vectors",
+  "version": "0.3.0",
+  "canonical": [
+    {
+      "name": "empty-object",
+      "input": "{}",
+      "canonical": "{}",
+      "hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "flat",
+      "input": "{\"b\":2,\"a\":1}",
+      "canonical": "{\"a\":1,\"b\":2}",
+      "hash": "sha256:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777"
+    },
+    {
+      "name": "flat-reordered",
+      "input": "{\"a\":1,\"b\":2}",
+      "canonical": "{\"a\":1,\"b\":2}",
+      "hash": "sha256:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777"
+    },
+    {
+      "name": "whitespace",
+      "input": "{\n  \"b\" : 2,\n  \"a\" : 1\n}",
+      "canonical": "{\"a\":1,\"b\":2}",
+      "hash": "sha256:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777"
+    },
+    {
+      "name": "nested",
+      "input": "{\"speakers\":[{\"name\":\"Dana\",\"turns\":3},{\"name\":\"Ra\\u00fal\",\"turns\":5}],\"lang\":\"en\",\"final\":true,\"notes\":null}",
+      "canonical": "{\"final\":true,\"lang\":\"en\",\"notes\":null,\"speakers\":[{\"name\":\"Dana\",\"turns\":3},{\"name\":\"Raúl\",\"turns\":5}]}",
+      "hash": "sha256:b78b4fb542d79e397a08ea92e0f32853fc0eb25efe7cc7ff3b63df3b79d7109f"
+    },
+    {
+      "name": "unicode",
+      "input": "{\"text\":\"café ☕ 🎧 日本語\"}",
+      "canonical": "{\"text\":\"café ☕ 🎧 日本語\"}",
+      "hash": "sha256:b7481ac20e25b4b8e3b3f5a5152a34484307d9a7b5a4fbea7adc273088f93157"
+    },
+    {
+      "name": "escaped-input",
+      "input": "{\"s\":\"\\u00e9\\u2028\"}",
+      "canonical": "{\"s\":\"é \"}",
+      "hash": "sha256:b9197c8834d2d62c011039efc279ed52825bc4b63d6abb4e82e294c03716d3e3"
+    },
+    {
+      "name": "utf16-key-order",
+      "input": "{\"\\ue000\":1,\"😀\":2,\"a\":3}",
+      "canonical": "{\"a\":3,\"😀\":2,\"\":1}",
+      "hash": "sha256:84495633024b0992798250783e7ccb01ab2875649ab22f353f14c0d6a8389fc2"
+    },
+    {
+      "name": "string-escapes",
+      "input": "{\"s\":\"quote\\\" back\\\\ nl\\n tab\\t cr\\r bs\\b ff\\f ctrl\\u0001 us\\u001f del\\u007f slash/\"}",
+      "canonical": "{\"s\":\"quote\\\" back\\\\ nl\\n tab\\t cr\\r bs\\b ff\\f ctrl\\u0001 us\\u001f del slash/\"}",
+      "hash": "sha256:a33217d05757732d886df725e11dc408f4832d39269a01a89b1cde2d9c890c03"
+    },
+    {
+      "name": "integer-bounds",
+      "input": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"zero\":0,\"neg\":-42}",
+      "canonical": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"neg\":-42,\"zero\":0}",
+      "hash": "sha256:9469cd310334e83149791bb63c074f091a11db56e149aaf2cc6005d3282ffaab"
+    },
+    {
+      "name": "arrays",
+      "input": "{\"a\":[3,1,2],\"b\":[],\"c\":[[],{}]}",
+      "canonical": "{\"a\":[3,1,2],\"b\":[],\"c\":[[],{}]}",
+      "hash": "sha256:b6fd4971b1dded8225a774a7c4fdc2b110491fd616678c52c6cda21ce3bcfe3a"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "fraction",
+      "input": "{\"confidence\":0.93}"
+    },
+    {
+      "name": "integer-written-as-fraction",
+      "input": "{\"n\":1.0}"
+    },
+    {
+      "name": "exponent",
+      "input": "{\"n\":1e3}"
+    },
+    {
+      "name": "above-range",
+      "input": "{\"n\":9007199254740992}"
+    },
+    {
+      "name": "below-range",
+      "input": "{\"n\":-9007199254740992}"
+    },
+    {
+      "name": "duplicate-key",
+      "input": "{\"a\":1,\"a\":2}"
+    },
+    {
+      "name": "nan",
+      "input": "{\"n\":NaN}"
+    },
+    {
+      "name": "unpaired-surrogate",
+      "input": "{\"s\":\"\\ud800\"}"
+    }
+  ],
+  "bytes": [
+    {
+      "name": "empty",
+      "hex": "",
+      "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "hello-newline",
+      "hex": "68656c6c6f0a",
+      "hash": "sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
+    },
+    {
+      "name": "all-byte-values",
+      "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "hash": "sha256:40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880"
+    }
+  ]
+}

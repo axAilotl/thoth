@@ -1,119 +1,40 @@
-"""CCF portable identifiers (spec section 2).
-
-Canonical IDs are producer-generated before submission and have the form::
-
-    urn:ccf:<kind>:<lowercase-hyphenated-uuidv4>
-
-UUIDv7 and any other UUID variant/version are rejected: timestamp-bearing
-IDs leak creation time after erasure, which is why CCF pins UUIDv4
-(spec section 2.1). All validation fails closed.
-"""
+"""Producer-generated UUIDv7 identifiers for CCF 0.3.0."""
 
 from __future__ import annotations
 
-import json
 import re
+import secrets
+import time
 import uuid
-from dataclasses import dataclass
 
-#: Portable ID kinds. ``receipt`` is the 0.2.0 transport identifier for
-#: uplift/downgrade receipts; the rest are the 0.1.2 portable kinds.
-ID_KINDS: frozenset[str] = frozenset(
-    {
-        "record",
-        "link",
-        "blob",
-        "archive",
-        "lineage",
-        "key",
-        "credential",
-        "batch",
-        "pack",
-        "receipt",
-    }
-)
-
-_URN_RE = re.compile(
-    r"^urn:ccf:(?P<kind>[a-z]+):"
-    r"(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+_ID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 )
 
 
 class CcfIdError(ValueError):
-    """Raised when a CCF identifier is malformed or violates the profile."""
+    """An identifier is not a lowercase, hyphenated UUIDv7."""
 
 
-@dataclass(frozen=True)
-class CcfId:
-    """A parsed, validated CCF portable identifier."""
-
-    kind: str
-    uuid: uuid.UUID
-
-    def __str__(self) -> str:
-        return f"urn:ccf:{self.kind}:{self.uuid}"
-
-
-def generate_id(kind: str) -> str:
-    """Generate a new canonical CCF ID of the given kind (UUIDv4)."""
-    if kind not in ID_KINDS:
-        raise CcfIdError(f"unsupported CCF id kind: {kind!r}")
-    return str(CcfId(kind, uuid.uuid4()))
+def generate_id() -> str:
+    """Generate an RFC 9562 UUIDv7 with a timestamp and 74 random bits."""
+    milliseconds = time.time_ns() // 1_000_000
+    if not 0 <= milliseconds < 2**48:
+        raise CcfIdError("current time is outside the UUIDv7 timestamp range")
+    random_bits = secrets.randbits(74)
+    value = (
+        (milliseconds << 80) | (7 << 76) | ((random_bits >> 62) << 64)
+        | (2 << 62) | (random_bits & ((1 << 62) - 1))
+    )
+    return str(uuid.UUID(int=value))
 
 
-def derive_id(namespace: uuid.UUID, kind: str, material: list[str]) -> str:
-    """Derive a deterministic canonical CCF ID from stable material.
-
-    UUIDv5 digest of the JSON-canonical ``material`` under ``namespace``,
-    with the version/variant bits forced to the UUIDv4 / RFC 4122 layout
-    :func:`parse_id` demands — deterministic content with a spec-legal
-    shape. Used ONLY where CCF offers no idempotency key of its own
-    (bootstrap objects, origin-root sources); every origin-bearing object
-    keeps a freshly generated URN and relies on the origin index.
-    """
-    if kind not in ID_KINDS:
-        raise CcfIdError(f"unsupported CCF id kind: {kind!r}")
-    if not material or not all(isinstance(part, str) and part for part in material):
-        raise CcfIdError("deterministic id material must be non-empty strings")
-    canonical = json.dumps(material, ensure_ascii=False, separators=(",", ":"))
-    digest = bytearray(uuid.uuid5(namespace, canonical).bytes)
-    digest[6] = (digest[6] & 0x0F) | 0x40  # version 4
-    digest[8] = (digest[8] & 0x3F) | 0x80  # RFC 4122 variant
-    return str(CcfId(kind, uuid.UUID(bytes=bytes(digest))))
+def parse_id(value: str) -> uuid.UUID:
+    """Validate the exact portable spelling and return its UUID value."""
+    if not isinstance(value, str) or not _ID_RE.fullmatch(value):
+        raise CcfIdError(f"expected lowercase hyphenated UUIDv7: {value!r}")
+    return uuid.UUID(value)
 
 
-def parse_id(urn: str) -> CcfId:
-    """Parse and validate a CCF URN. Fails closed on any deviation.
-
-    Rejects unknown kinds, non-lowercase text, malformed UUIDs, and any
-    UUID that is not version 4 with the RFC 4122 variant (this excludes
-    UUIDv7, nil/max UUIDs, and other layouts).
-    """
-    if not isinstance(urn, str):
-        raise CcfIdError(f"CCF id must be a string, got {type(urn).__name__}")
-    match = _URN_RE.match(urn)
-    if match is None:
-        raise CcfIdError(f"malformed CCF URN: {urn!r}")
-    kind = match.group("kind")
-    if kind not in ID_KINDS:
-        raise CcfIdError(f"unsupported CCF id kind: {kind!r}")
-    value = uuid.UUID(match.group("uuid"))
-    if value.version != 4:
-        raise CcfIdError(f"CCF id requires UUIDv4, got version {value.version}: {urn!r}")
-    if value.variant != uuid.RFC_4122:
-        raise CcfIdError(f"CCF id requires RFC 4122 variant: {urn!r}")
-    # uuid.UUID() accepts several spellings; the regex already pinned the
-    # exact lowercase hyphenated form, so a round-trip check is a cheap
-    # belt-and-suspenders assertion of canonical text.
-    if str(value) != match.group("uuid"):
-        raise CcfIdError(f"non-canonical UUID text: {urn!r}")
-    return CcfId(kind, value)
-
-
-def is_valid_id(urn: str) -> bool:
-    """Return True iff ``urn`` is a valid canonical CCF identifier."""
-    try:
-        parse_id(urn)
-    except CcfIdError:
-        return False
-    return True
+def is_valid_id(value: object) -> bool:
+    return isinstance(value, str) and _ID_RE.fullmatch(value) is not None

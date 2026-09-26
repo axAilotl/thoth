@@ -1,0 +1,15 @@
+{
+  "format": "ccf-export",
+  "version": "0.3.0",
+  "exported_at": "2026-09-24T12:00:00.000Z",
+  "source": {
+    "app": "cissa",
+    "device": "homelab"
+  },
+  "counts": {
+    "records": 6,
+    "links": 5,
+    "blobs": 1,
+    "files": 2
+  }
+}

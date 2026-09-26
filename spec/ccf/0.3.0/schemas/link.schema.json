@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/axAilotl/ccf-schema/spec/0.3.0/schemas/link.schema.json",
+  "title": "CCF 0.3.0 Link",
+  "allOf": [{"$ref": "common.schema.json#/$defs/object"}],
+  "if": {"required": ["deleted"]},
+  "then": {},
+  "else": {"required": ["from", "rel", "to"]},
+  "properties": {
+    "kind": {"const": "link"},
+    "from": {"$ref": "common.schema.json#/$defs/id"},
+    "rel": {"$ref": "common.schema.json#/$defs/name"},
+    "to": {"$ref": "common.schema.json#/$defs/id"},
+    "data": {"type": "object"}
+  }
+}

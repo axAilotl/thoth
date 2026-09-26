@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/axAilotl/ccf-schema/spec/0.3.0/schemas/common.schema.json",
+  "title": "CCF 0.3.0 common definitions",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+    },
+    "source": {
+      "type": "object",
+      "required": ["app"],
+      "properties": {
+        "app": {"type": "string", "minLength": 1},
+        "device": {"type": "string", "minLength": 1},
+        "native_id": {"type": "string", "minLength": 1},
+        "uri": {"type": "string", "minLength": 1}
+      }
+    },
+    "object": {
+      "type": "object",
+      "required": ["id", "kind", "created", "updated", "rev", "source"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["record", "link", "blob"]},
+        "created": {"$ref": "#/$defs/timestamp"},
+        "updated": {"$ref": "#/$defs/timestamp"},
+        "rev": {"type": "integer", "minimum": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "by": {"type": "string", "pattern": "^(user|app:.+|model:.+)$"},
+        "status": {"enum": ["inferred", "accepted", "rejected"]},
+        "deleted": {"$ref": "#/$defs/timestamp"},
+        "ext": {"type": "object"}
+      }
+    }
+  }
+}
