@@ -27,6 +27,7 @@ def register_parser(subparsers):
 
 def run(args, config):
     from core.path_layout import build_path_layout
+    from core.connector_registry import load_connector_registry
     from core.ccf_metadata import open_metadata_service
     from .metadata import CcfMetadataService
     from .store import ObjectStore
@@ -35,7 +36,8 @@ def run(args, config):
     if args.store is not None:
         device = args.device or config.get("database.ccf.device", "thoth")
         store_path = args.store.resolve()
-        service = CcfMetadataService(ObjectStore(store_path, device=device), vault_root=layout.vault_root)
+        service = CcfMetadataService(ObjectStore(store_path, device=device), vault_root=layout.vault_root,
+                                     connector_registry=load_connector_registry(config))
     else:
         service = open_metadata_service(config, layout=layout)
         if service is None:

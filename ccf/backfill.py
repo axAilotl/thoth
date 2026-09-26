@@ -38,6 +38,7 @@ def backfill(service, database_path, *, wiki_root=None):
     No ingestion, LLM call, source rewrite, or review transition is performed.
     """
     report = {"counts": {}, "errors": []}
+    problems_before = len(service.problems)
 
     def process(family, native_id, function):
         try:
@@ -86,4 +87,5 @@ def backfill(service, database_path, *, wiki_root=None):
                                     source_paths=metadata.get("thoth_source_paths") or [])
             process("wiki", path, wiki)
     report["store"] = service.store.stats()
+    report["errors"].extend(service.problems[problems_before:])
     return report
