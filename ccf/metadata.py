@@ -45,7 +45,7 @@ class CcfMetadataService:
         return capture_queue(self, artifact_id=artifact_id, artifact_type=artifact_type,
                              payload=payload, source=source, entities=entities)
 
-    def record_file(self, path: Path, *, artifact_id=None, artifact_type='document'):
+    def record_file(self, path: Path, *, artifact_id=None, artifact_type='document', inferred=False):
         """Map bytes in place; missing/unreadable files raise for item reporting.
 
         Uses raw:<sha256 of resolved path> and blob:<same digest> native keys,
@@ -54,7 +54,7 @@ class CcfMetadataService:
         """
         from .metadata_capture import record_raw
         from .metadata_values import artifact_type as record_type
-        record = record_raw(self, {'path': path})
+        record = record_raw(self, {'path': path}, inferred=inferred)
         if artifact_id is not None:
             artifact = self.reference(f'artifact:{artifact_id}', title=artifact_id,
                                       record_type=record_type(artifact_type))

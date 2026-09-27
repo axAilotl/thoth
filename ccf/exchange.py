@@ -77,7 +77,7 @@ def export_objects(objects, destination, *, source, include_files=False,
                 except (ValueError, TypeError) as exc:
                     _issue(report, f"object:{index}", exc, object_id=object_id)
                     continue
-                if not include_files or "deleted" in obj or not (obj.get("hash") and obj.get("loc")):
+                if not include_files or obj["kind"] not in {"record", "blob"} or "deleted" in obj or not (obj.get("hash") and obj.get("loc")):
                     continue
                 digest = obj["hash"].removeprefix("sha256:")
                 target = root / "files" / digest
@@ -142,7 +142,7 @@ def import_objects(store, source, *, content_dir=None):
                     report["counts"]["conflicts"] += int(result["conflict"])
                     for warning in result["warnings"]:
                         _issue(report, location, warning, object_id=object_id, warning=True)
-                    if obj.get("hash") and obj.get("loc") and "deleted" not in obj:
+                    if kind in {"record", "blob"} and obj.get("hash") and obj.get("loc") and "deleted" not in obj:
                         referenced.setdefault(obj["hash"], []).append(obj)
                 except (ValueError, TypeError, UnicodeError) as exc:
                     _issue(report, location, exc, object_id=object_id)

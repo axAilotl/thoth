@@ -106,3 +106,30 @@ def test_invalid_export_object_does_not_block_valid_neighbors(tmp_path):
     report = export_objects([{"id": "bad"}, obj], tmp_path / "export", source={"app": "thoth"})
     assert report["counts"]["records"] == 1
     assert report["errors"][0]["id"] == "bad"
+
+
+def test_link_unknown_fields_are_opaque_even_when_named_hash_and_loc(tmp_path):
+    store = ObjectStore(tmp_path / "store.sqlite3")
+    obj = store.upsert("one", "record", {"type": "note"})
+    link = store.upsert("link", "link", {"from": obj["id"], "to": obj["id"], "rel": "related",
+                                          "hash": {"future": 17}, "loc": ["future", "location"]})
+    dest = tmp_path / "export"
+    report = export_objects(store.objects(), dest, source={"app": "thoth"}, include_files=True)
+    assert not report["errors"]
+    target = ObjectStore(tmp_path / "target.sqlite3")
+    report = import_objects(target, dest)
+    assert not report["errors"] and target.get(link["id"]) == link
+
+
+def test_generated_vault_location_roundtrips_special_filename(tmp_path):
+    from ccf.metadata import CcfMetadataService
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    path = vault / "note#2?100%.md"
+    path.write_text("source bytes")
+    store = ObjectStore(tmp_path / "store.sqlite3")
+    obj = CcfMetadataService(store, vault_root=vault).record_file(path)
+    assert obj["loc"] == "vault:note%232%3F100%25.md"
+    result = export_objects(store.objects(), tmp_path / "export", source={"app": "thoth"},
+                            include_files=True, vault_root=vault, allowed_roots=[vault])
+    assert not result["warnings"] and result["counts"]["files"] == 1

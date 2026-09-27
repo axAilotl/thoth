@@ -81,7 +81,7 @@ def capture_queue(service, *, artifact_id, artifact_type, payload, source=None, 
     return artifact
 
 
-def record_raw(service, raw):
+def record_raw(service, raw, *, inferred=False):
     path = content_path(raw['path'], service.vault_root).resolve()
     with path.open('rb') as handle:
         digest = 'sha256:' + hashlib.file_digest(handle, 'sha256').hexdigest()
@@ -95,10 +95,16 @@ def record_raw(service, raw):
               or mimetypes.guess_type(path.name)[0] or 'application/octet-stream',
               'size': size, 'title': path.name, 'by': 'app:thoth'}
     blob = service.store.upsert(f'blob:{path_key}', 'blob', fields)
-    record = service.store.upsert(f'raw:{path_key}', 'record', {
+    previous = service.store.find(f'raw:{path_key}')
+    record_fields = {
         'type': 'note' if path.suffix.lower() == '.md' else
                 ('recording' if fields['media_type'].startswith(('audio/', 'video/')) else 'document'),
         'loc': loc, 'hash': digest, 'title': path.name, 'by': 'app:thoth',
-    })
+    }
+    if previous and previous.get('status'):
+        record_fields['status'] = previous['status']
+    elif inferred:
+        record_fields['status'] = 'inferred'
+    record = service.store.upsert(f'raw:{path_key}', 'record', record_fields)
     service.link(record, 'has_file', blob)
     return record

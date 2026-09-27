@@ -25,8 +25,9 @@ def record_processed_artifact(config, layout, entry, artifact):
             path = Path(name)
             if not path.is_absolute():
                 path = layout.vault_root / path
-            output = service.record_file(path, artifact_type=kind)
-            if kind in {"summary", "translation", "transcript", "markdown"}:
+            inferred = kind in {"summary", "translation", "transcript", "markdown"}
+            output = service.record_file(path, artifact_type=kind, inferred=inferred)
+            if inferred:
                 service.link(output, "derived_from", record, inferred=True)
             else:
                 service.link(record, "derived_from", output)

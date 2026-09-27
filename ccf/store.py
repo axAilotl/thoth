@@ -19,6 +19,7 @@ _SCHEMA = (
     "INSERT OR IGNORE INTO counter VALUES (1, 0)",
     "CREATE TABLE IF NOT EXISTS objects (id TEXT PRIMARY KEY, kind TEXT NOT NULL, body TEXT NOT NULL, changed INTEGER UNIQUE NOT NULL, deleted INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS native_keys (native_key TEXT PRIMARY KEY, object_id TEXT UNIQUE NOT NULL REFERENCES objects(id))",
+    "CREATE TABLE IF NOT EXISTS local_annotations (native_key TEXT PRIMARY KEY REFERENCES native_keys(native_key), body TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS peers (peer TEXT PRIMARY KEY, acknowledged INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS conflicts (object_id TEXT NOT NULL REFERENCES objects(id), body TEXT NOT NULL, PRIMARY KEY (object_id, body))",
 )
@@ -139,7 +140,8 @@ class ObjectStore:
     ) -> dict:
         """Replace local mutable fields, creating a stable ID only once.
 
-        ``fields`` is the complete mutable state, not a partial patch. Managed
+        ``fields`` is the mutable state. Data/ext keys authored by this native
+        writer may change or disappear; opaque imported keys survive. Managed
         identity/revision fields are forbidden. Source is used only at creation.
         Inline Record data receives its canonical hash automatically. Setting
         ``deleted`` produces a minimal tombstone, retaining a Record's type.
@@ -150,6 +152,7 @@ class ObjectStore:
         if not isinstance(fields, dict) or _MANAGED.intersection(fields):
             raise ValueError("fields must be a dict without store-managed fields")
         mutable = loads(canonicalize(fields))
+        authored = {key: mutable[key] for key in ("data", "ext") if key in mutable}
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -158,6 +161,17 @@ class ObjectStore:
             previous = self._get(db, row[0]) if row else None
             if previous is not None and previous["kind"] != kind:
                 raise ValueError("an object's kind cannot change")
+            if previous is not None and "deleted" not in mutable:
+                from .store_annotations import preserve_opaque
+                row = db.execute("SELECT body FROM local_annotations WHERE native_key=?", (native_key,)).fetchone()
+                owned = loads(row[0]) if row else {}
+                for key in ("data", "ext"):
+                    if key in mutable and not isinstance(mutable[key], dict):
+                        raise ValueError(f"{key} must be an object")
+                    if isinstance(previous.get(key), dict):
+                        merged = preserve_opaque(previous[key], mutable.get(key, {}), owned.get(key, {}))
+                        if merged or key in mutable:
+                            mutable[key] = merged
             if "deleted" in mutable:
                 mutable = {"deleted": mutable["deleted"]}
                 if kind == "record":
@@ -170,6 +184,8 @@ class ObjectStore:
             if previous is not None:
                 old_fields = {key: value for key, value in previous.items() if key not in _MANAGED}
                 if canonicalize(old_fields) == canonicalize(mutable):
+                    db.execute("INSERT INTO local_annotations VALUES (?, ?) ON CONFLICT(native_key) DO UPDATE SET body=excluded.body",
+                               (native_key, canonicalize(authored)))
                     return previous
                 obj = {key: previous[key] for key in _MANAGED}
                 obj.update(mutable, rev=previous["rev"] + 1, updated=now_timestamp())
@@ -186,6 +202,8 @@ class ObjectStore:
             self._write(db, obj)
             if previous is None:
                 db.execute("INSERT INTO native_keys VALUES (?, ?)", (native_key, obj["id"]))
+            db.execute("INSERT INTO local_annotations VALUES (?, ?) ON CONFLICT(native_key) DO UPDATE SET body=excluded.body",
+                       (native_key, canonicalize(authored)))
             return loads(canonicalize(obj))
 
     def apply(self, obj: dict) -> dict:
@@ -219,6 +237,21 @@ class ObjectStore:
                     warnings.append(f"{incoming['id']}: same-revision conflict retained")
             if status != "unchanged":
                 self._write(db, winner)
+            # Restoring this installation's export must preserve the identity
+            # used by later native-data replay. Foreign installations cannot
+            # claim local native keys merely by sharing a native_id.
+            origin = winner["source"]
+            native_key = origin.get("native_id")
+            if origin.get("app") == "thoth" and origin.get("device") == self.device and native_key:
+                binding = db.execute("SELECT object_id FROM native_keys WHERE native_key=?", (native_key,)).fetchone()
+                if binding is None:
+                    other = db.execute("SELECT native_key FROM native_keys WHERE object_id=?", (winner["id"],)).fetchone()
+                    if other is None:
+                        db.execute("INSERT INTO native_keys VALUES (?, ?)", (native_key, winner["id"]))
+                    elif other[0] != native_key:
+                        warnings.append(f"{winner['id']}: native key differs from existing binding")
+                elif binding[0] != winner["id"]:
+                    warnings.append(f"{winner['id']}: native key {native_key!r} already belongs to another object; binding preserved")
             return {"status": status, "object": winner, "warnings": warnings, "conflict": conflict}
 
     def conflicts(self, object_id: str | None = None) -> list[dict]:

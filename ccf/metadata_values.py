@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from urllib.parse import quote
 
 
 def portable(value):
@@ -26,7 +27,7 @@ def mapping(value):
 def location(path: Path, vault_root: Path) -> str:
     path = path.resolve()
     try:
-        return 'vault:' + path.relative_to(vault_root.resolve()).as_posix()
+        return 'vault:' + quote(path.relative_to(vault_root.resolve()).as_posix(), safe='/')
     except ValueError:
         return path.as_uri()
 

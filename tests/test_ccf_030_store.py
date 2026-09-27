@@ -292,3 +292,28 @@ def test_store_uses_wal_and_rejects_memory_database(store):
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     with pytest.raises(ValueError, match="persistent"):
         ObjectStore(":memory:")
+
+
+def test_restore_replay_keeps_native_id_but_foreign_devices_do_not_bind(tmp_path):
+    original = ObjectStore(tmp_path / "original.sqlite3", device="same-installation")
+    fields = {"type": "note", "data": {"native": "value"}}
+    obj = original.upsert("native:1", "record", fields)
+    restored = ObjectStore(tmp_path / "restored.sqlite3", device="same-installation")
+    restored.apply(obj)
+    assert restored.upsert("native:1", "record", fields) == obj
+    assert restored.stats()["objects"] == 1
+    foreign = ObjectStore(tmp_path / "foreign.sqlite3", device="another-installation")
+    foreign.apply(obj)
+    assert foreign.find("native:1") is None
+
+
+def test_native_update_preserves_opaque_fields_but_removes_its_own(store):
+    obj = store.upsert("native", "record", {"type": "note", "data": {"owned": {"value": 1, "obsolete": True}}})
+    incoming = dict(obj, rev=obj["rev"] + 1,
+                    data={"owned": {"value": 1, "obsolete": True, "foreign": "nested"}, "opaque": "kept"},
+                    ext={"foreign": {"v": 2}})
+    incoming["hash"] = hash_data(incoming["data"])
+    store.apply(incoming)
+    updated = store.upsert("native", "record", {"type": "note", "data": {"owned": {"value": 3}}})
+    assert updated["data"] == {"owned": {"value": 3, "foreign": "nested"}, "opaque": "kept"}
+    assert updated["ext"] == {"foreign": {"v": 2}}

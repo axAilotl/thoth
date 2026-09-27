@@ -60,8 +60,12 @@ def backfill(service, database_path, *, wiki_root=None):
                 service.capture_queue(artifact_id=row["artifact_id"], artifact_type=row["artifact_type"], payload=payload)
                 if row["review_json"]:
                     review = json.loads(row["review_json"])
-                    if isinstance(review, dict) and review:
-                        service.record_artifact_review(artifact_id=row["artifact_id"], artifact_type=row["artifact_type"], payload=payload, review=review)
+                    if not isinstance(review, dict) or not isinstance(review.get("events", []), list):
+                        raise ValueError("review audit must contain an events array")
+                    for index, event in enumerate(review.get("events", [])):
+                        process("reviews", f"{row['artifact_id']}:{index}", lambda event=event:
+                                service.record_artifact_review(artifact_id=row["artifact_id"],
+                                    artifact_type=row["artifact_type"], payload=payload, review=event))
             process("captures", row["artifact_id"], capture)
         if "canonical_entities" in tables:
             for row in connection.execute("SELECT * FROM canonical_entities ORDER BY canonical_id"):
