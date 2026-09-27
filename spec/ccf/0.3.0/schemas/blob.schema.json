@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/axAilotl/ccf-schema/spec/0.3.0/schemas/blob.schema.json",
+  "title": "CCF 0.3.0 Blob",
+  "allOf": [{"$ref": "common.schema.json#/$defs/object"}],
+  "if": {"required": ["deleted"]},
+  "then": {},
+  "else": {"required": ["loc", "hash", "media_type", "size"]},
+  "properties": {
+    "kind": {"const": "blob"},
+    "loc": {"type": "string", "minLength": 1},
+    "hash": {"$ref": "common.schema.json#/$defs/hash"},
+    "media_type": {"type": "string", "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"},
+    "size": {"type": "integer", "minimum": 0},
+    "title": {"type": "string"},
+    "data": {"type": "object"}
+  }
+}

@@ -75,6 +75,6 @@ Back up the SQLite database consistently (online backup API or with writers
 stopped) along with the THOTH control directory and your separate document
 backups. Do not place a live SQLite file inside Obsidian sync. Per-source JSON
 export uses the versioned `thoth.source-records/v1` envelope and retains complete
-archived records. It is an inspectable control-state export, **not** a claim of
-CCF capsule import/export compatibility. Existing CCF serializers retain their
-own contracts; portable control state does not require Markdown sidecars.
+archived records. This control-state envelope is separate from the CCF 0.3.0
+metadata exports provided by `thoth.py ccf export`. Neither format requires
+Markdown sidecars.

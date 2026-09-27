@@ -24,7 +24,7 @@ from .artifacts import (
 )
 from .capture_event_store import CaptureEventStore
 from .canonical_identity import CanonicalArtifactIdentity, CanonicalIdentityService
-from .ccf_dualwrite import open_dual_write_service
+from .ccf_metadata import open_metadata_service
 from .wiki_capture_compiler import CaptureWikiCompiler
 from .config import Config
 from .metadata_db import MetadataDB
@@ -418,12 +418,14 @@ class CompiledWikiUpdater:
             self.scaffold,
             f"{action.title()} `{updated_spec.slug}` from `{artifact.source_type}:{artifact.id}`.",
         )
-        return WikiUpdateResult(
+        result = WikiUpdateResult(
             slug=updated_spec.slug,
             page_path=page_path,
             source_paths=updated_spec.source_paths,
             action=action,
         )
+        self._record_ccf_wiki((result,))
+        return result
 
     def update_from_capture_events(
         self,
@@ -455,11 +457,7 @@ class CompiledWikiUpdater:
             for result in compiled
         )
         self.refresh_index()
-        # No CCF wiki-projection mirror here: capture-event pages cite
-        # capture events and raw vault paths as inputs, and capture events
-        # have no mirrored CCF object — no honest evidence Links can be
-        # built, and the projection converter's refusal is not weakened.
-        # (Semantic-memory pages ARE mirrored; see _mirror_wiki_projections.)
+        self._record_ccf_wiki(results)
         if results:
             append_wiki_log_entry(
                 self.scaffold,
@@ -489,7 +487,7 @@ class CompiledWikiUpdater:
             for result in compiled
         )
         self.refresh_index()
-        self._mirror_wiki_projections(results)
+        self._record_ccf_wiki(results)
         if results:
             append_wiki_log_entry(
                 self.scaffold,
@@ -501,82 +499,29 @@ class CompiledWikiUpdater:
             )
         return results
 
-    def _mirror_wiki_projections(
+    def _record_ccf_wiki(
         self, results: tuple[WikiUpdateResult, ...]
     ) -> None:
-        """Mirror compiled semantic wiki pages as CCF projection artifacts.
-
-        Fail-open and ledgered per page (``database.ccf_archive`` flags
-        ``dual_write`` + ``mirror_wiki``). Evidence is resolved from the
-        page's ``thoth_semantic_candidate_ids`` to mirrored candidate
-        assertions; a page with no resolvable inputs is skipped with a
-        warning — the projection converter rightly refuses evidence-less
-        pages, and that refusal is never weakened.
-
-        Capture-event pages (``update_from_capture_events``) are
-        deliberately NOT wired: their inputs are capture events and raw
-        vault paths, and capture events have no mirrored CCF object to
-        cite, so no honest evidence Links can be constructed there.
-        """
-        service = open_dual_write_service(self.config)
-        if service is None or not service.settings.mirror_wiki:
+        """Record generated files and their native input provenance per page."""
+        try:
+            service = open_metadata_service(self.config, layout=self.layout)
+            if service is None:
+                return
+        except Exception:
+            logger.exception("CCF wiki metadata store could not be opened")
             return
-        from ccf.dualwrite import families
-        from ccf.dualwrite.conventions import ASSERTION_REVISION
-
         for result in results:
-            if result.action not in ("created", "updated"):
+            if result.page_path is None or result.action not in ("created", "updated"):
                 continue
             try:
-                frontmatter = _read_frontmatter(result.page_path)
-                candidate_ids = [
-                    str(item)
-                    for item in frontmatter.get("thoth_semantic_candidate_ids") or []
-                ]
-                evidence = []
-                for candidate_id in candidate_ids:
-                    found = families.find_mirrored_object(
-                        service,
-                        native_id=candidate_id,
-                        revision=ASSERTION_REVISION,
-                    )
-                    if found is not None:
-                        evidence.append(found)
-                if not evidence:
-                    logger.warning(
-                        "skipping CCF wiki projection mirror for %s: no "
-                        "mirrored candidate assertions to cite as evidence",
-                        result.slug,
-                    )
-                    continue
-                families.mirror_wiki_projection(
-                    service,
-                    page={
-                        "slug": result.slug,
-                        "title": str(
-                            frontmatter.get("title") or result.slug
-                        ),
-                        "summary": frontmatter.get("thoth_summary")
-                        or frontmatter.get("description"),
-                        "kind": frontmatter.get("thoth_kind"),
-                        "input_hash": frontmatter.get("thoth_input_hash"),
-                        "source_paths": frontmatter.get("thoth_source_paths")
-                        or [],
-                        "event_ids": frontmatter.get("thoth_event_ids") or [],
-                        "semantic_candidate_ids": candidate_ids,
-                        "updated_at": frontmatter.get("thoth_updated_at"),
-                    },
-                    evidence=evidence,
+                service.record_wiki(
+                    page_path=result.page_path, slug=result.slug,
+                    metadata=_read_frontmatter(result.page_path),
+                    source_paths=result.source_paths,
                 )
-            except Exception as exc:
-                service.record_error(
-                    {
-                        "family": "wiki",
-                        "slug": result.slug,
-                        "page_path": str(result.page_path),
-                    },
-                    exc,
-                )
+            except Exception:
+                logger.exception("CCF wiki metadata failed for %s at %s",
+                                 result.slug, result.page_path)
 
     def refresh_index(self) -> Path:
         entries = []

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from pathlib import Path
@@ -18,9 +19,8 @@ from .capture_event_store import (
     CaptureSource,
     RawArtifactRef,
 )
-from .ccf_dualwrite import dual_write_requested
+from .ccf_metadata import open_metadata_service
 from .config import Config, config
-from .connector_registry import load_connector_registry
 from .ingestion_runtime import (
     IngestionDispatchResult,
     KnowledgeArtifactRuntime,
@@ -29,6 +29,9 @@ from .metadata_db import IngestionQueueEntry, MetadataDB, get_metadata_db
 from .path_layout import PathLayout
 from .postgres import PostgresConfigError, resolve_postgres_settings
 from .time_utils import utc_now_iso as _now_iso
+
+
+logger = logging.getLogger(__name__)
 
 
 _CAPTURE_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "thoth.capture_lifecycle")
@@ -95,8 +98,8 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
     ) -> None:
         super().__init__(runtime_config, layout=layout, db=db)
         self.capture_event_store = capture_event_store
-        self._ccf_dual_write = None
-        self._ccf_dual_write_resolved = False
+        self._ccf_metadata = None
+        self._ccf_metadata_resolved = False
 
     def capture(
         self,
@@ -349,18 +352,7 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             event_id=event_id,
             raw_ref_id=raw_ref_id,
         )
-        self._mirror_capture_to_ccf(
-            queue_artifact_id=queue_id,
-            artifact_type=artifact_kind,
-            source_id=source_id,
-            source_name=source_name,
-            source_type=source_type,
-            source_obj=source_obj,
-            session_obj=session_obj,
-            session_id=session_id,
-            raw_ref=raw_ref,
-            stored_entry=stored_entry,
-        )
+        self._record_ccf_capture(stored_entry, source_obj)
 
         lifecycle_id = _stable_id(
             "lifecycle",
@@ -768,236 +760,32 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
             raw_ref_id=raw_ref_id,
         )
 
-    # ------------------------------------------------------------------
-    # CCF dual-write mirror (config-gated; legacy stores stay authoritative)
-    # ------------------------------------------------------------------
-
-    def _dual_write_service(self):
-        """Lazily build the CCF dual-write service, or None when disabled.
-
-        Misconfiguration (contradictory flags, missing DSN/keys/package)
-        raises from the resolver — fail closed before any capture is
-        mirrored. When ``database.ccf_archive.dual_write`` is off the
-        ``ccf`` package is never imported.
-        """
-        if self._ccf_dual_write_resolved:
-            return self._ccf_dual_write
-        self._ccf_dual_write_resolved = True
-        self._ccf_dual_write = None
-        if not dual_write_requested(self.config):
-            return None
-        from ccf.dualwrite import CcfDualWriteService, resolve_dual_write_settings
-
-        self._ccf_dual_write = CcfDualWriteService.create_or_open(
-            resolve_dual_write_settings(self.config),
-            connector_registry=load_connector_registry(self.config),
-        )
-        return self._ccf_dual_write
-
-    def _mirror_capture_to_ccf(
-        self,
-        *,
-        queue_artifact_id: str,
-        artifact_type: str,
-        source_id: str,
-        source_name: str,
-        source_type: str,
-        source_obj: Mapping[str, Any],
-        session_obj: Mapping[str, Any] | None,
-        session_id: str | None,
-        raw_ref: RawArtifactRef | None,
-        stored_entry: IngestionQueueEntry,
-    ) -> None:
-        """Mirror one persisted capture into CCF, co-located with the
-        legacy queue/event-store commit. Mirror failures are logged and
-        ledgered loudly; they never propagate into the legacy write.
-        """
-        service = self._dual_write_service()
-        if service is None or raw_ref is None:
-            return
+    def _record_ccf_capture(self, entry: IngestionQueueEntry, source: Mapping) -> None:
+        """Attach portable metadata after the native capture is durable."""
         try:
-            payload = json.loads(stored_entry.payload_json or "{}")
-            metadata = payload.get("normalized_metadata")
-            if not isinstance(metadata, Mapping):
-                metadata = {}
-            receipt = service.mirror_capture(
-                source={
-                    "source_id": source_id,
-                    "source_name": source_name,
-                    "source_type": source_type,
-                    "collector": _clean_string(source_obj.get("collector")),
-                    "account": _clean_string(source_obj.get("account")),
-                    "native_source_id": _clean_string(
-                        source_obj.get("native_source_id")
-                    ),
-                    "base_uri": _clean_string(
-                        source_obj.get("base_uri") or source_obj.get("uri")
-                    ),
-                    "status": _clean_string(source_obj.get("status")) or "active",
-                },
-                session=(
-                    {**session_obj, "session_id": session_id}
-                    if session_obj and session_id
-                    else None
-                ),
-                raw_ref=asdict(raw_ref),
-                data=Path(raw_ref.path).read_bytes(),
-                findings_metadata=dict(metadata),
-            )
-        except Exception as exc:
-            service.record_error(
-                {
-                    "queue_artifact_id": queue_artifact_id,
-                    "source_id": source_id,
-                    "session_id": session_id,
-                    "raw_ref_id": raw_ref.raw_ref_id,
-                    "raw_path": raw_ref.path,
-                },
-                exc,
-            )
-            return
-        # Phase-2 converter families mirror after the capture envelope, each
-        # behind its own flag and its own failure boundary.
-        self._mirror_transcript_family(
-            service,
-            receipt=receipt,
-            queue_artifact_id=queue_artifact_id,
-            artifact_type=artifact_type,
-            source_id=source_id,
-            source_obj=source_obj,
-            source_name=source_name,
-            session_id=session_id,
-            payload=payload,
-        )
-        self._mirror_semantic_family(
-            service,
-            queue_artifact_id=queue_artifact_id,
-            source_id=source_id,
-            metadata=metadata,
-        )
-
-    def _mirror_transcript_family(
-        self,
-        service,
-        *,
-        receipt: Mapping[str, Any],
-        queue_artifact_id: str,
-        artifact_type: str,
-        source_id: str,
-        source_obj: Mapping[str, Any],
-        source_name: str,
-        session_id: str | None,
-        payload: Mapping[str, Any],
-    ) -> None:
-        """Mirror transcript utterances for transcript captures (flag-gated)."""
-        if not service.settings.mirror_transcripts or artifact_type != "transcript":
-            return
-        text = payload.get("raw_transcript") or payload.get("processed_transcript")
-        if not text:
-            return
-        objects = receipt.get("objects") or {}
-        media_artifact_ccf_id = objects.get("artifact_id")
-        if not media_artifact_ccf_id:
-            return
-        custom = payload.get("custom_metadata")
-        if not isinstance(custom, Mapping):
-            custom = {}
-        snapshot = {
-            "transcript_id": _clean_string(payload.get("transcript_id"))
-            or queue_artifact_id,
-            "raw_transcript": text,
-            "language": _clean_string(payload.get("language")),
-            "speaker": _clean_string(payload.get("speaker")),
-            "session_id": session_id or _clean_string(payload.get("session_id")),
-            "started_at": _clean_string(custom.get("started_at")),
-            "ended_at": _clean_string(custom.get("ended_at")),
-        }
-        segments = payload.get("segments")
-        if isinstance(segments, list) and segments:
-            snapshot["segments"] = segments
-        try:
-            from ccf.dualwrite import families
-
-            families.mirror_transcript(
-                service,
-                source={"source_id": source_id},
-                transcript=snapshot,
-                media_artifact_ccf_id=media_artifact_ccf_id,
-                run_ccf_id=objects.get("run_id"),
-                session_ccf_id=objects.get("session_id"),
-                session_id=session_id,
-                engine=_clean_string(source_obj.get("collector")) or source_name,
-            )
-        except Exception as exc:
-            service.record_error(
-                {
-                    "family": "transcripts",
-                    "queue_artifact_id": queue_artifact_id,
-                    "source_id": source_id,
-                    "transcript_id": snapshot["transcript_id"],
-                },
-                exc,
-            )
-
-    def _mirror_semantic_family(
-        self,
-        service,
-        *,
-        queue_artifact_id: str,
-        source_id: str,
-        metadata: Mapping[str, Any],
-    ) -> None:
-        """Mirror canonical entities resolved during this capture (flag-gated).
-
-        Covers the primary canonical entity plus the metadata person/project
-        entities ``CanonicalIdentityService`` upserted for this artifact.
-        Entity updates that happen outside captures (e.g. ``set_wiki_slug``)
-        are not re-mirrored; the origin tuple is revision-pinned, so the
-        first mirrored snapshot wins.
-        """
-        if not service.settings.mirror_semantic:
-            return
-        canonical_ids: list[str] = []
-        primary = _clean_string(metadata.get("canonical_id"))
-        if primary:
-            canonical_ids.append(primary)
-        for key in ("canonical_persons", "canonical_projects"):
-            values = metadata.get(key)
-            if isinstance(values, (list, tuple)):
-                canonical_ids.extend(
-                    str(value) for value in values if _clean_string(value)
-                )
-        if not canonical_ids:
-            return
-        try:
-            from ccf.dualwrite import families
-
+            if not self._ccf_metadata_resolved:
+                self._ccf_metadata = open_metadata_service(self.config, layout=self.layout)
+                self._ccf_metadata_resolved = True
+            if self._ccf_metadata is None:
+                return
+            payload = json.loads(entry.payload_json)
+            metadata = payload.get("normalized_metadata") or {}
+            canonical_ids = [metadata.get("canonical_id")]
+            for key in ("canonical_persons", "canonical_projects"):
+                canonical_ids.extend(metadata.get(key) or [])
+            entities = []
             for canonical_id in dict.fromkeys(canonical_ids):
-                record = self.db.get_canonical_entity(canonical_id)
-                if record is None:
+                if not canonical_id:
                     continue
-                families.mirror_entity(
-                    service,
-                    source={"source_id": source_id},
-                    entity={
-                        "canonical_id": record.canonical_id,
-                        "entity_type": record.entity_type,
-                        "display_name": record.display_name,
-                        "metadata": dict(record.metadata or {}),
-                        "primary_artifact_id": record.primary_artifact_id,
-                        "wiki_slug": record.wiki_slug,
-                    },
-                )
-        except Exception as exc:
-            service.record_error(
-                {
-                    "family": "semantic",
-                    "queue_artifact_id": queue_artifact_id,
-                    "source_id": source_id,
-                    "canonical_ids": list(dict.fromkeys(canonical_ids)),
-                },
-                exc,
+                record = self.db.get_canonical_entity(canonical_id)
+                if record is not None:
+                    entities.append(asdict(record))
+            self._ccf_metadata.capture_queue(
+                artifact_id=entry.artifact_id, artifact_type=entry.artifact_type,
+                payload=payload, source=source, entities=entities,
             )
+        except Exception:
+            logger.exception("CCF capture metadata failed for artifact %s", entry.artifact_id)
 
 
 def get_capture_lifecycle_service(

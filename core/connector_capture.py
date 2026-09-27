@@ -15,7 +15,7 @@ from typing import Any, Iterable, Iterator, Mapping
 from .artifacts import KnowledgeArtifact
 from .capture_event_store import CaptureEventStore
 from .capture_lifecycle import CaptureLifecycleResult, CaptureLifecycleService
-from .ccf_dualwrite import dual_write_requested
+from .ccf_metadata import metadata_enabled
 from .config import Config, config
 from .metadata_db import MetadataDB, get_metadata_db
 from .content_root_adapters import ContentAdapterError
@@ -237,10 +237,10 @@ def _raw_path_for_stores(lifecycle, runtime_config, raw_path):
     """Keep the raw path when any capture-side store consumes it.
 
     The raw file is the content both the capture event store and the CCF
-    dual-write mirror commit against; when neither is active the path is
+    metadata store point at; when neither is active the path is
     dropped exactly as before.
     """
-    if lifecycle.capture_event_store is not None or dual_write_requested(
+    if lifecycle.capture_event_store is not None or metadata_enabled(
         runtime_config
     ):
         return raw_path

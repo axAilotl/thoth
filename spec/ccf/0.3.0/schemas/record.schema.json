@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/axAilotl/ccf-schema/spec/0.3.0/schemas/record.schema.json",
+  "title": "CCF 0.3.0 Record",
+  "allOf": [{"$ref": "common.schema.json#/$defs/object"}],
+  "required": ["type"],
+  "properties": {
+    "kind": {"const": "record"},
+    "type": {"$ref": "common.schema.json#/$defs/name"},
+    "title": {"type": "string"},
+    "start": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "end": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "loc": {"type": "string", "minLength": 1},
+    "hash": {"$ref": "common.schema.json#/$defs/hash"},
+    "data": {"type": "object"}
+  }
+}

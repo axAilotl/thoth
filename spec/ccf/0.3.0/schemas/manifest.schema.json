@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/axAilotl/ccf-schema/spec/0.3.0/schemas/manifest.schema.json",
+  "title": "CCF 0.3.0 export manifest",
+  "type": "object",
+  "required": ["format", "version", "exported_at", "source", "counts"],
+  "properties": {
+    "format": {"const": "ccf-export"},
+    "version": {"const": "0.3.0"},
+    "exported_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "source": {"$ref": "common.schema.json#/$defs/source"},
+    "counts": {
+      "type": "object",
+      "required": ["records", "links", "blobs", "files"],
+      "properties": {
+        "records": {"type": "integer", "minimum": 0},
+        "links": {"type": "integer", "minimum": 0},
+        "blobs": {"type": "integer", "minimum": 0},
+        "files": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

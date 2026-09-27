@@ -12,7 +12,7 @@ from .artifact_review_policy import (
     INGESTION_CLOSED_REVIEW_STATUSES,
     require_review_revision,
 )
-from .ccf_dualwrite import mirrored_queue_artifact, open_dual_write_service
+from .ccf_metadata import open_metadata_service
 from .config import config as _runtime_config
 from .metadata_db import (
     IngestionQueueEntry,
@@ -82,7 +82,7 @@ class ArtifactReviewQueueService:
             if not security or not security_acknowledged:
                 raise ArtifactReviewQueueError("Security approval requires explicit acknowledgement")
             updated = self.db.approve_ingestion_security_override(artifact_id, **kwargs)
-            mirror_action = "security_override_approved"
+            metadata_action = "security_override_approved"
         elif action == "retry":
             if security:
                 raise ArtifactReviewQueueError("Use explicit security approval for flagged content")
@@ -90,17 +90,17 @@ class ArtifactReviewQueueService:
                 artifact_id, action="retry", status="pending", clear_error=True,
                 reset_attempts=True, **kwargs,
             )
-            mirror_action = "retry"
+            metadata_action = "retry"
         elif action == "reject":
             updated = self.db.transition_ingestion_review(
                 artifact_id, action="reject", status="rejected", **kwargs,
             )
-            mirror_action = "reject"
+            metadata_action = "reject"
         else:
             raise ArtifactReviewQueueError("Unsupported review action")
         if updated is None:
             raise ArtifactReviewQueueError("Review item no longer exists")
-        self._mirror_review_decision(updated, action=mirror_action)
+        self._record_ccf_review(updated, action=metadata_action)
         return updated
 
     def retry(
@@ -128,7 +128,7 @@ class ArtifactReviewQueueService:
             except ClassificationReviewError as exc:
                 raise ArtifactReviewQueueError(str(exc)) from exc
             updated = self._get_entry(artifact_id)
-            self._mirror_review_decision(updated, action="classification_approved")
+            self._record_ccf_review(updated, action="classification_approved")
             return updated
         if _entry_has_prompt_security_review(entry):
             approved = self.db.approve_ingestion_security_override(
@@ -146,7 +146,7 @@ class ArtifactReviewQueueService:
         )
         if not updated:
             raise ArtifactReviewQueueError(f"Artifact not found: {artifact_id}")
-        self._mirror_review_decision(updated, action="retry")
+        self._record_ccf_review(updated, action="retry")
         return updated
 
     def reject(
@@ -173,7 +173,7 @@ class ArtifactReviewQueueService:
             except ClassificationReviewError as exc:
                 raise ArtifactReviewQueueError(str(exc)) from exc
             updated = self._get_entry(artifact_id)
-            self._mirror_review_decision(updated, action="classification_rejected")
+            self._record_ccf_review(updated, action="classification_rejected")
             return updated
         updated = self.db.reject_ingestion_review(
             artifact_id,
@@ -183,7 +183,7 @@ class ArtifactReviewQueueService:
         )
         if not updated:
             raise ArtifactReviewQueueError(f"Artifact not found: {artifact_id}")
-        self._mirror_review_decision(updated, action="reject")
+        self._record_ccf_review(updated, action="reject")
         return updated
 
     def mark_reviewed(
@@ -210,57 +210,25 @@ class ArtifactReviewQueueService:
         )
         if not updated:
             raise ArtifactReviewQueueError(f"Artifact not found: {artifact_id}")
-        self._mirror_review_decision(updated, action="mark_reviewed")
+        self._record_ccf_review(updated, action="mark_reviewed")
         return updated
 
-    def _mirror_review_decision(
+    def _record_ccf_review(
         self, entry: IngestionQueueEntry, *, action: str
     ) -> None:
-        """Mirror the appended review event into CCF (fail-open, ledgered).
-
-        The target is the mirrored media artifact of the reviewed queue
-        entry, resolved through the origin index. When the artifact was
-        never mirrored (capture predates the mirror) the decision cannot
-        cite its target, so it is skipped with a warning rather than
-        weakened.
-        """
-        service = open_dual_write_service(self.config)
-        if service is None or not service.settings.mirror_review:
-            return
+        """Record the actual audit event after the native review transition."""
         try:
-            event = _latest_review_event(entry.review_json, action)
-            payload = json.loads(entry.payload_json or "{}")
-            if not isinstance(payload, Mapping):
-                payload = {}
-            target = mirrored_queue_artifact(service, self.config, payload)
-            if target is None:
-                logger.warning(
-                    "skipping CCF review mirror for %s on %s: "
-                    "artifact was never mirrored",
-                    action,
-                    entry.artifact_id,
-                )
+            service = open_metadata_service(self.config)
+            if service is None:
                 return
-            source_ccf_id, artifact_ccf_id = target
-            from ccf.dualwrite import families
-
-            families.mirror_review_decision(
-                service,
-                source_ccf_id=source_ccf_id,
-                review=event,
-                target_ccf_ids=[artifact_ccf_id],
-                evidence_ccf_ids=[artifact_ccf_id],
+            service.record_artifact_review(
+                artifact_id=entry.artifact_id, artifact_type=entry.artifact_type,
+                payload=json.loads(entry.payload_json),
+                review=_latest_review_event(entry.review_json, action),
             )
-        except Exception as exc:
-            service.record_error(
-                {
-                    "family": "review",
-                    "flow": "artifact_review",
-                    "artifact_id": entry.artifact_id,
-                    "action": action,
-                },
-                exc,
-            )
+        except Exception:
+            logger.exception("CCF review metadata failed for artifact %s action %s",
+                             entry.artifact_id, action)
 
     def _get_entry(self, artifact_id: str) -> IngestionQueueEntry:
         entry = self.db.get_ingestion_entry(artifact_id)

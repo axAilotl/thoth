@@ -43,9 +43,9 @@ FORBIDDEN_DIRECT_WIKI_OUTPUTS = {
 }
 
 #: CCF lane vocabulary a manifest ``ccf`` block may declare. The lane is
-#: carried onto mirrored artifacts by the dual-write thothmap, so the set
+#: carried onto metadata objects by Thoth, so the set
 #: is closed: an unknown lane fails manifest loading instead of silently
-#: inventing archive vocabulary. ``mixed`` covers wildcard connectors
+#: inventing Thoth connector vocabulary. ``mixed`` covers wildcard connectors
 #: whose artifact types span several lanes.
 CCF_LANES = frozenset(
     {
@@ -61,8 +61,8 @@ CCF_LANES = frozenset(
 )
 
 _CCF_ROLE_TOKEN = re.compile(r"[a-z][a-z0-9_]*")
-#: Extension keys must be namespaced dotted keys (``thoth.lane``), per the
-#: ``thoth.<...>`` precedent in ``ccf.thothmap.semantic``.
+#: Thoth connector extensions use namespaced dotted keys (``thoth.lane``).
+#: This is a connector contract, not a restriction on imported CCF objects.
 _CCF_EXTENSION_KEY = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+")
 _CCF_BLOCK_FIELDS = {"lane", "artifact_role", "extensions"}
 
@@ -71,10 +71,8 @@ _CCF_BLOCK_FIELDS = {"lane", "artifact_role", "extensions"}
 class ConnectorCcfBlock:
     """Optional CCF lane declaration of a connector manifest.
 
-    Consumed by the dual-write mirror (``ccf.dualwrite`` /
-    ``ccf.thothmap``): mirrored artifacts carry the lane and the block's
-    namespaced extensions instead of one generic role. ``None`` on the
-    manifest means legacy generic behavior.
+    Consumed by ``ccf.metadata``: objects carry the lane and namespaced
+    extensions. A manifest without this block has no lane declaration.
     """
 
     lane: str

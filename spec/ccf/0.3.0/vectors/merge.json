@@ -1,0 +1,215 @@
+{
+  "format": "ccf-merge-vectors",
+  "version": "0.3.0",
+  "cases": [
+    {
+      "name": "higher-rev-wins-over-later-update",
+      "a": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 3,
+        "source": {
+          "app": "cissa",
+          "device": "phone"
+        },
+        "title": "A"
+      },
+      "b": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T12:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa",
+          "device": "server"
+        },
+        "title": "B"
+      },
+      "winner": "a"
+    },
+    {
+      "name": "same-rev-later-update-wins",
+      "a": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa",
+          "device": "phone"
+        },
+        "title": "A"
+      },
+      "b": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T12:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa",
+          "device": "phone"
+        },
+        "title": "B"
+      },
+      "winner": "b"
+    },
+    {
+      "name": "same-rev-and-update-greater-device-wins",
+      "a": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa",
+          "device": "phone"
+        },
+        "title": "A"
+      },
+      "b": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa",
+          "device": "server"
+        },
+        "title": "B"
+      },
+      "winner": "b"
+    },
+    {
+      "name": "missing-device-orders-first",
+      "a": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa"
+        },
+        "title": "A"
+      },
+      "b": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa",
+          "device": "a"
+        },
+        "title": "B"
+      },
+      "winner": "b"
+    },
+    {
+      "name": "full-tie-greater-canonical-json-wins",
+      "a": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa",
+          "device": "phone"
+        },
+        "title": "Alpha"
+      },
+      "b": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 2,
+        "source": {
+          "app": "cissa",
+          "device": "phone"
+        },
+        "title": "Beta"
+      },
+      "winner": "b"
+    },
+    {
+      "name": "tombstone-with-higher-rev-wins",
+      "a": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T12:00:00.000Z",
+        "rev": 4,
+        "source": {
+          "app": "cissa",
+          "device": "phone"
+        },
+        "deleted": "2026-09-20T12:00:00.000Z"
+      },
+      "b": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 3,
+        "source": {
+          "app": "cissa",
+          "device": "server"
+        },
+        "title": "B"
+      },
+      "winner": "a"
+    },
+    {
+      "name": "edit-with-higher-rev-beats-tombstone",
+      "a": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T11:00:00.000Z",
+        "rev": 4,
+        "source": {
+          "app": "cissa",
+          "device": "phone"
+        },
+        "deleted": "2026-09-20T11:00:00.000Z"
+      },
+      "b": {
+        "id": "01926f3a-0c1e-7b2a-8f10-5a1d2c3e4f50",
+        "kind": "record",
+        "type": "note",
+        "created": "2026-09-20T10:00:00.000Z",
+        "updated": "2026-09-20T12:00:00.000Z",
+        "rev": 5,
+        "source": {
+          "app": "cissa",
+          "device": "server"
+        },
+        "title": "B"
+      },
+      "winner": "b"
+    }
+  ]
+}
