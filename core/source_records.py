@@ -68,7 +68,7 @@ class SourceRecordStore:
         return data
 
     def export(self) -> dict:
-        """Lossless, versioned control-state export; not a CCF capsule serializer."""
+        """Lossless, versioned control-state export; separate from CCF metadata exchange."""
         with self.db._get_connection() as conn:
             records = [self._decode(row) for row in conn.execute("SELECT * FROM source_records ORDER BY artifact_id")]
             archives = [self._decode(row) for row in conn.execute("SELECT * FROM source_record_archives ORDER BY original_path,sha256")]
