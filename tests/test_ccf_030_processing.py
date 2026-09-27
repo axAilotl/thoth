@@ -1,6 +1,7 @@
 """Metadata follows native success and cannot turn it into a processing failure."""
 
 from types import SimpleNamespace
+from pathlib import Path
 
 from core.ccf_processing import record_processed_artifact
 from core.config import Config
@@ -11,6 +12,7 @@ def test_completed_output_links_to_its_source_and_failure_is_reported(tmp_path, 
     from core.ccf_metadata import open_metadata_service
 
     config = Config()
+    config.load_from_file(str(Path(__file__).resolve().parents[1] / "config.example.json"))
     config.set("paths.vault_dir", str(tmp_path / "vault"))
     config.set("paths.system_dir", str(tmp_path / "system"))
     config.set("database.ccf", {"enabled": True, "device": "test", "path": "ccf.sqlite3"})
