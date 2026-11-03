@@ -204,6 +204,7 @@ class PipelineProcessor:
         rerun_llm: bool = False,
         llm_only: bool = False,
         dry_run: bool = False,
+        force_files: bool = False,
     ) -> PipelineStats:
         """Process all tweets through the complete pipeline in a single pass"""
         import time
@@ -217,7 +218,10 @@ class PipelineProcessor:
 
         resume_non_llm = resume
         resume_llm = not rerun_llm
-        resume_files = resume if not llm_only else False
+        # force_files rewrites markdown even when it already exists; use it when
+        # the rendered metadata changed (e.g. corrected tweet dates/metrics)
+        # without paying for a full non-LLM or LLM re-run.
+        resume_files = False if force_files else (resume if not llm_only else False)
         if llm_only:
             resume_llm = False
 
