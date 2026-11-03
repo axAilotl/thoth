@@ -5,6 +5,8 @@ ArXiv Processor V2 - Enhanced ArXiv processor using unified DocumentProcessor ba
 import json
 import logging
 import re
+import threading
+import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import xml.etree.ElementTree as ET
@@ -17,6 +19,39 @@ from core.pipeline_registry import PipelineStage, register_pipeline_stages
 from .document_processor import DocumentProcessor, DocumentLink, URL_PATTERNS
 
 logger = logging.getLogger(__name__)
+
+ARXIV_METADATA_TIMEOUT_SECONDS = 20.0
+ARXIV_METADATA_MIN_INTERVAL_SECONDS = 3.0
+ARXIV_METADATA_MAX_ATTEMPTS = 4
+ARXIV_METADATA_BACKOFF_BASE_SECONDS = 10.0
+ARXIV_METADATA_MAX_BACKOFF_SECONDS = 60.0
+ARXIV_METADATA_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+_ARXIV_METADATA_PACING_LOCK = threading.Lock()
+_ARXIV_METADATA_LAST_REQUEST_AT = 0.0
+
+
+def _pace_arxiv_metadata_request() -> None:
+    """Space arXiv API calls out across threads to stay under the rate limit."""
+    global _ARXIV_METADATA_LAST_REQUEST_AT
+    with _ARXIV_METADATA_PACING_LOCK:
+        now = time.monotonic()
+        wait = ARXIV_METADATA_MIN_INTERVAL_SECONDS - (now - _ARXIV_METADATA_LAST_REQUEST_AT)
+        if wait > 0:
+            time.sleep(wait)
+        _ARXIV_METADATA_LAST_REQUEST_AT = time.monotonic()
+
+
+def _arxiv_metadata_retry_delay(response: Optional[requests.Response], delay: float) -> float:
+    """Honor Retry-After when arXiv sends one, otherwise grow the backoff."""
+    if response is not None:
+        retry_after = response.headers.get('Retry-After')
+        if retry_after:
+            try:
+                return min(max(float(retry_after), 1.0), ARXIV_METADATA_MAX_BACKOFF_SECONDS)
+            except ValueError:
+                pass
+    return min(max(delay, 1.0), ARXIV_METADATA_MAX_BACKOFF_SECONDS)
 
 
 PIPELINE_STAGES = (
@@ -256,45 +291,77 @@ class ArXivProcessorV2(DocumentProcessor):
 
         return None
 
-    def _fetch_arxiv_metadata(self, arxiv_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch metadata from ArXiv API"""
-        try:
-            api_url = f"https://export.arxiv.org/api/query?id_list={arxiv_id}"
-            response = self.session.get(api_url, timeout=10)
-            response.raise_for_status()
-
-            root = ET.fromstring(response.text)
-            namespaces = {
-                "atom": "http://www.w3.org/2005/Atom",
-                "arxiv": "http://arxiv.org/schemas/atom",
-            }
-            entry = root.find("atom:entry", namespaces)
-            if entry is None:
-                return None
-
-            title = self._xml_text(entry.find("atom:title", namespaces))
-            abstract = self._xml_text(entry.find("atom:summary", namespaces))
-            authors = [
-                self._xml_text(author)
-                for author in entry.findall("atom:author/atom:name", namespaces)
-                if self._xml_text(author)
-            ]
-            categories = [
-                category.get("term")
-                for category in entry.findall("atom:category", namespaces)
-                if category.get("term")
-            ]
-
-            return {
-                'title': title,
-                'abstract': abstract,
-                'authors': authors,
-                'categories': categories
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to fetch ArXiv metadata for {arxiv_id}: {e}")
+    def _parse_arxiv_metadata(self, body: str) -> Optional[Dict[str, Any]]:
+        """Parse an arXiv Atom response into metadata fields."""
+        root = ET.fromstring(body)
+        namespaces = {
+            "atom": "http://www.w3.org/2005/Atom",
+            "arxiv": "http://arxiv.org/schemas/atom",
+        }
+        entry = root.find("atom:entry", namespaces)
+        if entry is None:
             return None
+
+        title = self._xml_text(entry.find("atom:title", namespaces))
+        abstract = self._xml_text(entry.find("atom:summary", namespaces))
+        authors = [
+            self._xml_text(author)
+            for author in entry.findall("atom:author/atom:name", namespaces)
+            if self._xml_text(author)
+        ]
+        categories = [
+            category.get("term")
+            for category in entry.findall("atom:category", namespaces)
+            if category.get("term")
+        ]
+
+        return {
+            'title': title,
+            'abstract': abstract,
+            'authors': authors,
+            'categories': categories
+        }
+
+    def _fetch_arxiv_metadata(self, arxiv_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch metadata from ArXiv API, paced and retried on throttling.
+
+        A discovery burst can queue hundreds of papers at once, and arXiv
+        answers with 429s long before the burst drains.  Requests are spaced
+        globally and retried with exponential backoff instead of dropping the
+        metadata for every throttled paper.
+        """
+        api_url = f"https://export.arxiv.org/api/query?id_list={arxiv_id}"
+        delay = ARXIV_METADATA_BACKOFF_BASE_SECONDS
+        last_error: Optional[Exception] = None
+        for attempt in range(1, ARXIV_METADATA_MAX_ATTEMPTS + 1):
+            _pace_arxiv_metadata_request()
+            try:
+                response = self.session.get(
+                    api_url, timeout=ARXIV_METADATA_TIMEOUT_SECONDS
+                )
+                response.raise_for_status()
+                return self._parse_arxiv_metadata(response.text)
+            except requests.HTTPError as exc:
+                last_error = exc
+                status = exc.response.status_code if exc.response is not None else None
+                if status not in ARXIV_METADATA_RETRY_STATUSES:
+                    break
+                delay = _arxiv_metadata_retry_delay(exc.response, delay)
+            except requests.RequestException as exc:
+                last_error = exc
+                delay = _arxiv_metadata_retry_delay(None, delay)
+            except ET.ParseError as exc:
+                last_error = exc
+                break
+            if attempt < ARXIV_METADATA_MAX_ATTEMPTS:
+                logger.warning(
+                    "ArXiv metadata request for %s failed (attempt %s/%s): %s; retrying in %.1fs",
+                    arxiv_id, attempt, ARXIV_METADATA_MAX_ATTEMPTS, last_error, delay,
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, ARXIV_METADATA_MAX_BACKOFF_SECONDS)
+        logger.error(f"Failed to fetch ArXiv metadata for {arxiv_id}: {last_error}")
+        return None
 
     def _xml_text(self, element: Optional[ET.Element]) -> str:
         """Return normalized text from an XML element."""

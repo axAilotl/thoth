@@ -12,6 +12,75 @@ from .base import KnowledgeArtifact
 from ..data_models import MediaItem, URLMapping, Tweet
 
 
+def _safe_int(value: Any) -> int:
+    """Coerce a metrics value to int without inventing a number."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _media_items_from_tweet_data(tweet_data: Mapping[str, Any]) -> List[MediaItem]:
+    """Build media items from an X API tweet payload's expanded media objects."""
+    items: List[MediaItem] = []
+    raw_media = tweet_data.get("media")
+    if not isinstance(raw_media, (list, tuple)):
+        return items
+    for raw in raw_media:
+        if not isinstance(raw, Mapping):
+            continue
+        media_key = str(raw.get("media_key") or raw.get("media_id") or "").strip()
+        media_url = str(raw.get("url") or raw.get("preview_image_url") or "").strip()
+        if not media_key and not media_url:
+            continue
+        alt_text = raw.get("alt_text")
+        items.append(
+            MediaItem(
+                media_id=media_key or media_url,
+                media_url=media_url,
+                media_type=str(raw.get("type") or "photo").strip() or "photo",
+                thumbnail_url=str(raw.get("preview_image_url") or "").strip() or None,
+                original_url=media_url or None,
+                alt_text=str(alt_text) if alt_text else None,
+                duration_millis=_safe_int(raw.get("duration_ms")) or None,
+            )
+        )
+    return items
+
+
+def _links_from_tweet_entities(
+    tweet_data: Mapping[str, Any],
+) -> Tuple[List[URLMapping], List[str]]:
+    """Recover t.co expansions and expanded URLs from an X API tweet payload.
+
+    Paper and repository detection runs on expanded URLs; without these the
+    pipeline only ever sees shorteners and misses the links behind them.
+    """
+    mappings: List[URLMapping] = []
+    extracted: List[str] = []
+    entities = tweet_data.get("entities")
+    if not isinstance(entities, Mapping):
+        return mappings, extracted
+    for raw in entities.get("urls") or ():
+        if not isinstance(raw, Mapping):
+            continue
+        short_url = str(raw.get("url") or "").strip()
+        expanded_url = str(raw.get("expanded_url") or "").strip()
+        if not expanded_url:
+            continue
+        if short_url and short_url != expanded_url:
+            mappings.append(
+                URLMapping(
+                    short_url=short_url,
+                    expanded_url=expanded_url,
+                    display_url=str(raw.get("display_url") or "").strip() or None,
+                )
+            )
+        if expanded_url not in extracted:
+            extracted.append(expanded_url)
+    return mappings, extracted
+
+
 @dataclass
 class TweetArtifact(KnowledgeArtifact):
     """Twitter/X bookmark with rich GraphQL data."""
@@ -84,23 +153,45 @@ class TweetArtifact(KnowledgeArtifact):
             raw_content = json.dumps(raw_content, ensure_ascii=False)
 
         base_fields = cls.base_fields_from_payload(bookmark_payload)
+        metrics = tweet_data.get("public_metrics")
+        if not isinstance(metrics, Mapping):
+            metrics = {}
+        favorite_count = _safe_int(metrics.get("like_count"))
+        retweet_count = _safe_int(metrics.get("retweet_count"))
+        reply_count = _safe_int(metrics.get("reply_count"))
         base_fields["custom_metadata"] = {
             **base_fields.get("custom_metadata", {}),
             "tweet_data": tweet_data,
             "graphql_cache_file": bookmark_payload.get("graphql_cache_file"),
             "has_graphql_response": bool(bookmark_payload.get("graphql_response")),
+            "favorite_count": favorite_count,
+            "retweet_count": retweet_count,
+            "reply_count": reply_count,
         }
+        media_items = _media_items_from_tweet_data(tweet_data)
+        url_mappings, extracted_urls = _links_from_tweet_entities(tweet_data)
 
         return cls(
             id=tweet_id,
             source_type=str(bookmark_payload.get("source") or "browser_extension"),
             raw_content=raw_content,
-            created_at=str(bookmark_payload.get("timestamp") or tweet_data.get("created_at") or ""),
+            # The bookmark payload's timestamp is when the bookmark was captured,
+            # not when the tweet was posted.  Prefer the tweet's own created_at so
+            # capture time never masquerades as publication time.
+            created_at=str(tweet_data.get("created_at") or bookmark_payload.get("timestamp") or ""),
             ingested_at=str(bookmark_payload.get("timestamp") or tweet_data.get("created_at") or ""),
             processing_status="pending",
             screen_name=str(tweet_data.get("author") or tweet_data.get("screen_name") or ""),
-            name=str(tweet_data.get("author") or tweet_data.get("name") or ""),
+            name=str(tweet_data.get("author_name") or tweet_data.get("author") or tweet_data.get("name") or ""),
             full_text=str(tweet_data.get("text") or tweet_data.get("full_text") or ""),
+            media_items=media_items,
+            url_mappings=url_mappings,
+            extracted_urls=extracted_urls,
+            engagement={
+                "favorite_count": favorite_count,
+                "retweet_count": retweet_count,
+                "reply_count": reply_count,
+            },
             **base_fields,
         )
 
@@ -174,23 +265,21 @@ class TweetArtifact(KnowledgeArtifact):
 
     def to_tweet_model(self) -> Tweet:
         """Convert the artifact into the legacy Tweet model used by the pipeline."""
-        return Tweet.from_dict(
-            {
-                "id": self.id,
-                "full_text": self.full_text,
-                "created_at": self.created_at or self.ingested_at or "",
-                "screen_name": self.screen_name,
-                "name": self.name,
-                "favorite_count": self.custom_metadata.get("favorite_count", 0)
-                if isinstance(self.custom_metadata, dict)
-                else 0,
-                "retweet_count": self.custom_metadata.get("retweet_count", 0)
-                if isinstance(self.custom_metadata, dict)
-                else 0,
-                "reply_count": self.custom_metadata.get("reply_count", 0)
-                if isinstance(self.custom_metadata, dict)
-                else 0,
-            }
+        metadata = self.custom_metadata if isinstance(self.custom_metadata, dict) else {}
+        return Tweet(
+            id=self.id,
+            full_text=self.full_text,
+            created_at=self.created_at or self.ingested_at or "",
+            screen_name=self.screen_name,
+            name=self.name,
+            favorite_count=_safe_int(metadata.get("favorite_count")),
+            retweet_count=_safe_int(metadata.get("retweet_count")),
+            reply_count=_safe_int(metadata.get("reply_count")),
+            media_items=list(self.media_items),
+            url_mappings=list(self.url_mappings),
+            extracted_urls=list(self.extracted_urls),
+            thread_id=self.thread_id,
+            is_self_thread=self.is_self_thread,
         )
 
     @classmethod

@@ -612,6 +612,7 @@ class KnowledgeArtifactRuntime:
         rerun_llm: bool = False,
         llm_only: bool = False,
         dry_run: bool = False,
+        force_files: bool = False,
     ) -> BookmarkDispatchResult:
         """Run bookmark capture through the shared tweet pipeline."""
         normalized = normalize_bookmark_payload(bookmark_data)
@@ -666,6 +667,7 @@ class KnowledgeArtifactRuntime:
             rerun_llm=rerun_llm,
             llm_only=llm_only,
             dry_run=dry_run,
+            force_files=force_files,
         )
 
         if not dry_run:
