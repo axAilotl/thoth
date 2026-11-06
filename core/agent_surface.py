@@ -820,7 +820,7 @@ class AgentSurfaceService:
         if self.managed_run is not None:
             if connector_name != self.managed_run.connector:
                 raise ValueError("Managed execution connector does not match authorized request")
-            if connector_name not in {"github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube", "competitor_web"}:
+            if connector_name not in {"github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube", "competitor_web", "ai_history"}:
                 raise ValueError("Connector does not support managed execution")
             options = self.managed_run.execution_options(options)
         registry = load_connector_registry(self.config)

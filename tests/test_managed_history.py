@@ -59,7 +59,7 @@ def test_selected_history_current_branch_update_and_explicit_delete(tmp_path, mo
     assert "Updated company finding" in runtime.read_artifacts(second, [artifact_id], expiry)[0]["body_text"]
     with runtime.db._get_connection() as connection:
         assert connection.execute("SELECT count(*) FROM ingestion_queue WHERE artifact_id = ?", (artifact_id,)).fetchone()[0] == 1
-        ledger = connection.execute("SELECT state_json FROM automation_state").fetchall()
+        ledger = connection.execute("SELECT value_json FROM automation_state").fetchall()
         assert "downstream repository" not in str([tuple(row) for row in ledger])
     deleted = history_run(None, "rev3", "delete")
     assert runtime.execute(deleted, {}, expiry, [])["status"] == "completed"
