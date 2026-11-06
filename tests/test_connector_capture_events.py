@@ -49,9 +49,13 @@ def test_managed_adapters_capture_in_explicit_accounts(connector, monkeypatch, t
 
     def github_get(session, url, headers=None, **kwargs):
         assert session.trust_env is False
+        if "arxiv" in url:
+            return SimpleNamespace(content=b"fixture feed", raise_for_status=lambda: None)
         calls.append((url, headers.get("Authorization")))
         return SimpleNamespace(status_code=200, json=lambda: [{
-            "id": 123, "full_name": "example/repo", "updated_at": "2026-04-03T00:00:00Z",
+            "starred_at": "2026-04-03T00:00:00Z", "repo": {
+                "id": 123, "full_name": "example/repo", "updated_at": "2026-04-03T00:00:00Z",
+            },
         }])
 
     monkeypatch.setattr("requests.Session.get", github_get)
@@ -105,6 +109,79 @@ def test_managed_context_rejects_wrong_paths_selections_and_ambient_store(tmp_pa
     config.set("database.capture_event_store.enabled", True)
     with pytest.raises(ValueError, match="explicit capture event store"):
         AgentSurfaceService(config, layout=layout, db=db, managed_run=run, account_root=tmp_path / "a")
+
+
+def test_managed_receipt_recovers_after_capture_and_replays_without_network(tmp_path, monkeypatch):
+    config, layout, db = _layout_and_db(tmp_path)
+    config.set("managed.connector_version", "test-pin")
+    run = _managed_run("github", "a", options={"limit": 2}, budgets={"max_items": 2})
+    store = _store(layout)
+    calls = []
+    def get(session, url, **kwargs):
+        calls.append(url)
+        return SimpleNamespace(status_code=200, json=lambda: [{"starred_at": "2026-04-03T00:00:00Z",
+            "repo": {"id": 123, "full_name": "org/repo"}}])
+    monkeypatch.setattr("requests.Session.get", get)
+    service = AgentSurfaceService(config, layout=layout, db=db, event_store=store,
+        managed_run=run, account_root=tmp_path)
+    write = db.upsert_automation_state
+    def interrupted(key, state):
+        if state["status"] == "completed":
+            raise RuntimeError("simulated receipt write interruption")
+        write(key, state)
+    monkeypatch.setattr(db, "upsert_automation_state", interrupted)
+    with pytest.raises(RuntimeError, match="interruption"):
+        service.run_connector("github", execute=True)
+    assert db.get_ingestion_entry("gh_123") is not None
+    monkeypatch.setattr(db, "upsert_automation_state", write)
+    service = AgentSurfaceService(config, layout=layout, db=db, event_store=store,
+        managed_run=replace(run, lease_generation=2), account_root=tmp_path)
+    receipt = service.run_connector("github", execute=True)
+    assert receipt["status"] == "completed"
+    assert receipt["result"]["queued_count"] == 0
+    assert receipt["result"]["artifacts"][0]["artifact_id"] == "gh_123"
+    assert len(receipt["result"]["artifacts"][0]["content_hash"]) == 64
+    assert receipt["result"]["coverage"][0]["covered_through"] == run.window_end
+    assert service.run_connector("github", execute=True) == receipt
+    assert len(calls) == 2
+    assert str(tmp_path) not in json.dumps(receipt)
+    with pytest.raises(ValueError, match="does not match"):
+        service.run_connector("huggingface", execute=True)
+
+
+def test_managed_partial_arxiv_preserves_success_and_failed_source_cutoff(tmp_path, monkeypatch):
+    config, layout, db = _layout_and_db(tmp_path)
+    config.set("managed.connector_version", "test-pin")
+    run = _managed_run("arxiv", "a", selected_resources=("good", "bad"),
+        source_config={"topics": ["good", "bad"]}, options={"limit": 5}, budgets={"max_items": 5})
+    def get(session, url, **kwargs):
+        return SimpleNamespace(content=url.encode(), raise_for_status=lambda: None)
+    monkeypatch.setattr("requests.Session.get", get)
+    monkeypatch.setattr("collectors.arxiv_collector.feedparser.parse", lambda content:
+        SimpleNamespace(bozo=True, entries=[]) if b"bad" in content else
+        SimpleNamespace(entries=[_arxiv_feed_entry("2604.00001")]))
+    service = AgentSurfaceService(config, layout=layout, db=db, event_store=_store(layout), managed_run=run, account_root=tmp_path)
+    receipt = service.run_connector("arxiv", execute=True)
+    assert receipt["status"] == "partial"
+    assert receipt["history"]["run"]["status"] == "partial"
+    sources = {entry["source"]: entry for entry in receipt["result"]["coverage"]}
+    assert sources["arxiv:topic:good"]["covered_through"] == run.window_end
+    assert sources["arxiv:topic:bad"]["covered_through"] is None
+    assert len(receipt["result"]["artifacts"]) == 1
+    with pytest.raises(ValueError, match="retry is not due"):
+        service.run_connector("arxiv", execute=True)
+
+
+def test_github_http_failure_is_failed_not_empty_success(tmp_path, monkeypatch):
+    config, layout, db = _layout_and_db(tmp_path)
+    config.set("sources.github.username", "company")
+    monkeypatch.setattr("requests.Session.get", lambda *a, **k: SimpleNamespace(status_code=503, text="do-not-log-secret"))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+    receipt = service.run_connector("github", execute=True)
+    assert receipt["status"] == "failed"
+    assert receipt["result"]["queued_count"] == 0
+    assert receipt["result"]["coverage"][0]["errors"] == [{"code": "http_503"}]
+    assert "do-not-log-secret" not in json.dumps(receipt)
 
 
 class RecordingCaptureEventStore:

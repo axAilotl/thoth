@@ -12,12 +12,14 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 import feedparser
+import requests
 
 from core.artifacts.paper import PaperArtifact
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
 from core.ccf_metadata import metadata_enabled
 from core.config import Config, config as runtime_config
+from core.collection_result import CollectionCoverage, collection_limit
 from core.connector_capture import ConnectorCaptureQueue, write_connector_raw_json
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
@@ -71,10 +73,18 @@ class ArXivCollector:
         """
         discovered = []
         self.last_errors = []
+        self.coverage = CollectionCoverage(self.config)
+        max_results = min(max_results, int(collection_limit(self.config, "max_items")))
         run_id = datetime.now().isoformat()
 
         with self.capture_queue.lifecycle() as lifecycle:
             for topic in topics:
+                source_key = f"arxiv:topic:{topic}"
+                summary = self.coverage.source(source_key)
+                remaining = max_results - sum(item["observed_count"] for item in self.coverage.sources.values())
+                if remaining <= 0:
+                    self.coverage.limited(source_key)
+                    continue
                 logger.info(f"Searching ArXiv for topic: {topic}")
 
                 # Construct query
@@ -83,15 +93,24 @@ class ArXivCollector:
                 params = {
                     "search_query": query,
                     "start": 0,
-                    "max_results": max_results,
+                    "max_results": remaining,
                     "sortBy": "submittedDate",
                     "sortOrder": "descending"
                 }
 
                 url = self.BASE_API_URL + urllib.parse.urlencode(params)
-                feed = feedparser.parse(url)
-
-                for entry in feed.entries:
+                source_key = f"arxiv:topic:{topic}"
+                summary = self.coverage.source(source_key)
+                feed = self._read_feed(url, source_key)
+                if feed is None:
+                    continue
+                if len(feed.entries) >= remaining:
+                    self.coverage.limited(source_key)
+                for entry in feed.entries[:remaining]:
+                    summary["observed_count"] += 1
+                    if not self.coverage.in_window(source_key, getattr(entry, "published", None) or getattr(entry, "updated", None)):
+                        continue
+                    errors_before = len(self.last_errors)
                     paper = self._queue_paper_from_entry_safely(
                         entry,
                         source="arxiv",
@@ -101,10 +120,14 @@ class ArXivCollector:
                     )
                     if paper:
                         discovered.append(paper)
+                        summary["queued_count"] += 1
+                    if len(self.last_errors) > errors_before:
+                        self.coverage.fail(source_key, "artifact_queue_failed", partial=True)
         self.last_summary = {
             "discovered_count": len(discovered),
             "error_count": len(self.last_errors),
             "errors": list(self.last_errors),
+            **self.coverage.receipt(),
         }
         return discovered
 
@@ -117,7 +140,8 @@ class ArXivCollector:
         """Scan arXiv category feeds and queue newly discovered papers."""
         discovered = []
         self.last_errors = []
-        feed_limit = min(max_results, 2000)
+        self.coverage = CollectionCoverage(self.config)
+        feed_limit = min(max_results, int(collection_limit(self.config, "max_items")))
         base_url = self.BASE_RSS_URL if feed_format == "rss" else self.BASE_ATOM_URL
 
         run_id = datetime.now().isoformat()
@@ -128,11 +152,26 @@ class ArXivCollector:
                 if not category:
                     continue
 
+                source_key = f"arxiv:category:{category}"
+                summary = self.coverage.source(source_key)
+                remaining = feed_limit - sum(item["observed_count"] for item in self.coverage.sources.values())
+                if remaining <= 0:
+                    self.coverage.limited(source_key)
+                    continue
                 logger.info(f"Scanning arXiv {feed_format.upper()} feed for category: {category}")
                 encoded_category = urllib.parse.quote(category, safe=".+")
-                feed = feedparser.parse(f"{base_url}{encoded_category}")
-
-                for entry in feed.entries[:feed_limit]:
+                source_key = f"arxiv:category:{category}"
+                summary = self.coverage.source(source_key)
+                feed = self._read_feed(f"{base_url}{encoded_category}", source_key)
+                if feed is None:
+                    continue
+                if len(feed.entries) >= remaining:
+                    self.coverage.limited(source_key)
+                for entry in feed.entries[:remaining]:
+                    summary["observed_count"] += 1
+                    if not self.coverage.in_window(source_key, getattr(entry, "published", None) or getattr(entry, "updated", None)):
+                        continue
+                    errors_before = len(self.last_errors)
                     paper = self._queue_paper_from_entry_safely(
                         entry,
                         source="arxiv_rss",
@@ -146,13 +185,34 @@ class ArXivCollector:
                     )
                     if paper:
                         discovered.append(paper)
+                        summary["queued_count"] += 1
+                    if len(self.last_errors) > errors_before:
+                        self.coverage.fail(source_key, "artifact_queue_failed", partial=True)
 
         self.last_summary = {
             "discovered_count": len(discovered),
             "error_count": len(self.last_errors),
             "errors": list(self.last_errors),
+            **self.coverage.receipt(),
         }
         return discovered
+
+    def _read_feed(self, url, source_key):
+        try:
+            if self.config.get("managed.window_start"):
+                with requests.Session() as session:
+                    session.trust_env = False
+                    response = session.get(url, timeout=collection_limit(self.config, "request_timeout_seconds"))
+                    response.raise_for_status()
+                    feed = feedparser.parse(response.content)
+            else:
+                feed = feedparser.parse(url)
+            if getattr(feed, "bozo", False) or getattr(feed, "status", 200) >= 400:
+                raise ValueError("invalid_feed")
+            return feed
+        except Exception as exc:
+            self.coverage.fail(source_key, type(exc).__name__)
+            return None
 
     def _queue_paper_from_entry_safely(
         self,
@@ -177,13 +237,13 @@ class ArXivCollector:
                 "source": source,
                 "artifact_id": artifact_id,
                 "error_type": exc.__class__.__name__,
-                "error": str(exc),
+                "error": exc.__class__.__name__,
             }
             self.last_errors.append(error)
             logger.warning(
                 "Skipping arXiv entry %s after queue failure: %s",
                 artifact_id or "<unknown>",
-                exc,
+                exc.__class__.__name__,
             )
             return None
 
@@ -199,8 +259,7 @@ class ArXivCollector:
         """Convert a feed entry to a queued paper artifact."""
         artifact_id = self._extract_artifact_id(entry)
         if not artifact_id:
-            logger.warning("Skipping arXiv entry without a recognizable paper id")
-            return None
+            raise ValueError("arxiv_entry_missing_id")
 
         if self.db.get_ingestion_entry(artifact_id):
             return None

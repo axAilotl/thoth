@@ -78,6 +78,11 @@ class ManagedCollectionRun:
         config.set(f"sources.{self.connector}", deepcopy(dict(self.source_config)))
         config.set(f"sources.{self.connector}.enabled", True)
         config.set("connectors.actor", self.account_id)
+        config.set("managed.window_start", self.window_start)
+        config.set("managed.window_end", self.window_end)
+        config.set("managed.cursor", self.cursor)
+        for key, value in self.budgets.items():
+            config.set(f"collection.{key}", value)
         return config
 
     def validate_paths(self, root: Path, layout: PathLayout, db: Any) -> None:

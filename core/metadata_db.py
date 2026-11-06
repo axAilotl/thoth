@@ -98,6 +98,8 @@ SEMANTIC_MEMORY_CANDIDATE_STATUS_CHECK = "', '".join(SEMANTIC_MEMORY_CANDIDATE_S
 CONNECTOR_RUN_ALLOWED_STATUSES = (
     'running',
     'completed',
+    'partial',
+    'blocked',
     'failed',
 )
 CONNECTOR_RUN_STATUS_CHECK = "', '".join(CONNECTOR_RUN_ALLOWED_STATUSES)
@@ -299,7 +301,7 @@ def _connector_retry_state(
     failure_reason: str | None,
     next_retry_at: str | None,
 ) -> dict[str, Any]:
-    retryable = status == "failed" and bool(next_retry_at)
+    retryable = status in {"failed", "partial"} and bool(next_retry_at)
     return {
         "status": status,
         "attempt": attempt,
@@ -3759,6 +3761,8 @@ class MetadataDB:
         failure_reason: Optional[str] = None,
         max_attempts: Optional[int] = None,
         metadata: Mapping[str, Any] | None = None,
+        retry_base_seconds: float = 300,
+        retry_max_seconds: float = 3600,
     ) -> Optional[ConnectorRunRecord]:
         """Mark a connector run completed or failed and refresh its checkpoint."""
         clean_run_id = str(run_id or "").strip()
@@ -3792,8 +3796,8 @@ class MetadataDB:
                 )
                 next_retry_at = None
                 clean_failure = str(failure_reason).strip() if failure_reason else None
-                if clean_status == "failed" and attempt < resolved_max_attempts:
-                    delay_seconds = min(3600, 300 * (2 ** max(0, attempt - 1)))
+                if clean_status in {"failed", "partial"} and attempt < resolved_max_attempts:
+                    delay_seconds = min(retry_max_seconds, retry_base_seconds * (2 ** max(0, attempt - 1)))
                     next_retry_at = (
                         datetime.now() + timedelta(seconds=delay_seconds)
                     ).isoformat()

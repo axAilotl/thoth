@@ -214,6 +214,7 @@ def _run_arxiv_connector(
             feed_format=feed_format,
         )
         return {
+            **collector.last_summary,
             "source": source,
             "categories": categories,
             "feed_format": feed_format,
@@ -228,6 +229,7 @@ def _run_arxiv_connector(
         raise ConnectorRunnerError("arxiv API execution requires topics")
     artifacts = collector.discover_papers(topics, max_results=limit)
     return {
+        **collector.last_summary,
         "source": source,
         "topics": topics,
         "queued": _artifact_summaries(artifacts),
@@ -266,6 +268,7 @@ def _run_github_connector(
         token=token,
     )
     return {
+        **collector.last_summary,
         "username": username or "authenticated account",
         "queued": _artifact_summaries(artifacts),
         "queued_count": len(artifacts),
@@ -298,6 +301,7 @@ def _run_huggingface_connector(
     discover = getattr(collector, entrypoint.attrs[-1])
     artifacts = discover(username=username, limit=limit)
     return {
+        **collector.last_summary,
         "username": username,
         "queued": _artifact_summaries(artifacts),
         "queued_count": len(artifacts),

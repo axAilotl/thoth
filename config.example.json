@@ -1,4 +1,12 @@
 {
+  "collection": {
+    "max_items": 100,
+    "max_pages": 10,
+    "request_timeout_seconds": 30,
+    "max_attempts": 5,
+    "retry_base_seconds": 300,
+    "retry_max_seconds": 3600
+  },
   "llm": {
     "providers": {
       "openai": {

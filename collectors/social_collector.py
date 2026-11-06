@@ -16,6 +16,7 @@ from core.artifacts.repository import RepositoryArtifact
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config as runtime_config
+from core.collection_result import CollectionCoverage, collection_limit
 from core.connector_capture import ConnectorCaptureQueue, write_connector_raw_json
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
@@ -54,102 +55,79 @@ class SocialCollector:
             # requests otherwise consults host netrc credentials implicitly.
             self.session.trust_env = False
 
-    def discover_github_stars(
-        self,
-        username: Optional[str] = None,
-        limit: int = 50,
-        token: Optional[str] = None,
-    ) -> List[RepositoryArtifact]:
-        """Fetch starred GitHub repositories and queue new artifacts."""
+    def discover_github_stars(self, username=None, limit=50, token=None):
+        """Collect a bounded GitHub star window with explicit coverage."""
         token = self._credentials.get("token") if self.managed else (
-            token
-            or self.config.get("sources.github.token")
-            or os.getenv("GITHUB_API")
-            or os.getenv("GITHUB_TOKEN")
+            token or self.config.get("sources.github.token") or os.getenv("GITHUB_API") or os.getenv("GITHUB_TOKEN")
         )
         if not token and not username:
-            logger.warning(
-                "GitHub token not configured, skipping authenticated stars collection."
-            )
-            return []
-
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
+            raise ValueError("GitHub collection requires an explicit username or token")
+        coverage = CollectionCoverage(self.config)
+        source = f"github:{username or 'authenticated'}"
+        summary = coverage.source(source, time_basis="starred_at" if self.managed else "snapshot")
+        headers = {"Accept": "application/vnd.github.star+json" if self.managed else "application/vnd.github+json",
+                   "X-GitHub-Api-Version": "2022-11-28"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-
+        limit = min(limit, int(collection_limit(self.config, "max_items")))
+        per_page = min(limit, 100)  # GitHub API protocol maximum.
+        cursor = json.loads(self.config.get("managed.cursor") or "{}")
+        page = int((cursor.get(source) or {}).get("page", 1))
+        url = f"https://api.github.com/users/{username}/starred" if username else "https://api.github.com/user/starred"
         discovered = []
-        page = 1
-        per_page = min(max(limit, 1), 100)
-        url = (
-            f"https://api.github.com/users/{username}/starred"
-            if username
-            else "https://api.github.com/user/starred"
-        )
-
         run_id = datetime.now().isoformat()
         with self.capture_queue.lifecycle() as lifecycle:
-            while len(discovered) < limit:
-                response = self.session.get(
-                    url,
-                    headers=headers,
-                    params={"per_page": per_page, "page": page, "sort": "updated"},
-                    timeout=30,
-                )
-                if response.status_code != 200:
-                    logger.error(
-                        "Failed to fetch GitHub stars: %s %s",
-                        response.status_code,
-                        response.text[:500],
-                    )
-                    return discovered
-
-                batch = response.json()
-                if not batch:
+            for _ in range(int(collection_limit(self.config, "max_pages"))):
+                try:
+                    response = self.session.get(url, headers=headers,
+                        params={"per_page": per_page, "page": page, "sort": "created", "direction": "desc"},
+                        timeout=collection_limit(self.config, "request_timeout_seconds"))
+                    if response.status_code != 200:
+                        coverage.fail(source, f"http_{response.status_code}")
+                        summary["cursor"] = {"page": page}
+                        break
+                    batch = response.json()
+                    if not isinstance(batch, list):
+                        raise ValueError("invalid_payload")
+                except Exception as exc:
+                    coverage.fail(source, type(exc).__name__)
+                    summary["cursor"] = {"page": page}
                     break
-
-                for repo_data in batch:
-                    artifact_id = f"gh_{repo_data['id']}"
-                    if self.db.get_ingestion_entry(artifact_id):
-                        continue
-
-                    raw_repo = self._to_serializable(repo_data)
-                    repo = RepositoryArtifact(
-                        id=artifact_id,
-                        source_type="github",
-                        raw_content=json.dumps(raw_repo),
-                        created_at=repo_data.get("updated_at"),
-                        ingested_at=datetime.now().isoformat(),
-                        repo_name=repo_data.get("full_name"),
-                        description=repo_data.get("description") or "",
-                        stars=repo_data.get("stargazers_count", 0),
-                        language=repo_data.get("language"),
-                        topics=repo_data.get("topics", []),
-                    )
-
-                    if self._queue_repository(
-                        repo,
-                        source="github",
-                        raw_payload=raw_repo,
-                        lifecycle=lifecycle,
-                        run_id=run_id,
-                        account=username,
-                        event_type="github_star",
-                        base_uri="https://api.github.com/user/starred"
-                        if not username
-                        else f"https://api.github.com/users/{username}/starred",
-                    ):
+                page_failed = False
+                for item in batch:
+                    summary["observed_count"] += 1
+                    try:
+                        data = item.get("repo", item)
+                        if self.managed and not coverage.in_window(source, item.get("starred_at")):
+                            continue
+                        artifact_id = f"gh_{data['id']}"
+                        if self.db.get_ingestion_entry(artifact_id):
+                            continue
+                        raw = self._to_serializable(data)
+                        repo = RepositoryArtifact(id=artifact_id, source_type="github", raw_content=json.dumps(raw),
+                            created_at=item.get("starred_at") or data.get("updated_at"), ingested_at=datetime.now().isoformat(),
+                            repo_name=data.get("full_name"), description=data.get("description") or "",
+                            stars=data.get("stargazers_count", 0), language=data.get("language"), topics=data.get("topics", []))
+                        if not self._queue_repository(repo, source="github", raw_payload=self._to_serializable(item),
+                            lifecycle=lifecycle, run_id=run_id, account=username, event_type="github_star", base_uri=url):
+                            raise ValueError("queue_not_persisted")
                         discovered.append(repo)
-                        logger.info(f"Queued GitHub repo: {repo.repo_name}")
-                        if len(discovered) >= limit:
-                            break
-
+                        summary["queued_count"] += 1
+                    except Exception as exc:
+                        coverage.fail(source, type(exc).__name__, partial=True)
+                        page_failed = True
+                if page_failed:
+                    summary["cursor"] = {"page": page}
+                    break
                 if len(batch) < per_page:
                     break
                 page += 1
-
+                if summary["observed_count"] >= limit:
+                    coverage.limited(source, {"page": page})
+                    break
+            else:
+                coverage.limited(source, {"page": page})
+        self.last_summary = coverage.receipt()
         return discovered
 
     def discover_hf_likes(
@@ -172,6 +150,10 @@ class SocialCollector:
             or os.getenv("HUGGINGFACE_API_TOKEN")
         )
 
+        coverage = CollectionCoverage(self.config)
+        source = f"huggingface:{hf_user}"
+        summary = coverage.source(source, time_basis="snapshot")
+        limit = min(limit, int(collection_limit(self.config, "max_items")))
         include_models = self.config.get("sources.huggingface.include_models", True)
         include_datasets = self.config.get("sources.huggingface.include_datasets", True)
         include_spaces = self.config.get("sources.huggingface.include_spaces", True)
@@ -179,15 +161,15 @@ class SocialCollector:
         try:
             from huggingface_hub import list_liked_repos, repo_info
         except ImportError:
-            logger.error(
-                "huggingface_hub package required. Install with: pip install huggingface_hub"
-            )
+            coverage.fail(source, "dependency_unavailable")
+            self.last_summary = coverage.receipt()
             return []
 
         try:
             likes = list_liked_repos(hf_user, token=hf_token or (False if self.managed else None))
         except Exception as exc:
-            logger.error(f"Failed to fetch HuggingFace likes for {hf_user}: {exc}")
+            coverage.fail(source, type(exc).__name__)
+            self.last_summary = coverage.receipt()
             return []
 
         repo_candidates: List[Tuple[Any, str]] = []
@@ -199,6 +181,10 @@ class SocialCollector:
 
         for repo_type, repo_ids in candidate_sets:
             for repo_id in repo_ids:
+                if summary["observed_count"] >= limit:
+                    coverage.limited(source)
+                    break
+                summary["observed_count"] += 1
                 try:
                     repo_candidates.append(
                         (
@@ -211,9 +197,7 @@ class SocialCollector:
                         )
                     )
                 except Exception as exc:
-                    logger.warning(
-                        "Could not fetch %s info for %s: %s", repo_type, repo_id, exc
-                    )
+                    coverage.fail(source, type(exc).__name__, partial=True)
 
         repo_candidates.sort(
             key=lambda item: getattr(item[0], "likes", 0) or 0,
@@ -228,6 +212,7 @@ class SocialCollector:
             for repo_data, repo_type in repo_candidates:
                 repo_name = getattr(repo_data, "id", None)
                 if not repo_name:
+                    coverage.fail(source, "missing_repository_id", partial=True)
                     continue
 
                 artifact_id = f"hf_{repo_type}_{repo_name.replace('/', '_')}"
@@ -254,19 +239,26 @@ class SocialCollector:
                     topics=getattr(repo_data, "tags", []) or [],
                 )
 
-                if self._queue_repository(
-                    repo,
-                    source="huggingface",
-                    raw_payload=raw_repo,
-                    lifecycle=lifecycle,
-                    run_id=run_id,
-                    account=hf_user,
-                    event_type="huggingface_like",
-                    base_uri="https://huggingface.co",
-                    source_metadata={"repo_type": repo_type},
-                ):
-                    discovered.append(repo)
-                    logger.info("Queued HuggingFace %s: %s", repo_type, repo.repo_name)
+                try:
+                    if self._queue_repository(
+                        repo,
+                        source="huggingface",
+                        raw_payload=raw_repo,
+                        lifecycle=lifecycle,
+                        run_id=run_id,
+                        account=hf_user,
+                        event_type="huggingface_like",
+                        base_uri="https://huggingface.co",
+                        source_metadata={"repo_type": repo_type},
+                    ):
+                        discovered.append(repo)
+                        summary["queued_count"] += 1
+                    else:
+                        raise ValueError("queue_not_persisted")
+                except Exception as exc:
+                    coverage.fail(source, type(exc).__name__, partial=True)
+
+        self.last_summary = coverage.receipt()
 
         return discovered
 

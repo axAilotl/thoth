@@ -148,7 +148,7 @@ class ConnectorScheduler:
         state["next_run_at"] = (started + timedelta(seconds=schedule.interval_seconds)).isoformat()
         db.upsert_automation_state(schedule.state_key, state)
         try:
-            self.service.run_connector(
+            result = self.service.run_connector(
                 schedule.connector_name, execute=True, options=dict(schedule.options),
             )
         except Exception as exc:
@@ -158,8 +158,10 @@ class ConnectorScheduler:
             )
             logger.exception("Scheduled connector %s failed", schedule.connector_name)
         else:
+            success = not isinstance(result, Mapping) or result.get("status") == "completed"
             mark_non_live_run_finished(
-                db, job_name=schedule.job_name, success=True, now=self.clock(),
+                db, job_name=schedule.job_name, success=success,
+                error=None if success else f"collection_{result.get('status', 'failed')}", now=self.clock(),
             )
             logger.info("Scheduled connector %s completed", schedule.connector_name)
         # An expensive failure must not immediately run again when it finishes.
