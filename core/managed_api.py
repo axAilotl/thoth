@@ -22,7 +22,9 @@ def create_app(runtime):
             else:
                 routes = {"/v1/collections/execute": (runtime.execute, {"run", "credentials", "lease_expires_at"}),
                           "/v1/collections/artifacts": (runtime.read_artifacts, {"run", "artifact_ids", "lease_expires_at"}),
-                          "/v1/collections/receipt": (runtime.receipt, {"run", "lease_expires_at"})}
+                          "/v1/collections/receipt": (runtime.receipt, {"run", "lease_expires_at"}),
+                          "/v1/wiki/propose": (runtime.wiki_propose, {"context", "source_documents", "page_snapshots", "topics", "model_routes", "lease_expires_at"}),
+                          "/v1/wiki/ack": (runtime.wiki_acknowledge, {"context", "proposal_id", "receipt", "lease_expires_at"})}
                 if scope["method"] != "POST" or scope["path"] not in routes:
                     raise ManagedRuntimeError("route_not_found", 404)
                 chunks, size = [], 0
@@ -46,7 +48,7 @@ def create_app(runtime):
                     keys = keys | {"history_exports"}
                 if not isinstance(payload, dict) or set(payload) != keys:
                     raise ManagedRuntimeError("invalid_envelope", 422)
-                arguments = {"raw_run": payload.pop("run"), **payload}
+                arguments = {"raw_run": payload.pop("run"), **payload} if "run" in payload else payload
                 result = await asyncio.to_thread(handler, **arguments)
             status, body = 200, result
         except ManagedRuntimeError as error:

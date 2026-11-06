@@ -68,7 +68,7 @@ class ManagedRuntimeSettings:
 
 
 class ManagedRuntime:
-    def __init__(self, settings, *, worker=None):
+    def __init__(self, settings, *, worker=None, wiki_invoke=None):
         self.settings = settings
         self.config = Config()
         self.config.data = json.loads(Path(settings.config_file).read_text())
@@ -84,7 +84,21 @@ class ManagedRuntime:
         self.layout.ensure_directories()
         self.db = MetadataDB(str(self.layout.database_path))
         self.worker = worker or self._worker
+        self.wiki_invoke = wiki_invoke
         self.lock = threading.Lock()
+
+    def wiki_propose(self, **request):
+        from .managed_wiki_runtime import ManagedWikiRuntime
+        return ManagedWikiRuntime(self, invoke=self.wiki_invoke).propose(**request)
+
+    def wiki_acknowledge(self, **request):
+        from .managed_wiki_runtime import ManagedWikiRuntime
+        if not self.lock.acquire(blocking=False):
+            raise ManagedRuntimeError("runtime_busy")
+        try:
+            return ManagedWikiRuntime(self, invoke=self.wiki_invoke).acknowledge(**request)
+        finally:
+            self.lock.release()
 
     def authorize(self, raw_run, lease_expires_at):
         try:

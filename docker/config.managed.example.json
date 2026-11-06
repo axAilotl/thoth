@@ -7,7 +7,19 @@
   },
   "database": {"path": "meta.db", "capture_event_store": {"enabled": false}},
   "processing": {"enable_llm_features": false},
+  "managed_wiki": {
+    "enabled": false,
+    "callback_socket": "/run/cissa-thoth/cissa-model.sock",
+    "callback_timeout_seconds": 180,
+    "max_callback_response_bytes": 2097152,
+    "max_sources": 100,
+    "max_topics": 10,
+    "max_page_bytes": 1048576
+  },
   "collection": {
+    "max_history_export_bytes": 1048576,
+    "max_history_messages": 1000,
+    "max_history_message_characters": 100000,
     "max_items": 100,
     "max_pages": 10,
     "request_timeout_seconds": 30,
