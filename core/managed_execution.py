@@ -81,6 +81,8 @@ class ManagedCollectionRun:
         config.set("managed.window_start", self.window_start)
         config.set("managed.window_end", self.window_end)
         config.set("managed.cursor", self.cursor)
+        config.set("managed.selected_resources", list(self.selected_resources))
+        config.set("managed.run_id", self.run_id)
         for key, value in self.budgets.items():
             config.set(f"collection.{key}", value)
         return config

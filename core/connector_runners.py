@@ -181,6 +181,12 @@ def _run_generic_connector(
     return dict(result)
 
 
+def _run_research_connector(context, entrypoint, options):
+    connector = entrypoint.target(context.config, layout=context.layout, db=context.db,
+                                  capture_event_store=context.event_store)
+    return connector.collect(**dict(options))
+
+
 def _run_arxiv_connector(
     context: ConnectorRunContext,
     entrypoint: ResolvedEntrypoint,
@@ -615,6 +621,7 @@ def _run_pi_skills_connector(
 # does not match the generic `Class(config, layout=..., db=...).collect(**options)`
 # contract. Each entry documents why the convention cannot be generic:
 _RUN_ADAPTERS: dict[str, tuple[str, RunAdapter]] = {
+    "collectors.ugc_discussion_connector:DiscussionCollector": ("class", _run_research_connector),
     # Async module-level function, not a collector class.
     "core.x_api_bookmark_sync:run_x_api_bookmark_backfill": (
         "function",

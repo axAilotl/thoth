@@ -623,6 +623,14 @@
     "password": ""
   },
   "sources": {
+    "ugc_discussion": {
+      "enabled": false,
+      "reddit": [],
+      "hn_queries": [],
+      "page_size": 100,
+      "include_comments": true,
+      "comment_limit": 1000
+    },
     "arxiv": {
       "source": "rss",
       "feed_format": "rss",
