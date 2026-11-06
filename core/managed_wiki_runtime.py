@@ -60,7 +60,7 @@ class ManagedWikiRuntime:
     def _layout(self, context):
         config = Config()
         config.data = deepcopy(self.runtime.config.data)
-        root = self.runtime.layout.system_root / "managed-wiki" / self._job_key(context).split(":")[-1]
+        root = context.account_root / "managed-wiki" / self._job_key(context).split(":")[-1]
         if not root.resolve().is_relative_to(context.account_root.resolve()):
             raise ManagedRuntimeError("wiki_snapshot_escape", 403)
         config.set("paths", {"vault_dir": str(root / "vault"), "wiki_dir": str(root / "wiki"),
