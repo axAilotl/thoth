@@ -39,10 +39,18 @@ def test_recurring_competitor_budget_rotates_all_sources_and_replay_does_not(tmp
         assert sum(r["observed_count"] for r in result["coverage"]) == 10
         assert all(r["covered_through"] is None for r in result["coverage"] if r["status"] == "partial")
         before = list(visited)
-        assert svc.run_connector("competitor_web", execute=True)["result"] == result
+        with pytest.raises(ValueError, match="retry is not due"):
+            svc.run_connector("competitor_web", execute=True)
         assert visited == before  # Ledger replay must not reserve a new rotation.
     assert visited[:42] == urls
     assert set(visited) == set(urls)
+
+    complete = service(tmp_path / "completed", "competitor_web", ["web:" + urls[0]],
+        {"pages": [{"url": urls[0]}], "max_redirects": 1, "user_agent": "test"})
+    result = complete.run_connector("competitor_web", execute=True)
+    before = list(visited)
+    assert complete.run_connector("competitor_web", execute=True) == result
+    assert visited == before
 
 
 def test_discussion_busy_first_source_cannot_starve_any_of_33_selections(tmp_path, monkeypatch):
