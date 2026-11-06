@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
+import json
 from .wiki_io import markdown_file_link
 from pathlib import Path
 import re
@@ -84,6 +85,13 @@ class ArchivistCompiler:
             managed_context.validate_runtime(layout, db, llm_interface)
         self.managed_context = managed_context
         self.config = config
+        defaults = json.loads((Path(__file__).resolve().parent.parent / "config.example.json").read_text())["llm"]["prompts"]["archivist"]
+        self.excerpt_characters = config.get("llm.prompts.archivist.excerpt_characters", defaults["excerpt_characters"])
+        self.default_max_tokens = config.get("llm.prompts.archivist.default_max_tokens", defaults["default_max_tokens"])
+        self.default_temperature = config.get("llm.prompts.archivist.default_temperature", defaults["default_temperature"])
+        for name, value in (("excerpt_characters", self.excerpt_characters), ("default_max_tokens", self.default_max_tokens)):
+            if type(value) is not int or value < 1:
+                raise ValueError(f"Archivist {name} must be a positive integer")
         self.project_root = project_root or Path.cwd()
         self.layout = layout or build_path_layout(config, project_root=self.project_root)
         if managed_context is None:
@@ -274,6 +282,9 @@ class ArchivistCompiler:
         system_prompt += FEEDBACK_SYSTEM_BOUNDARY
         user_prompt += feedback_prompt(feedback)
         provider_name, model_id, model_cfg = route
+        max_tokens = model_cfg.get("max_tokens", self.default_max_tokens)
+        if type(max_tokens) is not int or max_tokens < 1:
+            raise ArchivistCompilerError("Archivist model max_tokens must be positive")
         response = await self.llm_interface.generate(
             prompt=user_prompt,
             system_prompt=system_prompt,
@@ -281,8 +292,8 @@ class ArchivistCompiler:
             model=model_id,
             task="archivist",
             usage_model_config=model_cfg,
-            max_tokens=int(model_cfg.get("max_tokens", 1800) or 1800),
-            temperature=float(model_cfg.get("temperature", 0.2) or 0.2),
+            max_tokens=max_tokens,
+            temperature=float(model_cfg.get("temperature", self.default_temperature)),
         )
         if response.error:
             raise ArchivistCompilerError(
@@ -374,7 +385,8 @@ class ArchivistCompiler:
             )
         return "\n".join(rendered).strip()
 
-    def _candidate_excerpt(self, candidate: ArchivistCandidate, *, limit: int = 1800) -> str:
+    def _candidate_excerpt(self, candidate: ArchivistCandidate, *, limit: int | None = None) -> str:
+        limit = self.excerpt_characters if limit is None else limit
         text = " ".join((candidate.content_text or "").split())
         if text:
             if len(text) > limit:

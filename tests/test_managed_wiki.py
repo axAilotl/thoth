@@ -24,6 +24,7 @@ def environment(tmp_path, invoke=None):
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     context = ManagedWikiContext(account_id="a", archive_id="company", job_id="job", lease_generation=1,
         author="Cissa agent", topic_ids=(topic.id,), source_cutoff="2026-04-30T00:00:00Z", account_root=tmp_path,
+        budgets={"max_source_bytes": 100000, "max_total_source_bytes": 200000},
         source_manifest={"tweets/companion_note.md": {"account_id": "a", "archive_id": "company",
             "source_id": "source-1", "revision": "rev-1", "content_hash": digest, "file_sha256": digest,
             "observed_at": "2026-04-03T00:00:00Z", "uri": "cissa://sources/source-1"}},
@@ -32,7 +33,7 @@ def environment(tmp_path, invoke=None):
     async def gateway_call(request):
         calls.append(request)
         return await invoke(request) if invoke else {"content": "## Findings\nSource-backed finding [S1]."}
-    gateway = ManagedModelGateway(identity=context.identity(), tasks={"archivist": {"model": "configured-model", "max_tokens": 16384, "temperature": 0.2}}, invoke=gateway_call)
+    gateway = ManagedModelGateway(identity=context.identity(), tasks={"archivist": {"model": "configured-model", "max_tokens": 16384, "max_input_characters": 100000, "temperature": 0.2}}, invoke=gateway_call)
     compiler = ArchivistCompiler(config, project_root=tmp_path, layout=layout, db=db,
                                  llm_interface=gateway, managed_context=context)
     return compiler, context, topic, calls
@@ -111,3 +112,11 @@ def test_source_cutoff_and_changed_apply_manifest_are_enforced(tmp_path):
     with pytest.raises(ValueError, match="no longer authorized"):
         acknowledge_wiki_proposal(context=replace(context, source_manifest=future), layout=compiler.layout,
             db=compiler.db, proposal_id=proposal["proposal_id"], receipt=receipt)
+
+
+def test_managed_gateway_rejects_input_budget_before_request(tmp_path):
+    compiler, context, topic, calls = environment(tmp_path)
+    compiler.llm_interface.tasks["archivist"]["max_input_characters"] = 1
+    with pytest.raises(ValueError, match="input budget"):
+        asyncio.run(compiler.compile_topic(topic))
+    assert calls == []

@@ -207,6 +207,9 @@
       "transcript": "Combine fragmented sentences into coherent paragraphs. Remove all timestamps. Process the following transcript and generate the text output in plain text paragraphs without editing the content, only forming paragraphs that flow logically based on context inserting newlines between paragraphs. Return ONLY the processed transcript text with no preamble or explanation., followed by a concise 2-4 sentence summary followed by 3-8 relevant hashtag-style tags for the given content. Focus on topics, technologies, concepts, and themes. Return only comma-separated tags without # symbols, no explanations.",
       "archivist": {
         "system_file": "prompts/archivist_system.md",
+        "excerpt_characters": 1800,
+        "default_max_tokens": 1800,
+        "default_temperature": 0.2,
         "user_file": "prompts/archivist_user.md"
       },
       "translation": {

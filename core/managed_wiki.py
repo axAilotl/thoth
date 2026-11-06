@@ -32,6 +32,7 @@ class ManagedWikiContext:
     source_manifest: Mapping[str, Mapping[str, Any]]
     expected_pages: Mapping[str, Mapping[str, Any]]
     account_root: Path
+    budgets: Mapping[str, int]
 
     def identity(self):
         return {name: getattr(self, name) for name in ("account_id", "archive_id", "job_id", "lease_generation")}
@@ -40,6 +41,9 @@ class ManagedWikiContext:
         if not all((self.account_id, self.archive_id, self.job_id, self.author, self.topic_ids)) or type(self.lease_generation) is not int or self.lease_generation < 1:
             raise ValueError("Managed wiki identity, author, topics and lease are required")
         utc_time(self.source_cutoff)
+        for key in ("max_source_bytes", "max_total_source_bytes"):
+            if type(self.budgets.get(key)) is not int or self.budgets[key] < 1:
+                raise ValueError(f"Managed wiki requires positive {key}")
         root = self.account_root.resolve()
         if not self.account_root.is_absolute():
             raise ValueError("Managed wiki root must be absolute")
@@ -55,6 +59,7 @@ class ManagedWikiContext:
 
     def allowed_files(self, layout):
         allowed = {}
+        total_bytes = 0
         for name, source in self.source_manifest.items():
             if Path(name).is_absolute() or ".." in Path(name).parts:
                 raise ValueError("Invalid managed wiki source path")
@@ -67,7 +72,14 @@ class ManagedWikiContext:
             path = resolve_source_path(layout, name)
             if path is None or not path.resolve().is_relative_to(self.account_root.resolve()):
                 raise ValueError("Managed wiki source escapes account root")
-            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != source["file_sha256"]:
+            if not path.is_file():
+                raise ValueError("Managed wiki source revision changed or disappeared")
+            total_bytes += path.stat().st_size
+            if path.stat().st_size > self.budgets["max_source_bytes"] or total_bytes > self.budgets["max_total_source_bytes"]:
+                raise ValueError("Managed wiki source byte budget exceeded")
+            with path.open("rb") as handle:
+                digest = hashlib.file_digest(handle, "sha256").hexdigest()
+            if digest != source["file_sha256"]:
                 raise ValueError("Managed wiki source revision changed or disappeared")
             allowed[path.resolve()] = (name, dict(source))
         return allowed
