@@ -20,6 +20,7 @@ from core.capture_lifecycle import CaptureLifecycleService
 from core.ccf_metadata import metadata_enabled
 from core.config import Config, config as runtime_config
 from core.collection_result import CollectionCoverage, collection_limit
+from core.collection_fairness import FairCollectionBudget
 from core.connector_capture import ConnectorCaptureQueue, write_connector_raw_json
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
@@ -75,11 +76,12 @@ class ArXivCollector:
         self.last_errors = []
         self.coverage = CollectionCoverage(self.config)
         max_results = min(max_results, int(collection_limit(self.config, "max_items")))
+        budget = FairCollectionBudget(self.config, self.db, "arxiv", [f"arxiv:topic:{t}" for t in topics], max_items=max_results)
         run_id = datetime.now().isoformat()
 
         with self.capture_queue.lifecycle() as lifecycle:
-            for topic in topics:
-                source_key = f"arxiv:topic:{topic}"
+            for source_key in budget.sources:
+                topic = source_key.removeprefix("arxiv:topic:")
                 summary = self.coverage.source(source_key)
                 cursor = self.coverage.cursor(source_key)
                 if cursor.get("completed"):
@@ -87,7 +89,7 @@ class ArXivCollector:
                 start_offset = int(cursor.get("offset", 0))
                 if start_offset < 0:
                     raise ValueError("Invalid arXiv cursor offset")
-                remaining = max_results - sum(item["observed_count"] for item in self.coverage.sources.values())
+                remaining = budget.remaining(source_key)
                 if remaining <= 0:
                     self.coverage.limited(source_key)
                     continue
@@ -152,17 +154,14 @@ class ArXivCollector:
         self.last_errors = []
         self.coverage = CollectionCoverage(self.config)
         feed_limit = min(max_results, int(collection_limit(self.config, "max_items")))
+        budget = FairCollectionBudget(self.config, self.db, "arxiv", [f"arxiv:category:{c.strip()}" for c in categories if c.strip()], max_items=feed_limit)
         base_url = self.BASE_RSS_URL if feed_format == "rss" else self.BASE_ATOM_URL
 
         run_id = datetime.now().isoformat()
 
         with self.capture_queue.lifecycle() as lifecycle:
-            for raw_category in categories:
-                category = raw_category.strip()
-                if not category:
-                    continue
-
-                source_key = f"arxiv:category:{category}"
+            for source_key in budget.sources:
+                category = source_key.removeprefix("arxiv:category:")
                 summary = self.coverage.source(source_key)
                 cursor = self.coverage.cursor(source_key)
                 if cursor.get("completed"):
@@ -170,7 +169,7 @@ class ArXivCollector:
                 start_offset = int(cursor.get("offset", 0))
                 if start_offset < 0:
                     raise ValueError("Invalid arXiv cursor offset")
-                remaining = feed_limit - sum(item["observed_count"] for item in self.coverage.sources.values())
+                remaining = budget.remaining(source_key)
                 if remaining <= 0:
                     self.coverage.limited(source_key)
                     continue

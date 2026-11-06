@@ -19,11 +19,16 @@ class CompetitorWebCollector(ResearchCapture):
         self.renderer = renderer
 
     def collect(self):
+        pages = {f"web:{page['url']}": page for page in self.settings["pages"]}
+        ordered = self.plan(pages, slots=int(collection_limit(self.config, "max_pages")))
         with self.queue.lifecycle() as lifecycle:
-            for index, page in enumerate(self.settings["pages"]):
-                if index >= collection_limit(self.config, "max_pages"):
-                    self.source(f"web:{page['url']}", time_basis="observed_at")
-                    self.coverage.limited(f"web:{page['url']}")
+            for source in ordered:
+                page = pages[source]
+                self.source(source)["time_basis"] = "observed_at"
+                if self.coverage.cursor(source).get("completed"):
+                    continue
+                if not self.budget.remaining(source):
+                    self.coverage.limited(source)
                     continue
                 self._page(lifecycle, page)
         return self.receipt()
@@ -85,7 +90,8 @@ class CompetitorWebCollector(ResearchCapture):
                    "html": html, "method": method, "text_hash": digest,
                    "declared_publication_time": parser.published_at}
             self.raw_page(source, observed, raw)
-            summary.update(observed_count=1, changed=previous.get("text_hash") != digest,
+            self.observe(source)
+            summary.update(changed=previous.get("text_hash") != digest,
                            previous_hash=previous.get("text_hash"), current_hash=digest,
                            capture_method=method, observed_at=observed,
                            declared_publication_time=parser.published_at)

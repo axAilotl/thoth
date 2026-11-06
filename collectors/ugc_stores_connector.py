@@ -15,9 +15,15 @@ class StoreReviewCollector(ResearchCapture):
     name = "ugc_stores"
 
     def collect(self):
+        apps = {f"{a['platform']}:{a['app_id']}": a for a in self.settings["apps"]}
         with self.queue.lifecycle() as lifecycle:
-            for app in self.settings["apps"]:
-                self._app(lifecycle, app)
+            for source in self.plan(apps):
+                if self.coverage.cursor(source).get("completed"):
+                    continue
+                if not self.budget.remaining(source):
+                    self.coverage.limited(source)
+                    continue
+                self._app(lifecycle, apps[source])
         return self.receipt()
 
     def _app(self, lifecycle, app):
@@ -35,8 +41,12 @@ class StoreReviewCollector(ResearchCapture):
             return
         page = int(cursor.get("page", 1))
         continuation = cursor.get("continuation")
+        offset = int(cursor.get("offset", 0))
         try:
             for _ in range(int(collection_limit(self.config, "max_pages"))):
+                if not self.budget.remaining(source):
+                    self.coverage.limited(source, {"page": page, "continuation": continuation, "offset": offset})
+                    return
                 if platform == "apple":
                     if page > int(self.settings["apple_max_pages"]):
                         self.coverage.limited(source)
@@ -54,10 +64,9 @@ class StoreReviewCollector(ResearchCapture):
                     if summary["observed_count"] == 0:
                         self.coverage.fail(source, "empty_or_unavailable_sample", partial=True)
                     return
-                for record in records:
-                    summary["observed_count"] += 1
-                    if sum(item["observed_count"] for item in self.coverage.sources.values()) > collection_limit(self.config, "max_items"):
-                        self.coverage.limited(source, {"page": page, "continuation": continuation})
+                for index, record in enumerate(records[offset:], start=offset):
+                    if not self.observe(source):
+                        self.coverage.limited(source, {"page": page, "continuation": continuation, "offset": index})
                         return
                     if platform == "apple":
                         native_id, timestamp = record["id"]["label"], record["updated"]["label"]
@@ -75,6 +84,7 @@ class StoreReviewCollector(ResearchCapture):
                     if continuation is None:
                         return
                 page += 1
+                offset = 0
             self.coverage.limited(source, {"page": page, "continuation": continuation})
         except Exception as exc:
             self.coverage.fail(source, type(exc).__name__)

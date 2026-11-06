@@ -9,6 +9,7 @@ import requests
 
 from core.artifacts.markdown import MarkdownArtifact
 from core.collection_result import CollectionCoverage, collection_limit
+from core.collection_fairness import FairCollectionBudget
 from core.connector_capture import ConnectorCaptureQueue, write_connector_raw_json
 
 
@@ -27,11 +28,28 @@ class ResearchCapture:
         self.http.trust_env = False
         self.queued = []
 
+    def plan(self, sources, *, slots=None):
+        # Validate every selection before reserving rotation or performing I/O.
+        sources = list(sources)
+        for source in sources:
+            self.source(source)
+        self.budget = FairCollectionBudget(self.config, self.db, self.name, sources,
+            max_items=collection_limit(self.config, "max_items"), slots=slots)
+        return self.budget.sources
+
+    def observe(self, source, *, parent=None):
+        if not self.budget.observe(parent or source):
+            return False
+        self.coverage.source(source)["observed_count"] += 1
+        return True
+
     def source(self, name, *, time_basis="source_time"):
         selected = self.config.get("managed.selected_resources")
         if selected is not None and name not in selected:
             raise ValueError("Research source is outside selected resources")
-        return self.coverage.source(name, time_basis=time_basis)
+        entry = self.coverage.source(name, time_basis=time_basis)
+        entry["time_basis"] = time_basis
+        return entry
 
     def fetch(self, url, params=None):
         response = self.http.get(url, params=params,

@@ -89,3 +89,20 @@ def test_hn_page_budget_cursor_resumes_without_duplicate_evidence(tmp_path, monk
     assert second["status"] == "completed"
     assert pages == [0, 1]
     assert len(second["result"]["artifacts"]) == 1
+
+
+def test_hn_item_limit_resume_keeps_page_offset(tmp_path, monkeypatch):
+    collector = service(tmp_path)
+    collector.config.set("sources.ugc_discussion.reddit", [])
+    collector.config.set("collection.max_items", 1)
+    collector.config.set("collection.retry_base_seconds", 0.000001)
+    timestamp = int(datetime(2026, 4, 3, tzinfo=timezone.utc).timestamp())
+    def get(session, url, params=None, **kwargs):
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {
+            "hits": [{"objectID": f"h{i}", "created_at_i": timestamp, "title": "Evidence"} for i in range(2)], "nbPages": 1})
+    monkeypatch.setattr("requests.Session.get", get)
+    first = collector.run_connector("ugc_discussion", execute=True)["result"]
+    assert first["coverage"][0]["cursor"] == {"page": 0, "offset": 1}
+    second = collector.run_connector("ugc_discussion", execute=True)["result"]
+    assert second["status"] == "completed"
+    assert len(second["artifacts"]) == 2
