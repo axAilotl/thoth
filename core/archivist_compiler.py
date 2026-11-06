@@ -60,6 +60,7 @@ class ArchivistCompileResult:
     source_paths: tuple[str, ...]
     model_provider: str | None
     model: str | None
+    proposal: dict[str, Any] | None = None
 
 
 class ArchivistCompiler:
@@ -74,16 +75,24 @@ class ArchivistCompiler:
         contract: WikiContract | None = None,
         db: MetadataDB | None = None,
         llm_interface: LLMInterface | None = None,
+        managed_context: Any | None = None,
     ):
+        if managed_context is not None:
+            from .managed_model_gateway import ManagedModelGateway
+            if layout is None or db is None or project_root is None or not isinstance(llm_interface, ManagedModelGateway):
+                raise ValueError("Managed wiki requires explicit layout, database, project root and Cissa gateway")
+            managed_context.validate_runtime(layout, db, llm_interface)
+        self.managed_context = managed_context
         self.config = config
         self.project_root = project_root or Path.cwd()
         self.layout = layout or build_path_layout(config, project_root=self.project_root)
-        self.layout.ensure_directories()
+        if managed_context is None:
+            self.layout.ensure_directories()
         self.contract = contract or build_wiki_contract(config, project_root=self.project_root)
         self.db = db or get_metadata_db()
         self.publications = WikiPublicationStore(self.db, self.layout.wiki_root)
         self.llm_interface = llm_interface or LLMInterface(config.get("llm", {}))
-        self.scaffold = ensure_wiki_scaffold(config, project_root=self.project_root)
+        self.scaffold = ensure_wiki_scaffold(config, project_root=self.project_root) if managed_context is None else None
 
     async def run(
         self,
@@ -101,7 +110,12 @@ class ArchivistCompiler:
         topics = self._select_topics(registry, topic_ids=topic_ids, limit=limit)
         results: list[ArchivistCompileResult] = []
         for topic in topics:
-            results.append(await self.compile_topic(topic, force=force, dry_run=dry_run))
+            try:
+                results.append(await self.compile_topic(topic, force=force, dry_run=dry_run))
+            except Exception as exc:
+                if self.managed_context is None:
+                    raise
+                results.append(ArchivistCompileResult(topic.id, "failed", type(exc).__name__, None, 0, (), None, None))
         return results
 
     async def compile_topic(
@@ -111,6 +125,9 @@ class ArchivistCompiler:
         force: bool = False,
         dry_run: bool = False,
     ) -> ArchivistCompileResult:
+        if self.managed_context is not None:
+            from .managed_wiki import propose_topic
+            return await propose_topic(self, topic, force=force, dry_run=dry_run)
         page_path = topic.output_path_for_root(self.layout.wiki_root)
         publication = self.publications.inspect(page_path)
         if not publication.publishable:
@@ -374,7 +391,19 @@ class ArchivistCompiler:
         page_path: Path,
         publication: PublicationSnapshot,
     ) -> None:
+        content, metadata = self._render_topic_page(topic, candidates, body=body, page_path=page_path, publication=publication)
         page_path.parent.mkdir(parents=True, exist_ok=True)
+        self.publications.publish(page_path, content, snapshot=publication, metadata=metadata)
+
+    def _render_topic_page(
+        self,
+        topic: ArchivistTopicDefinition,
+        candidates: Sequence[ArchivistCandidate],
+        *,
+        body: str,
+        page_path: Path,
+        publication: PublicationSnapshot,
+    ) -> tuple[str, dict[str, Any]]:
         existing = read_document(page_path) if page_path.exists() else None
         previous_metadata = self.publications.metadata_for(page_path)
         # Explicitly adopted pre-upgrade pages retain their original metadata here.
@@ -438,7 +467,7 @@ class ArchivistCompiler:
                 "",
             ]
         )
-        self.publications.publish(page_path, content, snapshot=publication, metadata=metadata)
+        return content, metadata
 
     def _render_sources_section(
         self,

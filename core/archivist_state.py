@@ -285,14 +285,21 @@ def record_archivist_topic_run(
     """Persist a completed archivist topic run."""
 
     metadata_db = db or get_metadata_db()
-    existing = load_archivist_topic_state(topic.id, db=metadata_db)
     snapshot = snapshot_archivist_candidates(tuple(candidates))
+    return record_archivist_topic_snapshot(topic.id, snapshot, route=route, db=metadata_db,
+                                          run_at=run_at, succeeded=succeeded)
+
+
+def record_archivist_topic_snapshot(topic_id, snapshot, *, route, db, run_at=None, succeeded=True):
+    """Commit a compiled input snapshot after publication has been confirmed."""
+    metadata_db = db
+    existing = load_archivist_topic_state(topic_id, db=db)
     provider = route[0] if route else None
     model = route[1] if route else None
     recorded_at = run_at or utc_now_iso()
 
     updated = ArchivistTopicState(
-        topic_id=topic.id,
+        topic_id=topic_id,
         last_run_at=recorded_at,
         last_success_at=recorded_at if succeeded else existing.last_success_at,
         last_source_keys=snapshot.source_keys,
