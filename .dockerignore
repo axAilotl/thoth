@@ -5,6 +5,7 @@
 !docker/
 !docker/requirements.lock
 !docker/container.py
+!docker/managed.py
 !docker/config.container.example.json
 !core/
 !core/**

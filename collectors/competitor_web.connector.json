@@ -1,0 +1,43 @@
+{
+  "name": "competitor_web",
+  "source_name": "competitor_web",
+  "display_name": "Competitor web changes",
+  "description": "Configured public competitor page snapshots, source hashes and change evidence.",
+  "artifact_types": [
+    "markdown"
+  ],
+  "inputs": [
+    "remote_web:configured_public_pages"
+  ],
+  "outputs": [
+    "artifact_queue:markdown"
+  ],
+  "capabilities": [
+    "research",
+    "raw_evidence",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.competitor_web.enabled",
+    "sources.competitor_web.pages",
+    "sources.competitor_web.max_redirects",
+    "sources.competitor_web.user_agent"
+  ],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "public_network_ingest",
+  "allowed_side_effects": [
+    "network_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.competitor_web_connector:CompetitorWebCollector",
+  "cli_command": "connector run competitor_web",
+  "config_namespace": "sources.competitor_web",
+  "default_enabled": false,
+  "ccf": {
+    "lane": "markdown",
+    "artifact_role": "raw_capture"
+  }
+}

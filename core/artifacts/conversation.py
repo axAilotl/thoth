@@ -20,6 +20,9 @@ class ConversationArtifact(KnowledgeArtifact):
     messages: List[Dict[str, str]] = field(default_factory=list)
     model: Optional[str] = None
     tokens_used: Optional[int] = None
+    title: str = ""
+    body: str = ""
+    source_url: Optional[str] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -34,6 +37,9 @@ class ConversationArtifact(KnowledgeArtifact):
                 "messages": self.messages,
                 "model": self.model,
                 "tokens_used": self.tokens_used,
+                "title": self.title,
+                "body": self.body,
+                "source_url": self.source_url,
             }
         )
         return data

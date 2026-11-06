@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Mapping
 
 import requests
 
@@ -16,6 +16,7 @@ from core.artifacts.repository import RepositoryArtifact
 from core.capture_event_store import CaptureEventStore
 from core.capture_lifecycle import CaptureLifecycleService
 from core.config import Config, config as runtime_config
+from core.collection_result import CollectionCoverage, collection_limit
 from core.connector_capture import ConnectorCaptureQueue, write_connector_raw_json
 from core.metadata_db import MetadataDB, get_metadata_db
 from core.path_layout import PathLayout, build_path_layout
@@ -33,7 +34,13 @@ class SocialCollector:
         config: Config | None = None,
         layout: PathLayout | None = None,
         capture_event_store: CaptureEventStore | None = None,
+        managed: bool = False,
+        credentials: Mapping[str, str] | None = None,
     ):
+        if managed and (config is None or layout is None or db is None):
+            raise ValueError("Managed collector requires explicit config, layout and database")
+        self.managed = managed
+        self._credentials = dict(credentials or {})
         self.config = config or runtime_config
         self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
@@ -44,103 +51,90 @@ class SocialCollector:
             capture_event_store=capture_event_store,
         )
         self.session = requests.Session()
+        if managed:
+            # requests otherwise consults host netrc credentials implicitly.
+            self.session.trust_env = False
 
-    def discover_github_stars(
-        self,
-        username: Optional[str] = None,
-        limit: int = 50,
-        token: Optional[str] = None,
-    ) -> List[RepositoryArtifact]:
-        """Fetch starred GitHub repositories and queue new artifacts."""
-        token = (
-            token
-            or self.config.get("sources.github.token")
-            or os.getenv("GITHUB_API")
-            or os.getenv("GITHUB_TOKEN")
+    def discover_github_stars(self, username=None, limit=50, token=None):
+        """Collect a bounded GitHub star window with explicit coverage."""
+        token = self._credentials.get("token") if self.managed else (
+            token or self.config.get("sources.github.token") or os.getenv("GITHUB_API") or os.getenv("GITHUB_TOKEN")
         )
         if not token and not username:
-            logger.warning(
-                "GitHub token not configured, skipping authenticated stars collection."
-            )
-            return []
-
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
+            raise ValueError("GitHub collection requires an explicit username or token")
+        coverage = CollectionCoverage(self.config)
+        source = f"github:{username or 'authenticated'}"
+        summary = coverage.source(source, time_basis="starred_at" if self.managed else "snapshot")
+        headers = {"Accept": "application/vnd.github.star+json" if self.managed else "application/vnd.github+json",
+                   "X-GitHub-Api-Version": "2022-11-28"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-
+        limit = min(limit, int(collection_limit(self.config, "max_items")))
+        per_page = min(limit, 100)  # GitHub API protocol maximum.
+        cursor = json.loads(self.config.get("managed.cursor") or "{}")
+        page = int((cursor.get(source) or {}).get("page", 1))
+        url = f"https://api.github.com/users/{username}/starred" if username else "https://api.github.com/user/starred"
         discovered = []
-        page = 1
-        per_page = min(max(limit, 1), 100)
-        url = (
-            f"https://api.github.com/users/{username}/starred"
-            if username
-            else "https://api.github.com/user/starred"
-        )
-
         run_id = datetime.now().isoformat()
         with self.capture_queue.lifecycle() as lifecycle:
-            while len(discovered) < limit:
-                response = self.session.get(
-                    url,
-                    headers=headers,
-                    params={"per_page": per_page, "page": page, "sort": "updated"},
-                    timeout=30,
-                )
-                if response.status_code != 200:
-                    logger.error(
-                        "Failed to fetch GitHub stars: %s %s",
-                        response.status_code,
-                        response.text[:500],
-                    )
-                    return discovered
-
-                batch = response.json()
-                if not batch:
+            for _ in range(int(collection_limit(self.config, "max_pages"))):
+                try:
+                    response = self.session.get(url, headers=headers,
+                        params={"per_page": per_page, "page": page, "sort": "created", "direction": "desc"},
+                        timeout=collection_limit(self.config, "request_timeout_seconds"))
+                    if response.status_code != 200:
+                        coverage.fail(source, f"http_{response.status_code}")
+                        summary["cursor"] = {"page": page}
+                        break
+                    batch = response.json()
+                    if not isinstance(batch, list):
+                        raise ValueError("invalid_payload")
+                except Exception as exc:
+                    coverage.fail(source, type(exc).__name__)
+                    summary["cursor"] = {"page": page}
                     break
-
-                for repo_data in batch:
-                    artifact_id = f"gh_{repo_data['id']}"
-                    if self.db.get_ingestion_entry(artifact_id):
-                        continue
-
-                    raw_repo = self._to_serializable(repo_data)
-                    repo = RepositoryArtifact(
-                        id=artifact_id,
-                        source_type="github",
-                        raw_content=json.dumps(raw_repo),
-                        created_at=repo_data.get("updated_at"),
-                        ingested_at=datetime.now().isoformat(),
-                        repo_name=repo_data.get("full_name"),
-                        description=repo_data.get("description") or "",
-                        stars=repo_data.get("stargazers_count", 0),
-                        language=repo_data.get("language"),
-                        topics=repo_data.get("topics", []),
-                    )
-
-                    if self._queue_repository(
-                        repo,
-                        source="github",
-                        raw_payload=raw_repo,
-                        lifecycle=lifecycle,
-                        run_id=run_id,
-                        account=username,
-                        event_type="github_star",
-                        base_uri="https://api.github.com/user/starred"
-                        if not username
-                        else f"https://api.github.com/users/{username}/starred",
-                    ):
+                page_failed = False
+                for item in batch:
+                    summary["observed_count"] += 1
+                    try:
+                        data = item.get("repo", item)
+                        if self.managed and data.get("private") and not self._private_repository_allowed("github", data.get("full_name")):
+                            coverage.fail(source, "private_resource_not_granted", partial=True)
+                            page_failed = True
+                            continue
+                        if self.managed:
+                            errors_before = len(summary["errors"])
+                            if not coverage.in_window(source, item.get("starred_at")):
+                                page_failed = page_failed or len(summary["errors"]) > errors_before
+                                continue
+                        artifact_id = f"gh_{data['id']}"
+                        if self.db.get_ingestion_entry(artifact_id):
+                            continue
+                        raw = self._to_serializable(data)
+                        repo = RepositoryArtifact(id=artifact_id, source_type="github", raw_content=json.dumps(raw),
+                            created_at=item.get("starred_at") or data.get("updated_at"), ingested_at=datetime.now().isoformat(),
+                            repo_name=data.get("full_name"), description=data.get("description") or "",
+                            stars=data.get("stargazers_count", 0), language=data.get("language"), topics=data.get("topics", []))
+                        if not self._queue_repository(repo, source="github", raw_payload=self._to_serializable(item),
+                            lifecycle=lifecycle, run_id=run_id, account=username, event_type="github_star", base_uri=url):
+                            raise ValueError("queue_not_persisted")
                         discovered.append(repo)
-                        logger.info(f"Queued GitHub repo: {repo.repo_name}")
-                        if len(discovered) >= limit:
-                            break
-
+                        summary["queued_count"] += 1
+                    except Exception as exc:
+                        coverage.fail(source, type(exc).__name__, partial=True)
+                        page_failed = True
+                if page_failed:
+                    summary["cursor"] = {"page": page}
+                    break
                 if len(batch) < per_page:
                     break
                 page += 1
-
+                if summary["observed_count"] >= limit:
+                    coverage.limited(source, {"page": page})
+                    break
+            else:
+                coverage.limited(source, {"page": page})
+        self.last_summary = coverage.receipt()
         return discovered
 
     def discover_hf_likes(
@@ -150,19 +144,23 @@ class SocialCollector:
         hf_user = (
             username
             or self.config.get("sources.huggingface.username")
-            or os.getenv("HF_USER")
+            or (os.getenv("HF_USER") if not self.managed else None)
         )
         if not hf_user:
             logger.warning("HF_USER or sources.huggingface.username is not configured.")
             return []
 
-        hf_token = (
+        hf_token = self._credentials.get("token") if self.managed else (
             self.config.get("sources.huggingface.token")
             or os.getenv("HF_TOKEN")
             or os.getenv("HUGGINGFACEHUB_API_TOKEN")
             or os.getenv("HUGGINGFACE_API_TOKEN")
         )
 
+        coverage = CollectionCoverage(self.config)
+        source = f"huggingface:{hf_user}"
+        summary = coverage.source(source, time_basis="snapshot")
+        limit = min(limit, int(collection_limit(self.config, "max_items")))
         include_models = self.config.get("sources.huggingface.include_models", True)
         include_datasets = self.config.get("sources.huggingface.include_datasets", True)
         include_spaces = self.config.get("sources.huggingface.include_spaces", True)
@@ -170,15 +168,15 @@ class SocialCollector:
         try:
             from huggingface_hub import list_liked_repos, repo_info
         except ImportError:
-            logger.error(
-                "huggingface_hub package required. Install with: pip install huggingface_hub"
-            )
+            coverage.fail(source, "dependency_unavailable")
+            self.last_summary = coverage.receipt()
             return []
 
         try:
-            likes = list_liked_repos(hf_user, token=hf_token or None)
+            likes = list_liked_repos(hf_user, token=hf_token or (False if self.managed else None))
         except Exception as exc:
-            logger.error(f"Failed to fetch HuggingFace likes for {hf_user}: {exc}")
+            coverage.fail(source, type(exc).__name__)
+            self.last_summary = coverage.receipt()
             return []
 
         repo_candidates: List[Tuple[Any, str]] = []
@@ -188,23 +186,24 @@ class SocialCollector:
             ("space", getattr(likes, "spaces", []) if include_spaces else []),
         ]
 
-        for repo_type, repo_ids in candidate_sets:
-            for repo_id in repo_ids:
-                try:
-                    repo_candidates.append(
-                        (
-                            repo_info(
-                                repo_id,
-                                repo_type=repo_type,
-                                token=hf_token or None,
-                            ),
-                            repo_type,
-                        )
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Could not fetch %s info for %s: %s", repo_type, repo_id, exc
-                    )
+        candidates = [(repo_type, repo_id) for repo_type, repo_ids in candidate_sets for repo_id in repo_ids]
+        offset = int(coverage.cursor(source).get("offset", 0))
+        if offset < 0:
+            raise ValueError("Invalid Hugging Face cursor offset")
+        if len(candidates) > offset + limit:
+            coverage.limited(source, {"offset": offset + limit})
+        errors_before = len(summary["errors"])
+        for repo_type, repo_id in candidates[offset:offset + limit]:
+            summary["observed_count"] += 1
+            try:
+                info = repo_info(repo_id, repo_type=repo_type,
+                    token=hf_token or (False if self.managed else None))
+                if self.managed and getattr(info, "private", False) and not self._private_repository_allowed("huggingface", repo_id):
+                    coverage.fail(source, "private_resource_not_granted", partial=True)
+                    continue
+                repo_candidates.append((info, repo_type))
+            except Exception as exc:
+                coverage.fail(source, type(exc).__name__, partial=True)
 
         repo_candidates.sort(
             key=lambda item: getattr(item[0], "likes", 0) or 0,
@@ -219,6 +218,7 @@ class SocialCollector:
             for repo_data, repo_type in repo_candidates:
                 repo_name = getattr(repo_data, "id", None)
                 if not repo_name:
+                    coverage.fail(source, "missing_repository_id", partial=True)
                     continue
 
                 artifact_id = f"hf_{repo_type}_{repo_name.replace('/', '_')}"
@@ -245,21 +245,35 @@ class SocialCollector:
                     topics=getattr(repo_data, "tags", []) or [],
                 )
 
-                if self._queue_repository(
-                    repo,
-                    source="huggingface",
-                    raw_payload=raw_repo,
-                    lifecycle=lifecycle,
-                    run_id=run_id,
-                    account=hf_user,
-                    event_type="huggingface_like",
-                    base_uri="https://huggingface.co",
-                    source_metadata={"repo_type": repo_type},
-                ):
-                    discovered.append(repo)
-                    logger.info("Queued HuggingFace %s: %s", repo_type, repo.repo_name)
+                try:
+                    if self._queue_repository(
+                        repo,
+                        source="huggingface",
+                        raw_payload=raw_repo,
+                        lifecycle=lifecycle,
+                        run_id=run_id,
+                        account=hf_user,
+                        event_type="huggingface_like",
+                        base_uri="https://huggingface.co",
+                        source_metadata={"repo_type": repo_type},
+                    ):
+                        discovered.append(repo)
+                        summary["queued_count"] += 1
+                    else:
+                        raise ValueError("queue_not_persisted")
+                except Exception as exc:
+                    coverage.fail(source, type(exc).__name__, partial=True)
+
+        if len(summary["errors"]) > errors_before:
+            summary["cursor"] = {"offset": offset}
+        self.last_summary = coverage.receipt()
 
         return discovered
+
+    def _private_repository_allowed(self, provider, repository):
+        allowed = self.config.get(f"sources.{provider}.allowed_private_repositories", [])
+        selected = self.config.get("managed.selected_resources", [])
+        return repository in allowed and f"{provider}:repo:{repository}" in selected
 
     def _queue_repository(
         self,

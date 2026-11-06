@@ -243,6 +243,10 @@ fsspec==2026.7.0 \
     --hash=sha256:b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279 \
     --hash=sha256:c803c40f4cf860b49dea58ee3e1c33cb9c790520e233537e1340049f89b82a88
     # via huggingface-hub
+google-play-scraper==1.2.7 \
+    --hash=sha256:284f321d1b2c39e39e97e490d51bc316e1d876802360efb7e7463b5c16ed4972 \
+    --hash=sha256:a485510b09265f0096fc3813cfc26eef27e9a5c0035f99ee23f80e00de724530
+    # via -r requirements.txt
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
@@ -1251,4 +1255,8 @@ websockets==17.1 \
 youtube-transcript-api==1.2.4 \
     --hash=sha256:03878759356da5caf5edac77431780b91448fb3d8c21d4496015bdc8a7bc43ff \
     --hash=sha256:b72d0e96a335df599d67cee51d49e143cff4f45b84bcafc202ff51291603ddcd
+    # via -r requirements.txt
+yt-dlp==2026.8.19 \
+    --hash=sha256:1d57897e94c6665a0a6f9bc54b34e584284e32c034ffab3a7df25d8f7b24eedf \
+    --hash=sha256:9e213e48cea35c66b378e4447903f118f6392a5fa380a2b6d7070ec86f4e0af1
     # via -r requirements.txt

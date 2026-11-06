@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from math import ceil
 import re
+from typing import Callable
+from pathlib import Path
 
 from ..archivist_topics import ArchivistTopicDefinition
 from ..config import Config
@@ -35,6 +37,7 @@ async def select_archivist_candidates_async(
     layout: PathLayout | None = None,
     db: MetadataDB | None = None,
     llm_interface: LLMInterface | None = None,
+    path_filter: Callable[[Path], bool] | None = None,
 ) -> ArchivistSelectionResult:
     """Return archivist candidates using modular retrieval backends."""
 
@@ -46,6 +49,7 @@ async def select_archivist_candidates_async(
         config=config,
         layout=resolved_layout,
         db=metadata_db,
+        path_filter=path_filter,
     )
     include_roots = tuple(
         resolve_archivist_root_spec(root_spec, layout=resolved_layout)

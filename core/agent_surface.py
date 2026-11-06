@@ -19,6 +19,7 @@ from .agent_context import (
     capture_event_trust_state,
     hybrid_hit_citations,
 )
+from .collection_result import collection_limit
 from .agent_response import build_agent_plan_response, build_agent_query_response
 from .artifact_review_queue import (
     ArtifactReviewQueueError,
@@ -82,12 +83,34 @@ class AgentSurfaceService:
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
         event_store: Any | None = None,
+        managed_run: Any | None = None,
+        account_root: Path | None = None,
+        credentials: Mapping[str, str] | None = None,
+        web_renderer: Any | None = None,
+        history_exports: Any | None = None,
     ):
+        if managed_run is not None:
+            if runtime_config is None or layout is None or db is None or account_root is None:
+                raise ValueError("Managed execution requires explicit config, layout, database and account root")
+            managed_run.validate_paths(account_root, layout, db)
+            if runtime_config.get("managed.connector_version") != managed_run.connector_version:
+                raise ValueError("Managed connector version does not match deployed pin")
+            if runtime_config.get("database.capture_event_store.enabled", False) and event_store is None:
+                raise ValueError("Managed execution requires an explicit capture event store")
+            if event_store is not None:
+                roots = getattr(event_store, "raw_roots", ())
+                if not roots or any(not Path(root).resolve().is_relative_to(account_root.resolve()) for root in roots):
+                    raise ValueError("Managed capture store roots do not match account root")
+            runtime_config = managed_run.configuration(runtime_config)
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
         validate_metadata_db_matches_layout(self.db, self.layout)
         self.event_store = event_store
+        self.managed_run = managed_run
+        self._credentials = dict(credentials or {})
+        self.web_renderer = web_renderer
+        self.history_exports = history_exports
 
     def query_wiki(
         self,
@@ -775,6 +798,18 @@ class AgentSurfaceService:
         )
 
     def run_connector(
+        self, connector_name: str, *, execute: bool = False,
+        options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if self.managed_run is not None and execute:
+            if connector_name != self.managed_run.connector:
+                raise ValueError("Managed execution connector does not match authorized request")
+            self.managed_run.execution_options(options)
+            from .managed_collection_receipts import execute_managed
+            return execute_managed(self, lambda: self._run_connector(connector_name, execute=True, options=options))
+        return self._run_connector(connector_name, execute=execute, options=options)
+
+    def _run_connector(
         self,
         connector_name: str,
         *,
@@ -782,6 +817,12 @@ class AgentSurfaceService:
         options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Plan or execute a connector through the shared agent service layer."""
+        if self.managed_run is not None:
+            if connector_name != self.managed_run.connector:
+                raise ValueError("Managed execution connector does not match authorized request")
+            if connector_name not in {"github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube", "competitor_web", "ai_history"}:
+                raise ValueError("Connector does not support managed execution")
+            options = self.managed_run.execution_options(options)
         registry = load_connector_registry(self.config)
         manifest = registry.get(connector_name)
         policy = connector_policy_status(manifest, self.config)
@@ -791,6 +832,9 @@ class AgentSurfaceService:
             if value is not None
         }
         checkpoint_inputs = _connector_checkpoint_inputs(execution_options)
+        if self.managed_run is not None:
+            checkpoint_inputs["managed_run"] = self.managed_run.identity()
+            checkpoint_inputs["managed_run"].pop("lease_generation")
         history_options = _redact_sensitive_value(checkpoint_inputs)
         actor = self._resolve_connector_actor(execution_options)
         checkpoint_key = connector_checkpoint_key(manifest.name, checkpoint_inputs)
@@ -811,6 +855,11 @@ class AgentSurfaceService:
             layout=self.layout,
             db=self.db,
             actor=actor,
+            managed_run=self.managed_run,
+            credentials=self._credentials,
+            event_store=self.event_store,
+            web_renderer=self.web_renderer,
+            history_exports=self.history_exports,
         )
         if not execute:
             planner = connector_run_planner(manifest, run_context)
@@ -838,6 +887,7 @@ class AgentSurfaceService:
             inputs=history_options,
             checkpoint_key=checkpoint_key,
             resume_token=checkpoint.resume_token if checkpoint else None,
+            max_attempts=int(collection_limit(self.config, "max_attempts")),
             metadata=_initial_connector_run_metadata(
                 manifest,
                 options=history_options,
@@ -853,11 +903,17 @@ class AgentSurfaceService:
             with connector_run_context(
                 run.run_id,
                 checkpoint_id=run.checkpoint_id,
+                scope=self.managed_run.identity() if self.managed_run is not None else None,
             ):
                 result = handler(execution_options)
             from .connector_publications import publish_connector_derivatives
             publish_connector_derivatives(manifest.name, result, config=self.config, layout=self.layout, db=self.db)
             serialized_result = serialize_agent_payload(result)
+            result_status = serialized_result.get("status", "completed") if "coverage" in serialized_result else "completed"
+            if result_status not in {"completed", "partial", "failed", "blocked"}:
+                raise ValueError("Connector returned invalid result status")
+            if self.managed_run is not None:
+                serialized_result["managed_run"] = self.managed_run.identity()
             if self.db.connector_run_output_count(run.run_id) == 0:
                 self._record_connector_result_outputs(
                     run_id=run.run_id,
@@ -869,38 +925,47 @@ class AgentSurfaceService:
                     default_source=manifest.source_name,
                 )
             recorded_output_count = self.db.connector_run_output_count(run.run_id)
+            if self.managed_run is not None:
+                from .managed_collection_receipts import artifact_receipts
+                serialized_result["artifacts"] = artifact_receipts(self.db, run.checkpoint_id, connector=self.managed_run.connector)
             output_count = max(
                 recorded_output_count,
                 _connector_output_count(serialized_result),
             )
             run = self.db.finish_connector_run(
                 run.run_id,
-                status="completed",
+                status=result_status,
                 output_count=output_count,
                 resume_token=_connector_resume_token(serialized_result),
                 state=_connector_checkpoint_state(serialized_result),
+                retry_base_seconds=collection_limit(self.config, "retry_base_seconds"),
+                retry_max_seconds=collection_limit(self.config, "retry_max_seconds"),
                 metadata=_finished_connector_run_metadata(
                     manifest,
                     options=history_options,
                     result=serialized_result,
                     actor=actor,
                 ),
-            ) or run
+            )
+            if run is None:
+                raise RuntimeError("Connector run completion was not persisted")
         except Exception as exc:
-            failure_reason = str(exc).strip() or exc.__class__.__name__
+            failure_reason = exc.__class__.__name__ if self.managed_run is not None else (str(exc).strip() or exc.__class__.__name__)
             self.db.finish_connector_run(
                 run.run_id,
                 status="failed",
                 output_count=self.db.connector_run_output_count(run.run_id),
                 failure_reason=failure_reason,
                 metadata={"failure_reason": failure_reason},
+                retry_base_seconds=collection_limit(self.config, "retry_base_seconds"),
+                retry_max_seconds=collection_limit(self.config, "retry_max_seconds"),
             )
             raise
 
         checkpoint = self.db.get_connector_checkpoint(manifest.name, checkpoint_key)
         return {
-            **plan,
-            "status": "completed",
+            **({} if self.managed_run is not None else plan),
+            "status": result_status,
             "execute": True,
             "result": serialized_result,
             "history": {

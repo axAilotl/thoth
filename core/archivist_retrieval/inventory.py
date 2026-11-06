@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional, Callable
 
 from collectors.web_clipper_layout import (
     WebClipperSourceContract,
@@ -78,6 +78,7 @@ def sync_archivist_inventory(
     config: Config,
     layout: PathLayout | None = None,
     db: MetadataDB | None = None,
+    path_filter: Callable[[Path], bool] | None = None,
 ) -> ArchivistInventoryResult:
     """Incrementally sync allowed roots into the corpus index and return documents."""
 
@@ -111,6 +112,8 @@ def sync_archivist_inventory(
         scanned_roots.append(root.spec)
         keep_candidate_keys: list[str] = []
         for path in iter_allowed_corpus_paths(root, exclude_roots=exclude_roots):
+            if path_filter is not None and not path_filter(path):
+                continue
             if not path.is_file():
                 continue
 
@@ -136,11 +139,12 @@ def sync_archivist_inventory(
             else:
                 indexed_count += 1
 
-        metadata_db.prune_archivist_corpus_documents(
-            scope=root.scope,
-            relative_prefix=root.relative_prefix,
-            keep_candidate_keys=tuple(keep_candidate_keys),
-        )
+        if path_filter is None:
+            metadata_db.prune_archivist_corpus_documents(
+                scope=root.scope,
+                relative_prefix=root.relative_prefix,
+                keep_candidate_keys=tuple(keep_candidate_keys),
+            )
 
     return ArchivistInventoryResult(
         documents=tuple(

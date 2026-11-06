@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
+import json
 from .wiki_io import markdown_file_link
 from pathlib import Path
 import re
@@ -60,6 +61,7 @@ class ArchivistCompileResult:
     source_paths: tuple[str, ...]
     model_provider: str | None
     model: str | None
+    proposal: dict[str, Any] | None = None
 
 
 class ArchivistCompiler:
@@ -74,16 +76,31 @@ class ArchivistCompiler:
         contract: WikiContract | None = None,
         db: MetadataDB | None = None,
         llm_interface: LLMInterface | None = None,
+        managed_context: Any | None = None,
     ):
+        if managed_context is not None:
+            from .managed_model_gateway import ManagedModelGateway
+            if layout is None or db is None or project_root is None or not isinstance(llm_interface, ManagedModelGateway):
+                raise ValueError("Managed wiki requires explicit layout, database, project root and Cissa gateway")
+            managed_context.validate_runtime(layout, db, llm_interface)
+        self.managed_context = managed_context
         self.config = config
+        defaults = json.loads((Path(__file__).resolve().parent.parent / "config.example.json").read_text())["llm"]["prompts"]["archivist"]
+        self.excerpt_characters = config.get("llm.prompts.archivist.excerpt_characters", defaults["excerpt_characters"])
+        self.default_max_tokens = config.get("llm.prompts.archivist.default_max_tokens", defaults["default_max_tokens"])
+        self.default_temperature = config.get("llm.prompts.archivist.default_temperature", defaults["default_temperature"])
+        for name, value in (("excerpt_characters", self.excerpt_characters), ("default_max_tokens", self.default_max_tokens)):
+            if type(value) is not int or value < 1:
+                raise ValueError(f"Archivist {name} must be a positive integer")
         self.project_root = project_root or Path.cwd()
         self.layout = layout or build_path_layout(config, project_root=self.project_root)
-        self.layout.ensure_directories()
+        if managed_context is None:
+            self.layout.ensure_directories()
         self.contract = contract or build_wiki_contract(config, project_root=self.project_root)
         self.db = db or get_metadata_db()
         self.publications = WikiPublicationStore(self.db, self.layout.wiki_root)
         self.llm_interface = llm_interface or LLMInterface(config.get("llm", {}))
-        self.scaffold = ensure_wiki_scaffold(config, project_root=self.project_root)
+        self.scaffold = ensure_wiki_scaffold(config, project_root=self.project_root) if managed_context is None else None
 
     async def run(
         self,
@@ -101,7 +118,12 @@ class ArchivistCompiler:
         topics = self._select_topics(registry, topic_ids=topic_ids, limit=limit)
         results: list[ArchivistCompileResult] = []
         for topic in topics:
-            results.append(await self.compile_topic(topic, force=force, dry_run=dry_run))
+            try:
+                results.append(await self.compile_topic(topic, force=force, dry_run=dry_run))
+            except Exception as exc:
+                if self.managed_context is None:
+                    raise
+                results.append(ArchivistCompileResult(topic.id, "failed", type(exc).__name__, None, 0, (), None, None))
         return results
 
     async def compile_topic(
@@ -111,6 +133,9 @@ class ArchivistCompiler:
         force: bool = False,
         dry_run: bool = False,
     ) -> ArchivistCompileResult:
+        if self.managed_context is not None:
+            from .managed_wiki import propose_topic
+            return await propose_topic(self, topic, force=force, dry_run=dry_run)
         page_path = topic.output_path_for_root(self.layout.wiki_root)
         publication = self.publications.inspect(page_path)
         if not publication.publishable:
@@ -257,6 +282,9 @@ class ArchivistCompiler:
         system_prompt += FEEDBACK_SYSTEM_BOUNDARY
         user_prompt += feedback_prompt(feedback)
         provider_name, model_id, model_cfg = route
+        max_tokens = model_cfg.get("max_tokens", self.default_max_tokens)
+        if type(max_tokens) is not int or max_tokens < 1:
+            raise ArchivistCompilerError("Archivist model max_tokens must be positive")
         response = await self.llm_interface.generate(
             prompt=user_prompt,
             system_prompt=system_prompt,
@@ -264,8 +292,8 @@ class ArchivistCompiler:
             model=model_id,
             task="archivist",
             usage_model_config=model_cfg,
-            max_tokens=int(model_cfg.get("max_tokens", 1800) or 1800),
-            temperature=float(model_cfg.get("temperature", 0.2) or 0.2),
+            max_tokens=max_tokens,
+            temperature=float(model_cfg.get("temperature", self.default_temperature)),
         )
         if response.error:
             raise ArchivistCompilerError(
@@ -357,7 +385,8 @@ class ArchivistCompiler:
             )
         return "\n".join(rendered).strip()
 
-    def _candidate_excerpt(self, candidate: ArchivistCandidate, *, limit: int = 1800) -> str:
+    def _candidate_excerpt(self, candidate: ArchivistCandidate, *, limit: int | None = None) -> str:
+        limit = self.excerpt_characters if limit is None else limit
         text = " ".join((candidate.content_text or "").split())
         if text:
             if len(text) > limit:
@@ -374,7 +403,19 @@ class ArchivistCompiler:
         page_path: Path,
         publication: PublicationSnapshot,
     ) -> None:
+        content, metadata = self._render_topic_page(topic, candidates, body=body, page_path=page_path, publication=publication)
         page_path.parent.mkdir(parents=True, exist_ok=True)
+        self.publications.publish(page_path, content, snapshot=publication, metadata=metadata)
+
+    def _render_topic_page(
+        self,
+        topic: ArchivistTopicDefinition,
+        candidates: Sequence[ArchivistCandidate],
+        *,
+        body: str,
+        page_path: Path,
+        publication: PublicationSnapshot,
+    ) -> tuple[str, dict[str, Any]]:
         existing = read_document(page_path) if page_path.exists() else None
         previous_metadata = self.publications.metadata_for(page_path)
         # Explicitly adopted pre-upgrade pages retain their original metadata here.
@@ -438,7 +479,7 @@ class ArchivistCompiler:
                 "",
             ]
         )
-        self.publications.publish(page_path, content, snapshot=publication, metadata=metadata)
+        return content, metadata
 
     def _render_sources_section(
         self,

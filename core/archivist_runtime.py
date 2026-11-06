@@ -47,22 +47,29 @@ async def run_archivist_topics(
     force: bool = False,
     dry_run: bool = False,
     limit: int | None = None,
+    managed_context: Any | None = None,
+    llm_interface: Any | None = None,
 ) -> dict[str, Any]:
     """Run the archivist compiler and return a stable API-friendly payload."""
     config = _as_config(config_or_data)
+    if managed_context is not None and (layout is None or db is None or llm_interface is None):
+        raise ArchivistRuntimeError("Managed wiki requires explicit layout/database/model gateway")
     resolved_layout = layout or build_path_layout(
         config, project_root=project_root
     )
     metadata_db = db or get_metadata_db()
-    resolved_layout.ensure_directories()
+    if managed_context is None:
+        resolved_layout.ensure_directories()
     compiler = ArchivistCompiler(
         config,
         project_root=project_root,
         layout=resolved_layout,
         db=metadata_db,
+        llm_interface=llm_interface,
+        managed_context=managed_context,
     )
     results = await compiler.run(
-        topic_ids=topic_ids,
+        topic_ids=topic_ids if topic_ids is not None else (managed_context.topic_ids if managed_context else None),
         force=force,
         dry_run=dry_run,
         limit=limit,
@@ -95,12 +102,14 @@ def serialize_archivist_run(
             "source_paths": list(result.source_paths),
             "model_provider": result.model_provider,
             "model": result.model,
+            "proposal": result.proposal,
         }
         for result in results
     ]
 
     return {
-        "status": "ok",
+        "status": ("failed" if results and all(result.status in {"failed", "blocked"} for result in results)
+                   else "partial" if any(result.status in {"failed", "blocked"} for result in results) else "ok"),
         "force": bool(force),
         "dry_run": bool(dry_run),
         "limit": limit,
@@ -110,6 +119,9 @@ def serialize_archivist_run(
             "compiled": sum(1 for result in results if result.status == "compiled"),
             "skipped": sum(1 for result in results if result.status == "skipped"),
             "dry_run": sum(1 for result in results if result.status == "dry_run"),
+            "proposed": sum(1 for result in results if result.status == "proposed"),
+            "blocked": sum(1 for result in results if result.status == "blocked"),
+            "failed": sum(1 for result in results if result.status == "failed"),
             "total": len(results),
         },
     }

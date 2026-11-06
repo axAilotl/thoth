@@ -1,0 +1,45 @@
+{
+  "name": "ugc_discussion",
+  "source_name": "ugc_discussion",
+  "display_name": "Public discussion research",
+  "description": "Collect configured public Reddit archive and Hacker News evidence with coverage receipts.",
+  "artifact_types": [
+    "markdown"
+  ],
+  "inputs": [
+    "remote_api:public_discussion"
+  ],
+  "outputs": [
+    "artifact_queue:markdown"
+  ],
+  "capabilities": [
+    "research",
+    "raw_evidence",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.ugc_discussion.enabled",
+    "sources.ugc_discussion.reddit",
+    "sources.ugc_discussion.hn_queries",
+    "sources.ugc_discussion.page_size",
+    "sources.ugc_discussion.include_comments",
+    "sources.ugc_discussion.comment_limit"
+  ],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "public_network_ingest",
+  "allowed_side_effects": [
+    "network_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.ugc_discussion_connector:DiscussionCollector",
+  "cli_command": "connector run ugc_discussion",
+  "config_namespace": "sources.ugc_discussion",
+  "default_enabled": false,
+  "ccf": {
+    "lane": "markdown",
+    "artifact_role": "raw_capture"
+  }
+}

@@ -17,13 +17,14 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from .config import Config
 from .connector_registry import ConnectorManifest, ConnectorManifestError
 from .metadata_db import MetadataDB
 from .path_layout import PathLayout
+from .managed_execution import ManagedCollectionRun
 
 
 class ConnectorRunnerError(ConnectorManifestError):
@@ -38,6 +39,11 @@ class ConnectorRunContext:
     layout: PathLayout
     db: MetadataDB
     actor: str | None = None
+    managed_run: ManagedCollectionRun | None = None
+    credentials: Mapping[str, str] = field(default_factory=dict, repr=False)
+    event_store: Any | None = None
+    web_renderer: Any | None = None
+    history_exports: Any | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -177,12 +183,22 @@ def _run_generic_connector(
     return dict(result)
 
 
+def _run_research_connector(context, entrypoint, options):
+    extra = {"renderer": context.web_renderer} if entrypoint.module == "collectors.competitor_web_connector" else {}
+    if entrypoint.module == "collectors.ai_history_connector":
+        extra = {"history_exports": context.history_exports}
+    connector = entrypoint.target(context.config, layout=context.layout, db=context.db,
+                                  capture_event_store=context.event_store, **extra)
+    return connector.collect(**dict(options))
+
+
 def _run_arxiv_connector(
     context: ConnectorRunContext,
     entrypoint: ResolvedEntrypoint,
     options: Mapping[str, Any],
 ) -> dict[str, Any]:
-    collector = entrypoint.target(db=context.db)
+    collector = entrypoint.target(config=context.config, layout=context.layout, db=context.db,
+                                 capture_event_store=context.event_store)
     source = str(
         options.get("source") or context.config.get("sources.arxiv.source", "api")
     )
@@ -209,6 +225,7 @@ def _run_arxiv_connector(
             feed_format=feed_format,
         )
         return {
+            **collector.last_summary,
             "source": source,
             "categories": categories,
             "feed_format": feed_format,
@@ -223,6 +240,7 @@ def _run_arxiv_connector(
         raise ConnectorRunnerError("arxiv API execution requires topics")
     artifacts = collector.discover_papers(topics, max_results=limit)
     return {
+        **collector.last_summary,
         "source": source,
         "topics": topics,
         "queued": _artifact_summaries(artifacts),
@@ -235,18 +253,21 @@ def _run_github_connector(
     entrypoint: ResolvedEntrypoint,
     options: Mapping[str, Any],
 ) -> dict[str, Any]:
-    token = (
+    token = context.credentials.get("token") if context.managed_run else (
         context.config.get("sources.github.token")
         or os.getenv("GITHUB_API")
         or os.getenv("GITHUB_TOKEN")
     )
-    username = _optional_text(options.get("github_user") or options.get("username"))
+    username = _optional_text(options.get("github_user") or options.get("username")
+                              or context.config.get("sources.github.username"))
     if not token and not username:
         raise ConnectorRunnerError(
             "github connector requires a username for public stars, or sources.github.token, GITHUB_API, or GITHUB_TOKEN"
         )
 
-    collector = entrypoint.root(db=context.db)
+    collector = entrypoint.root(config=context.config, layout=context.layout, db=context.db,
+                               capture_event_store=context.event_store,
+                               managed=context.managed_run is not None, credentials=context.credentials)
     limit = _positive_int(
         options.get("limit"),
         default=int(context.config.get("sources.github.limit", 50) or 50),
@@ -258,6 +279,7 @@ def _run_github_connector(
         token=token,
     )
     return {
+        **collector.last_summary,
         "username": username or "authenticated account",
         "queued": _artifact_summaries(artifacts),
         "queued_count": len(artifacts),
@@ -273,14 +295,16 @@ def _run_huggingface_connector(
         options.get("hf_user")
         or options.get("username")
         or context.config.get("sources.huggingface.username")
-        or os.getenv("HF_USER")
+        or (os.getenv("HF_USER") if context.managed_run is None else None)
     )
     if not username:
         raise ConnectorRunnerError(
             "huggingface connector requires sources.huggingface.username, HF_USER, or username option"
         )
 
-    collector = entrypoint.root(db=context.db)
+    collector = entrypoint.root(config=context.config, layout=context.layout, db=context.db,
+                               capture_event_store=context.event_store,
+                               managed=context.managed_run is not None, credentials=context.credentials)
     limit = _positive_int(
         options.get("limit"),
         default=int(context.config.get("sources.huggingface.limit", 50) or 50),
@@ -288,6 +312,7 @@ def _run_huggingface_connector(
     discover = getattr(collector, entrypoint.attrs[-1])
     artifacts = discover(username=username, limit=limit)
     return {
+        **collector.last_summary,
         "username": username,
         "queued": _artifact_summaries(artifacts),
         "queued_count": len(artifacts),
@@ -601,6 +626,11 @@ def _run_pi_skills_connector(
 # does not match the generic `Class(config, layout=..., db=...).collect(**options)`
 # contract. Each entry documents why the convention cannot be generic:
 _RUN_ADAPTERS: dict[str, tuple[str, RunAdapter]] = {
+    "collectors.ugc_discussion_connector:DiscussionCollector": ("class", _run_research_connector),
+    "collectors.ugc_stores_connector:StoreReviewCollector": ("class", _run_research_connector),
+    "collectors.ugc_youtube_connector:YouTubeResearchCollector": ("class", _run_research_connector),
+    "collectors.competitor_web_connector:CompetitorWebCollector": ("class", _run_research_connector),
+    "collectors.ai_history_connector:AIHistoryCollector": ("class", _run_research_connector),
     # Async module-level function, not a collector class.
     "core.x_api_bookmark_sync:run_x_api_bookmark_backfill": (
         "function",
