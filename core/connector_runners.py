@@ -17,13 +17,14 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from .config import Config
 from .connector_registry import ConnectorManifest, ConnectorManifestError
 from .metadata_db import MetadataDB
 from .path_layout import PathLayout
+from .managed_execution import ManagedCollectionRun
 
 
 class ConnectorRunnerError(ConnectorManifestError):
@@ -38,6 +39,9 @@ class ConnectorRunContext:
     layout: PathLayout
     db: MetadataDB
     actor: str | None = None
+    managed_run: ManagedCollectionRun | None = None
+    credentials: Mapping[str, str] = field(default_factory=dict, repr=False)
+    event_store: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -182,7 +186,8 @@ def _run_arxiv_connector(
     entrypoint: ResolvedEntrypoint,
     options: Mapping[str, Any],
 ) -> dict[str, Any]:
-    collector = entrypoint.target(db=context.db)
+    collector = entrypoint.target(config=context.config, layout=context.layout, db=context.db,
+                                 capture_event_store=context.event_store)
     source = str(
         options.get("source") or context.config.get("sources.arxiv.source", "api")
     )
@@ -235,18 +240,21 @@ def _run_github_connector(
     entrypoint: ResolvedEntrypoint,
     options: Mapping[str, Any],
 ) -> dict[str, Any]:
-    token = (
+    token = context.credentials.get("token") if context.managed_run else (
         context.config.get("sources.github.token")
         or os.getenv("GITHUB_API")
         or os.getenv("GITHUB_TOKEN")
     )
-    username = _optional_text(options.get("github_user") or options.get("username"))
+    username = _optional_text(options.get("github_user") or options.get("username")
+                              or context.config.get("sources.github.username"))
     if not token and not username:
         raise ConnectorRunnerError(
             "github connector requires a username for public stars, or sources.github.token, GITHUB_API, or GITHUB_TOKEN"
         )
 
-    collector = entrypoint.root(db=context.db)
+    collector = entrypoint.root(config=context.config, layout=context.layout, db=context.db,
+                               capture_event_store=context.event_store,
+                               managed=context.managed_run is not None, credentials=context.credentials)
     limit = _positive_int(
         options.get("limit"),
         default=int(context.config.get("sources.github.limit", 50) or 50),
@@ -273,14 +281,16 @@ def _run_huggingface_connector(
         options.get("hf_user")
         or options.get("username")
         or context.config.get("sources.huggingface.username")
-        or os.getenv("HF_USER")
+        or (os.getenv("HF_USER") if context.managed_run is None else None)
     )
     if not username:
         raise ConnectorRunnerError(
             "huggingface connector requires sources.huggingface.username, HF_USER, or username option"
         )
 
-    collector = entrypoint.root(db=context.db)
+    collector = entrypoint.root(config=context.config, layout=context.layout, db=context.db,
+                               capture_event_store=context.event_store,
+                               managed=context.managed_run is not None, credentials=context.credentials)
     limit = _positive_int(
         options.get("limit"),
         default=int(context.config.get("sources.huggingface.limit", 50) or 50),

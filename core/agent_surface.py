@@ -82,12 +82,30 @@ class AgentSurfaceService:
         layout: PathLayout | None = None,
         db: MetadataDB | None = None,
         event_store: Any | None = None,
+        managed_run: Any | None = None,
+        account_root: Path | None = None,
+        credentials: Mapping[str, str] | None = None,
     ):
+        if managed_run is not None:
+            if runtime_config is None or layout is None or db is None or account_root is None:
+                raise ValueError("Managed execution requires explicit config, layout, database and account root")
+            managed_run.validate_paths(account_root, layout, db)
+            if runtime_config.get("managed.connector_version") != managed_run.connector_version:
+                raise ValueError("Managed connector version does not match deployed pin")
+            if runtime_config.get("database.capture_event_store.enabled", False) and event_store is None:
+                raise ValueError("Managed execution requires an explicit capture event store")
+            if event_store is not None:
+                roots = getattr(event_store, "raw_roots", ())
+                if not roots or any(not Path(root).resolve().is_relative_to(account_root.resolve()) for root in roots):
+                    raise ValueError("Managed capture store roots do not match account root")
+            runtime_config = managed_run.configuration(runtime_config)
         self.config = runtime_config or config
         self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
         validate_metadata_db_matches_layout(self.db, self.layout)
         self.event_store = event_store
+        self.managed_run = managed_run
+        self._credentials = dict(credentials or {})
 
     def query_wiki(
         self,
@@ -782,6 +800,12 @@ class AgentSurfaceService:
         options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Plan or execute a connector through the shared agent service layer."""
+        if self.managed_run is not None:
+            if connector_name != self.managed_run.connector:
+                raise ValueError("Managed execution connector does not match authorized request")
+            if connector_name not in {"github", "huggingface", "arxiv"}:
+                raise ValueError("Connector does not support managed execution")
+            options = self.managed_run.execution_options(options)
         registry = load_connector_registry(self.config)
         manifest = registry.get(connector_name)
         policy = connector_policy_status(manifest, self.config)
@@ -791,6 +815,8 @@ class AgentSurfaceService:
             if value is not None
         }
         checkpoint_inputs = _connector_checkpoint_inputs(execution_options)
+        if self.managed_run is not None:
+            checkpoint_inputs["managed_run"] = self.managed_run.identity()
         history_options = _redact_sensitive_value(checkpoint_inputs)
         actor = self._resolve_connector_actor(execution_options)
         checkpoint_key = connector_checkpoint_key(manifest.name, checkpoint_inputs)
@@ -811,6 +837,9 @@ class AgentSurfaceService:
             layout=self.layout,
             db=self.db,
             actor=actor,
+            managed_run=self.managed_run,
+            credentials=self._credentials,
+            event_store=self.event_store,
         )
         if not execute:
             planner = connector_run_planner(manifest, run_context)
@@ -853,6 +882,7 @@ class AgentSurfaceService:
             with connector_run_context(
                 run.run_id,
                 checkpoint_id=run.checkpoint_id,
+                scope=self.managed_run.identity() if self.managed_run is not None else None,
             ):
                 result = handler(execution_options)
             from .connector_publications import publish_connector_derivatives

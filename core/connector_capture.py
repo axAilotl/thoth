@@ -31,6 +31,7 @@ class ConnectorRunContext:
 
     run_id: str
     checkpoint_id: str | None = None
+    scope: Mapping[str, Any] | None = None
 
 
 _ACTIVE_CONNECTOR_RUN: ContextVar[ConnectorRunContext | None] = ContextVar(
@@ -44,9 +45,10 @@ def connector_run_context(
     run_id: str,
     *,
     checkpoint_id: str | None = None,
+    scope: Mapping[str, Any] | None = None,
 ) -> Iterator[ConnectorRunContext]:
     """Bind queued connector artifacts to a run history record."""
-    context = ConnectorRunContext(run_id=run_id, checkpoint_id=checkpoint_id)
+    context = ConnectorRunContext(run_id=run_id, checkpoint_id=checkpoint_id, scope=scope)
     token = _ACTIVE_CONNECTOR_RUN.set(context)
     try:
         yield context
@@ -126,6 +128,7 @@ class ConnectorCaptureQueue:
         capabilities: Iterable[str] | None = None,
     ) -> CaptureLifecycleResult:
         """Persist one artifact queue row and optional capture event records."""
+        event = _scoped_event(event)
         result = lifecycle.capture_to_queue(
             artifact_type=artifact_type,
             payload=artifact.to_dict(),
@@ -155,6 +158,7 @@ class ConnectorCaptureQueue:
         capabilities: Iterable[str] | None = None,
     ) -> CaptureLifecycleResult:
         """Persist a connector payload that has not yet been materialized."""
+        event = _scoped_event(event)
         result = lifecycle.capture_to_queue(
             artifact_type=artifact_type,
             payload=payload,
@@ -189,6 +193,14 @@ class ConnectorCaptureQueue:
                 f"Failed to record connector output {result.queue_artifact_id} "
                 f"for run {context.run_id}"
             )
+
+
+def _scoped_event(event: Mapping[str, Any] | None) -> dict[str, Any]:
+    result = dict(event or {})
+    context = current_connector_run_context()
+    if context is not None and context.scope:
+        result["provenance"] = {**dict(result.get("provenance") or {}), "managed_run": dict(context.scope)}
+    return result
 
 
 def _resolve_connector_raw_root(layout: PathLayout) -> tuple[ContentRoot, str]:

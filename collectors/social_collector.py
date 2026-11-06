@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Mapping
 
 import requests
 
@@ -33,7 +33,13 @@ class SocialCollector:
         config: Config | None = None,
         layout: PathLayout | None = None,
         capture_event_store: CaptureEventStore | None = None,
+        managed: bool = False,
+        credentials: Mapping[str, str] | None = None,
     ):
+        if managed and (config is None or layout is None or db is None):
+            raise ValueError("Managed collector requires explicit config, layout and database")
+        self.managed = managed
+        self._credentials = dict(credentials or {})
         self.config = config or runtime_config
         self.layout = layout or build_path_layout(self.config)
         self.db = db or get_metadata_db()
@@ -44,6 +50,9 @@ class SocialCollector:
             capture_event_store=capture_event_store,
         )
         self.session = requests.Session()
+        if managed:
+            # requests otherwise consults host netrc credentials implicitly.
+            self.session.trust_env = False
 
     def discover_github_stars(
         self,
@@ -52,7 +61,7 @@ class SocialCollector:
         token: Optional[str] = None,
     ) -> List[RepositoryArtifact]:
         """Fetch starred GitHub repositories and queue new artifacts."""
-        token = (
+        token = self._credentials.get("token") if self.managed else (
             token
             or self.config.get("sources.github.token")
             or os.getenv("GITHUB_API")
@@ -150,13 +159,13 @@ class SocialCollector:
         hf_user = (
             username
             or self.config.get("sources.huggingface.username")
-            or os.getenv("HF_USER")
+            or (os.getenv("HF_USER") if not self.managed else None)
         )
         if not hf_user:
             logger.warning("HF_USER or sources.huggingface.username is not configured.")
             return []
 
-        hf_token = (
+        hf_token = self._credentials.get("token") if self.managed else (
             self.config.get("sources.huggingface.token")
             or os.getenv("HF_TOKEN")
             or os.getenv("HUGGINGFACEHUB_API_TOKEN")
@@ -176,7 +185,7 @@ class SocialCollector:
             return []
 
         try:
-            likes = list_liked_repos(hf_user, token=hf_token or None)
+            likes = list_liked_repos(hf_user, token=hf_token or (False if self.managed else None))
         except Exception as exc:
             logger.error(f"Failed to fetch HuggingFace likes for {hf_user}: {exc}")
             return []
@@ -196,7 +205,7 @@ class SocialCollector:
                             repo_info(
                                 repo_id,
                                 repo_type=repo_type,
-                                token=hf_token or None,
+                                token=hf_token or (False if self.managed else None),
                             ),
                             repo_type,
                         )

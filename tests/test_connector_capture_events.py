@@ -1,6 +1,8 @@
 import asyncio
 import json
 import sys
+import pytest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,7 +22,89 @@ from core.metadata_db import MetadataDB
 from core.path_layout import PathLayout, build_path_layout
 from core.research_graph import ResearchGraphService
 from core.wiki_io import read_document
+from core.agent_surface import AgentSurfaceService
+from core.managed_execution import ManagedCollectionRun
 from processors.youtube_processor import YouTubeVideo
+
+
+def _managed_run(connector, account, **changes):
+    return ManagedCollectionRun(**{
+        "run_id": f"run-{account}", "idempotency_key": f"key-{account}",
+        "account_id": account, "archive_id": f"archive-{account}",
+        "integration_id": f"integration-{account}", "connector": connector,
+        "connector_version": "test-pin", "lease_generation": 1,
+        "selected_resources": (account,),
+        "source_config": {"username": account, "topics": [account], "limit": 1},
+        "options": {"limit": 1}, "window_start": "2026-04-01T00:00:00Z",
+        "window_end": "2026-05-01T00:00:00Z", "budgets": {"max_items": 1},
+        **changes,
+    })
+
+
+@pytest.mark.parametrize("connector", ["github", "huggingface", "arxiv"])
+def test_managed_adapters_capture_in_explicit_accounts(connector, monkeypatch, tmp_path):
+    for key in ("GITHUB_API", "GITHUB_TOKEN", "HF_USER", "HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN"):
+        monkeypatch.setenv(key, "hostile-global")
+    calls = []
+
+    def github_get(session, url, headers=None, **kwargs):
+        assert session.trust_env is False
+        calls.append((url, headers.get("Authorization")))
+        return SimpleNamespace(status_code=200, json=lambda: [{
+            "id": 123, "full_name": "example/repo", "updated_at": "2026-04-03T00:00:00Z",
+        }])
+
+    monkeypatch.setattr("requests.Session.get", github_get)
+    def liked(user, token):
+        calls.append((user, token))
+        return SimpleNamespace(models=["org/model"], datasets=[], spaces=[])
+    def info(repo_id, repo_type, token):
+        calls.append((repo_id, token))
+        return SimpleNamespace(id=repo_id, created_at=None)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(list_liked_repos=liked, repo_info=info))
+    monkeypatch.setattr("collectors.arxiv_collector.feedparser.parse", lambda url: SimpleNamespace(entries=[_arxiv_feed_entry("2604.00001")]))
+    for account, credentials in (("company-a", {"token": "scoped-a"}), ("company-b", {})):
+        config, layout, db = _layout_and_db(tmp_path / account)
+        config.set("managed.connector_version", "test-pin")
+        config.set(f"sources.{connector}.token", "stale-config-secret")
+        config.set(f"sources.{connector}.username", "wrong-account")
+        store = _store(layout)
+        run = _managed_run(connector, account)
+        service = AgentSurfaceService(config, layout=layout, db=db, event_store=store,
+                                      managed_run=run, account_root=tmp_path / account, credentials=credentials)
+        receipt = service.run_connector(connector, execute=True)
+        assert receipt["result"]["queued_count"] == 1
+        assert len(store.events) == 1
+        assert next(iter(store.events.values())).provenance["managed_run"] == run.identity()
+        assert all(Path(ref.path).is_relative_to(layout.raw_root) for ref in store.raw_refs.values())
+        assert receipt["history"]["run"]["output_count"] == 1
+        serialized = json.dumps(receipt)
+        assert "scoped-a" not in serialized and "hostile-global" not in serialized and "stale-config-secret" not in serialized
+    if connector == "github":
+        assert calls == [("https://api.github.com/users/company-a/starred", "Bearer scoped-a"),
+                         ("https://api.github.com/users/company-b/starred", None)]
+    elif connector == "huggingface":
+        assert calls == [("company-a", "scoped-a"), ("org/model", "scoped-a"),
+                         ("company-b", False), ("org/model", False)]
+
+
+def test_managed_context_rejects_wrong_paths_selections_and_ambient_store(tmp_path):
+    config, layout, db = _layout_and_db(tmp_path / "a")
+    config.set("managed.connector_version", "test-pin")
+    run = _managed_run("github", "a")
+    with pytest.raises(ValueError, match="outside account root"):
+        AgentSurfaceService(config, layout=layout, db=db, managed_run=run, account_root=tmp_path / "b")
+    with pytest.raises(ValueError, match="outside selected resources"):
+        replace(run, options={"username": "b"}).execution_options(None)
+    with pytest.raises(ValueError, match="override"):
+        run.execution_options({"username": "b"})
+    with pytest.raises(ValueError, match="credentials"):
+        replace(run, source_config={"token": "secret"})
+    with pytest.raises(ValueError, match="UTC"):
+        replace(run, window_start="2026-04-01T00:00:00")
+    config.set("database.capture_event_store.enabled", True)
+    with pytest.raises(ValueError, match="explicit capture event store"):
+        AgentSurfaceService(config, layout=layout, db=db, managed_run=run, account_root=tmp_path / "a")
 
 
 class RecordingCaptureEventStore:
