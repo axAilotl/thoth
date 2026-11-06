@@ -42,6 +42,8 @@ def create_app(runtime):
                 except (ValueError, UnicodeError):
                     raise ManagedRuntimeError("invalid_json", 422) from None
                 handler, keys = routes[scope["path"]]
+                if isinstance(payload, dict) and "history_exports" in payload and scope["path"] == "/v1/collections/execute":
+                    keys = keys | {"history_exports"}
                 if not isinstance(payload, dict) or set(payload) != keys:
                     raise ManagedRuntimeError("invalid_envelope", 422)
                 arguments = {"raw_run": payload.pop("run"), **payload}

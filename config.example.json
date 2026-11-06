@@ -1,5 +1,8 @@
 {
   "collection": {
+    "max_history_export_bytes": 1048576,
+    "max_history_messages": 1000,
+    "max_history_message_characters": 100000,
     "max_items": 100,
     "max_pages": 10,
     "request_timeout_seconds": 30,

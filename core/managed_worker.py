@@ -18,7 +18,7 @@ def execute(request):
     db = MetadataDB(str(layout.database_path))
     run = ManagedCollectionRun(**request["run"])
     service = AgentSurfaceService(config, layout=layout, db=db, managed_run=run,
-        account_root=Path(request["account_root"]), credentials=request["credentials"])
+        account_root=Path(request["account_root"]), credentials=request["credentials"], history_exports=request.get("history_exports"))
     return service.run_connector(run.connector, execute=True)["result"]
 
 

@@ -95,7 +95,7 @@ class ManagedRuntime:
             raise ManagedRuntimeError("account_binding_mismatch", 403)
         if run.connector_version != self.settings.connector_version:
             raise ManagedRuntimeError("connector_version_mismatch")
-        if run.connector not in {"github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube", "competitor_web"}:
+        if run.connector not in {"github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube", "competitor_web", "ai_history"}:
             raise ManagedRuntimeError("connector_not_managed", 403)
         try:
             run.validate_paths(Path(self.settings.account_root), self.layout, self.db)
@@ -123,15 +123,21 @@ class ManagedRuntime:
                 if total > self.settings.max_storage_bytes:
                     raise ManagedRuntimeError("account_storage_budget_exceeded", 507)
 
-    def execute(self, raw_run, credentials, lease_expires_at):
+    def execute(self, raw_run, credentials, lease_expires_at, history_exports=None):
         run, remaining = self.authorize(raw_run, lease_expires_at)
         if not isinstance(credentials, dict) or set(credentials) - {"token"} or any(not isinstance(value, str) for value in credentials.values()):
             raise ManagedRuntimeError("invalid_credentials", 422)
+        if history_exports is not None:
+            if run.connector != "ai_history" or not isinstance(history_exports, list) or any(
+                not isinstance(item, dict) or set(item) != {"resource_id", "content"} or
+                not all(isinstance(value, str) for value in item.values()) for item in history_exports):
+                raise ManagedRuntimeError("invalid_history_exports", 422)
         if not self.lock.acquire(blocking=False):
             raise ManagedRuntimeError("runtime_busy")
         try:
             self.check_storage()
-            result = self.worker(raw_run, credentials, min(remaining, self.settings.execution_timeout_seconds))
+            extra = {"history_exports": history_exports} if history_exports is not None else {}
+            result = self.worker(raw_run, credentials, min(remaining, self.settings.execution_timeout_seconds), **extra)
             self.authorize(raw_run, lease_expires_at)
             self.check_storage()
             if result.get("managed_run") != run.identity():
@@ -171,25 +177,30 @@ class ManagedRuntime:
             if hashlib.sha256(raw.encode()).hexdigest() != allowed[artifact_id]["content_hash"]:
                 raise ManagedRuntimeError("artifact_revision_changed")
             body = payload.get("body") or payload.get("abstract") or raw
+            history = payload.get("custom_metadata", {}) if run.connector == "ai_history" else {}
+            if history:
+                body = history["body"]
             if not isinstance(body, str) or len(body) > self.settings.max_artifact_characters:
                 raise ManagedRuntimeError("artifact_text_budget_exceeded", 413)
-            uri = payload.get("source_url") or payload.get("source_uri")
+            uri = history.get("source_uri") or payload.get("source_url") or payload.get("source_uri")
             if not uri and payload.get("arxiv_id"):
                 uri = "https://arxiv.org/abs/" + quote(payload["arxiv_id"], safe="/")
             if not uri and payload.get("repo_name"):
                 uri = ("https://github.com/" if run.connector == "github" else "https://huggingface.co/") + quote(payload["repo_name"], safe="/")
-            if uri and urlsplit(uri).scheme not in {"https", "http"}:
+            if uri and urlsplit(uri).scheme not in ({"https", "http", "cissa"} if history else {"https", "http"}):
                 raise ManagedRuntimeError("invalid_artifact_source_uri")
             documents.append({"external_id": artifact_id, "source_uri": uri,
-                "title": str(payload.get("title") or payload.get("repo_name") or artifact_id)[:1024],
+                "title": str(history.get("title") or payload.get("title") or payload.get("repo_name") or artifact_id)[:1024],
                 "body_text": body, "content_sha256": hashlib.sha256(body.encode()).hexdigest(),
-                "source_updated_at": payload.get("created_at") or payload.get("ingested_at") or allowed[artifact_id].get("observed_at"),
-                "metadata": {"capture_content_hash": allowed[artifact_id]["content_hash"], "run_id": run.run_id}})
+                "source_updated_at": history.get("source_updated_at") or payload.get("created_at") or payload.get("ingested_at") or allowed[artifact_id].get("observed_at"),
+                "metadata": {"capture_content_hash": allowed[artifact_id]["content_hash"], "run_id": run.run_id, **history.get("history", {})}})
         return documents
 
-    def _worker(self, run, credentials, timeout):
+    def _worker(self, run, credentials, timeout, history_exports=None):
         request = {"run": run, "credentials": credentials, "config_file": self.settings.config_file,
                    "account_root": self.settings.account_root, "connector_version": self.settings.connector_version}
+        if history_exports is not None:
+            request["history_exports"] = history_exports
         process = subprocess.Popen([sys.executable, "-m", "core.managed_worker"],
             cwd=Path(__file__).resolve().parent.parent, env={"PATH": os.defpath, "TZ": "UTC"},
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)

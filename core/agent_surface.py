@@ -87,6 +87,7 @@ class AgentSurfaceService:
         account_root: Path | None = None,
         credentials: Mapping[str, str] | None = None,
         web_renderer: Any | None = None,
+        history_exports: Any | None = None,
     ):
         if managed_run is not None:
             if runtime_config is None or layout is None or db is None or account_root is None:
@@ -109,6 +110,7 @@ class AgentSurfaceService:
         self.managed_run = managed_run
         self._credentials = dict(credentials or {})
         self.web_renderer = web_renderer
+        self.history_exports = history_exports
 
     def query_wiki(
         self,
@@ -857,6 +859,7 @@ class AgentSurfaceService:
             credentials=self._credentials,
             event_store=self.event_store,
             web_renderer=self.web_renderer,
+            history_exports=self.history_exports,
         )
         if not execute:
             planner = connector_run_planner(manifest, run_context)

@@ -1,0 +1,21 @@
+{
+  "name": "ai_history",
+  "source_name": "ai_history",
+  "display_name": "Selected company agent history",
+  "description": "Import explicitly selected conversation exports as historical evidence, never task authority.",
+  "artifact_types": ["markdown"],
+  "inputs": ["protected_upload:ai_history"],
+  "outputs": ["artifact_queue:markdown"],
+  "capabilities": ["history", "raw_evidence", "queue"],
+  "config_keys": ["sources.ai_history.enabled", "sources.ai_history.sources"],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "selected_history_ingest",
+  "allowed_side_effects": ["raw_file_write", "artifact_queue_write"],
+  "entrypoint": "collectors.ai_history_connector:AIHistoryCollector",
+  "cli_command": "connector run ai_history",
+  "config_namespace": "sources.ai_history",
+  "default_enabled": false,
+  "ccf": {"lane": "transcript", "artifact_role": "historical_evidence"}
+}
