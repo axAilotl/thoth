@@ -73,6 +73,13 @@ class ResearchCapture:
         self.queued.append({"artifact_id": result.queue_artifact_id, "content_hash": digest, "source_uri": uri})
         self.coverage.source(source)["queued_count"] += 1
 
+    def raw_page(self, source, page, raw):
+        digest = hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+        write_connector_raw_json(self.layout, connector_name=self.name, subdir="pages",
+            native_id=f"{source}:{page}:{digest}", payload=raw, captured_at=datetime.now(timezone.utc).isoformat())
+        self.coverage.source(source).setdefault("raw_pages", []).append({"page": page, "content_hash": digest})
+        return digest
+
     def receipt(self):
         return {**self.coverage.receipt(), "queued": self.queued, "queued_count": len(self.queued)}
 

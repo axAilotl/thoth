@@ -1,0 +1,45 @@
+{
+  "name": "ugc_stores",
+  "source_name": "ugc_stores",
+  "display_name": "App-store review samples",
+  "description": "Collect configured Apple and Play review samples with raw evidence and coverage limits.",
+  "artifact_types": [
+    "markdown"
+  ],
+  "inputs": [
+    "remote_api:public_store_reviews"
+  ],
+  "outputs": [
+    "artifact_queue:markdown"
+  ],
+  "capabilities": [
+    "research",
+    "raw_evidence",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.ugc_stores.enabled",
+    "sources.ugc_stores.apps",
+    "sources.ugc_stores.country",
+    "sources.ugc_stores.language",
+    "sources.ugc_stores.play_page_size",
+    "sources.ugc_stores.apple_max_pages"
+  ],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "public_network_ingest",
+  "allowed_side_effects": [
+    "network_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.ugc_stores_connector:StoreReviewCollector",
+  "cli_command": "connector run ugc_stores",
+  "config_namespace": "sources.ugc_stores",
+  "default_enabled": false,
+  "ccf": {
+    "lane": "markdown",
+    "artifact_role": "raw_capture"
+  }
+}

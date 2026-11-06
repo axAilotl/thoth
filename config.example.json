@@ -3,6 +3,7 @@
     "max_items": 100,
     "max_pages": 10,
     "request_timeout_seconds": 30,
+    "worker_timeout_seconds": 90,
     "max_attempts": 5,
     "retry_base_seconds": 300,
     "retry_max_seconds": 3600
@@ -623,6 +624,10 @@
     "password": ""
   },
   "sources": {
+    "ugc_stores": {
+      "enabled": false, "apps": [], "country": "us", "language": "en",
+      "play_page_size": 100, "apple_max_pages": 10
+    },
     "ugc_discussion": {
       "enabled": false,
       "reddit": [],

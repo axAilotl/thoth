@@ -243,6 +243,10 @@ fsspec==2026.7.0 \
     --hash=sha256:b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279 \
     --hash=sha256:c803c40f4cf860b49dea58ee3e1c33cb9c790520e233537e1340049f89b82a88
     # via huggingface-hub
+google-play-scraper==1.2.7 \
+    --hash=sha256:284f321d1b2c39e39e97e490d51bc316e1d876802360efb7e7463b5c16ed4972 \
+    --hash=sha256:a485510b09265f0096fc3813cfc26eef27e9a5c0035f99ee23f80e00de724530
+    # via -r requirements.txt
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
