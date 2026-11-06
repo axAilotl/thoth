@@ -15,4 +15,5 @@ PyYAML>=6.0
 jsonschema>=4.23.0
 referencing>=0.35.0
 google-play-scraper==1.2.7
+yt-dlp==2026.8.19
 

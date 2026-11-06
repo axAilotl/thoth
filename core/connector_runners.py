@@ -623,6 +623,7 @@ def _run_pi_skills_connector(
 _RUN_ADAPTERS: dict[str, tuple[str, RunAdapter]] = {
     "collectors.ugc_discussion_connector:DiscussionCollector": ("class", _run_research_connector),
     "collectors.ugc_stores_connector:StoreReviewCollector": ("class", _run_research_connector),
+    "collectors.ugc_youtube_connector:YouTubeResearchCollector": ("class", _run_research_connector),
     # Async module-level function, not a collector class.
     "core.x_api_bookmark_sync:run_x_api_bookmark_backfill": (
         "function",

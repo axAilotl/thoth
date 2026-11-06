@@ -624,6 +624,7 @@
     "password": ""
   },
   "sources": {
+    "ugc_youtube": {"enabled": false, "queries": [], "search_count": 8},
     "ugc_stores": {
       "enabled": false, "apps": [], "country": "us", "language": "en",
       "play_page_size": 100, "apple_max_pages": 10

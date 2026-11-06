@@ -18,6 +18,9 @@ class ResearchCapture:
     def __init__(self, config, *, layout, db, capture_event_store=None):
         self.config, self.layout, self.db = config, layout, db
         self.settings = config.get(f"sources.{self.name}", {})
+        for key in ("page_size", "comment_limit", "search_count", "play_page_size", "apple_max_pages"):
+            if key in self.settings and (type(self.settings[key]) is not int or self.settings[key] < 1):
+                raise ValueError(f"Research setting {key} must be a positive integer")
         self.coverage = CollectionCoverage(config)
         self.queue = ConnectorCaptureQueue(config, layout=layout, db=db, capture_event_store=capture_event_store)
         self.http = requests.Session()

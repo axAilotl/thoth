@@ -1,0 +1,42 @@
+{
+  "name": "ugc_youtube",
+  "source_name": "ugc_youtube",
+  "display_name": "Dated YouTube research",
+  "description": "Public metadata candidates dated by upload date, never title text.",
+  "artifact_types": [
+    "markdown"
+  ],
+  "inputs": [
+    "remote_api:youtube_search_metadata"
+  ],
+  "outputs": [
+    "artifact_queue:markdown"
+  ],
+  "capabilities": [
+    "research",
+    "raw_evidence",
+    "queue"
+  ],
+  "config_keys": [
+    "sources.ugc_youtube.enabled",
+    "sources.ugc_youtube.queries",
+    "sources.ugc_youtube.search_count"
+  ],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "public_network_ingest",
+  "allowed_side_effects": [
+    "network_read",
+    "raw_file_write",
+    "artifact_queue_write"
+  ],
+  "entrypoint": "collectors.ugc_youtube_connector:YouTubeResearchCollector",
+  "cli_command": "connector run ugc_youtube",
+  "config_namespace": "sources.ugc_youtube",
+  "default_enabled": false,
+  "ccf": {
+    "lane": "markdown",
+    "artifact_role": "raw_capture"
+  }
+}
