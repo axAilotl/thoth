@@ -69,3 +69,23 @@ def test_source_scope_is_checked_before_network(tmp_path, monkeypatch):
     monkeypatch.setattr("requests.Session.get", lambda *a, **k: pytest.fail("network must not run"))
     with pytest.raises(ValueError, match="outside selected"):
         collector.run_connector("ugc_discussion", execute=True)
+
+
+def test_hn_page_budget_cursor_resumes_without_duplicate_evidence(tmp_path, monkeypatch):
+    collector = service(tmp_path, max_pages=1)
+    collector.config.set("sources.ugc_discussion.reddit", [])
+    collector.config.set("collection.retry_base_seconds", 0.000001)
+    timestamp = int(datetime(2026, 4, 3, tzinfo=timezone.utc).timestamp())
+    pages = []
+    def get(session, url, params=None, **kwargs):
+        pages.append(params["page"])
+        hit = {"objectID": "overlap", "created_at_i": timestamp, "title": "example.com experience"}
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"hits": [hit], "nbPages": 2})
+    monkeypatch.setattr("requests.Session.get", get)
+    first = collector.run_connector("ugc_discussion", execute=True)
+    assert first["status"] == "partial"
+    assert first["result"]["coverage"][0]["covered_through"] is None
+    second = collector.run_connector("ugc_discussion", execute=True)
+    assert second["status"] == "completed"
+    assert pages == [0, 1]
+    assert len(second["result"]["artifacts"]) == 1

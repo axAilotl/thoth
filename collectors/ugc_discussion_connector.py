@@ -32,7 +32,7 @@ class DiscussionCollector(ResearchCapture):
         if cursor.get("completed"):
             return
         before = int(cursor.get("before", end))
-        page_size = int(self.settings["page_size"])
+        page_size = min(int(self.settings["page_size"]), int(collection_limit(self.config, "max_items")))
         try:
             for _ in range(int(collection_limit(self.config, "max_pages"))):
                 records = self.fetch("https://arctic-shift.photon-reddit.com/api/posts/search",
@@ -94,7 +94,7 @@ class DiscussionCollector(ResearchCapture):
             for _ in range(int(collection_limit(self.config, "max_pages"))):
                 data = self.fetch("https://hn.algolia.com/api/v1/search_by_date", {
                     "query": query, "numericFilters": f"created_at_i>={start},created_at_i<{end}",
-                    "hitsPerPage": int(self.settings["page_size"]), "page": page})
+                    "hitsPerPage": min(int(self.settings["page_size"]), int(collection_limit(self.config, "max_items"))), "page": page})
                 for hit in data["hits"]:
                     summary["observed_count"] += 1
                     if sum(item["observed_count"] for item in self.coverage.sources.values()) > collection_limit(self.config, "max_items"):
