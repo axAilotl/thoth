@@ -40,8 +40,8 @@ class ResearchCapture:
         response.raise_for_status()
         return response.json()
 
-    def capture(self, lifecycle, *, source, native_id, uri, timestamp, title, text, raw):
-        if not self.coverage.in_window(source, timestamp):
+    def capture(self, lifecycle, *, source, native_id, uri, timestamp, title, text, raw, filter_window=True):
+        if filter_window and not self.coverage.in_window(source, timestamp):
             return
         raw_text = json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str)
         digest = hashlib.sha256(raw_text.encode()).hexdigest()

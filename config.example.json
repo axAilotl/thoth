@@ -4,6 +4,7 @@
     "max_pages": 10,
     "request_timeout_seconds": 30,
     "worker_timeout_seconds": 90,
+    "max_response_bytes": 2097152,
     "max_attempts": 5,
     "retry_base_seconds": 300,
     "retry_max_seconds": 3600
@@ -624,6 +625,7 @@
     "password": ""
   },
   "sources": {
+    "competitor_web": {"enabled": false, "pages": [], "max_redirects": 5, "user_agent": "ThothResearch/1.0"},
     "ugc_youtube": {"enabled": false, "queries": [], "search_count": 8},
     "ugc_stores": {
       "enabled": false, "apps": [], "country": "us", "language": "en",

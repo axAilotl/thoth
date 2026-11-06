@@ -42,6 +42,7 @@ class ConnectorRunContext:
     managed_run: ManagedCollectionRun | None = None
     credentials: Mapping[str, str] = field(default_factory=dict, repr=False)
     event_store: Any | None = None
+    web_renderer: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -182,8 +183,9 @@ def _run_generic_connector(
 
 
 def _run_research_connector(context, entrypoint, options):
+    extra = {"renderer": context.web_renderer} if entrypoint.module == "collectors.competitor_web_connector" else {}
     connector = entrypoint.target(context.config, layout=context.layout, db=context.db,
-                                  capture_event_store=context.event_store)
+                                  capture_event_store=context.event_store, **extra)
     return connector.collect(**dict(options))
 
 
@@ -624,6 +626,7 @@ _RUN_ADAPTERS: dict[str, tuple[str, RunAdapter]] = {
     "collectors.ugc_discussion_connector:DiscussionCollector": ("class", _run_research_connector),
     "collectors.ugc_stores_connector:StoreReviewCollector": ("class", _run_research_connector),
     "collectors.ugc_youtube_connector:YouTubeResearchCollector": ("class", _run_research_connector),
+    "collectors.competitor_web_connector:CompetitorWebCollector": ("class", _run_research_connector),
     # Async module-level function, not a collector class.
     "core.x_api_bookmark_sync:run_x_api_bookmark_backfill": (
         "function",

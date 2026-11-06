@@ -86,6 +86,7 @@ class AgentSurfaceService:
         managed_run: Any | None = None,
         account_root: Path | None = None,
         credentials: Mapping[str, str] | None = None,
+        web_renderer: Any | None = None,
     ):
         if managed_run is not None:
             if runtime_config is None or layout is None or db is None or account_root is None:
@@ -107,6 +108,7 @@ class AgentSurfaceService:
         self.event_store = event_store
         self.managed_run = managed_run
         self._credentials = dict(credentials or {})
+        self.web_renderer = web_renderer
 
     def query_wiki(
         self,
@@ -816,7 +818,7 @@ class AgentSurfaceService:
         if self.managed_run is not None:
             if connector_name != self.managed_run.connector:
                 raise ValueError("Managed execution connector does not match authorized request")
-            if connector_name not in {"github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube"}:
+            if connector_name not in {"github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube", "competitor_web"}:
                 raise ValueError("Connector does not support managed execution")
             options = self.managed_run.execution_options(options)
         registry = load_connector_registry(self.config)
@@ -854,6 +856,7 @@ class AgentSurfaceService:
             managed_run=self.managed_run,
             credentials=self._credentials,
             event_store=self.event_store,
+            web_renderer=self.web_renderer,
         )
         if not execute:
             planner = connector_run_planner(manifest, run_context)
