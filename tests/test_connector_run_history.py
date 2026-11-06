@@ -11,6 +11,22 @@ from core.metadata_db import MetadataDB
 from core.path_layout import build_path_layout
 
 
+def test_scheduler_does_not_mark_partial_collection_success(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from core.connector_scheduler import ConnectorSchedule, ConnectorScheduler
+    config = _config(tmp_path)
+    layout = build_path_layout(config, project_root=tmp_path)
+    db = MetadataDB(str(layout.database_path))
+    service = AgentSurfaceService(config, layout=layout, db=db)
+    monkeypatch.setitem(_RUN_ADAPTERS, "collectors.arxiv_collector:ArXivCollector",
+        ("class", lambda *_: {"status": "partial", "coverage": [{"source": "arxiv", "status": "partial"}], "queued_count": 0}))
+    scheduler = ConnectorScheduler(service, clock=lambda: datetime(2026, 4, 1, tzinfo=timezone.utc))
+    scheduler._execute(ConnectorSchedule("arxiv", 60, True, {}))
+    state = db.get_automation_state("non_live_scheduler:connector:arxiv")
+    assert state["last_success"] is False
+    assert state["last_error"] == "collection_partial"
+
+
 def _config(tmp_path: Path) -> Config:
     config = Config()
     config.data = {}

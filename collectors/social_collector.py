@@ -98,8 +98,11 @@ class SocialCollector:
                     summary["observed_count"] += 1
                     try:
                         data = item.get("repo", item)
-                        if self.managed and not coverage.in_window(source, item.get("starred_at")):
-                            continue
+                        if self.managed:
+                            errors_before = len(summary["errors"])
+                            if not coverage.in_window(source, item.get("starred_at")):
+                                page_failed = page_failed or len(summary["errors"]) > errors_before
+                                continue
                         artifact_id = f"gh_{data['id']}"
                         if self.db.get_ingestion_entry(artifact_id):
                             continue
@@ -179,25 +182,20 @@ class SocialCollector:
             ("space", getattr(likes, "spaces", []) if include_spaces else []),
         ]
 
-        for repo_type, repo_ids in candidate_sets:
-            for repo_id in repo_ids:
-                if summary["observed_count"] >= limit:
-                    coverage.limited(source)
-                    break
-                summary["observed_count"] += 1
-                try:
-                    repo_candidates.append(
-                        (
-                            repo_info(
-                                repo_id,
-                                repo_type=repo_type,
-                                token=hf_token or (False if self.managed else None),
-                            ),
-                            repo_type,
-                        )
-                    )
-                except Exception as exc:
-                    coverage.fail(source, type(exc).__name__, partial=True)
+        candidates = [(repo_type, repo_id) for repo_type, repo_ids in candidate_sets for repo_id in repo_ids]
+        offset = int(coverage.cursor(source).get("offset", 0))
+        if offset < 0:
+            raise ValueError("Invalid Hugging Face cursor offset")
+        if len(candidates) > offset + limit:
+            coverage.limited(source, {"offset": offset + limit})
+        errors_before = len(summary["errors"])
+        for repo_type, repo_id in candidates[offset:offset + limit]:
+            summary["observed_count"] += 1
+            try:
+                repo_candidates.append((repo_info(repo_id, repo_type=repo_type,
+                    token=hf_token or (False if self.managed else None)), repo_type))
+            except Exception as exc:
+                coverage.fail(source, type(exc).__name__, partial=True)
 
         repo_candidates.sort(
             key=lambda item: getattr(item[0], "likes", 0) or 0,
@@ -258,6 +256,8 @@ class SocialCollector:
                 except Exception as exc:
                     coverage.fail(source, type(exc).__name__, partial=True)
 
+        if len(summary["errors"]) > errors_before:
+            summary["cursor"] = {"offset": offset}
         self.last_summary = coverage.receipt()
 
         return discovered

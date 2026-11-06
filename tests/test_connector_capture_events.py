@@ -184,6 +184,23 @@ def test_github_http_failure_is_failed_not_empty_success(tmp_path, monkeypatch):
     assert "do-not-log-secret" not in json.dumps(receipt)
 
 
+def test_arxiv_cursor_resumes_and_skips_previously_covered_source(tmp_path, monkeypatch):
+    config, layout, db = _layout_and_db(tmp_path)
+    config.set("managed.window_start", "2026-04-01T00:00:00Z")
+    config.set("managed.window_end", "2026-05-01T00:00:00Z")
+    config.set("managed.cursor", json.dumps({"arxiv:topic:already": {"completed": True}, "arxiv:topic:pending": {"offset": 3}}))
+    urls = []
+    def get(session, url, **kwargs):
+        urls.append(url)
+        return SimpleNamespace(content=b"fixture", raise_for_status=lambda: None)
+    monkeypatch.setattr("requests.Session.get", get)
+    monkeypatch.setattr("collectors.arxiv_collector.feedparser.parse", lambda _: SimpleNamespace(entries=[]))
+    collector = ArXivCollector(config=config, layout=layout, db=db)
+    assert collector.discover_papers(["already", "pending"]) == []
+    assert len(urls) == 1 and "start=3" in urls[0] and "pending" in urls[0]
+    assert collector.last_summary["status"] == "completed"
+
+
 class RecordingCaptureEventStore:
     def __init__(self, *, raw_roots):
         self.raw_roots = tuple(raw_roots)

@@ -20,6 +20,13 @@ class CollectionCoverage:
             "time_basis": time_basis,
         })
 
+    def cursor(self, source: str) -> dict[str, Any]:
+        cursors = json.loads(self.config.get("managed.cursor") or "{}")
+        value = cursors.get(source) or {}
+        if not isinstance(value, dict):
+            raise ValueError("Invalid source cursor")
+        return value
+
     def fail(self, source: str, code: str, *, partial: bool = False) -> None:
         entry = self.source(source)
         entry["status"] = "partial" if partial or entry["queued_count"] else "failed"
@@ -57,6 +64,8 @@ class CollectionCoverage:
         coverage = list(self.sources.values())
         for entry in coverage:
             entry["covered_through"] = end if entry["status"] == "completed" else None
+            if entry["status"] == "completed":
+                entry["cursor"] = {"completed": True}
         return {"status": status, "coverage": coverage,
                 "window_start": self.config.get("managed.window_start"), "window_end": end,
                 "observed_at": datetime.now(timezone.utc).isoformat(),

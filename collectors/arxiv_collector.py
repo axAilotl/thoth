@@ -81,6 +81,12 @@ class ArXivCollector:
             for topic in topics:
                 source_key = f"arxiv:topic:{topic}"
                 summary = self.coverage.source(source_key)
+                cursor = self.coverage.cursor(source_key)
+                if cursor.get("completed"):
+                    continue
+                start_offset = int(cursor.get("offset", 0))
+                if start_offset < 0:
+                    raise ValueError("Invalid arXiv cursor offset")
                 remaining = max_results - sum(item["observed_count"] for item in self.coverage.sources.values())
                 if remaining <= 0:
                     self.coverage.limited(source_key)
@@ -92,7 +98,7 @@ class ArXivCollector:
                 query = f'all:"{topic}"'
                 params = {
                     "search_query": query,
-                    "start": 0,
+                    "start": start_offset,
                     "max_results": remaining,
                     "sortBy": "submittedDate",
                     "sortOrder": "descending"
@@ -105,7 +111,9 @@ class ArXivCollector:
                 if feed is None:
                     continue
                 if len(feed.entries) >= remaining:
-                    self.coverage.limited(source_key)
+                    self.coverage.limited(source_key, {"offset": start_offset + remaining})
+                errors_before_feed = len(self.last_errors)
+                errors_before_window = len(summary["errors"])
                 for entry in feed.entries[:remaining]:
                     summary["observed_count"] += 1
                     if not self.coverage.in_window(source_key, getattr(entry, "published", None) or getattr(entry, "updated", None)):
@@ -123,6 +131,8 @@ class ArXivCollector:
                         summary["queued_count"] += 1
                     if len(self.last_errors) > errors_before:
                         self.coverage.fail(source_key, "artifact_queue_failed", partial=True)
+                if len(self.last_errors) > errors_before_feed or len(summary["errors"]) > errors_before_window:
+                    summary["cursor"] = {"offset": start_offset}
         self.last_summary = {
             "discovered_count": len(discovered),
             "error_count": len(self.last_errors),
@@ -154,6 +164,12 @@ class ArXivCollector:
 
                 source_key = f"arxiv:category:{category}"
                 summary = self.coverage.source(source_key)
+                cursor = self.coverage.cursor(source_key)
+                if cursor.get("completed"):
+                    continue
+                start_offset = int(cursor.get("offset", 0))
+                if start_offset < 0:
+                    raise ValueError("Invalid arXiv cursor offset")
                 remaining = feed_limit - sum(item["observed_count"] for item in self.coverage.sources.values())
                 if remaining <= 0:
                     self.coverage.limited(source_key)
@@ -165,9 +181,11 @@ class ArXivCollector:
                 feed = self._read_feed(f"{base_url}{encoded_category}", source_key)
                 if feed is None:
                     continue
-                if len(feed.entries) >= remaining:
-                    self.coverage.limited(source_key)
-                for entry in feed.entries[:remaining]:
+                if len(feed.entries) > start_offset + remaining:
+                    self.coverage.limited(source_key, {"offset": start_offset + remaining})
+                errors_before_feed = len(self.last_errors)
+                errors_before_window = len(summary["errors"])
+                for entry in feed.entries[start_offset:start_offset + remaining]:
                     summary["observed_count"] += 1
                     if not self.coverage.in_window(source_key, getattr(entry, "published", None) or getattr(entry, "updated", None)):
                         continue
@@ -188,6 +206,8 @@ class ArXivCollector:
                         summary["queued_count"] += 1
                     if len(self.last_errors) > errors_before:
                         self.coverage.fail(source_key, "artifact_queue_failed", partial=True)
+                if len(self.last_errors) > errors_before_feed or len(summary["errors"]) > errors_before_window:
+                    summary["cursor"] = {"offset": start_offset}
 
         self.last_summary = {
             "discovered_count": len(discovered),
