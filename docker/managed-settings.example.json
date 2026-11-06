@@ -1,0 +1,16 @@
+{
+  "account_id": "ACCOUNT_ID",
+  "archive_id": "ARCHIVE_ID",
+  "account_root": "/data/account",
+  "connector_version": "COMMITTED_THOTH_REVISION",
+  "expected_peer": "spiffe://cissa/managed-collection-dispatcher",
+  "socket_path": "/run/cissa-thoth/managed.sock",
+  "config_file": "/managed/config.json",
+  "max_request_bytes": 262144,
+  "max_storage_bytes": 1073741824,
+  "max_artifact_characters": 200000,
+  "max_artifacts_per_read": 100,
+  "execution_timeout_seconds": 900,
+  "termination_grace_seconds": 5,
+  "max_lease_seconds": 1200
+}

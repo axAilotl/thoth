@@ -924,7 +924,7 @@ class AgentSurfaceService:
             recorded_output_count = self.db.connector_run_output_count(run.run_id)
             if self.managed_run is not None:
                 from .managed_collection_receipts import artifact_receipts
-                serialized_result["artifacts"] = artifact_receipts(self.db, run.checkpoint_id)
+                serialized_result["artifacts"] = artifact_receipts(self.db, run.checkpoint_id, connector=self.managed_run.connector)
             output_count = max(
                 recorded_output_count,
                 _connector_output_count(serialized_result),

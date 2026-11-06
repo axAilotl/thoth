@@ -2,6 +2,8 @@ FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
+ARG THOTH_BUILD_REVISION=unversioned
+RUN printf '%s\n' "$THOTH_BUILD_REVISION" > /app/BUILD_REVISION
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg poppler-utils \
@@ -19,7 +21,7 @@ COPY static/ static/
 COPY scripts/ scripts/
 COPY thoth.py thoth_api.py thoth_keeper.py thoth_mcp.py keeper_profile.py ./
 COPY config.example.json config.schema.json archivist_topics.example.yaml ./
-COPY docker/container.py docker/config.container.example.json docker/
+COPY docker/container.py docker/managed.py docker/config.container.example.json docker/
 RUN ln -s /runtime/config/config.json config.json \
     && ln -s /runtime/config/control.json control.json \
     && ln -s /runtime/config/.env .env \

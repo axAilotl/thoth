@@ -1,0 +1,20 @@
+{
+  "paths": {
+    "vault_dir": "/data/account/vault",
+    "wiki_dir": "/data/account/wiki",
+    "system_dir": "/data/account/system",
+    "cache_dir": "cache"
+  },
+  "database": {"path": "meta.db", "capture_event_store": {"enabled": false}},
+  "processing": {"enable_llm_features": false},
+  "collection": {
+    "max_items": 100,
+    "max_pages": 10,
+    "request_timeout_seconds": 30,
+    "worker_timeout_seconds": 90,
+    "max_response_bytes": 2097152,
+    "max_attempts": 5,
+    "retry_base_seconds": 300,
+    "retry_max_seconds": 3600
+  }
+}

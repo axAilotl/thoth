@@ -10,15 +10,24 @@ from datetime import datetime, timezone
 from .collection_result import collection_limit
 
 
+def managed_collection_key(request):
+    identity = request.identity()
+    return "managed_collection:" + hashlib.sha256(json.dumps({
+        name: identity[name] for name in ("account_id", "archive_id", "integration_id", "idempotency_key")
+    }, sort_keys=True).encode()).hexdigest()
+
+
+def managed_collection_fingerprint(request):
+    inputs = asdict(request)
+    inputs.pop("lease_generation")
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+
+
 def execute_managed(service, invoke):
     request = service.managed_run
     identity = request.identity()
-    key = "managed_collection:" + hashlib.sha256(json.dumps({
-        name: identity[name] for name in ("account_id", "archive_id", "integration_id", "idempotency_key")
-    }, sort_keys=True).encode()).hexdigest()
-    inputs = asdict(request)
-    inputs.pop("lease_generation")
-    fingerprint = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+    key = managed_collection_key(request)
+    fingerprint = managed_collection_fingerprint(request)
     lock_dir = service.layout.system_root / "managed-collection-locks"
     lock_dir.mkdir(parents=True, exist_ok=True)
     with (lock_dir / key.split(":")[-1]).open("a") as handle:
@@ -35,6 +44,8 @@ def execute_managed(service, invoke):
             if state.get("status") == "completed":
                 receipt = state["receipt"]
                 receipt["result"]["managed_run"] = identity
+                state.update(lease_generation=request.lease_generation, receipt=receipt)
+                service.db.upsert_automation_state(key, state)
                 return receipt
             if state.get("attempt", 0) >= collection_limit(service.config, "max_attempts"):
                 raise ValueError("Managed collection retry budget exhausted")
@@ -66,7 +77,7 @@ def _finish(service, key, state):
     service.db.upsert_automation_state(key, state)
 
 
-def artifact_receipts(db, checkpoint_id):
+def artifact_receipts(db, checkpoint_id, *, connector):
     """Include captures from interrupted attempts, without disclosing paths."""
     with db._get_connection() as conn:
         rows = conn.execute(
@@ -82,6 +93,6 @@ def artifact_receipts(db, checkpoint_id):
         raw = payload.get("raw_content", "")
         if not isinstance(raw, str):
             raw = json.dumps(raw, sort_keys=True)
-        result.append({**dict(row), "content_hash": hashlib.sha256(raw.encode()).hexdigest(),
+        result.append({**dict(row), "source": connector, "content_hash": hashlib.sha256(raw.encode()).hexdigest(),
                        "source_time": payload.get("created_at"), "observed_at": payload.get("ingested_at")})
     return result

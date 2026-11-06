@@ -1,0 +1,37 @@
+name: cissa-thoth-managed
+services:
+  thoth-managed:
+    image: ${THOTH_MANAGED_IMAGE:?Set a CI-built digest-pinned image}
+    user: "${THOTH_UID:?Set account volume UID}:${THOTH_GID:?Set private socket GID}"
+    entrypoint: [python, docker/managed.py]
+    command: [/managed/settings.json]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: ${THOTH_MANAGED_CPUS:?Set bounded CPU allocation}
+    mem_limit: ${THOTH_MANAGED_MEMORY:?Set bounded RAM allocation}
+    pids_limit: ${THOTH_MANAGED_PIDS:?Set bounded process allocation}
+    stop_grace_period: ${THOTH_MANAGED_STOP_GRACE:?Set worker shutdown grace}
+    volumes:
+      - type: bind
+        source: ${THOTH_MANAGED_CONFIG_DIR:?Set explicit account configuration directory}
+        target: /managed
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${THOTH_MANAGED_ACCOUNT_DIR:?Set isolated account data directory}
+        target: /data/account
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${THOTH_MANAGED_SOCKET_DIR:?Set private proxy socket directory}
+        target: /run/cissa-thoth
+        bind: {create_host_path: false}
+    tmpfs:
+      - /tmp:size=${THOTH_MANAGED_TMPFS_BYTES:?Set temporary storage budget},mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: ${THOTH_MANAGED_LOG_SIZE:?Set bounded log size}
+        max-file: ${THOTH_MANAGED_LOG_FILES:?Set bounded log count}
