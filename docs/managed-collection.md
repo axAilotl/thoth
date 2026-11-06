@@ -35,3 +35,21 @@ Cissa owns transport authentication, lease validation/revocation, Secret
 Manager resolution, safe public receipts and per-account process provisioning.
 Do not publish the standalone Thoth API or share one configured process between
 accounts. An explicit context is not a replacement for that authorization.
+
+### Fair recurring samples
+
+Managed research divides `max_items` fairly across the selected sources; Reddit
+comments consume their parent subreddit's share. Busy early selections cannot
+consume every later source's allocation. Store and discussion page offsets remain
+window-specific. YouTube searches and arXiv topics/categories use the same fair
+allocation. Any exhausted sample remains partial, without a successful cutoff.
+
+Competitor `max_pages` bounds URLs attempted per run. Existing account-local
+SQLite automation state rotates that bounded selection across successive runs;
+it is scoped by integration and exact source selection. Rotation is reserved
+before I/O so a slow/killed first source cannot monopolize future runs. Exact
+receipt replay does not call collectors or advance rotation. This is source
+sampling state, not a second scheduler or a completed cursor carried to a new
+window. To cover more competitor URLs every week, configure multiple explicitly
+selected integrations each within the existing page budget. Do not raise the
+global page limit to compensate for fixed ordering.

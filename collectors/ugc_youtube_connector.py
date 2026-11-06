@@ -20,13 +20,17 @@ class YouTubeResearchCollector(ResearchCapture):
 
     def collect(self):
         cache = {}
+        queries = {f"youtube:{q}": q for q in self.settings["queries"]}
         with self.queue.lifecycle() as lifecycle:
-            for query in self.settings["queries"]:
-                source = f"youtube:{query}"
+            for source in self.plan(queries):
+                query = queries[source]
                 summary = self.source(source, time_basis="upload_date")
                 summary.update(coverage_kind="search_sample", limitations=["Search results are a sample; relevance and affiliate claims need review"])
                 cursor = self.coverage.cursor(source)
                 if cursor.get("completed"):
+                    continue
+                if not self.budget.remaining(source):
+                    self.coverage.limited(source)
                     continue
                 try:
                     size = min(int(self.settings["search_count"]), int(collection_limit(self.config, "max_items")))
@@ -37,10 +41,9 @@ class YouTubeResearchCollector(ResearchCapture):
                     for index, video_id in enumerate(candidates[offset:], start=offset):
                         if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
                             raise ValueError("Invalid YouTube video ID")
-                        if sum(row["observed_count"] for row in self.coverage.sources.values()) >= collection_limit(self.config, "max_items"):
+                        if not self.observe(source):
                             self.coverage.limited(source, {"offset": index})
                             break
-                        summary["observed_count"] += 1
                         uri = f"https://www.youtube.com/watch?v={video_id}"
                         if video_id not in cache:
                             data = self._metadata(uri)

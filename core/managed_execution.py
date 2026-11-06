@@ -83,6 +83,7 @@ class ManagedCollectionRun:
         config.set("managed.cursor", self.cursor)
         config.set("managed.selected_resources", list(self.selected_resources))
         config.set("managed.run_id", self.run_id)
+        config.set("managed.integration_id", self.integration_id)
         for key, value in self.budgets.items():
             config.set(f"collection.{key}", value)
         return config
