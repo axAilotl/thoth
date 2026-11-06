@@ -9,8 +9,10 @@ Required fields: `run_id`, `idempotency_key`, `account_id`, `archive_id`,
 `integration_id`, `connector`, `connector_version`, positive `lease_generation`,
 `selected_resources`, `source_config`, `options`, UTC `window_start` and
 `window_end` (`[start,end)`), and positive finite `budgets`. `cursor` is optional.
-For discovery connectors resources are GitHub/HF usernames or arXiv
-topics/categories. Credentials are forbidden in `source_config` and `options`.
+Discovery resource IDs are `github:user:<name>`, `huggingface:user:<name>`,
+`arxiv:topic:<topic>` and `arxiv:category:<category>`. Private repositories need
+both `allowed_private_repositories` in source configuration and an explicit
+`github:repo:<owner/name>` or `huggingface:repo:<owner/name>` resource grant. Credentials are forbidden in `source_config` and `options`.
 
 The local worker constructs `AgentSurfaceService(config, layout=layout, db=db,
 event_store=store, managed_run=request, account_root=root,

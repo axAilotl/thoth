@@ -98,6 +98,10 @@ class SocialCollector:
                     summary["observed_count"] += 1
                     try:
                         data = item.get("repo", item)
+                        if self.managed and data.get("private") and not self._private_repository_allowed("github", data.get("full_name")):
+                            coverage.fail(source, "private_resource_not_granted", partial=True)
+                            page_failed = True
+                            continue
                         if self.managed:
                             errors_before = len(summary["errors"])
                             if not coverage.in_window(source, item.get("starred_at")):
@@ -192,8 +196,12 @@ class SocialCollector:
         for repo_type, repo_id in candidates[offset:offset + limit]:
             summary["observed_count"] += 1
             try:
-                repo_candidates.append((repo_info(repo_id, repo_type=repo_type,
-                    token=hf_token or (False if self.managed else None)), repo_type))
+                info = repo_info(repo_id, repo_type=repo_type,
+                    token=hf_token or (False if self.managed else None))
+                if self.managed and getattr(info, "private", False) and not self._private_repository_allowed("huggingface", repo_id):
+                    coverage.fail(source, "private_resource_not_granted", partial=True)
+                    continue
+                repo_candidates.append((info, repo_type))
             except Exception as exc:
                 coverage.fail(source, type(exc).__name__, partial=True)
 
@@ -261,6 +269,11 @@ class SocialCollector:
         self.last_summary = coverage.receipt()
 
         return discovered
+
+    def _private_repository_allowed(self, provider, repository):
+        allowed = self.config.get(f"sources.{provider}.allowed_private_repositories", [])
+        selected = self.config.get("managed.selected_resources", [])
+        return repository in allowed and f"{provider}:repo:{repository}" in selected
 
     def _queue_repository(
         self,

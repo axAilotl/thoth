@@ -109,12 +109,13 @@ class ManagedCollectionRun:
         # connectors validate their own named resource schema before network I/O.
         if self.connector in {"github", "huggingface"}:
             username = result.get("username") or result.get("github_user") or result.get("hf_user") or self.source_config.get("username")
-            if username not in self.selected_resources:
+            if f"{self.connector}:user:{username}" not in self.selected_resources:
                 raise ValueError("Managed discovery username is outside selected resources")
         elif self.connector == "arxiv":
             key = "categories" if result.get("source", self.source_config.get("source", "api")) == "rss" else "topics"
             selected = result.get(key, self.source_config.get(key, []))
-            if not isinstance(selected, (tuple, list)) or not selected or not set(selected) <= set(self.selected_resources):
+            prefix = "arxiv:category:" if key == "categories" else "arxiv:topic:"
+            if not isinstance(selected, (tuple, list)) or not selected or not {prefix + str(item) for item in selected} <= set(self.selected_resources):
                 raise ValueError("Managed arXiv selection is outside selected resources")
         return result
 

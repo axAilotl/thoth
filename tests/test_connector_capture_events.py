@@ -33,7 +33,7 @@ def _managed_run(connector, account, **changes):
         "account_id": account, "archive_id": f"archive-{account}",
         "integration_id": f"integration-{account}", "connector": connector,
         "connector_version": "test-pin", "lease_generation": 1,
-        "selected_resources": (account,),
+        "selected_resources": ((f"arxiv:topic:{account}" if connector == "arxiv" else f"{connector}:user:{account}"),),
         "source_config": {"username": account, "topics": [account], "limit": 1},
         "options": {"limit": 1}, "window_start": "2026-04-01T00:00:00Z",
         "window_end": "2026-05-01T00:00:00Z", "budgets": {"max_items": 1},
@@ -111,6 +111,31 @@ def test_managed_context_rejects_wrong_paths_selections_and_ambient_store(tmp_pa
         AgentSurfaceService(config, layout=layout, db=db, managed_run=run, account_root=tmp_path / "a")
 
 
+@pytest.mark.parametrize("provider", ["github", "huggingface"])
+def test_managed_private_repository_requires_explicit_grant(provider, tmp_path, monkeypatch):
+    config, layout, db = _layout_and_db(tmp_path)
+    config.set("managed.connector_version", "test-pin")
+    run = _managed_run(provider, "a")
+    store = _store(layout)
+    monkeypatch.setattr("requests.Session.get", lambda *a, **k: SimpleNamespace(status_code=200, json=lambda: [
+        {"starred_at": "2026-04-03T00:00:00Z", "repo": {"id": 123, "full_name": "org/private", "private": True}}]))
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(
+        list_liked_repos=lambda *a, **k: SimpleNamespace(models=["org/private"], datasets=[], spaces=[]),
+        repo_info=lambda *a, **k: SimpleNamespace(id="org/private", private=True, created_at=None)))
+    service = AgentSurfaceService(config, layout=layout, db=db, event_store=store, managed_run=run,
+                                  account_root=tmp_path, credentials={"token": "scoped"})
+    result = service.run_connector(provider, execute=True)["result"]
+    assert result["status"] == "partial" and result["artifacts"] == []
+    assert result["coverage"][0]["errors"][0]["code"] == "private_resource_not_granted"
+    assert not store.events
+    granted = replace(run, run_id="granted", idempotency_key="granted",
+        selected_resources=(*run.selected_resources, f"{provider}:repo:org/private"),
+        source_config={**run.source_config, "allowed_private_repositories": ["org/private"]})
+    service = AgentSurfaceService(config, layout=layout, db=db, event_store=store, managed_run=granted,
+                                  account_root=tmp_path, credentials={"token": "scoped"})
+    assert len(service.run_connector(provider, execute=True)["result"]["artifacts"]) == 1
+
+
 def test_managed_receipt_recovers_after_capture_and_replays_without_network(tmp_path, monkeypatch):
     config, layout, db = _layout_and_db(tmp_path)
     config.set("managed.connector_version", "test-pin")
@@ -152,7 +177,7 @@ def test_managed_receipt_recovers_after_capture_and_replays_without_network(tmp_
 def test_managed_partial_arxiv_preserves_success_and_failed_source_cutoff(tmp_path, monkeypatch):
     config, layout, db = _layout_and_db(tmp_path)
     config.set("managed.connector_version", "test-pin")
-    run = _managed_run("arxiv", "a", selected_resources=("good", "bad"),
+    run = _managed_run("arxiv", "a", selected_resources=("arxiv:topic:good", "arxiv:topic:bad"),
         source_config={"topics": ["good", "bad"]}, options={"limit": 5}, budgets={"max_items": 5})
     def get(session, url, **kwargs):
         return SimpleNamespace(content=url.encode(), raise_for_status=lambda: None)
