@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 from core.collection_result import collection_limit
 from .research_capture import ResearchCapture
@@ -86,6 +87,7 @@ class StoreReviewCollector(ResearchCapture):
         process = subprocess.run([sys.executable, "-m", "collectors.play_reviews_worker"],
             input=json.dumps(request), capture_output=True, text=True, check=False,
             timeout=collection_limit(self.config, "worker_timeout_seconds"),
+            cwd=Path(__file__).resolve().parent.parent,
             env={"PATH": os.defpath, "TZ": "UTC"})
         if process.returncode:
             raise RuntimeError("Play review worker failed")

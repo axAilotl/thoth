@@ -63,3 +63,17 @@ def test_play_parser_worker_propagates_network_errors(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "google_play_scraper.constants.request", SimpleNamespace(Formats=SimpleNamespace(Reviews=SimpleNamespace(build=lambda **kwargs: "https://play.google.com"))))
     with pytest.raises(TimeoutError):
         collect_page({"language": "en", "country": "us", "app_id": "com.example", "count": 5, "timeout_seconds": 1})
+
+
+def test_capped_store_sample_keeps_cursor_without_claiming_complete_window(tmp_path, monkeypatch):
+    collector = service(tmp_path, max_pages=1)
+    collector.config.set("sources.ugc_stores.apps", [{"platform": "apple", "app_id": "123"}])
+    entry = {"id": {"label": "a1"}, "updated": {"label": "2026-04-03T00:00:00Z"},
+             "title": {"label": "Edited review"}, "content": {"label": "New opinion"}, "im:rating": {"label": "2"}, "im:version": {"label": "2.0"}}
+    monkeypatch.setattr("requests.Session.get", lambda *a, **k: SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"feed": {"entry": [entry]}}))
+    receipt = collector.run_connector("ugc_stores", execute=True)
+    row = receipt["result"]["coverage"][0]
+    assert row["status"] == "partial" and row["covered_through"] is None
+    assert row["cursor"]["page"] == 2
+    queued = collector.db.get_ingestion_entry(receipt["result"]["artifacts"][0]["artifact_id"])
+    assert '2.0' in queued.payload_json and 'New opinion' in queued.payload_json
