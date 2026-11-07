@@ -605,11 +605,17 @@ class CaptureLifecycleService(KnowledgeArtifactRuntime):
     ) -> RawArtifactRef | None:
         if raw_path is None:
             return None
-        raw_roots = (
-            self.capture_event_store.raw_roots
-            if self.capture_event_store is not None
-            else (self.layout.raw_root,)
-        )
+        if self.capture_event_store is not None:
+            raw_roots = self.capture_event_store.raw_roots
+        else:
+            # No event store: raw refs are still persisted by the CCF metadata
+            # store.  Use the same managed-inbox roots the connector queue
+            # records against.  layout.raw_root alone would reject vault files
+            # that live outside the raw directory (clippings, papers), which is
+            # exactly what the web_clipper scans.
+            from .connector_capture import connector_raw_roots
+
+            raw_roots = connector_raw_roots(self.layout)
         raw_ref = RawArtifactRef.from_file(
             raw_path,
             source_id=source_id,

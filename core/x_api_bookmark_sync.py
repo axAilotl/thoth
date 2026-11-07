@@ -7,7 +7,10 @@ only. It is intentionally narrow and fail-closed.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -32,6 +35,8 @@ from .x_api_auth import (
     resolve_x_api_auth_config,
     store_x_api_token_bundle,
 )
+
+logger = logging.getLogger(__name__)
 
 X_API_BOOKMARKS_URL = "https://api.x.com/2/users/{user_id}/bookmarks"
 X_API_BOOKMARKS_SOURCE = "x_api_backfill"
@@ -374,6 +379,27 @@ def _build_tweet_data(
     }
 
 
+X_API_RATE_LIMIT_MAX_WAITS = 4
+X_API_RATE_LIMIT_MAX_WAIT_SECONDS = 900.0
+X_API_RATE_LIMIT_DEFAULT_WAIT_SECONDS = 60.0
+X_API_PAGE_PACING_SECONDS = 1.0
+
+
+def _x_api_rate_limit_wait_seconds(response: httpx.Response) -> float:
+    """Return how long to wait before retrying a rate-limited bookmark page."""
+    for header, is_epoch in (("x-rate-limit-reset", True), ("retry-after", False)):
+        raw = response.headers.get(header)
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        wait = value - time.time() if is_epoch else value
+        return min(max(wait, 1.0), X_API_RATE_LIMIT_MAX_WAIT_SECONDS)
+    return X_API_RATE_LIMIT_DEFAULT_WAIT_SECONDS
+
+
 async def _fetch_bookmark_page(
     *,
     client: httpx.AsyncClient,
@@ -388,22 +414,38 @@ async def _fetch_bookmark_page(
         pagination_token=pagination_token,
         max_results=max_results,
     )
-    response = await client.get(url, headers=headers, params=params)
-    if response.status_code == 429:
-        raise XApiBookmarkSyncError(
-            "X API bookmark lookup was rate limited"
-        )
-    try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise XApiBookmarkSyncError(
-            f"X API bookmark lookup failed with status {response.status_code}"
-        ) from exc
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise XApiBookmarkSyncError("X API bookmark lookup response must be a JSON object")
-    return payload
-
+    for attempt in range(1, X_API_RATE_LIMIT_MAX_WAITS + 1):
+        response = await client.get(url, headers=headers, params=params)
+        if response.status_code == 429:
+            if attempt >= X_API_RATE_LIMIT_MAX_WAITS:
+                raise XApiBookmarkSyncError(
+                    "X API bookmark lookup was rate limited"
+                )
+            wait_seconds = _x_api_rate_limit_wait_seconds(response)
+            logger.warning(
+                "X API bookmark lookup rate limited (attempt %s/%s); waiting %.0fs",
+                attempt,
+                X_API_RATE_LIMIT_MAX_WAITS,
+                wait_seconds,
+            )
+            await asyncio.sleep(wait_seconds)
+            continue
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise XApiBookmarkSyncError(
+                f"X API bookmark lookup failed with status {response.status_code}"
+            ) from exc
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise XApiBookmarkSyncError(
+                "X API bookmark lookup response must be a JSON object"
+            )
+        # Space pages out: X rate limits bookmark lookups per user, and a
+        # historical backfill can walk dozens of pages in one run.
+        await asyncio.sleep(X_API_PAGE_PACING_SECONDS)
+        return payload
+    raise XApiBookmarkSyncError("X API bookmark lookup was rate limited")
 
 async def _resolve_bundle_and_user_id(
     config: Config,
