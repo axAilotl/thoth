@@ -120,13 +120,22 @@ class AIExportParser:
         # project; the selected Cissa source grant is the project authority.
         # Real exports link assistant answers to their prompt reliably, but most
         # human messages name a parent outside the export. Walk parents from
-        # the leaf; where the link leaves the export, continue with the latest
-        # earlier response (regenerated answers come later than abandoned ones).
+        # the leaf, then the reverse of a ``children`` link; only where both
+        # leave the export, continue with the latest earlier response.
         def order(key):
             response = nodes[key]
             return (_milliseconds(response.get("create_time")),
                     0 if str(response.get("sender")).lower() == "human" else 1, key)
         ordered = sorted(nodes, key=order)
+        parent_of = {}
+        for key, response in nodes.items():
+            for child in (response.get("children") or []):
+                child_id = child.get("response_id") if isinstance(child, dict) else child
+                if isinstance(child_id, str):
+                    parent_of.setdefault(child_id, key)
+            for child_id in (response.get("children_ids") or []):
+                if isinstance(child_id, str):
+                    parent_of.setdefault(child_id, key)
         current = session.get("leaf_response_id")
         if current not in nodes:
             current = ordered[-1] if ordered else None
@@ -139,6 +148,9 @@ class AIExportParser:
             if len(branch) > self.max_messages:
                 raise ValueError("history_message_budget_exceeded")
             parent = nodes[current].get("parent_response_id")
+            if parent not in nodes:
+                # The parent's ``children`` list links back inside the export.
+                parent = parent_of.get(current)
             if parent in nodes:
                 current = parent
                 continue

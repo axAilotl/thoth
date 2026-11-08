@@ -61,9 +61,12 @@ def grok_export():
                           "workspace_id": "grok-folder"},
          "responses": [
              response("r1", None, "human", "My truck makes a noise", 1775037600000),
-             response("r2", "r1", "assistant", "ABANDONED_BRANCH", 1775037601000),
+             # The abandoned answer is newer than the kept one: only the
+             # kept answer's ``children`` link reaches the next prompt.
+             response("r2", "r1", "assistant", "ABANDONED_BRANCH", 1775037602500),
              response("r3", "r1", "assistant", "Check the belt", 1775037602000,
-                      thinking_trace="HIDDEN_REASONING", steps=[{"tool": "search"}], web_search_results=[{"url": "u"}]),
+                      thinking_trace="HIDDEN_REASONING", steps=[{"tool": "search"}], web_search_results=[{"url": "u"}],
+                      children=[{"response_id": "r4"}]),
              # Real exports: human messages usually name a parent outside the export.
              response("r4", "outside-export-id", "human", "And the alternator?", 1775037603000,
                       generated_image_urls=["img"]),

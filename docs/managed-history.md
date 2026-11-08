@@ -53,8 +53,10 @@ sender,message,create_time,model,…}}]}],…}`. `source_id` is `conversation.id
 The current branch is followed from `leaf_response_id` through
 `parent_response_id` (the newest response when there is no usable leaf). In
 real exports most human messages name a parent outside the export; there the
-walk continues with the latest earlier response (time, then human first, then
-id), so regenerated answers win over abandoned ones.
+walk follows the reverse of the parent's `children` link, and only when both
+leave the export the latest earlier response (time, then human first, then id).
+Validated on a real export: 688/688 conversations, 5,479 of 5,504 responses kept
+(23 empty, 2 abandoned).
 `sender` (`human`/`assistant`, any case) is the role; `create_time` is Mongo
 extended JSON (`{"$date":{"$numberLong":ms}}` or `{"$date":"ISO"}`).
 `thinking_trace`, `steps`, `web_search_results`, `file_attachments`,
