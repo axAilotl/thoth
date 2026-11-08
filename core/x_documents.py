@@ -9,6 +9,7 @@ candidates only; nothing is fetched here.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import re
 from typing import Any, Iterable, Mapping
@@ -139,7 +140,10 @@ def x_document(*, kind: str, tweet_data: Mapping[str, Any], artifact_id: str, so
     if search_only:
         # Search-only bulk data (owner decision 2026-11-07) is never enriched and
         # keeps one copy of the text plus the metadata.
-        artifact.raw_content = json.dumps({"kind": kind, "x": metadata}, sort_keys=True, ensure_ascii=False)
+        # The text digest keeps the receipt hash bound to the text it serves.
+        artifact.raw_content = json.dumps(
+            {"kind": kind, "x": metadata, "text_sha256": hashlib.sha256(body.encode()).hexdigest()},
+            sort_keys=True, ensure_ascii=False)
         artifact.full_text = ""
         artifact.custom_metadata = projection
     else:
