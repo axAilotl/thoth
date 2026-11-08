@@ -18,6 +18,8 @@
   },
   "collection": {
     "max_history_export_bytes": 1048576,
+    "max_x_archive_file_bytes": 8388608,
+    "max_x_archive_documents": 2000,
     "max_history_messages": 1000,
     "max_history_message_characters": 100000,
     "max_items": 100,

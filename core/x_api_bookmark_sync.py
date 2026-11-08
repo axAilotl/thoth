@@ -486,8 +486,13 @@ async def sync_x_api_bookmarks(
     max_pages: int | None = None,
     resume_from_checkpoint: bool = True,
     full_scan: bool = False,
+    managed_identity: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Fetch bookmark pages, persist delivery-safe checkpoint state, and emit payloads.
+
+    ``managed_identity`` is ``(access_token, user_id)`` supplied by a Cissa managed
+    run: the token bundle on disk is never read or refreshed, every bookmark is
+    queued as a tweet document, and no payloads are returned.
 
     Returned-payload mode persists the checkpoint only after all fetched payloads
     can be returned to the caller. Capture-event mode persists after each page is
@@ -504,9 +509,12 @@ async def sync_x_api_bookmarks(
 
     resolved_layout = layout or build_path_layout(config)
     resolved_layout.ensure_directories()
-    auth_config, bundle, user_id = await _resolve_bundle_and_user_id(
-        config, layout=resolved_layout
-    )
+    if managed_identity is not None:
+        bundle, user_id = {"access_token": managed_identity[0]}, managed_identity[1]
+    else:
+        _, bundle, user_id = await _resolve_bundle_and_user_id(
+            config, layout=resolved_layout
+        )
 
     checkpoint = load_x_api_bookmark_sync_checkpoint(resolved_layout)
     if checkpoint and checkpoint.user_id != user_id:
@@ -526,7 +534,7 @@ async def sync_x_api_bookmarks(
     last_sync_timestamp = _iso_utc()
     latest_checkpoint: XApiBookmarkSyncCheckpoint | None = None
 
-    should_capture_events = _should_capture_bookmark_events(
+    should_capture_events = managed_identity is not None or _should_capture_bookmark_events(
         config,
         capture_event_store=capture_event_store,
     )
@@ -604,8 +612,17 @@ async def sync_x_api_bookmarks(
                         default_source=X_API_BOOKMARKS_SOURCE,
                         default_timestamp=_now_utc(),
                     )
-                    payloads.append(payload)
-                    if capture_queue is not None and lifecycle is not None:
+                    if managed_identity is not None:
+                        _queue_x_api_bookmark_document(
+                            capture_queue,
+                            lifecycle,
+                            payload=payload,
+                            user_id=user_id,
+                            run_id=last_sync_timestamp,
+                        )
+                    else:
+                        payloads.append(payload)
+                    if managed_identity is None and capture_queue is not None and lifecycle is not None:
                         _queue_x_api_bookmark_capture(
                             capture_queue,
                             lifecycle,
@@ -695,6 +712,53 @@ async def run_x_api_bookmark_backfill(
             else resume_from_checkpoint
         ),
         full_scan=full_scan,
+    )
+
+
+def _queue_x_api_bookmark_document(
+    capture_queue,
+    lifecycle,
+    *,
+    payload: Mapping[str, Any],
+    user_id: str,
+    run_id: str,
+) -> None:
+    """Queue one bookmark as a tweet document carrying its Cissa projection."""
+    from .x_documents import x_document
+
+    tweet_id = validate_tweet_id(payload.get("tweet_id"))
+    artifact = x_document(
+        kind="bookmark",
+        tweet_data=payload["tweet_data"],
+        artifact_id=f"x:bookmark:{tweet_id}",
+        source="x_api",
+        observed_at=run_id,
+        extra_metadata={"bookmarked_at": payload.get("timestamp")},
+    )
+    capture_queue.queue_artifact(
+        lifecycle,
+        artifact,
+        artifact_type="tweet",
+        source={
+            "source_name": "x_api",
+            "source_type": "twitter",
+            "collector": "x_api_bookmark_sync",
+            "account": user_id,
+            "native_source_id": user_id,
+            "base_uri": X_API_BOOKMARKS_URL.format(user_id=user_id),
+        },
+        session={
+            "session_type": "x_api_bookmark_sync",
+            "native_session_id": f"x_api_bookmark_sync:{user_id}:{run_id}",
+            "started_at": run_id,
+        },
+        event={
+            "event_type": "x_api_bookmark",
+            "native_event_id": tweet_id,
+            "captured_at": run_id,
+            "privacy": {"classification": "personal"},
+            "provenance": {"collector": "x_api_bookmark_sync"},
+        },
     )
 
 

@@ -1,0 +1,21 @@
+{
+  "name": "x_archive",
+  "source_name": "x_archive",
+  "display_name": "X archive",
+  "description": "Import the owner's selected X archive data files (posts, long posts, likes) as tweet documents. Direct messages and other sections are refused; linked URLs are follow-on candidates only.",
+  "artifact_types": ["tweet"],
+  "inputs": ["protected_upload:x_archive"],
+  "outputs": ["artifact_queue:tweet"],
+  "capabilities": ["history", "raw_evidence", "queue"],
+  "config_keys": ["sources.x_archive.enabled", "sources.x_archive.sources"],
+  "auth": [],
+  "queue_capability": true,
+  "queue_behavior": "queues_artifacts",
+  "safety_mode": "selected_history_ingest",
+  "allowed_side_effects": ["raw_file_write", "artifact_queue_write"],
+  "entrypoint": "collectors.x_archive_connector:XArchiveCollector",
+  "cli_command": "connector run x_archive",
+  "config_namespace": "sources.x_archive",
+  "default_enabled": false,
+  "ccf": {"lane": "tweet", "artifact_role": "raw_capture"}
+}

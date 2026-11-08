@@ -6,10 +6,14 @@ import hashlib
 import json
 from urllib.parse import quote
 
-from collectors.personal.ai_export import AIExportParser
+from collectors.personal.ai_export import PROVIDERS, AIExportParser
 from core.artifacts.conversation import ConversationArtifact
 from core.collection_result import CollectionCoverage, collection_limit
 from core.connector_capture import ConnectorCaptureQueue, write_connector_raw_json
+
+
+HISTORY_URI_PREFIXES = {"chatgpt": "https://chatgpt.com/c/", "claude": "https://claude.ai/chat/",
+                        "grok": "https://grok.com/chat/", "normalized": "cissa://history/"}
 
 
 class AIHistoryCollector:
@@ -51,7 +55,7 @@ class AIHistoryCollector:
 
     def _capture(self, lifecycle, parser, resource, source, content):
         provider, project, source_id = source["provider"], source["project_id"], source["source_id"]
-        if provider not in {"chatgpt", "claude", "normalized"} or source["operation"] not in {"upsert", "delete"}:
+        if provider not in PROVIDERS or source["operation"] not in {"upsert", "delete"}:
             raise ValueError("Invalid history source")
         if any(not isinstance(value, str) or not value or ":" in value for value in (project, source_id)) or not isinstance(source["revision"], str) or not source["revision"]:
             raise ValueError("Invalid history identity")
@@ -62,7 +66,8 @@ class AIHistoryCollector:
                 raise ValueError("History export digest mismatch")
             parsed = parser.parse(content, provider=provider, source_id=source_id, project_id=project)
         metadata = {"historical_evidence": True, "authority": "none", "provider": provider,
-                    "project_id": project, "source_id": source_id, "revision": source["revision"], "operation": source["operation"]}
+                    "project_id": project, "source_id": source_id, "revision": source["revision"], "operation": source["operation"],
+                    "stripped_parts": parsed.get("stripped_parts", {})}
         raw = json.dumps({**parsed, "history": metadata}, sort_keys=True, ensure_ascii=False)
         artifact_id = f"history:{provider}:{project}:{source_id}"
         previous = self.db.get_ingestion_entry(artifact_id)
@@ -74,7 +79,7 @@ class AIHistoryCollector:
         digest = hashlib.sha256(raw.encode()).hexdigest()
         raw_path = write_connector_raw_json(self.layout, connector_name="ai_history", subdir="sessions",
             native_id=f"{artifact_id}:{digest}", payload=json.loads(raw), captured_at=now)
-        uri = {"chatgpt": "https://chatgpt.com/c/", "claude": "https://claude.ai/chat/", "normalized": "cissa://history/"}[provider] + quote(source_id, safe="")
+        uri = HISTORY_URI_PREFIXES[provider] + quote(source_id, safe="")
         body = "" if source["operation"] == "delete" else "\n\n".join(
             f'[{message["created_at"] or "time unavailable"}] {message["role"]}:\n{message["text"]}' for message in parsed["messages"])
         artifact = ConversationArtifact(id=artifact_id, source_type="ai_history", capabilities=(),

@@ -185,7 +185,7 @@ def _run_generic_connector(
 
 def _run_research_connector(context, entrypoint, options):
     extra = {"renderer": context.web_renderer} if entrypoint.module == "collectors.competitor_web_connector" else {}
-    if entrypoint.module == "collectors.ai_history_connector":
+    if entrypoint.module in {"collectors.ai_history_connector", "collectors.x_archive_connector"}:
         extra = {"history_exports": context.history_exports}
     connector = entrypoint.target(context.config, layout=context.layout, db=context.db,
                                   capture_event_store=context.event_store, **extra)
@@ -368,6 +368,10 @@ def _run_x_api_connector(
     entrypoint: ResolvedEntrypoint,
     options: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if context.managed_run is not None:
+        from .x_api_managed import run_managed_x_api_bookmarks
+
+        return run_managed_x_api_bookmarks(context)
     no_resume = _optional_bool(options.get("no_resume"))
     return _run_async(
         entrypoint.target(
@@ -631,6 +635,7 @@ _RUN_ADAPTERS: dict[str, tuple[str, RunAdapter]] = {
     "collectors.ugc_youtube_connector:YouTubeResearchCollector": ("class", _run_research_connector),
     "collectors.competitor_web_connector:CompetitorWebCollector": ("class", _run_research_connector),
     "collectors.ai_history_connector:AIHistoryCollector": ("class", _run_research_connector),
+    "collectors.x_archive_connector:XArchiveCollector": ("class", _run_research_connector),
     # Async module-level function, not a collector class.
     "core.x_api_bookmark_sync:run_x_api_bookmark_backfill": (
         "function",

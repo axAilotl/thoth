@@ -17,6 +17,19 @@ from .config import Config
 from .path_layout import PathLayout
 
 
+# Connectors a Cissa managed runtime may execute.
+MANAGED_CONNECTORS = frozenset({
+    "github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube",
+    "competitor_web", "ai_history", "x_archive", "x_api",
+})
+# Connectors whose bytes arrive only as a digest-bound owner upload
+# (``history_exports`` on the protected execute request).
+OWNER_UPLOAD_CONNECTORS = frozenset({"ai_history", "x_archive"})
+# Connectors whose artifacts carry their own document projection
+# (title, body, source_uri, source_updated_at, metadata) in custom_metadata.
+DOCUMENT_PROJECTION_CONNECTORS = frozenset({"ai_history", "x_archive", "x_api"})
+
+
 def utc_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
@@ -117,6 +130,10 @@ class ManagedCollectionRun:
             prefix = "arxiv:category:" if key == "categories" else "arxiv:topic:"
             if not isinstance(selected, (tuple, list)) or not selected or not {prefix + str(item) for item in selected} <= set(self.selected_resources):
                 raise ValueError("Managed arXiv selection is outside selected resources")
+        elif self.connector == "x_api":
+            username = self.source_config.get("username")
+            if not isinstance(username, str) or tuple(self.selected_resources) != (f"x_api:bookmarks:{username}",):
+                raise ValueError("Managed X bookmark account is outside selected resources")
         return result
 
 

@@ -15,7 +15,8 @@ from urllib.parse import quote, urlsplit
 
 from .config import Config
 from .managed_collection_receipts import managed_collection_key, managed_collection_fingerprint
-from .managed_execution import ManagedCollectionRun, utc_time
+from .managed_execution import (DOCUMENT_PROJECTION_CONNECTORS, MANAGED_CONNECTORS, OWNER_UPLOAD_CONNECTORS,
+    ManagedCollectionRun, utc_time)
 from .metadata_db import MetadataDB
 from .path_layout import build_path_layout
 
@@ -109,7 +110,7 @@ class ManagedRuntime:
             raise ManagedRuntimeError("account_binding_mismatch", 403)
         if run.connector_version != self.settings.connector_version:
             raise ManagedRuntimeError("connector_version_mismatch")
-        if run.connector not in {"github", "huggingface", "arxiv", "ugc_discussion", "ugc_stores", "ugc_youtube", "competitor_web", "ai_history"}:
+        if run.connector not in MANAGED_CONNECTORS:
             raise ManagedRuntimeError("connector_not_managed", 403)
         try:
             run.validate_paths(Path(self.settings.account_root), self.layout, self.db)
@@ -142,7 +143,7 @@ class ManagedRuntime:
         if not isinstance(credentials, dict) or set(credentials) - {"token"} or any(not isinstance(value, str) for value in credentials.values()):
             raise ManagedRuntimeError("invalid_credentials", 422)
         if history_exports is not None:
-            if run.connector != "ai_history" or not isinstance(history_exports, list) or any(
+            if run.connector not in OWNER_UPLOAD_CONNECTORS or not isinstance(history_exports, list) or any(
                 not isinstance(item, dict) or set(item) != {"resource_id", "content"} or
                 not all(isinstance(value, str) for value in item.values()) for item in history_exports):
                 raise ManagedRuntimeError("invalid_history_exports", 422)
@@ -191,7 +192,9 @@ class ManagedRuntime:
             if hashlib.sha256(raw.encode()).hexdigest() != allowed[artifact_id]["content_hash"]:
                 raise ManagedRuntimeError("artifact_revision_changed")
             body = payload.get("body") or payload.get("abstract") or raw
-            history = payload.get("custom_metadata", {}) if run.connector == "ai_history" else {}
+            # Owner-upload and X connectors project their own document; other
+            # connectors keep the generic payload fields.
+            history = payload.get("custom_metadata", {}) if run.connector in DOCUMENT_PROJECTION_CONNECTORS else {}
             if history:
                 body = history["body"]
             if not isinstance(body, str) or len(body) > self.settings.max_artifact_characters:
@@ -207,7 +210,8 @@ class ManagedRuntime:
                 "title": str(history.get("title") or payload.get("title") or payload.get("repo_name") or artifact_id)[:1024],
                 "body_text": body, "content_sha256": hashlib.sha256(body.encode()).hexdigest(),
                 "source_updated_at": history.get("source_updated_at") or payload.get("created_at") or payload.get("ingested_at") or allowed[artifact_id].get("observed_at"),
-                "metadata": {"capture_content_hash": allowed[artifact_id]["content_hash"], "run_id": run.run_id, **history.get("history", {})}})
+                "metadata": {"capture_content_hash": allowed[artifact_id]["content_hash"], "run_id": run.run_id,
+                    **history.get("history", {}), **({"x": history["x"]} if "x" in history else {})}})
         return documents
 
     def _worker(self, run, credentials, timeout, history_exports=None):
