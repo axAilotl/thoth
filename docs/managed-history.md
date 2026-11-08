@@ -51,7 +51,10 @@ Grok exports are `{"conversations":[{"conversation":{id,title,create_time,
 modify_time,leaf_response_id,…},"responses":[{"response":{_id,parent_response_id,
 sender,message,create_time,model,…}}]}],…}`. `source_id` is `conversation.id`.
 The current branch is followed from `leaf_response_id` through
-`parent_response_id` (the newest response when there is no usable leaf).
+`parent_response_id` (the newest response when there is no usable leaf). In
+real exports most human messages name a parent outside the export; there the
+walk continues with the latest earlier response (time, then human first, then
+id), so regenerated answers win over abandoned ones.
 `sender` (`human`/`assistant`, any case) is the role; `create_time` is Mongo
 extended JSON (`{"$date":{"$numberLong":ms}}` or `{"$date":"ISO"}`).
 `thinking_trace`, `steps`, `web_search_results`, `file_attachments`,
@@ -105,7 +108,8 @@ Bodies expand `t.co` links. Metadata `x` holds kind, ids, author, time, urls and
 `follow_on` candidates (`arxiv`, `youtube`, `github`, `x_post`, unresolved
 `short_link`); nothing is fetched. Owner decision 2026-11-07: archive documents
 are search-only (`x.search_only: true`): indexed, never enriched or used for
-memory/task extraction. No per-item raw copy is written. A malformed record is
+memory/task extraction. No per-item raw copy is written and the queue row keeps
+one copy of the text plus metadata. A malformed record is
 skipped and makes the file `partial` (`x_archive_item_rejected`).
 `collection.max_x_archive_file_bytes` bounds one file and
 `collection.max_x_archive_documents` bounds documents per run; the rest is

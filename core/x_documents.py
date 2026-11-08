@@ -98,7 +98,7 @@ def build_tweet_data(*, tweet_id: str, text: str, created_at: str | None = None,
 
 def x_document(*, kind: str, tweet_data: Mapping[str, Any], artifact_id: str, source: str,
                observed_at: str, extra_metadata: Mapping[str, Any] | None = None,
-               source_uri: str | None = None) -> TweetArtifact:
+               source_uri: str | None = None, search_only: bool = False) -> TweetArtifact:
     """A queueable tweet artifact carrying the Cissa document projection."""
     if kind not in KINDS:
         raise ValueError("invalid_x_document_kind")
@@ -123,6 +123,8 @@ def x_document(*, kind: str, tweet_data: Mapping[str, Any], artifact_id: str, so
                 "author_username": author, "lang": tweet_data.get("lang"), "urls": linked,
                 "follow_on": candidates, "media_count": len(tweet_data.get("media") or []), **dict(extra_metadata or {})}
     metadata = {key: value for key, value in metadata.items() if value not in (None, [], {})}
+    if search_only:
+        metadata["search_only"] = True
     payload = normalize_bookmark_payload({"tweet_id": tweet_id, "tweet_data": dict(tweet_data),
                                           "timestamp": created or observed_at, "source": source},
                                          default_source=source)
@@ -132,6 +134,14 @@ def x_document(*, kind: str, tweet_data: Mapping[str, Any], artifact_id: str, so
     artifact.id = artifact_id
     artifact.source_type = source
     artifact.ingested_at = observed_at
-    artifact.custom_metadata = {**artifact.custom_metadata, "title": title[:1024], "body": body,
-                                "source_uri": uri, "source_updated_at": created or observed_at, "x": metadata}
+    projection = {"title": title[:1024], "body": body, "source_uri": uri,
+                  "source_updated_at": created or observed_at, "x": metadata}
+    if search_only:
+        # Search-only bulk data (owner decision 2026-11-07) is never enriched and
+        # keeps one copy of the text plus the metadata.
+        artifact.raw_content = json.dumps({"kind": kind, "x": metadata}, sort_keys=True, ensure_ascii=False)
+        artifact.full_text = ""
+        artifact.custom_metadata = projection
+    else:
+        artifact.custom_metadata = {**artifact.custom_metadata, **projection}
     return artifact

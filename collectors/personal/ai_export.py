@@ -118,19 +118,32 @@ class AIExportParser:
             nodes[str(response["_id"])] = response
         # Grok project/workspace fields name Grok's own folders, not the Cissa
         # project; the selected Cissa source grant is the project authority.
+        # Real exports link assistant answers to their prompt reliably, but most
+        # human messages name a parent outside the export. Walk parents from
+        # the leaf; where the link leaves the export, continue with the latest
+        # earlier response (regenerated answers come later than abandoned ones).
+        def order(key):
+            response = nodes[key]
+            return (_milliseconds(response.get("create_time")),
+                    0 if str(response.get("sender")).lower() == "human" else 1, key)
+        ordered = sorted(nodes, key=order)
         current = session.get("leaf_response_id")
         if current not in nodes:
-            # No usable leaf: the newest response ends the current branch.
-            current = max(nodes, key=lambda key: (_milliseconds(nodes[key].get("create_time")), key), default=None)
+            current = ordered[-1] if ordered else None
         visited, branch = set(), []
         while current is not None:
-            if current in visited or current not in nodes:
+            if current in visited:
                 raise ValueError("invalid_history_branch")
             visited.add(current)
             branch.append(nodes[current])
             if len(branch) > self.max_messages:
                 raise ValueError("history_message_budget_exceeded")
-            current = nodes[current].get("parent_response_id")
+            parent = nodes[current].get("parent_response_id")
+            if parent in nodes:
+                current = parent
+                continue
+            earlier = [key for key in ordered if order(key) < order(current) and key not in visited]
+            current = earlier[-1] if earlier else None
         return session, [self._message(response, "grok", stripped) for response in reversed(branch)]
 
     def _message(self, message, provider, stripped):

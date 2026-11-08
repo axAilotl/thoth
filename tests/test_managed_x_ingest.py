@@ -57,20 +57,24 @@ def grok_export():
     return {"conversations": [
         {"conversation": {"id": "other", "title": "PRIVATE_UNSELECTED", "leaf_response_id": None}, "responses": []},
         {"conversation": {"id": "g1", "title": "Truck repair", "create_time": "2026-04-01T10:00:00.000000Z",
-                          "modify_time": "2026-04-01T10:05:00.000000Z", "leaf_response_id": "r4",
+                          "modify_time": "2026-04-01T10:05:00.000000Z", "leaf_response_id": "r5",
                           "workspace_id": "grok-folder"},
          "responses": [
              response("r1", None, "human", "My truck makes a noise", 1775037600000),
              response("r2", "r1", "assistant", "ABANDONED_BRANCH", 1775037601000),
              response("r3", "r1", "assistant", "Check the belt", 1775037602000,
                       thinking_trace="HIDDEN_REASONING", steps=[{"tool": "search"}], web_search_results=[{"url": "u"}]),
-             response("r4", "r3", "human", "", 1775037603000, generated_image_urls=["img"]),
+             # Real exports: human messages usually name a parent outside the export.
+             response("r4", "outside-export-id", "human", "And the alternator?", 1775037603000,
+                      generated_image_urls=["img"]),
+             response("r5", "r4", "assistant", "", 1775037604000),
          ]}], "projects": [], "tasks": [], "media_posts": []}
 
 
 def test_grok_current_branch_strips_reasoning_and_tools():
     result = parser().parse(json.dumps(grok_export()), provider="grok", source_id="g1", project_id="company")
-    assert [(m["role"], m["text"]) for m in result["messages"]] == [("user", "My truck makes a noise"), ("assistant", "Check the belt")]
+    assert [(m["role"], m["text"]) for m in result["messages"]] == [
+        ("user", "My truck makes a noise"), ("assistant", "Check the belt"), ("user", "And the alternator?")]
     assert result["messages"][0]["created_at"] == "2026-04-01T10:00:00+00:00"
     assert result["title"] == "Truck repair" and result["updated_at"].startswith("2026-04-01T10:05")
     assert result["stripped_parts"] == {"empty_message": 1, "image": 1, "thinking": 1, "tool_result": 1, "tool_use": 1}

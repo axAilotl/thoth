@@ -197,7 +197,7 @@ class XArchiveCollector:
             if tweet["id"] in merged_tweets:
                 return None  # Its full text is the matching long post's document.
             return x_document(kind="tweet", tweet_data=tweet["data"], artifact_id=f'x:tweet:{tweet["id"]}',
-                              source=SOURCE, observed_at=now, extra_metadata=tweet["extra"])
+                              source=SOURCE, observed_at=now, extra_metadata=tweet["extra"], search_only=True)
         if section == "note-tweet":
             note = _note(item)
             tweet = tweet_index.get(merged.get(note["id"]) or str(note.get("tweet_id") or ""))
@@ -209,18 +209,17 @@ class XArchiveCollector:
                                        "created_at": note["created_at"] or base.get("created_at"),
                                        "entities": {"urls": [{"url": u["url"], "expanded_url": u["expanded_url"]} for u in urls]}})
             return x_document(kind="note", tweet_data=data, artifact_id=f'x:note:{note["id"]}', source=SOURCE,
-                              observed_at=now, source_uri=None if post_id else f'cissa://x/note/{note["id"]}',
+                              observed_at=now, search_only=True, source_uri=None if post_id else f'cissa://x/note/{note["id"]}',
                               extra_metadata={"note_tweet_id": note["id"], "post_matched": bool(post_id),
                                               **(tweet["extra"] if tweet else {})})
         like = item["like"]
         data = build_tweet_data(tweet_id=like["tweetId"], text=str(like.get("fullText") or ""))
         return x_document(kind="like", tweet_data=data, artifact_id=f'x:like:{data["id"]}', source=SOURCE,
-                          observed_at=now)
+                          observed_at=now, search_only=True)
 
     def _queue(self, lifecycle, artifact, resource, now):
         # Search-only data: no per-item raw evidence copy. The digest-bound
         # upload is the evidence; the queue row keeps the compact document.
-        artifact.custom_metadata["x"]["search_only"] = True
         self.queue.queue_artifact(lifecycle, artifact, artifact_type="tweet",
             source={"source_name": SOURCE, "source_type": SOURCE, "native_source_id": resource,
                     "base_uri": artifact.custom_metadata["source_uri"]},
